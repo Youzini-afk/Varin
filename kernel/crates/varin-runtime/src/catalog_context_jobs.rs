@@ -1808,6 +1808,7 @@ mod presentation_tests {
                 .map(|reference|reference["content_object"].as_str().unwrap().to_owned()).collect();
             let reference = db.content.save_with_dependencies(&recipe, dependencies).unwrap();
             db.db.execute("UPDATE context_jobs SET recipe=?1,plan_hash=?2 WHERE run_id=?3",params![encode(&reference).unwrap(),recipe.plan_hash,job.receipt.run_id]).unwrap();
+            crate::catalog::organization::remove_for_legacy_fixture(&db.db);
             db.db.pragma_update(None, "user_version", 93).unwrap();
             drop(read);
             drop(db);

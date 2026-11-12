@@ -78,7 +78,7 @@ async function fixture() {
   };
   const unexpectedRead = vi.fn(async () => { throw new Error('Input preparation cannot reopen resources'); });
   const scope = createThreadResourceScope({ dataDirectory: root, workingStates: { withBranchStore: unexpectedRead },
-    documents: { admitWorkspaceRegistration: async () => ({ workspaceId: 'workspace', canonicalPath: root, hostId: 'test', kind: 'directory' }), inspectWorkspace: unexpectedRead, readSnapshot: unexpectedRead }, configuration: unexpectedRead,
+    documents: { admitWorkspaceRegistration: async () => ({ workspaceId: 'workspace', canonicalPath: root, authorizationRoot: root, hostId: 'test', kind: 'directory' }), inspectWorkspace: unexpectedRead, readSnapshot: unexpectedRead }, configuration: unexpectedRead,
     validateLiveSource: unexpectedRead, withSourceRead: unexpectedRead, projectTrusted: () => false });
   const prepareSkill = vi.fn(createThreadSkillInputPreparer(scope));
   const prepareContext = Object.assign(vi.fn<(...args: Parameters<ContextPreparer>) => ReturnType<ContextPreparer>>(async () => initial(a)), {

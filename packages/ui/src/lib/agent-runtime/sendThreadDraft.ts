@@ -30,13 +30,19 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
     await prepared.release?.(); prepared.unsubscribe?.(); preparations.delete(deliveryKey);
   };
   const prepare = async (identity: ThreadIdentity) => {
+    if (request.sourceDisabled) return null;
     const selected = request.sourceSelection ?? (request.workspacePath ? { path: request.workspacePath,
       resourceOwner: { kind: 'local' as const }, mode: 'live_root' as const, contentMode: 'saved-files' as const, captureScopes: [] } : undefined);
     if (!selected?.path.trim()) return null;
     let pending = preparations.get(deliveryKey);
     if (!pending) {
-      const source = await api.sources.resolve(identity, { resourceOwner: selected.resourceOwner, path: selected.path });
+      const selection = 'selection' in selected ? selected.selection : undefined;
+      const source = selection?.mode === 'native_workspace' ? {resourceOwner:selected.resourceOwner, workspaceId:selection.workspaceId}
+        : await api.sources.resolve(identity, { resourceOwner: selected.resourceOwner, path: selected.path });
       assertHost();
+      if ('expectedWorkspaceId' in selected && selected.expectedWorkspaceId && source.workspaceId !== selected.expectedWorkspaceId) {
+        throw new Error('The original project workspace has changed. Choose the source again before sending.');
+      }
       let content: ThreadPrepareSource['content'] = { mode: 'saved-files' };
       let release: (() => Promise<void>) | undefined;
       if (selected.mode !== 'live_root' && selected.contentMode === 'surface-drafts') {
@@ -51,7 +57,7 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
         content = { mode: 'surface-drafts', context };
       }
       pending = { input: { ...identity, key: `${request.key}:source`, resourceOwner: source.resourceOwner,
-        workspaceId: source.workspaceId, mode: selected.mode, content, captureScopes: selected.captureScopes }, release };
+        workspaceId: source.workspaceId, mode: selected.mode, content, captureScopes: selected.captureScopes, ...(selection ? {selection} : {}) }, release };
       preparations.set(deliveryKey, pending);
       if (release) pending.unsubscribe = registerRuntimeEndpointSwitchBlocker(releasePreparation);
     }
@@ -66,7 +72,7 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
       const identity = await useThreadStore.getState().materializeDraft(draftKey, { waitForCatalog: false });
       assertHost();
       if (!read().pendingInput) {
-        const preparedSource = read().preparedSource ?? await prepare(identity);
+        const preparedSource = request.sourceDisabled ? null : read().preparedSource ?? await prepare(identity);
         assertHost();
         const selected = composerFileSelections(request.selectedAttachments, request.referenceScope ?? '');
         const attachments = await prepareThreadFiles(api, identity, draftKey, request.files);
@@ -79,7 +85,7 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
           editorText: request.editorText, editorImages: request.images, markerObjectIds: request.markerObjectIds, markerOccurrenceIds: request.markerOccurrenceIds, fileIds: request.files.map(file => file.id), selectedAttachmentIds: request.selectedAttachments?.map(file => file.id), editorContext: request.editorContext, inlineContext: request.inlineContext,
           preparedSource, goalObjective: request.goalObjective, goalBudget: request.goalBudget,
           input: { ...identity, key: request.key, expectedHead: null, text: request.text, images, ...quotedFiles, materials, skills: request.skills, references: request.references,
-            model: request.model, ...(request.agent ? { agent: request.agent } : {}), ...(preparedSource ? { source: preparedSource.source } : {}) } };
+            model: request.model, ...(request.agent ? { agent: request.agent } : {}), ...(request.sourceDisabled ? { source: null } : preparedSource ? { source: preparedSource.source } : {}) } };
         patch({ pendingInput: input });
       }
       const original = read().pendingInput!;

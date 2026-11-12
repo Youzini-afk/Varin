@@ -28,8 +28,10 @@ import { useOpenThreadContext } from '@/lib/openThreadContext';
 import { threadSubtreeIds } from '@/lib/agent-runtime/thread-tree';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
+import { useProjectGit } from '@/hooks/useProjectGit';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 
 import { useTitlebarLeftInset } from '@/hooks/useTitlebarLeftInset';
@@ -246,7 +248,7 @@ export const Header: React.FC<HeaderProps> = ({
     return openDirectory ? getActiveContextMode(state.contextPanelByDirectory[openDirectory]) : null;
   }, [openDirectory]));
 
-  const currentBranchLabel = useGitBranchLabel(openDirectory || null);
+  const currentBranchLabel = useGitBranchLabel(useProjectGit().directory ?? null);
 
   const currentSessionTitle = currentSessionSummary?.title || (identity ? t('sessions.sidebar.session.untitled') : activeProjectLabel ?? 'Varin');
   const [isRenamingHeaderSession, setIsRenamingHeaderSession] = React.useState(false);
@@ -412,38 +414,8 @@ export const Header: React.FC<HeaderProps> = ({
   }, [isArchiveSurfaceOpen, isMultiRunSurfaceOpen, isScheduledSurfaceOpen, t, worktreesSurfaceProjectId, worktreesSurfaceProjectLabel]);
 
 
-  const actionDirectory = React.useMemo(() => {
-    return normalize(openDirectory || activeProject?.path || '');
-  }, [activeProject?.path, openDirectory]);
-
-  const activeProjectRef = React.useMemo(() => {
-    if (!activeProject) {
-      return null;
-    }
-    return { id: activeProject.id, path: activeProject.path };
-  }, [activeProject]);
-
-  const lastProjectActionsContextRef = React.useRef<{
-    projectRef: { id: string; path: string };
-    directory: string;
-  } | null>(null);
-
-  React.useEffect(() => {
-    if (!activeProjectRef || !actionDirectory) {
-      return;
-    }
-    lastProjectActionsContextRef.current = {
-      projectRef: activeProjectRef,
-      directory: actionDirectory,
-    };
-  }, [actionDirectory, activeProjectRef]);
-
-  const projectActionsContext = React.useMemo(() => {
-    if (activeProjectRef && actionDirectory) {
-      return { projectRef: activeProjectRef, directory: actionDirectory };
-    }
-    return lastProjectActionsContextRef.current;
-  }, [actionDirectory, activeProjectRef]);
+  const projectActionsContext = useProjectActionsContext();
+  const actionDirectory = projectActionsContext?.directory ?? '';
 
   const blurActiveElement = React.useCallback(() => {
     if (typeof document === 'undefined') {
@@ -931,7 +903,7 @@ export const Header: React.FC<HeaderProps> = ({
             {(contextPhase === 'preparing' || contextPhase === 'waiting') && <Icon name="loader-4" className="size-3 animate-spin" />}
             <span className="max-w-40 truncate">{t(contextPhaseLabels[contextPhase])}</span>
           </button>}
-          <OpenInAppButton directory={actionDirectory} className="mr-1" />
+          {projectActionsContext?.projectRef.resourceOwner?.kind !== 'managed_host' && <OpenInAppButton directory={actionDirectory} className="mr-1" />}
           <WorkbenchServices />
           {panelControl ?? <ContextPanelControls />}
           <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />

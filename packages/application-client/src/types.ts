@@ -91,6 +91,9 @@ export interface TerminalError extends Error {
 }
 
 export interface CreateTerminalOptions {
+  /** Frozen logical project source; never a target mount path. */
+  selection?: import('./threads.js').ProjectSourceSelection;
+  resourceOwner?: import('@varin/protocol').SourceResourceOwner;
   cwd?: string;
   workspacePath?: string;
   sessionId?: string;
@@ -675,7 +678,14 @@ export interface VersionedProjectWorkspace {
   adoptionOperationId: string;
   state: 'preparing' | 'ready' | 'disabled';
 }
+export interface ProjectSourceBinding {
+  resourceOwner: import('@varin/protocol').SourceResourceOwner;
+  /** Opaque identity registered by the selected Host’s Documents owner. */
+  workspaceId: string;
+}
 export interface ProjectEntry {
+  /** Omitted bindings retain the original local-Host meaning. */
+  source?: ProjectSourceBinding;
   id: string;
   /** Default execution folder. Project membership does not restrict file access. */
   path: string;
@@ -2620,6 +2630,7 @@ export interface WorkspaceTestAPI {
 }
 
 export interface RuntimeAPIs {
+  conversationOrganization?: import('./conversation-organization.js').ConversationOrganizationAPI;
   bots?: import('./bots.js').BotsAPI;
   agentProfiles?: import("./agent-profiles.js").AgentProfilesAPI;
   schedules?: import("./schedules.js").ScheduledTasksAPI;

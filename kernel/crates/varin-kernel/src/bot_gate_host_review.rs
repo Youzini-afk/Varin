@@ -553,7 +553,7 @@ fn product_bot_entry_admission_original_history_knowledge_tools_and_actual_model
         let frame = f.pump_dispatch(|frame| {
             let method = frame["method"].as_str().unwrap(); let params = frame["params"].clone();
             Some((|| -> Result<Value, KernelError> { match method {
-                "runtime.input.submit" | "runtime.input.receipt" => input_commands::execute(runtime.clone(), method, params, Arc::new(AtomicBool::new(false)), None),
+                "runtime.input.submit" | "runtime.input.receipt" | "runtime.input.inheritedReceipt" => input_commands::execute(runtime.clone(), method, params, Arc::new(AtomicBool::new(false)), None),
                 "runtime.context.inspect" => { let read = owner.lock().unwrap().capture_active_checkpoint(params["branchId"].as_str().unwrap()).map_err(domain)?; Ok(serde_json::to_value(read.map(|read|read.load()).transpose().map_err(domain)?)?) },
                 "runtime.context.refresh" => {
                     let p: ContextRefreshParams = serde_json::from_value(params)?;

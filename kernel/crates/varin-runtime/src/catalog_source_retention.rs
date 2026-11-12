@@ -60,7 +60,7 @@ fn record_sources(table: &str, value: &Value) -> Result<Vec<SourceSelection>> {
                 add(value.pointer(pointer))?;
             }
         }
-        "external_conversations" => add(value.get("nativeWorkspace"))?,
+        "external_conversations" => { add(value.get("nativeWorkspace"))?; add(value.get("executionSource"))?; },
         "external_children" => {
             for pointer in [
                 "/source/nativeSource",

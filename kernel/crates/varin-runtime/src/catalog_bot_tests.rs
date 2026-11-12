@@ -429,7 +429,15 @@ fn bot_sessions_discover_read_and_contact_user_work_without_matter_links() {
     for caller in ["thread", "second-session", "other-bot-session"] {
         let list = db.capture_family_read(caller, None, None).unwrap().list(false, &||false).unwrap();
         assert!(list.members.iter().any(|member| member.thread_id == "ordinary"));
-        assert!(!list.members.iter().any(|member| ["thread", "second-session", "other-bot-session"].contains(&member.thread_id.as_str())));
+        for target in ["thread", "second-session", "other-bot-session"] {
+            assert_eq!(list.members.iter().any(|member| member.thread_id == target), target != caller);
+            let branch = match target { "thread" => "main", "second-session" => "second-route", _ => "other-bot-route" };
+            db.capture_family_read(caller, Some(target), Some(branch)).unwrap().authorize(&||false).unwrap();
+            if target != caller {
+                assert!(!super::bot_work::can_message(&db.db,caller,"second-route",target,branch).unwrap());
+                assert!(!super::bot_work::linked(&db.db,caller,target,Some(branch),false,true).unwrap());
+            }
+        }
         let reference = super::background::BackgroundReference { thread_id: "ordinary".into(), branch_id: "ordinary-main".into(),
             head_id: original.input_id.clone(), item_ids: vec![original.input_id.clone()] };
         let mut caller_command = command(); caller_command.key = format!("background-{caller}");
@@ -689,4 +697,41 @@ fn collected_parent_keeps_surviving_child_bot_ancestry_and_gate() {
     reopened.publish_bot_gate(gate(3,true)).unwrap();
     assert!(bot::thread_permitted(&reopened.db,&child.child_thread_id,reopened.epoch()).unwrap());
     drop(reopened);std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn bot_cross_session_fixed_history_media_and_background_share_read_authority() {
+    use super::family::{FamilyReadQuery, ReadRequest};
+    let fixture=Fixture::new(); let mut db=fixture.open(); db.publish_bot_gate(gate(1,true)).unwrap(); db.create_bot_thread("thread","main","bot").unwrap();
+    let mut input=command();input.input=json!({"text":"original discussion","attachments":[{"media_type":"image/png","data_base64":"AAEC"}]});
+    let source=db.submit(&input).unwrap();
+    db.publish_bot_gate(BotGate {bot_id:"reader-bot".into(),..gate(1,true)}).unwrap();
+    db.create_bot_thread("reader","reader-main","reader-bot").unwrap();
+    db.create_thread("ordinary-reader","ordinary-reader-main").unwrap();
+    let item=db.append_history(&source.run_id,db.epoch(),Some(&source.input_id),HistorySource::Assistant,
+        json!({"id":"cross-bot-answer","provenance":{"kind":"assistant"},"content":{"kind":"text","text":"Retained discussion"},"opaque":null}),None).unwrap();
+    let page=db.capture_family_read("reader",Some("thread"),Some("main")).unwrap().read(ReadRequest {
+        run_id:None,anchor:None,cursor:None,query:FamilyReadQuery::Recent {limit:Some(1),max_item_bytes:None}
+    },&||false).unwrap();
+    assert_eq!(page.items[0].id,item.id);
+    let continuation=ReadRequest {run_id:None,anchor:Some(page.anchor.clone()),cursor:page.next_cursor.clone(),
+        query:FamilyReadQuery::Recent {limit:Some(1),max_item_bytes:None}};
+    let older=db.capture_family_read("reader",Some("thread"),Some("main")).unwrap().read(continuation.clone(),&||false).unwrap();
+    assert_eq!(older.items[0].id,source.input_id);
+    let descriptor=&older.items[0].media[0];
+    let output=db.capture_family_read("reader",Some("thread"),Some("main")).unwrap()
+        .media_output(None,&page.anchor,&source.input_id,descriptor.part_index,&descriptor.content_ref,&||false).unwrap();
+    assert!(matches!(&output.parts[0],crate::output::OutputPart::Media{media} if media.data_base64=="AAEC"));
+
+    let background=super::background::BackgroundReference {thread_id:"thread".into(),branch_id:"main".into(),head_id:item.id.clone(),item_ids:vec![item.id.clone()]};
+    super::background::authorize(&db.db,"reader",&[background.clone()]).unwrap();
+    assert!(super::background::authorize(&db.db,"ordinary-reader",&[background.clone()]).is_err());
+    assert!(db.capture_family_read("ordinary-reader",Some("thread"),Some("main")).unwrap().authorize(&||false).is_err());
+    assert!(!super::bot_work::can_message(&db.db,"reader","reader-main","thread","main").unwrap());
+    // Previously returned anchors and media descriptors carry no independent authority.
+    db.db.execute("UPDATE threads SET principal_id='other-user' WHERE id='thread'",[]).unwrap();
+    assert!(db.capture_family_read("reader",Some("thread"),Some("main")).unwrap().read(continuation,&||false).is_err());
+    assert!(db.capture_family_read("reader",Some("thread"),Some("main")).unwrap()
+        .media_output(None,&page.anchor,&source.input_id,descriptor.part_index,&descriptor.content_ref,&||false).is_err());
+    assert!(super::background::authorize(&db.db,"reader",&[background]).is_err());
 }

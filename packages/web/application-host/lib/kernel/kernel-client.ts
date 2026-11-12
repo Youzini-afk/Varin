@@ -854,7 +854,7 @@ export class KernelClient {
     const grant = this.issuedGrants.get(query.grantId);
     const runId = query.scope.kind === 'run' ? query.scope.runId : null;
     if (!grant || this.inactiveGrants.has(query.grantId) || grant.kernelEpoch !== query.resourceEpoch
-      || grant.runId !== runId || grant.threadId !== query.scope.threadId
+      || grant.runId !== runId || grant.threadId !== (query.scope.kind === 'external' ? query.scope.conversationId : query.scope.threadId)
       || grant.owningWorkspace !== query.source.workspace_id || grant.executionWorkspace !== query.source.execution_workspace_id
       || grant.sessionId !== null || grant.workerId !== null) {
       throw new KernelClientError({ code: 'forbidden', message: 'Original source authority permit is unavailable or mismatched' });
@@ -1942,6 +1942,7 @@ export class KernelClient {
       threadId: params.threadId ?? null,
       runId: params.runId ?? null,
       operationId: params.operationId ?? null,
+      externalTransportId: params.externalTransportId ?? null,
       owningWorkspace: params.owningWorkspace ?? null,
       executionWorkspace: params.executionWorkspace ?? null,
       storageIdentity: params.storageIdentity ?? this.handshakeResult!.storageRoot,

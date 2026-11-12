@@ -26,7 +26,7 @@ function fixture() {
   });
   const claimManagedChildSource = vi.fn(async (input: SourceHandoffClaimParams) => {
     events.push('claim-handoff');
-    const grant = { grantId: input.grantId, threadId: input.scope.threadId, kernelEpoch: 'target-epoch' } as KernelGrantHandle;
+    const grant = { grantId: input.grantId, threadId: input.scope.kind === 'external' || input.scope.kind === 'external_child' ? input.scope.conversationId : input.scope.threadId, kernelEpoch: 'target-epoch' } as KernelGrantHandle;
     grants.set(input.grantId, grant); return grant;
   });
   const sourceRequest = vi.fn(async (method: string, input: unknown): Promise<unknown> => {

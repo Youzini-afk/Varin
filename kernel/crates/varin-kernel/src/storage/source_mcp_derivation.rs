@@ -615,6 +615,20 @@ mod tests {
             "principalId":"client","coordinatorHostId":"coordinator","grantId":"preparation",
             "scope":{"kind":"source_read","threadId":"thread:child:dispatch","branchId":"branch:child:dispatch","key":"child:dispatch"},
             "source":handoff.source,"handoff":handoff})).unwrap(),EPOCH,HOST,"generation").unwrap();
+        // External preparation is scoped to the original Storage handoff, not a target Catalog Run.
+        let external_claim = json!({"principalId":"client","coordinatorHostId":"coordinator","grantId":"external-preparation",
+            "scope":{"kind":"external_child","conversationId":"external:child:dispatch","operationId":"dispatch"},
+            "source":handoff.source,"handoff":handoff});
+        let external = storage.claim_source_handoff(serde_json::from_value(external_claim.clone()).unwrap(),EPOCH,HOST,"generation").unwrap();
+        assert_eq!(external["thread_id"], "external:child:dispatch");
+        for (pointer, value) in [("/scope/conversationId", "external:child:foreign"), ("/scope/operationId", "foreign"),
+            ("/principalId", "foreign"), ("/coordinatorHostId", "foreign")] {
+            let mut forged = external_claim.clone();
+            *forged.pointer_mut(pointer).unwrap() = json!(value);
+            assert!(storage.claim_source_handoff(serde_json::from_value(forged).unwrap(),EPOCH,HOST,"generation").is_err());
+        }
+        storage.authorize(Some("external-preparation"),EPOCH,HOST,"generation","workspace.backend.inspect",&json!({})).unwrap();
+        assert!(storage.authorize(Some("external-preparation"),EPOCH,HOST,"generation","workspace.open",&json!({})).is_err());
         storage.authorize(Some("preparation"),EPOCH,HOST,"generation","workspace.backend.inspect",&json!({})).unwrap();
         assert!(storage.authorize(Some("preparation"),EPOCH,HOST,"generation","workspace.open",&json!({})).is_err());
         storage.begin_branch_builder(&json!({"builderId":"builder","operationId":"branch-create:child-source:dispatch",

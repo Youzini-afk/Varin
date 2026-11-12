@@ -8,12 +8,14 @@ import { createSettingsRuntime } from './settings-runtime.js';
 const createRuntime = async (
   syncPresets: (presets: unknown) => Promise<void> = async () => {},
   mergePersistedSettings: (current: VarinSettingsDocument, changes: VarinSettingsDocument) => VarinSettingsDocument = (_current, changes) => changes,
+  resolveProjectSource?: import('./settings-runtime.js').SettingsRuntimeDependencies['resolveProjectSource'],
 ) => {
   const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'varin-settings-runtime-'));
   const settingsFilePath = path.join(tempRoot, 'settings.json');
   const runtime = createSettingsRuntime({
     fsPromises,
     path,
+    ...(resolveProjectSource ? { resolveProjectSource } : {}),
     SETTINGS_FILE_PATH: settingsFilePath,
     sanitizeProjects: (projects) => Array.isArray(projects) ? projects : [],
     sanitizeSettingsUpdate: (settings) => settings as VarinSettingsDocument,
@@ -115,4 +117,27 @@ describe('settings runtime', () => {
     } finally { await cleanup(); }
   });
 
+});
+
+it('registers remote folders through their owner and retains saved offline projects on metadata edits', async () => {
+  const source = { resourceOwner: { kind: 'managed_host', hostId: 'remote', connectionId: 'connection', endpointIdentity: 'endpoint' }, workspaceId: 'remote-root' };
+  let online = true;
+  const resolutions: string[] = [];
+  const { runtime, cleanup } = await createRuntime(undefined, (current, changes) => ({ ...current, ...changes }), async request => {
+    resolutions.push(request.path);
+    if (!online) throw new Error('Remote Host is offline');
+    return { workspaceId: 'remote-root', path: request.path };
+  });
+  const project = { id: 'remote', path: 'Z:\\not-on-coordinator', source };
+  try {
+    await runtime.persistSettings({ projects: [project] });
+    expect(resolutions).toEqual([project.path]);
+    online = false;
+    await runtime.persistSettings({ projects: [{ ...project, label: 'Still visible offline' }] });
+    expect(resolutions).toHaveLength(1);
+    expect((await runtime.readSettingsFromDisk()).projects).toEqual([{ ...project, label: 'Still visible offline' }]);
+    await expect(runtime.persistSettings({ projects: [{ ...project, path: 'Z:\\another' }] })).rejects.toThrow('offline');
+    await expect(runtime.persistSettings({ projects: [{ id: 'remote', path: project.path }] })).rejects.toThrow('explicit source binding');
+    expect((await runtime.readSettingsFromDisk()).projects).toEqual([{ ...project, label: 'Still visible offline' }]);
+  } finally { await cleanup(); }
 });

@@ -1,3 +1,4 @@
+import { getEditorResourceWorkspace } from '@/lib/workbench/editors/resource-workspace';
 import React from 'react';
 import { ResourceEditorHost } from '@/components/workbench/ResourceEditorHost';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
@@ -12,8 +13,9 @@ export const ContextResourceEditor: React.FC<{
   filePath: string;
   viewId: string;
   editorViewId?: string;
+  editorWorkspaceId?: string;
   workspaceRoot: string;
-}> = ({ filePath, viewId, editorViewId, workspaceRoot }) => {
+}> = ({ filePath, viewId, editorViewId, editorWorkspaceId, workspaceRoot }) => {
   const { t } = useI18n();
   const { documents } = useRuntimeAPIs();
   const runtimeGeneration = React.useSyncExternalStore(
@@ -23,6 +25,12 @@ export const ContextResourceEditor: React.FC<{
     root: string; generation: number; workspaceId?: string; error?: string;
   } | null>(null);
   React.useEffect(() => {
+    if (editorWorkspaceId?.startsWith('resource-editor:')) {
+      setResolution(getEditorResourceWorkspace(editorWorkspaceId)
+        ? { root: workspaceRoot, generation: runtimeGeneration, workspaceId: editorWorkspaceId }
+        : { root: workspaceRoot, generation: runtimeGeneration, error: 'The original resource Host is unavailable' });
+      return;
+    }
     let cancelled = false;
     void documents.resolveWorkspace({ path: workspaceRoot }).then((workspace) => {
       if (!cancelled) setResolution({ root: workspaceRoot, generation: runtimeGeneration, workspaceId: workspace.workspaceId });
@@ -30,7 +38,7 @@ export const ContextResourceEditor: React.FC<{
       if (!cancelled) setResolution({ root: workspaceRoot, generation: runtimeGeneration, error: error instanceof Error ? error.message : String(error) });
     });
     return () => { cancelled = true; };
-  }, [documents, runtimeGeneration, workspaceRoot]);
+  }, [documents, runtimeGeneration, workspaceRoot, editorWorkspaceId]);
   const currentResolution = resolution?.root === workspaceRoot && resolution.generation === runtimeGeneration ? resolution : null;
   const workspaceId = currentResolution?.workspaceId;
   const resourceId = resourceIdFromWorkspacePath(workspaceRoot, filePath);

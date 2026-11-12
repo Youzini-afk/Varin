@@ -234,6 +234,32 @@ impl SubmissionPreparation {
     pub fn scope(&self) -> Option<&context::ContextScope> {
         self.scope.as_ref()
     }
+    /// A Host-derived fallback is not a new explicit source choice. Resolve only those
+    /// prepared fields from the original retained intent, then run the full original
+    /// intent comparison. This read executes on the request worker, outside Catalog.
+    pub fn existing_receipt_inheriting_source(
+        &self,
+        launch: &Option<launches::LaunchSelection>,
+        inherit_source: bool,
+    ) -> Result<Option<Receipt>> {
+        if !inherit_source {
+            return Err(RuntimeError::Invalid("original fallback lookup requires inherited source intent".into()));
+        }
+        let Some((intent, _)) = &self.existing else { return Ok(None); };
+        let original = self.content.load(intent)?;
+        if original.get("inherit_source").and_then(Value::as_bool) != Some(true) {
+            return Err(RuntimeError::Conflict("original input selected an explicit source".into()));
+        }
+        let mut candidate = launch.clone();
+        if let Some(selected) = candidate.as_mut() {
+            let saved = original.get("launch").ok_or_else(|| RuntimeError::Invalid("retained input launch missing".into()))?;
+            selected.source = serde_json::from_value(saved.get("source").cloned().ok_or_else(|| RuntimeError::Invalid("retained input source missing".into()))?)?;
+            selected.tools = serde_json::from_value(saved.get("tools").cloned().ok_or_else(|| RuntimeError::Invalid("retained input tools missing".into()))?)?;
+            selected.tool_schema_generation = saved.get("tool_schema_generation").and_then(Value::as_u64).ok_or_else(|| RuntimeError::Invalid("retained source tool generation missing".into()))?;
+        }
+        self.existing_receipt(&candidate, inherit_source)
+    }
+
     pub fn existing_receipt(
         &self,
         launch: &Option<launches::LaunchSelection>,

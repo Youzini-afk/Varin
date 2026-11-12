@@ -1,5 +1,10 @@
+import { createHash } from 'node:crypto';
+import { parseProjectSourceSelection, type ProjectSourceSelection } from '@varin/application-client';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
+import { Readable } from 'node:stream';
+import { attachmentMimeType } from '@varin/protocol';
+import { readOfficeFilesystem, type OfficeFilesystemRenderer } from '../office/filesystem-reader.js';
 import path from 'node:path';
 import os from 'node:os';
 import type { ResourceFileCommand, ResourceFileResult, ResourceFileEntry } from '@varin/application-client';
@@ -8,9 +13,11 @@ import type { KernelFileResourceBackend } from '../kernel/file-resource-backend.
 import { resolveWorkspacePath, normalizePathIdentity, normalizeWorkspaceRelativePath } from './path-safety.js';
 import type { RecoveryIdentity } from '../recovery/journal-files.js';
 
-export interface ResourceWorkspaceRequest { root?: string; workspaceId?: string; command: ResourceFileCommand; taskSource?: { runId: string; source: import('../kernel/protocol.generated.js').LaunchSource } }
-export interface ResourceWorkspaceUpload { root: string; workspaceId: string; path: string; key: string; byteLength: number }
+export interface ResourceWorkspaceRequest { selection?: ProjectSourceSelection; root?: string; workspaceId?: string; command: ResourceFileCommand; taskSource?: { runId: string; source: import('../kernel/protocol.generated.js').LaunchSource } }
+export interface ResourceWorkspaceUpload { selection?: ProjectSourceSelection; root: string; workspaceId: string; path: string; key: string; byteLength: number }
+export type ResourceWorkspaceAsset = Omit<import('@varin/application-client').ResourceAssetRequest,'resourceOwner' | 'task'>;
 export interface ResourceFilesOwner {
+  asset(input:ResourceWorkspaceAsset,signal?:AbortSignal):Promise<Response>;
   request(input: ResourceWorkspaceRequest, signal?: AbortSignal): Promise<ResourceFileResult>;
   upload(input: ResourceWorkspaceUpload, body: AsyncIterable<Uint8Array>, signal?: AbortSignal): Promise<{ kind: 'done' }>;
 }
@@ -18,15 +25,23 @@ const checked = (value: unknown): string => { if (typeof value !== 'string' || v
 
 /** User operations share Documents admission and native file transactions with the editor. */
 export function createResourceFilesOwner(documents: DocumentAuthority, files: KernelFileResourceBackend,
-  fileTarget?: import('../kernel/thread-file-target.js').ThreadFileTargetResolver): ResourceFilesOwner {
-  const resolve = async (root: string, workspaceId?: string, signal?: AbortSignal) => {
-    const workspace = await documents.resolveWorkspace({ path: checked(root) });
+  fileTarget?: import('../kernel/thread-file-target.js').ThreadFileTargetResolver,
+  prepareProjectSelection?: (selection: Extract<ProjectSourceSelection,{mode:'native_workspace'}>, signal?: AbortSignal) => Promise<{path:string;originalRoot:string}>,
+  search?: { files: Pick<ReturnType<typeof import('../fs/search.js').createFsSearchRuntime>, 'searchFilesystemFiles'>; content: ReturnType<typeof import('../search/content.js').createWorkspaceContentSearch> },
+  renderOffice?:OfficeFilesystemRenderer): ResourceFilesOwner {
+  const resolve = async (root: string, workspaceId?: string, signal?: AbortSignal, rawSelection?: ProjectSourceSelection) => {
+    const selection = rawSelection === undefined ? undefined : parseProjectSourceSelection(rawSelection);
+    const adopted = selection?.mode === 'native_workspace' ? await (async () => {
+      if (!prepareProjectSelection) throw new Error('The original native project owner is unavailable');
+      return prepareProjectSelection(selection, signal);
+    })() : undefined;
+    const workspace = await documents.resolveWorkspace({ path: adopted?.path ?? checked(root) });
     const registered = await documents.admitWorkspaceRegistration(workspace.workspaceId, signal);
     if (workspaceId && workspaceId !== workspace.workspaceId) throw new Error('The file location changed; reopen it');
     const physical = await documents.inspectWorkspace(workspace.workspaceId);
     const identity: RecoveryIdentity = { authorityId: registered.hostId, filesystemProfile: process.platform,
       workspaceId: workspace.workspaceId, canonicalRoot: physical.root };
-    return { identity, root: physical.root };
+    return { identity, root: physical.root, displayRoot: adopted?.originalRoot ?? physical.root };
   };
   const target = (root: string, name: string) => resolveWorkspacePath(checked(name), { root, allowMissing: true });
   const entryTarget = async (root: string, name: string) => {
@@ -40,6 +55,27 @@ export function createResourceFilesOwner(documents: DocumentAuthority, files: Ke
       { resourceOperations: paths.map(resourceId => ({ resourceId, scope: 'subtree' })) });
 
   return {
+    async asset(input,signal) {
+      signal?.throwIfAborted();
+      if(!input.asset || !['raw','serve','office-preview','office-read'].includes(input.asset.kind))throw new Error('Unknown file asset');
+      const {root}=await resolve(input.root,input.workspaceId,signal,input.selection);
+      const file=await target(root,input.path);
+      const stats=await fs.stat(file.absolutePath);
+      if(!stats.isFile())throw new Error('Choose a file inside this location');
+      if(input.asset.kind==='office-preview'||input.asset.kind==='office-read') {
+        const bytes=await fs.readFile(file.absolutePath,{...(signal?{signal}:{})});
+        return readOfficeFilesystem(bytes,file.absolutePath,input.asset.kind==='office-read'?input.asset.input:{view:'preview',...(input.asset.expectedRevision===undefined?{}:{expectedRevision:input.asset.expectedRevision})},renderOffice,signal);
+      }
+      const mime:Record<string,string>={'.html':'text/html','.htm':'text/html','.css':'text/css','.js':'application/javascript','.mjs':'application/javascript','.json':'application/json','.wasm':'application/wasm','.svg':'image/svg+xml','.woff':'font/woff','.woff2':'font/woff2','.txt':'text/plain'};
+      if(input.asset.expectedRevision!==undefined) {
+        const hash=createHash('sha256');
+        for await(const chunk of createReadStream(file.absolutePath,{...(signal?{signal}:{})}))hash.update(chunk);
+        const revision=`sha256-${hash.digest('hex')}`;
+        if(revision!==input.asset.expectedRevision)return Response.json({error:'The file changed. Refresh its current revision.',revision},{status:409});
+      }
+      const stream=createReadStream(file.absolutePath,{...(signal?{signal}:{})});
+      return new Response(Readable.toWeb(stream) as ReadableStream<Uint8Array>,{headers:{'Content-Type':mime[path.extname(file.absolutePath).toLowerCase()]??attachmentMimeType(file.absolutePath),'Content-Length':String(stats.size),'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'}});
+    },
     async request(input, signal) {
       signal?.throwIfAborted();
       const command = input.command;
@@ -53,12 +89,38 @@ export function createResourceFilesOwner(documents: DocumentAuthority, files: Ke
         const original = input.taskSource;
         const task = original && fileTarget ? await fileTarget(original.runId, { ...original.source, resource_owner: { kind: 'local' } }, '.', signal) : null;
         if (original && task?.kind !== 'document') throw new Error('This task has no available writable file view yet');
-        const { root, identity } = await resolve(task?.kind === 'document' ? task.root : command.path?.trim() || os.homedir(), undefined, signal);
-        return { kind: 'opened', root, workspaceId: identity.workspaceId, locations: [...new Set([os.homedir(), path.parse(root).root])] };
+        if (input.selection && original) throw new Error('Choose a project source or task source, not both');
+        const { root, displayRoot, identity } = await resolve(task?.kind === 'document' ? task.root : command.path?.trim() || os.homedir(), undefined, signal, input.selection);
+        return { kind: 'opened', root: displayRoot, workspaceId: identity.workspaceId, locations: [...new Set([os.homedir(), path.parse(root).root])] };
       }
       if (!input.root || !input.workspaceId) throw new Error('Choose a file location first');
-      const { root, identity } = await resolve(input.root, input.workspaceId, signal);
+      const { root, identity } = await resolve(input.root, input.workspaceId, signal, input.selection);
       const file = await (['readlink', 'symlink', 'remove', 'rename', 'copy'].includes(command.kind) ? entryTarget : target)(root, command.path);
+      if (command.kind === 'filename-search' || command.kind === 'content-search') {
+        if (!search) throw new Error('The original file search owner is unavailable');
+        if (typeof command.query !== 'string') throw new Error('A search query is required');
+        if (command.maxResults !== undefined && (!Number.isSafeInteger(command.maxResults) || command.maxResults < 1)) throw new Error('Invalid search result limit');
+        const common = { query: command.query,
+          ...(command.includeHidden === undefined ? {} : { includeHidden: command.includeHidden }),
+          ...(command.respectGitignore === undefined ? {} : { respectGitignore: command.respectGitignore }) };
+        if (command.kind === 'filename-search') {
+          const found = await search.files.searchFilesystemFiles(file.absolutePath, { ...common,
+            ...(command.maxResults === undefined ? {} : { limit: command.maxResults }), ...(signal ? {signal} : {}) });
+          return { kind: 'filename-search', results: found.map(item => ({path: path.posix.join(file.relativePath, item.relativePath)})), enumerationStatus: found.enumerationStatus ?? 'incomplete' };
+        }
+        // The accepted Documents view, never a caller-supplied search workspace,
+        // selects the original compute owner. Hits retain that view's identity.
+        const result = await search.content.searchContent({ ...common, workspaceId: identity.workspaceId,
+          ...(file.relativePath ? { paths: [file.relativePath] } : {}),
+          ...(command.maxResults === undefined ? {} : { maxResults: command.maxResults }),
+          ...(command.ignoreCase === undefined ? {} : { ignoreCase: command.ignoreCase }),
+          ...(command.fixedStrings === undefined ? {} : { fixedStrings: command.fixedStrings }),
+          ...(command.glob === undefined ? {} : { glob: command.glob }),
+          ...(command.before === undefined ? {} : { before: command.before }),
+          ...(command.after === undefined ? {} : { after: command.after }),
+        }, { generation: 0, ...(signal ? {signal} : {}) });
+        return { kind: 'content-search', result };
+      }
       if (command.kind === 'list') {
         const names = (await fs.readdir(file.absolutePath, { withFileTypes: true })).filter(entry => !command.query || entry.name.toLocaleLowerCase().includes(command.query.toLocaleLowerCase()))
           .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name, undefined, { numeric: true }));
@@ -135,7 +197,7 @@ export function createResourceFilesOwner(documents: DocumentAuthority, files: Ke
     },
     async upload(input, body, signal) {
       if (!Number.isSafeInteger(input.byteLength) || input.byteLength < 0 || !input.key) throw new Error('Invalid upload metadata');
-      const { root, identity } = await resolve(input.root, input.workspaceId, signal);
+      const { root, identity } = await resolve(input.root, input.workspaceId, signal, input.selection);
       const file = await target(root, input.path);
       if (!file.relativePath) throw new Error('A filename is required');
       await mutate(identity, input.key, [file.relativePath], async () => {

@@ -71,6 +71,15 @@ pub(super) fn ordinary_conversation(db: &Connection, caller: &str, target: &str)
         params![caller, target], |row| row.get(0),
     ).map_err(Into::into)
 }
+/// Read authority is deliberately separate from messaging and memory links.
+/// Only a directly bound Bot conversation gains the principal-wide product view;
+/// delegated Agents retain their original family and explicit-background authority.
+pub(super) fn readable_conversation(db: &Connection, caller: &str, target: &str) -> Result<bool> {
+    db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM bot_thread_bindings bot JOIN threads caller ON caller.id=bot.thread_id JOIN threads target ON target.id=?2 WHERE bot.thread_id=?1 AND caller.principal_id IS target.principal_id AND target.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id=target.id AND json_extract(owner.body,'$.executor')='code_retrieval') AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN context_jobs c ON c.run_id=r.id WHERE b.thread_id=target.id) AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN operations o ON o.run_id=r.id WHERE b.thread_id=target.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1'))",
+        params![caller, target], |row| row.get(0),
+    ).map_err(Into::into)
+}
 pub(super) fn can_message(
     db: &Connection,
     sender: &str,
@@ -199,6 +208,24 @@ impl Catalog {
         entry(&self.db, bot_id)?;
         matters(&self.db, bot_id)
     }
+    pub fn bot_matters_scoped(&self, bot_id: &str, principal: Option<Option<String>>) -> Result<Vec<BotMatter>> {
+        let rows = self.bot_matters(bot_id)?;
+        let Some(principal) = principal else { return Ok(rows) };
+        rows.into_iter().filter_map(|row| match matter_visible(&self.db, bot_id, &row, principal.as_deref()) {
+            Ok(true) => Some(Ok(row)), Ok(false) => None, Err(e) => Some(Err(e)),
+        }).collect()
+    }
+    pub fn update_bot_matter_scoped(&mut self, input: MatterUpdate, principal: Option<String>) -> Result<BotMatter> {
+        if !matter_visible(&self.db, &input.bot_id, &input.matter, principal.as_deref())? {
+            return Err(RuntimeError::Conflict("matter is outside the current principal".into()));
+        }
+        if let Some(prior) = matters(&self.db, &input.bot_id)?.into_iter().find(|m|m.id==input.matter.id) {
+            if !matter_visible(&self.db, &input.bot_id, &prior, principal.as_deref())? {
+                return Err(RuntimeError::Conflict("matter is outside the current principal".into()));
+            }
+        }
+        self.update_bot_matter(input, None)
+    }
     /// None is the authenticated product command. A model invocation may associate
     /// its own family or preserve an existing user grant, never grant itself access.
     pub fn update_bot_matter(
@@ -207,6 +234,25 @@ impl Catalog {
         caller: Option<&crate::execution::ToolExecutionContext>,
     ) -> Result<BotMatter> {
         let root = entry(&self.db, &input.bot_id)?;
+        // Authorize the actual invocation before looking up receipts: a shared Bot
+        // and a guessed command key do not grant another principal's matter data.
+        if let Some(caller) = caller {
+            let run = self.run(&caller.run_id)?;
+            fence(&run, self.epoch)?;
+            let session_bot: Option<String> = self.db.query_row("SELECT bot_id FROM bot_thread_bindings WHERE thread_id=?1", [&run.thread_id], |r|r.get(0)).optional()?;
+            if session_bot.as_deref()!=Some(input.bot_id.as_str()) || run.cancel_requested {
+                return Err(RuntimeError::Conflict("matter update is outside its Bot session execution".into()));
+            }
+            tool_content::root_tool_context(&self.db, caller, true)?;
+            if !matter_visible(&self.db,&input.bot_id,&input.matter,run.principal_id.as_deref())? {
+                return Err(RuntimeError::Conflict("matter is outside the current principal".into()));
+            }
+            if let Some(prior)=matters(&self.db,&input.bot_id)?.into_iter().find(|m|m.id==input.matter.id) {
+                if !matter_visible(&self.db,&input.bot_id,&prior,run.principal_id.as_deref())? {
+                    return Err(RuntimeError::Conflict("matter is outside the current principal".into()));
+                }
+            }
+        }
         let key = format!("bot-matter:{}:{}", input.bot_id, input.key);
         let intent = serde_json::to_value(&input)?;
         if let Some((old, receipt)) = self
@@ -356,4 +402,12 @@ impl ColdBotPreparation {
             submission,
         })
     }
+}
+
+// A mixed legacy matter cannot expose its title/description merely because one link is
+// readable. Empty legacy matters retain their original Bot entry's principal.
+fn matter_visible(db: &Connection, bot: &str, matter: &BotMatter, principal: Option<&str>) -> Result<bool> {
+    let ids = if matter.threads.is_empty() { vec![entry(db, bot)?] } else { matter.threads.iter().map(|t|t.thread_id.clone()).collect() };
+    for id in ids { if !db.query_row("SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1 AND principal_id IS ?2)", params![id,principal], |r|r.get::<_,bool>(0))? { return Ok(false); } }
+    Ok(true)
 }

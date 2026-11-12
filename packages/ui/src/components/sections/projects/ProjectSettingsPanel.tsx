@@ -43,7 +43,7 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
     if (!project) {
       return null;
     }
-    return { id: project.id, path: project.path };
+    return { id: project.id, path: project.path, source: project.source };
   }, [project]);
 
   const handleIdentitySave = React.useCallback(async (data: ProjectIdentitySaveData) => {

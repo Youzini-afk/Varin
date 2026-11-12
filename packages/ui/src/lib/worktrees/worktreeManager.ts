@@ -1,3 +1,5 @@
+import { manageProject, subscribeRuntimeEndpointWillChange, type ProjectEntry, type ProjectManagementOperations } from '@varin/application-client';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { substituteCommandVariables } from '@/lib/project-config';
 import type { WorktreeMetadata } from '@/types/worktree';
 import {
@@ -5,6 +7,8 @@ import {
   git,
 } from '@/lib/gitApi';
 import {
+  registerWorktreeBootstrapReader,
+  waitForWorktreeBootstrap,
   clearWorktreeBootstrapState,
   markWorktreeBootstrapPending,
   setWorktreeBootstrapState,
@@ -46,7 +50,26 @@ const deriveCanonicalWorktreeFields = (
   };
 };
 
-export type ProjectRef = { id: string; path: string };
+export type ProjectRef = { id: string; path: string; source?: ProjectEntry['source'] };
+const sourceForProject = (project: ProjectRef) => Object.hasOwn(project, 'source') ? project.source : useProjectsStore.getState().projects.find(entry => entry.id === project.id)?.source;
+export const freezeWorktreeProject = (project: ProjectRef): ProjectRef => ({ ...project, source: sourceForProject(project) });
+const projectManagement = <K extends keyof ProjectManagementOperations>(project: ProjectRef, action: K, input: ProjectManagementOperations[K]['input']) =>
+  manageProject(project.id, action, input, undefined, sourceForProject(project));
+export const remoteWorktreeProject = (project: ProjectRef): boolean =>
+  (sourceForProject(project))?.resourceOwner.kind === 'managed_host';
+const bootstrapKey = (project: ProjectRef, directory: string): string => {
+  if (!remoteWorktreeProject(project)) return directory;
+  const source = sourceForProject(project);
+  const key = JSON.stringify(['project-worktree', project.id, source, directory]);
+  registerWorktreeBootstrapReader(key, () => {
+    const registered = useProjectsStore.getState().projects.find(entry => entry.id === project.id);
+    if (registered && JSON.stringify(registered.source) !== JSON.stringify(source)) throw new Error('Project source changed; original worktree preparation remains on its source Host');
+    return manageProject(project.id, 'worktree-bootstrap', { directory }, undefined, source);
+  });
+  return key;
+};
+export const waitForProjectWorktreeBootstrap = (project: ProjectRef, directory: string): Promise<void> =>
+  waitForWorktreeBootstrap(bootstrapKey(project, directory));
 
 const normalizePath = (value: string): string => {
   const replaced = value.replace(/\\/g, '/');
@@ -58,11 +81,15 @@ const normalizePath = (value: string): string => {
 
 const latestWorktreeStatus = new Map<string, NonNullable<WorktreeMetadata['worktreeStatus']>>();
 
+const scopedMetadataKeys = new WeakMap<WorktreeMetadata, string>();
+
 export const getLatestWorktreeMetadata = (metadata: WorktreeMetadata): WorktreeMetadata => {
-  const status = latestWorktreeStatus.get(normalizePath(metadata.path));
-  return status && status !== metadata.worktreeStatus
-    ? { ...metadata, worktreeStatus: status }
-    : metadata;
+  const status = latestWorktreeStatus.get(normalizePath(scopedMetadataKeys.get(metadata) ?? metadata.path));
+  if (!status || status === metadata.worktreeStatus) return metadata;
+  const next = { ...metadata, worktreeStatus: status };
+  const scopedKey = scopedMetadataKeys.get(metadata);
+  if (scopedKey) scopedMetadataKeys.set(next, scopedKey);
+  return next;
 };
 
 const slugifyWorktreeName = (value: string): string => {
@@ -325,6 +352,16 @@ const readStableProjectWorktrees = async (projectDirectory: string): Promise<Wor
 };
 
 export async function listProjectWorktrees(project: ProjectRef): Promise<WorktreeMetadata[]> {
+  project = freezeWorktreeProject(project);
+  if (remoteWorktreeProject(project)) {
+    const entries = await projectManagement(project, 'worktrees', {});
+    return entries.filter(entry => entry.path !== project.path).map(entry => ({
+      source: 'sdk' as const, name: entry.name || deriveSdkWorktreeNameFromDirectory(entry.path), path: entry.path,
+      projectDirectory: project.path, branch: entry.branch.replace(/^refs\/heads\//, ''),
+      label: entry.branch.replace(/^refs\/heads\//, '') || entry.name,
+      ...deriveCanonicalWorktreeFields(entry, entry.path),
+    }));
+  }
   const projectDirectory = normalizePath(await projectExecutionPath(project));
 
   // Return cached if fresh
@@ -364,11 +401,13 @@ export type CreateWorktreeArgs = {
 };
 
 export async function createWorktree(project: ProjectRef, args: CreateWorktreeArgs): Promise<WorktreeMetadata> {
-  const projectDirectory = normalizePath(await projectExecutionPath(project));
-  const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
+  project = freezeWorktreeProject(project);
+  const remote = remoteWorktreeProject(project);
+  const projectDirectory = remote ? project.path : normalizePath(await projectExecutionPath(project));
+  const metadataProjectDirectory = remote ? project.path : await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
   const payload = toCreatePayload(args, projectDirectory);
 
-  const created = await git.worktree.create(projectDirectory, payload);
+  const created = await (remote ? projectManagement(project, 'worktree-create', payload) : git.worktree.create(projectDirectory, payload));
   const returnedName = typeof created?.name === 'string' ? created.name : '';
   const returnedBranch = typeof created?.branch === 'string' ? created.branch : '';
   const returnedPath = typeof created?.path === 'string' ? created.path : '';
@@ -389,19 +428,22 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
     headState: returnedBranch ? 'branch' : 'unborn',
     worktreeSource: 'created-for-session',
   };
-  setStoredWorktreeStatus(metadata.path, metadata.worktreeStatus ?? 'ready');
+  const observationKey = bootstrapKey(project, metadata.path);
+  if (remote) removedRemoteWorktrees.delete(observationKey);
+  if (remote) scopedMetadataKeys.set(metadata, observationKey);
+  setStoredWorktreeStatus(observationKey, metadata.worktreeStatus ?? 'ready');
 
   if (created?.bootstrapStatus) {
-    setWorktreeBootstrapState(metadata.path, created.bootstrapStatus);
+    setWorktreeBootstrapState(observationKey, created.bootstrapStatus);
   } else if (created?.directoryCreated) {
-    markWorktreeBootstrapPending(metadata.path);
+    markWorktreeBootstrapPending(observationKey);
   }
   const shouldWatchBootstrap = created?.bootstrapStatus?.status === 'pending'
     || (!created?.bootstrapStatus && created?.directoryCreated === true);
   if (shouldWatchBootstrap) {
-    startWorktreeBootstrapWatcher(metadata.path, {
-      onFailed: () => setStoredWorktreeStatus(metadata.path, 'invalid'),
-      onReady: () => setStoredWorktreeStatus(metadata.path, 'ready'),
+    startWorktreeBootstrapWatcher(observationKey, {
+      onFailed: () => setStoredWorktreeStatus(observationKey, 'invalid'),
+      onReady: () => setStoredWorktreeStatus(observationKey, 'ready'),
     });
   }
 
@@ -414,16 +456,43 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
 }
 
 export async function validateWorktreeCreate(project: ProjectRef, args: CreateWorktreeArgs): Promise<GitWorktreeValidationResult> {
+  project = freezeWorktreeProject(project);
+  if (remoteWorktreeProject(project)) return projectManagement(project, 'worktree-validate', toCreatePayload(args, project.path));
   const projectDirectory = await projectExecutionPath(project);
   const payload = toCreatePayload(args, projectDirectory);
   return git.worktree.validate(projectDirectory, payload);
 }
+
+const removedRemoteWorktrees = new Set<string>();
+subscribeRuntimeEndpointWillChange(() => removedRemoteWorktrees.clear());
 
 export async function removeProjectWorktree(project: ProjectRef, worktree: WorktreeMetadata, options?: {
   deleteRemoteBranch?: boolean;
   deleteLocalBranch?: boolean;
   remoteName?: string;
 }): Promise<void> {
+  project = freezeWorktreeProject(project);
+  if (remoteWorktreeProject(project)) {
+    const key = bootstrapKey(project, worktree.path);
+    if (!removedRemoteWorktrees.has(key)) {
+      const removed = await projectManagement(project, 'worktree-remove', { directory: worktree.path, deleteLocalBranch: options?.deleteLocalBranch === true });
+      if (!removed.success) throw new Error('Worktree removal failed');
+      removedRemoteWorktrees.add(key);
+      clearWorktreeBootstrapState(key);
+      latestWorktreeStatus.delete(normalizePath(key));
+    }
+    const branch = worktree.branch?.replace(/^refs\/heads\//, '').trim();
+    if (options?.deleteRemoteBranch && branch) {
+      try {
+        const deleted = await projectManagement(project, 'worktree-remote-branch-delete', { branch, remote: options.remoteName });
+        if (!deleted.success) throw new Error('Remote branch deletion failed');
+      } catch (reason) {
+        throw new Error(`Worktree removed; remote branch deletion remains incomplete. Retry will only retry that branch deletion. ${reason instanceof Error ? reason.message : String(reason)}`);
+      }
+    }
+    removedRemoteWorktrees.delete(key);
+    return;
+  }
   const projectDirectory = normalizePath(await projectExecutionPath(project));
 
   const deleteRemote = Boolean(options?.deleteRemoteBranch);

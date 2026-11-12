@@ -71,8 +71,9 @@ export const normalizeProjectActionDirectory = (value: string): string => {
   return trimmed.length > 1 ? trimmed.replace(/\/+$/, '') : trimmed;
 };
 
-export const toProjectActionRunKey = (directory: string, actionId: string): string => {
-  return `${normalizeProjectActionDirectory(directory)}::${actionId}`;
+export const toProjectActionRunKey = (directory: string, actionId: string,resourceOwner?:import('@varin/protocol').SourceResourceOwner, selection?:import('@varin/application-client').ProjectSourceSelection): string => {
+  const original=`${normalizeProjectActionDirectory(directory)}::${actionId}`;
+  return resourceOwner?.kind==='managed_host'?JSON.stringify([resourceOwner.hostId,resourceOwner.connectionId,resourceOwner.endpointIdentity,original,selection??null]):original;
 };
 
 export type ProjectActionDesktopForwardOption = {

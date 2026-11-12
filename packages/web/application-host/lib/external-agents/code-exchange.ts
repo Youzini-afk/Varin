@@ -1,5 +1,6 @@
 /** External files cross the same snapshot/three-way merge journal as native peers. */
 import { randomUUID } from 'node:crypto';
+import { exchangeRemoteExternalCode } from './managed-code-exchange.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { ExternalChild, LaunchSource } from '../kernel/protocol.generated.js';
 import type { ToolInvocationAuthority } from '../kernel/tool-invocation.js';
@@ -24,7 +25,7 @@ import { normalizePathIdentity } from '../workspace/path-safety.js';
 import { record, text } from './transport.js';
 import type { WorkingResult } from '../harness/working-state/types.js';
 
-function scopedMapping(base: SourcePathMap, prefix: string): SourcePathMap {
+export function scopedMapping(base: SourcePathMap, prefix: string): SourcePathMap {
   if (prefix === base.from) return { from: '', to: base.to };
   if (!base.from || prefix.startsWith(`${base.from}/`))
     return {
@@ -35,6 +36,49 @@ function scopedMapping(base: SourcePathMap, prefix: string): SourcePathMap {
     return { from: prefix ? base.from.slice(prefix.length + 1) : base.from, to: base.to };
   throw new Error('The selected Agent sources are disjoint');
 }
+export function externalCodeIntegration(caller:ToolInvocationAuthority,self:CodeParticipant,child:ExternalChild,
+  direction:'receive'|'send',externalSource:LaunchSource,result:WorkingResult,target:ExchangeScope,signal:AbortSignal):IntegrationPlanInput & {operationId:string} {
+  if(!result.root)throw new Error('External exchange snapshot has no retained root');
+  const sourceId=direction==='receive'?child.conversation_id:caller.threadId;
+  const targetId=direction==='receive'?caller.threadId:child.conversation_id;
+  return {
+      operationId: `integration:${caller.operationId}`,
+      workspaceId: externalSource.workspace_id,
+      threadId: sourceId,
+      branchId: result.branchId,
+      resultRevision: result.resultRevision,
+      scopedWorkingStates: (target as ExchangeScope).workingStates,
+      parentAuthority: {
+        kind: 'directory',
+        directory: target.directory,
+        workspaceId: (target as ExchangeScope).documentWorkspaceId,
+      },
+      signal,
+      operationBinding: {
+        kind: 'external_code_exchange',
+        externalOperationId: child.dispatch_operation_id ?? child.operation_id,
+        direction,
+        operationId: caller.operationId,
+        parentRunId: caller.runId,
+        parentThreadId: caller.threadId,
+        parentBranchId: self.branchId,
+        childThreadId: sourceId,
+        targetThreadId: targetId,
+        origin: caller.origin,
+        callId: caller.callId,
+        target: direction === 'receive' ? self.source : externalSource,
+        result: {
+          workspaceId: externalSource.workspace_id,
+          branchId: result.branchId,
+          resultRevision: result.resultRevision,
+          root: result.root,
+          publicationId: `code-exchange:${caller.operationId}`,
+        },
+      },
+    };
+
+}
+
 export async function exchangeExternalCode(
   owners: CodeExchangeOwners,
   caller: ToolInvocationAuthority,
@@ -45,6 +89,10 @@ export async function exchangeExternalCode(
   signal: AbortSignal,
   options: { frozen?: WorkingResult; defer?: (result: WorkingResult) => Promise<ToolExecutionReceipt> } = {},
 ): Promise<ToolExecutionReceipt> {
+  const savedSource=record(child.source);
+  const externalSource=record(savedSource.executionSource??savedSource.nativeSource);
+  if(self.source.resource_owner.kind==='managed_host'||record(externalSource.resource_owner).kind==='managed_host'
+    ||child.handoff?.source.resource_owner.kind==='managed_host') return exchangeRemoteExternalCode(owners,caller,self,child,direction,files,signal,options);
   const opened: Array<{ release(): Promise<void> }> = [];
   let integration: (IntegrationPlanInput & { operationId: string }) | undefined;
   let dispatched = false;
@@ -183,41 +231,7 @@ export async function exchangeExternalCode(
     });
     if (!result.root) throw new Error('External exchange snapshot has no retained root');
     if (options.defer) return await options.defer(result);
-    integration = {
-      operationId: `integration:${caller.operationId}`,
-      workspaceId: source.workspace_id,
-      threadId: sourceId,
-      branchId: result.branchId,
-      resultRevision: result.resultRevision,
-      scopedWorkingStates: (target as ExchangeScope).workingStates,
-      parentAuthority: {
-        kind: 'directory',
-        directory: target.directory,
-        workspaceId: (target as ExchangeScope).documentWorkspaceId,
-      },
-      signal,
-      operationBinding: {
-        kind: 'external_code_exchange',
-        externalOperationId: child.dispatch_operation_id ?? child.operation_id,
-        direction,
-        operationId: caller.operationId,
-        parentRunId: caller.runId,
-        parentThreadId: caller.threadId,
-        parentBranchId: self.branchId,
-        childThreadId: sourceId,
-        targetThreadId: targetId,
-        origin: caller.origin,
-        callId: caller.callId,
-        target: direction === 'receive' ? self.source : source,
-        result: {
-          workspaceId: source.workspace_id,
-          branchId: result.branchId,
-          resultRevision: result.resultRevision,
-          root: result.root,
-          publicationId: `code-exchange:${caller.operationId}`,
-        },
-      },
-    };
+    integration = externalCodeIntegration(caller,self,child,direction,source,result,target as ExchangeScope,signal);
     dispatched = true;
     const merged = await owners.coordinator.mergeResult(integration);
     return integrationCompletion(merged);

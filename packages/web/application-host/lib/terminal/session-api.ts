@@ -1,3 +1,8 @@
+export interface TerminalWorkspaceSource {
+  selection: Extract<import('@varin/application-client').ProjectSourceSelection, { mode: 'native_workspace' }>;
+  canonicalRoot: string;
+}
+
 export type TerminalSessionOwner = "user" | "harness" | "agent";
 
 export interface TerminalProcess {
@@ -28,6 +33,8 @@ export interface TerminalSpawnSpec {
 }
 
 export interface CreateTerminalSessionInput {
+  /** Trusted target-owner provenance, fixed with the original session identity. */
+  source?: TerminalWorkspaceSource;
   sessionId?: string;
   cwd: string;
   cols?: number;
@@ -59,7 +66,7 @@ export interface TerminalHandle {
   readonly id: string;
   readonly cwd: string;
   readonly status: "exited" | "running" | "error";
-  write(data: string): void | Promise<void>;
+  write(data: string, operationId?:string): void | Promise<void>;
   resize(cols: number, rows: number): void | Promise<void>;
   onData(handler: (data: string) => void): { dispose(): void };
   onCommand(handler: (event: TerminalCommandRecord) => void): { dispose(): void };
@@ -72,6 +79,8 @@ export interface TerminalHandle {
 }
 
 export interface TerminalSessionInfo {
+  source?: TerminalWorkspaceSource;
+  cols?:number;rows?:number;
   cwd: string;
   id: string;
   integration: "not-observed" | "ready";
@@ -84,6 +93,10 @@ export interface TerminalSessionInfo {
 }
 
 export interface TerminalSessionApi {
+  retireTerminalSession?(id:string):Promise<void>;
+  readTerminalSnapshot?(id:string):Record<string,unknown>|null;
+  observeTerminalSession?(id:string,listener:(frame:Record<string,unknown>)=>void):{dispose():void}|null;
+  updateTerminalAppearance?(id:string,appearance:{themeMode?:"dark"|"light";terminalBackground?:string;terminalForeground?:string}):void;
   attachTerminalSession(id: string): TerminalHandle | null;
   createTerminalSession(input: CreateTerminalSessionInput): Promise<TerminalHandle>;
   adoptTerminalSession?(input: AdoptTerminalSessionInput): Promise<TerminalHandle>;

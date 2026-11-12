@@ -9,6 +9,7 @@ export interface LegacyEditorTabsSnapshot {
 }
 
 interface RootExplorerState {
+  sourceRoot?: string;
   expandedPaths: string[];
   legacyOpenPaths: string[];
   legacySelectedPath: string | null;
@@ -22,14 +23,14 @@ interface FilesExplorerState {
 }
 
 interface FilesExplorerActions {
-  collapseAllExpandedPaths(root: string): void;
+  collapseAllExpandedPaths(root: string, scopeKey?: string): void;
   consumeLegacyEditorTabs(root: string): LegacyEditorTabsSnapshot;
-  expandPath(root: string, path: string): void;
-  expandPaths(root: string, paths: string[]): void;
-  removeExpandedPathsByPrefix(root: string, prefixPath: string): void;
-  renameExpandedPathsByPrefix(root: string, from: string, to: string): void;
+  expandPath(root: string, path: string, scopeKey?: string): void;
+  expandPaths(root: string, paths: string[], scopeKey?: string): void;
+  removeExpandedPathsByPrefix(root: string, prefixPath: string, scopeKey?: string): void;
+  renameExpandedPathsByPrefix(root: string, from: string, to: string, scopeKey?: string): void;
   resetForRuntimeSwitch(runtimeKey: string): void;
-  toggleExpandedPath(root: string, path: string): void;
+  toggleExpandedPath(root: string, path: string, scopeKey?: string): void;
 }
 
 export type FilesExplorerStore = FilesExplorerState & FilesExplorerActions;
@@ -65,9 +66,11 @@ const sanitizeByRoot = (input: unknown): Record<string, RootExplorerState> => {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
   const output: Record<string, RootExplorerState> = {};
   for (const [rawRoot, raw] of Object.entries(input)) {
-    const root = normalizePath(rawRoot);
-    if (!root || !raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    if (!rawRoot || !raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
     const value = raw as Record<string, unknown>;
+    const scoped = typeof value.sourceRoot === 'string';
+    const root = normalizePath(scoped ? value.sourceRoot as string : rawRoot);
+    if (!root) continue;
     const paths = (candidate: unknown): string[] => Array.isArray(candidate)
       ? [...new Set(candidate
         .filter((item): item is string => typeof item === 'string')
@@ -78,7 +81,8 @@ const sanitizeByRoot = (input: unknown): Record<string, RootExplorerState> => {
     const legacySelectedCandidate = typeof (value.legacySelectedPath ?? value.selectedPath) === 'string'
       ? normalizePath(String(value.legacySelectedPath ?? value.selectedPath))
       : null;
-    output[root] = {
+    output[scoped ? rawRoot : root] = {
+      ...(scoped ? { sourceRoot: root } : {}),
       expandedPaths: paths(value.expandedPaths),
       legacyOpenPaths,
       legacySelectedPath: legacySelectedCandidate && withinRoot(legacySelectedCandidate, root)
@@ -140,12 +144,13 @@ export const useFilesExplorerStore = create<FilesExplorerStore>()(
           return snapshot;
         },
 
-        toggleExpandedPath: (rootValue, pathValue) => {
+        toggleExpandedPath: (rootValue, pathValue, scopeKey) => {
           const root = normalizePath(rootValue);
           const path = normalizePath(pathValue);
           if (!withinRoot(path, root)) return;
-          set((state) => updateRoot(state, root, (current) => ({
+          set((state) => updateRoot(state, scopeKey ?? root, (current) => ({
             ...current,
+            ...(scopeKey ? { sourceRoot: root } : {}),
             expandedPaths: current.expandedPaths.includes(path)
               ? current.expandedPaths.filter((item) => item !== path)
               : [...current.expandedPaths, path],
@@ -153,22 +158,24 @@ export const useFilesExplorerStore = create<FilesExplorerStore>()(
           })));
         },
 
-        collapseAllExpandedPaths: (rootValue) => {
+        collapseAllExpandedPaths: (rootValue, scopeKey) => {
           const root = normalizePath(rootValue);
           if (!root) return;
-          set((state) => updateRoot(state, root, (current) => ({
+          set((state) => updateRoot(state, scopeKey ?? root, (current) => ({
             ...current,
+            ...(scopeKey ? { sourceRoot: root } : {}),
             expandedPaths: [],
             touchedAt: Date.now(),
           })));
         },
 
-        expandPath: (rootValue, pathValue) => {
+        expandPath: (rootValue, pathValue, scopeKey) => {
           const root = normalizePath(rootValue);
           const path = normalizePath(pathValue);
           if (!withinRoot(path, root)) return;
-          set((state) => updateRoot(state, root, (current) => ({
+          set((state) => updateRoot(state, scopeKey ?? root, (current) => ({
             ...current,
+            ...(scopeKey ? { sourceRoot: root } : {}),
             expandedPaths: current.expandedPaths.includes(path)
               ? current.expandedPaths
               : [...current.expandedPaths, path],
@@ -176,23 +183,25 @@ export const useFilesExplorerStore = create<FilesExplorerStore>()(
           })));
         },
 
-        expandPaths: (rootValue, pathValues) => {
+        expandPaths: (rootValue, pathValues, scopeKey) => {
           const root = normalizePath(rootValue);
           const paths = pathValues.map(normalizePath).filter((path) => withinRoot(path, root));
           if (!root || paths.length === 0) return;
-          set((state) => updateRoot(state, root, (current) => ({
+          set((state) => updateRoot(state, scopeKey ?? root, (current) => ({
             ...current,
+            ...(scopeKey ? { sourceRoot: root } : {}),
             expandedPaths: [...new Set([...current.expandedPaths, ...paths])],
             touchedAt: Date.now(),
           })));
         },
 
-        removeExpandedPathsByPrefix: (rootValue, prefixValue) => {
+        removeExpandedPathsByPrefix: (rootValue, prefixValue, scopeKey) => {
           const root = normalizePath(rootValue);
           const prefix = comparable(normalizePath(prefixValue));
           if (!root || !prefix) return;
-          set((state) => updateRoot(state, root, (current) => ({
+          set((state) => updateRoot(state, scopeKey ?? root, (current) => ({
             ...current,
+            ...(scopeKey ? { sourceRoot: root } : {}),
             expandedPaths: current.expandedPaths.filter((item) => {
               const path = comparable(item);
               return path !== prefix && !path.startsWith(`${prefix}/`);
@@ -201,14 +210,15 @@ export const useFilesExplorerStore = create<FilesExplorerStore>()(
           })));
         },
 
-        renameExpandedPathsByPrefix: (rootValue, fromValue, toValue) => {
+        renameExpandedPathsByPrefix: (rootValue, fromValue, toValue, scopeKey) => {
           const root = normalizePath(rootValue);
           const from = normalizePath(fromValue);
           const to = normalizePath(toValue);
           if (!withinRoot(from, root) || !withinRoot(to, root)) return;
           const fromComparable = comparable(from);
-          set((state) => updateRoot(state, root, (current) => ({
+          set((state) => updateRoot(state, scopeKey ?? root, (current) => ({
             ...current,
+            ...(scopeKey ? { sourceRoot: root } : {}),
             expandedPaths: current.expandedPaths.map((item) => {
               const itemComparable = comparable(item);
               if (itemComparable !== fromComparable && !itemComparable.startsWith(`${fromComparable}/`)) return item;

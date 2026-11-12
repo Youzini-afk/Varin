@@ -40,6 +40,8 @@ import { registerMonacoExtensionView } from '@/lib/monaco/extension-service';
 
 type MonacoFileDiffEditorProps = {
   className?: string;
+  scope?: import('@/lib/documents/resource-session').ResourceDocumentScope;
+  editorWorkspaceId?: string;
   identity: DocumentIdentity;
   modifiedContent?: string;
   modifiedRevision?: string;
@@ -61,6 +63,8 @@ const jsonClone = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value
 
 export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
   className,
+  scope,
+  editorWorkspaceId,
   identity,
   modifiedContent,
   modifiedRevision,
@@ -99,7 +103,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
     modified: editor.ITextModel;
     dispose(): void;
   } | null>(null);
-  const models = getFileEditorModelRegistry();
+  const models = scope?.models ?? getFileEditorModelRegistry();
   const usesLiveDocument = modifiedContent === undefined;
   const sideBySide = renderSideBySide ?? (viewState.diffLayout === 'split' ? true : viewState.diffLayout === 'inline' ? false : undefined);
   const onViewStateChangeRef = React.useRef(onViewStateChange);
@@ -262,12 +266,12 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
       }
     }
     const modifiedEditor = diffEditor.getModifiedEditor();
-    const bridge = usesLiveDocument ? getMonacoLanguageBridge(monaco, models) : null;
+    const bridge = usesLiveDocument && !scope ? getMonacoLanguageBridge(monaco, models) : null;
     if (bridge) bridge.acquire(modifiedModel, identity, languageOwnerId);
-    const runDebugAdapter = usesLiveDocument
+    const runDebugAdapter = scope ? null : usesLiveDocument
       ? createRunDebugEditorAdapter({ editor: modifiedEditor, identity, monaco })
       : null;
-    const disposeExtensionView = usesLiveDocument
+    const disposeExtensionView = scope ? () => {} : usesLiveDocument
       ? registerMonacoExtensionView({
           editor: modifiedEditor,
           getDocumentVersion: () => models.getRecordForModel(modifiedModel)?.localEditRevision ?? 0,
@@ -279,6 +283,8 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
       : () => undefined;
     const disposeCommandTarget = usesLiveDocument
       ? registerFileEditorCommandTarget({
+      documents: scope?.documents,
+      editorWorkspaceId,
           editor: modifiedEditor,
           identity,
           ownerId: modelOwnerId,
@@ -331,7 +337,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
           : null,
         dirty: record.dirty,
         viewId,
-        workspaceId: identity.workspaceId,
+        workspaceId: editorWorkspaceId ?? identity.workspaceId,
       });
     };
     const scheduleCapture = (): void => {
@@ -356,15 +362,14 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
           const currentDirectory = sessionDirectoryRef.current;
           if (
             !currentSessionId
-            || !currentDirectory
-            || resourceIdFromWorkspacePath(currentDirectory, path) === null
+            || (!editorWorkspaceId && (!currentDirectory || resourceIdFromWorkspacePath(currentDirectory, path) === null))
           ) {
             toast.error(tRef.current('workbench.attachment.no-session'));
             return;
           }
           const result = attachEditorContext({
             threadKey: currentSessionId,
-            workspaceId: identity.workspaceId,
+            workspaceId: editorWorkspaceId ?? identity.workspaceId,
             resourceId: identity.resourceId,
             kind: 'diff',
             label: identity.resourceId,
@@ -420,6 +425,8 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
     languageOwnerId,
     modelOwnerId,
     models,
+    scope,
+    editorWorkspaceId,
     modifiedModel,
     monaco,
     originalHandle,

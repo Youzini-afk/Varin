@@ -49,6 +49,7 @@ interface Opened {
     view: KernelWorkspaceInspection;
     source: Source;
     originalPath: string;
+    closing?: Promise<void>;
 }
 interface Flight<T> {
     work: Promise<T>;
@@ -104,19 +105,63 @@ function observe<T>(flight: Flight<T>, signal?: AbortSignal): Promise<T> {
             signal?.addEventListener('abort', abort, { once: true });
     });
 }
+/** Project configuration adapters share the Host's original filesystem sessions. */
+export interface NativeProjectLifecycle {
+    enable(projectId: string, signal?: AbortSignal): Promise<unknown>;
+    disable(projectId: string): Promise<void>;
+    inspectBackend(projectId: string, signal?: AbortSignal): ReturnType<KernelScopedClient['inspectWorkspaceBackend']>;
+    inspectProject(projectId: string, signal?: AbortSignal): Promise<{
+        workspace: VersionedProjectWorkspace | null;
+        view: KernelWorkspaceInspection | null;
+        progress: { phase: string; entries: number; bytes: number } | null;
+        preparing: boolean;
+    }>;
+}
+function createFilesystemSessions() {
+    return {
+        opened: new Map<string, Opened>(),
+        opening: new Map<string, Flight<Opened>>(),
+        known: new Map<string, Source>(),
+        documentViews: new Map<string, Source>(),
+        retiring: new Set<string>(),
+        references: new Map<string, Promise<{ epoch: string; grant: KernelGrantHandle; source: Source }>>(),
+    };
+}
+/** A pending native close is not a failed detach. Only the original Close
+ * notification authorizes another attempt; unrelated errors and process exit
+ * preserve the original grant and pending cleanup for inspection/recovery. */
+async function closeAfterNativeIdle(kernel: KernelClient, actor: KernelScopedClient,
+    address: Parameters<KernelScopedClient['closeWorkspace']>[0], pending: () => Promise<void>): Promise<void> {
+    let revision = 0, exited: Error | undefined, wake: (() => void) | undefined;
+    const changed = () => { revision++; wake?.(); };
+    const unobserve = kernel.onWorkspaceIdle(changed);
+    const unobserveExit = kernel.subscribeExit(error => { exited = error; changed(); });
+    try {
+        for (;;) {
+            if (exited) throw exited;
+            const observed = revision;
+            try { await actor.closeWorkspace(address); return; }
+            catch (error) {
+                if (!(error instanceof KernelClientError) || error.code !== 'workspace_native_handles_active') throw error;
+            }
+            await pending();
+            if (exited) throw exited;
+            // Subscribe before dispatch, including Close delivered before the
+            // pending response. Never lose that original idle transition.
+            if (revision === observed) await new Promise<void>(resolve => { wake = resolve; });
+            wake = undefined;
+        }
+    } finally { unobserve(); unobserveExit(); }
+}
 /** Host adapter only. Rust owns every byte, version, mount and execution lease. */
 export function createNativeWorkspaceOwner(owners: Owners) {
-    const opened = new Map<string, Opened>();
-    const opening = new Map<string, Flight<Opened>>();
+    return createWorkspaceOwner(owners, createFilesystemSessions());
+}
+function createWorkspaceOwner(owners: Owners, sessions: ReturnType<typeof createFilesystemSessions>) {
+    const { opened, opening, known, documentViews, retiring, references } = sessions;
     const enabling = new Map<string, Flight<Awaited<ReturnType<typeof enableProject>>>>();
-    const known = new Map<string, Source>();
-    const documentViews = new Map<string, Source>();
-    const retiring = new Set<string>();
-    const references = new Map<string, Promise<{
-        epoch: string;
-        grant: KernelGrantHandle;
-        source: Source;
-    }>>();
+    const projectLifecycle = (projects: Owners['projects'], update: Owners['update']): NativeProjectLifecycle =>
+        createWorkspaceOwner({ ...owners, projects, update }, sessions);
     const documentId = (source: Source) => {
         if (!source.native_scope)
             return source.execution_workspace_id;
@@ -128,6 +173,27 @@ export function createNativeWorkspaceOwner(owners: Owners) {
     };
     const sourceOf = (workspace: VersionedProjectWorkspace): Source => ({ workspace_id: workspace.workspaceId,
         execution_workspace_id: workspace.executionWorkspaceId, branch_id: workspace.branchId });
+    const closeEntry = async (entry: Opened, waitForIdle = true): Promise<void> => {
+        if (entry.closing) {
+            if (!waitForIdle) throw new KernelClientError({ code: 'workspace_native_handles_active', message: 'Original native workspace close is still pending' });
+            try { await entry.closing; return; }
+            catch (error) {
+                if (!(error instanceof KernelClientError) || error.code !== 'workspace_native_handles_active') throw error;
+            }
+        }
+        const work = (async () => {
+            const actor = owners.kernel.scoped(entry.grant);
+            const address = { branchId: entry.source.branch_id!, generation: entry.view.binding.generation };
+            if (waitForIdle) await closeAfterNativeIdle(owners.kernel, actor, address, async () => {
+                entry.view = await actor.inspectWorkspace(address).catch(() => entry.view);
+            });
+            else await actor.closeWorkspace(address);
+            await owners.kernel.revokeGrant(entry.grant.grantId);
+            if (opened.get(address.branchId) === entry) opened.delete(address.branchId);
+        })().finally(() => { if (entry.closing === work) delete entry.closing; });
+        entry.closing = work;
+        return work;
+    };
     const open = async (source: Source, signal?: AbortSignal): Promise<Opened> => {
         if (!source.branch_id)
             throw new Error('Native workspace branch is missing');
@@ -148,6 +214,10 @@ export function createNativeWorkspaceOwner(owners: Owners) {
             return entry;
         }
         const prior = opened.get(branch);
+        if (prior?.epoch === handshake.kernelEpoch && prior.closing) {
+            await prior.closing;
+            return open(source, signal);
+        }
         if (prior?.epoch === handshake.kernelEpoch) {
             if (prior.source.workspace_id !== source.workspace_id || prior.source.execution_workspace_id !== source.execution_workspace_id)
                 throw new Error('Native workspace source identity changed');
@@ -157,9 +227,7 @@ export function createNativeWorkspaceOwner(owners: Owners) {
         const controller = new AbortController(), ownerSignal = controller.signal;
         const work = (async () => {
             if (prior?.epoch === handshake.kernelEpoch) {
-                await owners.kernel.scoped(prior.grant).closeWorkspace({ branchId: branch, generation: prior.view.binding.generation });
-                await owners.kernel.revokeGrant(prior.grant.grantId);
-                opened.delete(branch);
+                await closeEntry(prior);
             }
             const grant = await owners.kernel.issueGrant({ grantId: `native-project:${randomUUID()}`, owningWorkspace: source.workspace_id,
                 executionWorkspace: source.execution_workspace_id, capabilities: ['storage.read', 'storage.write'], pathScopes: [''] }, ownerSignal);
@@ -206,6 +274,27 @@ export function createNativeWorkspaceOwner(owners: Owners) {
         const actual = await acquire(selected, entry.grant, signal);
         return { path: actual.path, source: { resourceOwner: { kind: 'local' }, workspaceId: selected.workspace_id,
                 executionWorkspaceId: selected.execution_workspace_id, mode: 'native_workspace', branchId: selected.branch_id!, ...(selected.native_scope ? { nativeScope: selected.native_scope } : {}), tools: [] } };
+    };
+    /** Reopen exactly the admitted project adoption, never infer it from current Settings. */
+    const prepareSelection = async (selection: Extract<import('@varin/application-client').ProjectSourceSelection,{mode:'native_workspace'}>, _threadId: string, signal?: AbortSignal) => {
+        const registration = await owners.documents.admitWorkspaceRegistration(selection.workspaceId, signal);
+        const source: Source = {workspace_id:selection.workspaceId, execution_workspace_id:selection.executionWorkspaceId, branch_id:selection.branchId,...(selection.nativeScope ? {native_scope:selection.nativeScope} : {})};
+        const grant = await owners.kernel.issueGrant({grantId:`workspace-selection:${randomUUID()}`, owningWorkspace:selection.workspaceId,
+            executionWorkspace:selection.executionWorkspaceId, capabilities:['storage.read','storage.write'], pathScopes:['']}, signal);
+        try {
+            const actor = owners.kernel.scoped(grant);
+            const operation = await actor.getOperation(selection.adoptionOperationId, signal);
+            const result = operation?.result as {branchId?:string;workspaceId?:string;adoption?:{sourceRootId?:string}} | undefined;
+            if (operation?.kind !== 'workspace.adopt' || operation.state !== 'committed' || result?.branchId !== selection.branchId || result.workspaceId !== selection.workspaceId)
+                throw new Error('The frozen project adoption no longer matches its original receipt');
+            const root = await actor.fileRootRegister({workspaceId:selection.workspaceId, executionWorkspaceId:selection.executionWorkspaceId, canonicalRoot:registration.canonicalPath}, signal);
+            if (result.adoption?.sourceRootId !== root.rootId) throw new Error('The frozen project adoption belongs to another physical source');
+        } finally { await owners.kernel.revokeGrant(grant.grantId); }
+        // Project adoption has its original project lifecycle, unlike temporary source:
+        // branches. Do not claim it as conversation-owned source.preparation.
+        const entry = await open(source, signal), actual = await acquire(source, entry.grant, signal);
+        return {path:actual.path, source:{resourceOwner:{kind:'local' as const},workspaceId:selection.workspaceId,
+            executionWorkspaceId:selection.executionWorkspaceId,branchId:selection.branchId,...(selection.nativeScope ? {nativeScope:selection.nativeScope} : {}),mode:'native_workspace' as const,tools:[]}};
     };
     const acquire = async (source: Source, grant: KernelGrantHandle, signal?: AbortSignal) => {
         const entry = await open(source, signal);
@@ -355,14 +444,12 @@ export function createNativeWorkspaceOwner(owners: Owners) {
         const entry = opened.get(ref.branchId);
         if (entry && entry.epoch === owners.kernel.handshake?.kernelEpoch) {
             try {
-                await owners.kernel.scoped(entry.grant).closeWorkspace({ branchId: ref.branchId, generation: entry.view.binding.generation });
+                await closeEntry(entry);
             }
             catch (error) {
                 entry.view = await owners.kernel.scoped(entry.grant).inspectWorkspace({ branchId: ref.branchId, generation: entry.view.binding.generation }).catch(() => entry.view);
                 throw error;
             }
-            await owners.kernel.revokeGrant(entry.grant.grantId);
-            opened.delete(ref.branchId);
         }
         known.delete(ref.executionWorkspaceId);
         await owners.update(projectId, { ...ref, state: 'disabled' });
@@ -504,7 +591,7 @@ export function createNativeWorkspaceOwner(owners: Owners) {
     };
     /** Retire a mount only after its original resources have drained. The branch
      * and its saved versions remain owned by their existing references. */
-    const releaseSource = async (source: Source) => {
+    const releaseOpenedSource = async (source: Source, waitForIdle: boolean) => {
         if ((await owners.projects()).some(project => project.versionedWorkspace?.branchId === source.branch_id && project.versionedWorkspace.state !== 'disabled'))
             return;
         const branch = source.branch_id;
@@ -516,7 +603,7 @@ export function createNativeWorkspaceOwner(owners: Owners) {
         const actor = owners.kernel.scoped(entry.grant);
         await actor.inspectWorkspace({ branchId: branch, generation: entry.view.binding.generation });
         try {
-            await actor.closeWorkspace({ branchId: branch, generation: entry.view.binding.generation });
+            await closeEntry(entry, waitForIdle);
         }
         catch (error) {
             if (error instanceof KernelClientError && error.code === 'workspace_in_use')
@@ -524,9 +611,8 @@ export function createNativeWorkspaceOwner(owners: Owners) {
             entry.view = await actor.inspectWorkspace({ branchId: branch, generation: entry.view.binding.generation }).catch(() => entry.view);
             throw error;
         }
-        await owners.kernel.revokeGrant(entry.grant.grantId);
-        opened.delete(branch);
     };
+    const releaseSource = (source: Source) => releaseOpenedSource(source, true);
     const retainReference = async (source: Source, key: string, signal?: AbortSignal) => {
         let held = references.get(key);
         if (held) {
@@ -598,7 +684,9 @@ export function createNativeWorkspaceOwner(owners: Owners) {
             claimed = true;
             const original = opened.get(branch);
             try {
-                await releaseSource(original?.source ?? source);
+                // Maintenance is woken by the original idle event and must not
+                // block other source retirements while this mount is draining.
+                await releaseOpenedSource(original?.source ?? source, false);
             }
             catch (error) {
                 if (error instanceof KernelClientError && ['workspace_in_use', 'workspace_native_handles_active'].includes(error.code))
@@ -646,6 +734,6 @@ export function createNativeWorkspaceOwner(owners: Owners) {
             }
         }
     };
-    return { prepare, acquire, resolveId, resolvePath, textEncodingSource, enable, disable, inspectProject, inspectBackend, openBackendSettings, open, snapshot, releaseSource, retainReference, releaseReference, retireSource, retainPrepared };
+    return { projectLifecycle, prepare, prepareSelection, acquire, resolveId, resolvePath, textEncodingSource, enable, disable, inspectProject, inspectBackend, openBackendSettings, open, snapshot, releaseSource, retainReference, releaseReference, retireSource, retainPrepared };
 }
 export type NativeWorkspaceOwner = ReturnType<typeof createNativeWorkspaceOwner>;

@@ -49,6 +49,7 @@ type WorkspaceResponse = Response;
 // ── Domain types ──────────────────────────────────────────────────────────
 
 interface ProjectEntry {
+  source?: import('@varin/application-client').ProjectSourceBinding;
   id: string;
   path: string;
   additionalPaths?: string[];
@@ -249,7 +250,7 @@ const openWorkspaceProject = async (
   const settings = await readSettingsFromDisk();
   const projects = sanitizeProjects(settings?.projects || []) ?? [];
   const now = Date.now();
-  const existing = projects.find((project) => projectFolders(project).some((folder) => projectPathKey(folder) === projectPathKey(resolved.absolutePath)));
+  const existing = projects.find((project) => project.source?.resourceOwner.kind !== 'managed_host' && projectFolders(project).some((folder) => projectPathKey(folder) === projectPathKey(resolved.absolutePath)));
   const projectId = existing?.id ?? `project_${randomUUID()}`;
   const label = context.pathModule.basename(resolved.absolutePath) || resolved.absolutePath;
   const project: ProjectEntry = existing

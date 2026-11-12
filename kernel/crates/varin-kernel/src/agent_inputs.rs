@@ -8,9 +8,21 @@ fn submit_input(
     order: Option<varin_runtime::resource_admission::ResourceReservation>,
     receipt_only: bool,
 ) -> Result<Value, KernelError> {
+    submit_input_with_original_source(catalog, params, cancelled, order, receipt_only, false)
+}
+
+fn submit_input_with_original_source(
+    catalog: Arc<Mutex<Catalog>>,
+    params: Value,
+    cancelled: Arc<AtomicBool>,
+    order: Option<varin_runtime::resource_admission::ResourceReservation>,
+    receipt_only: bool,
+    original_inherited_source: bool,
+) -> Result<Value, KernelError> {
     if cancelled.load(Ordering::Acquire) {
         return Err(KernelError::Cancelled);
     }
+    if original_inherited_source && !receipt_only { return Err(KernelError::Protocol("original source lookup is read-only".into())); }
     let mut params = params;
     if !receipt_only {
         let object = params
@@ -114,9 +126,11 @@ fn submit_input(
         }
     }
     if receipt_only {
-        let receipt = preparation
-            .existing_receipt(&launch, inherit_source)
-            .map_err(domain)?;
+        let receipt = if original_inherited_source {
+            preparation.existing_receipt_inheriting_source(&launch, inherit_source)
+        } else {
+            preparation.existing_receipt(&launch, inherit_source)
+        }.map_err(domain)?;
         if cancelled.load(Ordering::Acquire) {
             return Err(KernelError::Cancelled);
         }
@@ -366,12 +380,13 @@ pub(super) fn execute(
                 return Err(KernelError::Cancelled);
             }
             owner
-                .create_thread_with_principal(&p.thread_id, &p.branch_id, p.principal_id.as_ref().and_then(|value| value.0.as_deref()))
+                .create_thread_with_organization_defaults(&p.thread_id, &p.branch_id, p.principal_id.as_ref().and_then(|value| value.0.as_deref()), p.organization, p.creation_defaults)
                 .map_err(domain)?;
             Ok(json!({"threadId":p.thread_id,"branchId":p.branch_id}))
         }
         "runtime.input.submit" => submit_input(catalog, params, cancelled, order, false),
         "runtime.input.receipt" => submit_input(catalog, params, cancelled, None, true),
+        "runtime.input.inheritedReceipt" => submit_input_with_original_source(catalog, params, cancelled, None, true, true),
         "runtime.child.prepare" => prepare_child_input(catalog, params, cancelled),
         "runtime.input.enqueue" | "runtime.input.enqueueReceipt" => {
             let receipt_only = method == "runtime.input.enqueueReceipt";

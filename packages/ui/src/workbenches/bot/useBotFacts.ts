@@ -151,8 +151,8 @@ export function useBotPresence(botIds: readonly string[], enabled: boolean): Rea
   const key = botIds.join('\u0000');
   React.useEffect(() => enabled ? subscribeVarinEvents(event => {
     if (event.type === 'bot-presence') setReads(current => current.has(event.botId) ? new Map(current).set(event.botId, { status: 'ready', value: event.presence }) : current);
-    if (event.type === 'stream-ready') refresh();
-  }) : undefined, [enabled]);
+    if (event.type === 'stream-ready' || event.type === 'bot-presence-changed' && key.split('\u0000').includes(event.botId)) refresh();
+  }) : undefined, [enabled, key]);
   React.useEffect(() => {
     if (!enabled) return undefined;
     const ids = key ? key.split('\u0000') : [];

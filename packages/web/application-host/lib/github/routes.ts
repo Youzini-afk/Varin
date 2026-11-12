@@ -1,3 +1,5 @@
+import { createProjectGitRoutes } from '../git/project-dispatch.js';
+import { createGitHubProjectReads, type GitHubProjectReader } from './project-read.js';
 import {
   configureGitHubGitAuthor as defaultConfigureGitHubGitAuthor,
   installTerminalGitHubAuth as defaultInstallTerminalGitHubAuth,
@@ -158,7 +160,7 @@ function withTimeout<Result>(promise: Promise<Result>, timeoutMs: number, label:
   });
 }
 
-function getRequestedRepo(req: Request): Pick<GitHubRepoRef, 'owner' | 'repo'> | null {
+function getRequestedRepo(req: Pick<Request, 'query'>): Pick<GitHubRepoRef, 'owner' | 'repo'> | null {
   const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
   const repo = typeof req.query?.repo === 'string' ? req.query.repo.trim() : '';
   return owner && repo ? { owner, repo } : null;
@@ -197,7 +199,9 @@ function setPrStatusCache(key: string, data: Record<string, unknown>, fetchedAt:
   prStatusCache.set(key, { data, fetchedAt });
 }
 
-export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDependencies = {}): void {
+export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDependencies = {}): GitHubProjectReader {
+  const projectRoutes = createProjectGitRoutes(app, 'github');
+  const projectReads = createGitHubProjectReads({ get: (path, handler) => projectRoutes.get(path, (request, response) => handler(request, response)) });
   let githubLibraries: GitHubLibraries | null = null;
   const loadGitHubLibraries = dependencies.getGitHubLibraries || (async () => {
     if (!githubLibraries) {
@@ -239,7 +243,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
   const isGitHubAuthInvalid = (error: unknown): boolean => errorStatus(error) === 401 || errorStatus(error) === 403;
   const isGitHubResourceUnavailable = (error: unknown): boolean => errorStatus(error) === 403 || errorStatus(error) === 404;
 
-  app.get('/api/github/auth/status', async (_req, res) => {
+  projectReads.register('/api/github/auth/status', async (_req, res) => {
     try {
       const { getGitHubAuth, getOctokitOrNull, clearGitHubAuth, getGitHubAuthAccounts, GH_CLI_ACCOUNT_ID, isGhCliActive, isGhCliDisabled, setGhCliActive } = await getGitHubLibraries();
       const { getGhCliToken } = await import('./gh-cli-credential.js');
@@ -314,7 +318,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
     }
   });
 
-  app.post('/api/github/auth/gh-cli', async (req, res) => {
+  projectRoutes.post('/api/github/auth/gh-cli', async (req, res) => {
     try {
       const { setGhCliDisabled, isGhCliDisabled } = await getGitHubLibraries();
       const { clearGhCliTokenCache } = await import('./gh-cli-credential.js');
@@ -328,7 +332,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
     }
   });
 
-  app.post('/api/github/auth/start', async (_req, res) => {
+  projectRoutes.post('/api/github/auth/start', async (_req, res) => {
     try {
       const { getGitHubClientId, getGitHubScopes, startDeviceFlow } = await getGitHubLibraries();
       const clientId = getGitHubClientId();
@@ -360,7 +364,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
     }
   });
 
-  app.post('/api/github/auth/complete', async (req, res) => {
+  projectRoutes.post('/api/github/auth/complete', async (req, res) => {
     try {
       const { getGitHubClientId, exchangeDeviceCode, setGitHubAuth, getGitHubAuthAccounts } = await getGitHubLibraries();
       const clientId = getGitHubClientId();
@@ -416,7 +420,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
     }
   });
 
-  app.post('/api/github/auth/activate', async (req, res) => {
+  projectRoutes.post('/api/github/auth/activate', async (req, res) => {
     try {
       const { activateGitHubAuth, getGitHubAuth, getOctokitOrNull, clearGitHubAuth, getGitHubAuthAccounts, GH_CLI_ACCOUNT_ID, isGhCliDisabled, setGhCliActive } = await getGitHubLibraries();
       const accountId = typeof req.body?.accountId === 'string' ? req.body.accountId : '';
@@ -513,7 +517,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
     }
   });
 
-  app.post('/api/github/auth/terminal', async (req, res) => {
+  projectRoutes.post('/api/github/auth/terminal', async (req, res) => {
     try {
       const { getGitHubAuth, GITHUB_AUTH_FILE } = await getGitHubLibraries();
       const auth = getGitHubAuth();
@@ -540,7 +544,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
     }
   });
 
-  app.post('/api/github/auth/git-author', async (_req, res) => {
+  projectRoutes.post('/api/github/auth/git-author', async (_req, res) => {
     try {
       const { getGitHubAuth } = await getGitHubLibraries();
       const auth = getGitHubAuth();
@@ -561,7 +565,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
     }
   });
 
-  app.delete('/api/github/auth', async (_req, res) => {
+  projectRoutes.delete('/api/github/auth', async (_req, res) => {
     try {
       const { clearGitHubAuth } = await getGitHubLibraries();
       const removed = clearGitHubAuth();
@@ -572,7 +576,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
     }
   });
 
-  app.get('/api/github/me', async (_req, res) => {
+  projectRoutes.get('/api/github/me', async (_req, res) => {
     try {
       const { getOctokitOrNull, clearGitHubAuth } = await getGitHubLibraries();
       const octokit = getOctokitOrNull();
@@ -598,7 +602,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
 
   // ================= GitHub PR APIs =================
 
-  app.get('/api/github/pr/status', async (req, res) => {
+  projectRoutes.get('/api/github/pr/status', async (req, res) => {
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       const branch = typeof req.query?.branch === 'string' ? req.query.branch.trim() : '';
@@ -806,7 +810,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
     }
   });
 
-  app.post('/api/github/pr/create', async (req, res) => {
+  projectRoutes.post('/api/github/pr/create', async (req, res) => {
     try {
       const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
       const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
@@ -1011,7 +1015,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
     }
   });
 
-  app.post('/api/github/pr/update', async (req, res) => {
+  projectRoutes.post('/api/github/pr/update', async (req, res) => {
     try {
       const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
       const number = typeof req.body?.number === 'number' ? req.body.number : null;
@@ -1090,7 +1094,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
     }
   });
 
-  app.post('/api/github/pr/merge', async (req, res) => {
+  projectRoutes.post('/api/github/pr/merge', async (req, res) => {
     try {
       const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
       const number = typeof req.body?.number === 'number' ? req.body.number : null;
@@ -1137,7 +1141,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
     }
   });
 
-  app.post('/api/github/pr/ready', async (req, res) => {
+  projectRoutes.post('/api/github/pr/ready', async (req, res) => {
     try {
       const directory = typeof req.body?.directory === 'string' ? req.body.directory.trim() : '';
       const number = typeof req.body?.number === 'number' ? req.body.number : null;
@@ -1193,7 +1197,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
 
   // ================= GitHub Repo APIs =================
 
-  app.get('/api/github/repo/upstream', async (req, res) => {
+  projectRoutes.get('/api/github/repo/upstream', async (req, res) => {
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       if (!directory) {
@@ -1259,7 +1263,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
     }
   });
 
-  app.get('/api/github/repo/branches', async (req, res) => {
+  projectRoutes.get('/api/github/repo/branches', async (req, res) => {
     try {
       const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
       const repo = typeof req.query?.repo === 'string' ? req.query.repo.trim() : '';
@@ -1294,7 +1298,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
 
   // ================= GitHub Issue APIs =================
 
-  app.get('/api/github/issues/list', async (req, res) => {
+  projectReads.register('/api/github/issues/list', async (req, res) => {
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       const page = typeof req.query?.page === 'string' ? Number(req.query.page) : 1;
@@ -1403,7 +1407,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
     }
   });
 
-  app.get('/api/github/issues/get', async (req, res) => {
+  projectReads.register('/api/github/issues/get', async (req, res) => {
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       const number = typeof req.query?.number === 'string' ? Number(req.query.number) : null;
@@ -1464,7 +1468,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
     }
   });
 
-  app.get('/api/github/issues/comments', async (req, res) => {
+  projectReads.register('/api/github/issues/comments', async (req, res) => {
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       const number = typeof req.query?.number === 'string' ? Number(req.query.number) : null;
@@ -1509,7 +1513,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
 
   // ================= GitHub Pull Request Context APIs =================
 
-  app.get('/api/github/pulls/list', async (req, res) => {
+  projectReads.register('/api/github/pulls/list', async (req, res) => {
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       const page = typeof req.query?.page === 'string' ? Number(req.query.page) : 1;
@@ -1653,7 +1657,7 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
     }
   });
 
-  app.get('/api/github/pulls/context', async (req, res) => {
+  projectReads.register('/api/github/pulls/context', async (req, res) => {
     try {
       const directory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
       const number = typeof req.query?.number === 'string' ? Number(req.query.number) : null;
@@ -1998,4 +2002,6 @@ export function registerGitHubRoutes(app: Express, dependencies: GitHubRouteDepe
       return res.status(500).json({ error: errorMessage(error, 'Failed to load GitHub PR context') });
     }
   });
+  projectReads.read.dispatch = projectRoutes.dispatch;
+  return projectReads.read;
 }

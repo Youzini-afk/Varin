@@ -137,12 +137,30 @@ Host 只重试同一解析请求，不在响应未知时换 UUID。返回旧创�
 向该分支提交的模型循环。项目归属、Source、策略选择和执行权限分开表达；显示路径或调用参数
 里的 Thread ID 不能授予访问权。
 
+## 会话组织的原存储边界
+
+组织领域与原生／外部会话共同位于 Catalog，按原可信 principal 分区。它保存容器身份、单父位置、顺序、
+局部 revision、初始化代际与受理证据，不保存第二份聊天、归档状态、项目设置或 Bot 档案。
+移动在同一事务验证原位置、受影响父节点、同级锚点与祖先环；不相关分支无需争抢全局目录 revision。
+全局 revision 与原事件 cursor 用于观察追平，分页绑定完整查询及排序代际，过期后明确重读。
+混合节点分页同时计算容器与会话；页内 `items` 决定顺序，附带的祖先容器只提供路径与修改上下文，
+不冒充已加载子项。旧的仅会话分页合同仍可读取原续页。搜索使用原 Settings 的项目名称，
+名称索引只经可信 Host 边界提供，不接受客户端自行覆写；相关项目改名使旧搜索续页明确失效。
+模型可以携带多次目录读取的 observation，组合不同页中实际读到的对象与父容器版本；
+受影响对象的版本互相矛盾时要求重新读取，不在提交时偷读最新版本冒充用户已见事实。
+已解散容器的身份被保留为退役身份，旧稳定引用不能重新指向另一个同名组。
+
+首次初始化只消费已成功核验的项目列表与原会话投影，保留多项目关联，无法唯一定位的会话留在根。
+后续读取不重新归类已整理内容，旧客户端 Settings 数组也不能解释为删除共享分组。
+Host 项目注册与 Catalog 分类是两个原 owner 的提交；第二步失败保留已登记项目并可用同键续办，不造假回滚。
+组织命令先核对原回执再检查当前项目登记，已受理请求不因后来的项目移除被误判成从未执行。
+
 ## 持久受理与执行生命周期
 
 [Catalog](../kernel/crates/varin-runtime/src/catalog.rs) 通过独占 owner 锁管理
 `conversation.sqlite`，使用 SQLite WAL/FULL 短事务。初次安装所有内部域在同一事务完成。
 已有数据先只读检查已知格式和结构，再由原 writer 自动升级到当前结构。升级步骤位于
-[catalog_upgrade.rs](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)，覆盖格式 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 与独立格式 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92；预检查严格区分已有 Zone2 捕获的 81 和已有派发索引但没有 Zone2 的 82。
+[catalog_upgrade.rs](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)，覆盖格式 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94 → 95 → 96 与独立格式 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94 → 95 → 96；预检查严格区分已有 Zone2 捕获的 81 和已有派发索引但没有 Zone2 的 82。
 84 → 85 为消息、派发、历史及上下文保留增加 typed 附件关系；旧材料引用只由升级器转换一次，新发送不解析正文建立权限。附件字节仍由原 Storage／材料 owner 保管。
 85 → 86 允许明确 User 派发保留空工具来源，并增加原子任务报告身份；旧工具派发正文和回执保持不变，不回放执行效果。
 78 → 79 初始化外部 Agent 结构，79 → 80 初始化空用量账本及开始记账时间，不按缺少结算时间的旧回执伪造历史账单。
@@ -366,8 +384,26 @@ tool/result 对。持久脚本、PTY、研究 Job 和 MCP Task 各有实际寿�
 本地物理 Source 派发只读或 Shared 子 agent 时，直接共享父 Run 的实际执行目录。各 worktree 保留各自的目录身份；
 materialized 来源保留原 environment Run，续跑沿用同一个目录，并能读取期间发生的文件变化。
 这条路径省去整目录捕获和复制。省略 `workMode` 的派发复用选定来源；只有显式 `isolated_write` 才建立独立工作状态。固定 branch 直接复用原树，managed Host 由目标资源 owner 执行同一准备合同。
+外部 Harness 的产品会话、输入、原生 session 绑定和 transport 回执仍由协调 Host 的原 Catalog 管理。
+跨 Host 来源冻结完整 `executionSource`，不把目标 cwd 交给协调端 spawn。目标 Host 的原
+ExternalAgentsService 解析实际安装程序、profile、版本与环境；环境凭据留在目标。原 Source authority
+使用 typed `external` scope 和 `external_harness` purpose，绑定 conversation、transport、process 与真实物理根，
+不伪造 Run。字节流、stdin、停止与进程树证明复用 managed Source 原进程资源 owner，四种 Harness
+协议适配器仍在协调端使用同一 transport。
+
+Catalog 的 pending／bound transport 保留不确定 dispatch 的原地址；重连先停止并核验旧 executor，再以新
+transport 续接同一原生 session，不能把旧 stdout 重放到新协议 peer。无进程记录只有在原 Storage 关闭
+scope、撤销 grant 并证明 late spawn 无法受理后才可记为 not-started。断连、删除与重启后清理同样核验
+原 receipt，不能以 HTTP abort 或空内存表宣称已停止。确认进程树已停止后，原 Storage 释放输出 spool；只有停止与输出释放均确认才关闭 transport 回执，丢失回应仍以原身份重试。跨设备文件输入通过原 Storage immutable capture／
+attachment import 传递字节与目标只读文件视图，不把协调端文件路径作为目标能力。
+
 
 普通项目来源准备继续使用原目录，不自动启用系统挂载或把旧会话切到另一份文件。显式选择的挂载后端沿原来源准备与受理边界交接，重试保留原输入身份；导航切换不代替来源选择。
+项目绑定还固定目标 Documents workspace ID。新绑定和路径变更由原 SourceDirectory 准入；派发时重查
+登记项目、完整 resource owner 与原路径，根注册变化明确失败。远端 `isolated_write` 的能力检查与物化
+由目标资源 owner 完成，不用协调 Host 的本机 backend 判定另一台设备的能力。
+分类和历史读取不调用这条准备路径；已经准备的 Run 不因项目树移动而重新选择来源。
+
 
 固定捕获的 saved-files/surface-drafts、Git 语义、来源闭包和文件一致性由
 [资源合同](resources.md)解释。连续目录观察只用于名称清单；正文复用另由原生文件身份、change time 与已验证对象身份决定，不能只看 mtime/大小或 Git HEAD。

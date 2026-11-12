@@ -20,6 +20,7 @@ mod directory_watch;
 mod directory_watch_linux;
 mod error;
 mod family_tools;
+mod organization_tools;
 mod file_observation;
 mod followup_tools;
 mod host_query;

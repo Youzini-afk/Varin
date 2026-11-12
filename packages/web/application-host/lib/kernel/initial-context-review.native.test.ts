@@ -3,6 +3,12 @@ import { guardProviderReply } from './provider-response.test-helper.js';
 import { isSummaryRequest } from './summary-request.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
 import { createMemoryOwner } from './memory-owner.js';
+import { createBotMemoryOwner } from './bot-memory-owner.js';
+import { createBotHistory } from '../memory/bot-history.js';
+import { createMemoryService } from '../memory/memory-service.js';
+import { openWorkspaceKnowledge, type KnowledgeStore } from '../knowledge/store.js';
+import { createKnowledgeContextRuntime } from '../knowledge/context-runtime.js';
+import { knowledgeStoreKeyForScope, scopeOfScopeId, threadScopeId } from '../harness/owner-scope.js';
 import { createThreadContext } from './thread-context.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
 import { createThreadSourcePreparer } from './thread-sources.js';
@@ -45,12 +51,14 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   cleanups.push(async () => { releaseCodec(); await kernel.close(); if (!existingRoot) await fs.rm(root, { recursive: true, force: true }); });
   const secret = 'fake-http-provider-key-not-a-real-secret';
   const requests: Array<{ body: Record<string, unknown>; authorization?: string }> = [];
+  const providerErrors: string[] = [];
   const provider = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on('data', (bytes: Buffer) => chunks.push(bytes));
-    request.on('end', guardProviderReply(response, () => {
+    request.on('end', guardProviderReply(response, async () => {
       requests.push({ body: JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>, ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}) });
-      return reply(requests.at(-1)!.body, response);
+      try { await reply(requests.at(-1)!.body, response); }
+      catch (error) { providerErrors.push(error instanceof Error ? error.stack ?? error.message : String(error)); throw error; }
     }));
   });
   const endpoint = existingEndpoint ?? `${await listen(provider)}/responses`;
@@ -71,10 +79,29 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const prepareContext = createThreadContext({ personalization, resources, projectForWorkspace: async () => 'selected-project',
     botForThread: async threadId => (await runtime.thread(threadId)).bot_id
       ? { id: 'recovery-bot', name: 'Recovery Bot', instructions: null, revision: 1 } : null });
-  kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext }));
+  // Actual Bot Runs synchronize their original knowledge owners before the
+  // first provider request. The ordinary-note owner cannot stand in for them.
+  const knowledgeStores = new Map<string, Promise<KnowledgeStore>>();
+  const store = (scope:string):Promise<KnowledgeStore> => {
+    let pending=knowledgeStores.get(scope);
+    if(!pending){pending=openWorkspaceKnowledge({dataDir:root,hostId:'http-review',workspaceId:knowledgeStoreKeyForScope(scope),scope:scopeOfScopeId(scope),embedding:null});knowledgeStores.set(scope,pending);}
+    return pending;
+  };
+  const ownerForThread=async(id:string)=>{
+    const thread=await runtime.thread(id);if(!thread.bot_id)throw new Error('Expected original Bot thread');
+    return {scope:'bot' as const,ownerId:thread.bot_id};
+  };
+  const history=createBotHistory(runtime);
+  const memory=createMemoryService({storeForScopeId:store,userStore:()=>store('user'),ownerForThread,
+    threadStoreIfPresent:id=>store(threadScopeId(id)),associationForThread:async id=>({threadIds:[id]}),
+    readHistorySource:async(botId,span)=>(await history.read(botId,span)).text});
+  const knowledge=createKnowledgeContextRuntime({getStore:store,getUserStore:()=>store('user'),getThreadStore:id=>store(threadScopeId(id)),
+    recallForThread:async({threadId,query})=>memory.search(await ownerForThread(threadId),query,8,{threadId,includeShared:true})});
+  kernel.setMemoryOwner(createMemoryOwner({ personalization, prepareContext,
+    bot:createBotMemoryOwner({runtime,history,memory,prepareContext,knowledge:knowledge.knowledgeForThread}) }));
   let closed = false;
   const close = async () => { if (closed) return; closed = true;
-    try { await storage.dispose(); await documents.dispose(); }
+    try { for(const pending of knowledgeStores.values())await (await pending).close(); await storage.dispose(); await documents.dispose(); }
     finally { releaseCodec(); await kernel.close(); }
   };
   cleanups.push(close);
@@ -89,7 +116,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   }, async source => { await documents.inspectWorkspace(source.workspaceId); await documents.inspectWorkspace(source.executionWorkspaceId); }, (_runId, error) => { launchErrors.push(error); }, prepare, prepareContext);
   const submissionErrors: string[] = [];
   const submit = adapter.submit.bind(adapter);
-  adapter.submit = async input => { try { return await submit(input); } catch (error) { submissionErrors.push(String(error)); throw error; } };
+  adapter.submit = async input => { try { return await submit(input); } catch (error) { submissionErrors.push(String(error)); console.error('Initial context submission failed', error); throw error; } };
   const app = express();
   registerCommonRequestMiddleware(app, { express });
   registerThreadRoutes(app, adapter, (request, response, next) => {
@@ -99,9 +126,28 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const hostUrl = await listen(createServer(app));
   configureRuntimeUrlResolver({ apiBaseUrl: hostUrl, realtimeBaseUrl: hostUrl });
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'fixture-client' });
-  return { adapter, prepareContext, refreshPersonalization: () => adapter.refreshPersonalization(), submissionErrors, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
+  return { adapter, resources, prepareContext, refreshPersonalization: () => adapter.refreshPersonalization(), submissionErrors, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, providerErrors, launchErrors, root, closeKernel: () => kernel.close() };
 }
 
+async function assertModelRunCompleted(f: Awaited<ReturnType<typeof fixture>>, identity: {runtime:'agent';threadId:string;branchId:string}, runId:string) {
+  try {
+    await expect.poll(async () => {
+      const run = await f.api.run(runId);
+      if (['failed','cancelled'].includes(run.state)) throw new Error(`Original model Run terminated: ${run.state}`);
+      return run.state;
+    }).toBe('completed');
+  } catch (error) {
+    const inspect = async (read:()=>Promise<unknown>) => {try{return await read();}catch(failure){return String(failure);}};
+    console.error('Bot model native fixture evidence',JSON.stringify({
+      run:await inspect(()=>f.api.run(runId)),launch:await inspect(()=>f.runtime.launch(runId)),
+      snapshot:await inspect(()=>f.api.snapshot(identity)),
+      launchErrors:f.launchErrors.map(value=>value instanceof Error ? value.stack : String(value)),
+      submissionErrors:f.submissionErrors,providerErrors:f.providerErrors,
+      providerRequests:f.requests.map(request=>request.body),
+    },null,2));
+    throw error;
+  }
+}
 const model = { providerId: 'fixture-provider', modelId: 'fixture-model' };
 it.each(['agent', 'bot'] as const)('refreshes the built-in prompt and sends again after recovering a projectless %s conversation', async mode => {
   const f = await fixture((_body, response) => {
@@ -242,3 +288,117 @@ it('initial context preserves pinned AGENTS and request roles while current pers
   expect((await reopened.api.snapshot(identity)).history.slice(0, before.history.length)).toEqual(before.history);
   expect(reopened.launchErrors).toEqual([]);
 }, 45_000);
+
+it('a real Bot model consumes organization observations, moves the original conversation, and filters its archived location', async () => {
+  const { responsesToolResult } = await import('./provider-tool-result.test-helper.js');
+  let step = 0;
+  let observation = '';
+  let group = '';
+  let target = '';
+  let labelReads = 0;
+  const f = await fixture((body, response) => {
+    const result = responsesToolResult(body);
+    const content = result?.content as Record<string, unknown> | undefined;
+    const invoke = (name: string, args: unknown) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{
+        type: 'function_call', id: `org-item-${step}`, call_id: `org-call-${step}`, name: 'tool_invoke', arguments: JSON.stringify({ name, arguments: args }),
+      }] } })}\n\n`);
+    };
+    if (step > 0) expect(result?.outcome).toBe('succeeded');
+    switch (step++) {
+      case 0: return invoke('organization', { action: 'list' });
+      case 1:
+        observation = String(content?.observation);
+        expect(observation).toMatch(/^read:/);
+        expect((content?.conversations as Array<{ directBot?: { name: string } }>).some(item => item.directBot?.name === 'Recovery Bot')).toBe(true);
+        return invoke('organization', { action: 'create_group', input: { name: 'Release discussions', observation } });
+      case 2:
+        group = String((content?.changed as Array<{ ref: string }>)[0]!.ref);
+        expect(group).toMatch(/^container:/);
+        return invoke('organization', { action: 'list' });
+      case 3:
+        observation = String(content?.observation);
+        target = (content?.conversations as Array<{ ref: string; name: string }>).find(item => item.name === 'Original work')!.ref;
+        return invoke('organization', { action: 'move', input: { observation, targets: [target], container: group } });
+      case 4: return invoke('threads', { containerId: group, scope: 'all' });
+      case 5: {
+        const page = content?.page as { members: Array<{ agentId: string; organization: { path: Array<{ ref: string }> } }> };
+        expect(page.members).toHaveLength(1);
+        expect(page.members[0]!.agentId).toBe(target);
+        expect(page.members[0]!.organization.path.at(-1)?.ref).toBe(group);
+        return invoke('read_thread', { threadId: target, query: { kind: 'overview' } });
+      }
+      case 6:
+        expect((content?.page as { organization: { path: Array<{ ref: string }> } }).organization.path.at(-1)?.ref).toBe(group);
+        return invoke('organization', { action: 'archive', input: { observation, reference: target } });
+      case 7: return invoke('threads', { containerId: group, archived: 'only', scope: 'all' });
+      case 8:
+        expect((content?.page as { members: Array<{ agentId: string }> }).members.map(item => item.agentId)).toEqual([target]);
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'done', type: 'message', content: [{ type: 'output_text', text: 'Organized the original conversation.' }] }] } })}\n\n`);
+        return;
+      default: throw new Error('Unexpected organization model request');
+    }
+  });
+  const { createResourceOwner } = await import('./resource-owner.js');
+  const { readConversationOrganizationLabels } = await import('../conversation-organization/labels.js');
+  f.kernel.setResourceOwner(createResourceOwner({ runtime: f.runtime, resources: f.resources,
+    organization: async (request, _run, signal) => {
+      expect(request.action).toBe('labels'); labelReads++;
+      return { result: await readConversationOrganizationLabels(request.input as { botIds: string[]; projectIds: string[] }, {
+        bots: async () => [{ id: 'recovery-bot', name: 'Recovery Bot' }], settings: async () => ({ projects: [] }),
+      }, signal) };
+    },
+  }));
+  const original = await f.api.create('Original work');
+  await f.api.update({runtime:'agent',threadId:original.threadId,key:'original-work-title',expectedRevision:(await f.runtime.thread(original.threadId)).revision,title:'Original work'});
+  await f.kernel.agentRuntimeRequest('runtime.bot.gate.publish', { botId: 'recovery-bot', profileRevision: 1, activityOperationId: null, permitted: true });
+  const identity = { runtime: 'agent' as const, ...await f.runtime.createBotThread('recovery-bot', 'thread:organization-bot', 'branch:organization-main') };
+  const run = await f.api.submit({ ...identity, key: 'organize', expectedHead: null, text: 'Group and archive the existing conversation.', model });
+  await assertModelRunCompleted(f,identity,run.run_id);
+  expect(step).toBe(9);
+  expect(labelReads).toBe(2);
+  const saved = await f.runtime.thread(original.threadId);
+  expect(saved.archived).toBe(true);
+  const tree = await f.runtime.organizationRead(null, { archived: 'include' });
+  expect(tree.conversations.find(entry => entry.conversation.id === original.threadId)?.position.containerId).toBe(tree.containers.find(container => container.name === 'Release discussions')?.id);
+});
+
+it('a real shared Bot model lists and opens matters only within its caller principal',async()=>{
+  const {responsesToolResult}=await import('./provider-tool-result.test-helper.js');
+  let step=0;
+  const f=await fixture((body,response)=>{
+    const result=responsesToolResult(body);
+    const invoke=(args:unknown)=>{
+      response.writeHead(200,{'content-type':'text/event-stream'});
+      response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[{type:'function_call',
+        id:`matter-item-${step}`,call_id:`matter-call-${step}`,name:'tool_invoke',arguments:JSON.stringify({name:'matters',arguments:args})}]}})}\n\n`);
+    };
+    switch(step++){
+      case 0:return invoke({action:'list'});
+      case 1:
+        expect(result?.outcome).toBe('succeeded');
+        expect((result?.content as {matters:Array<{id:string}>}).matters.map(row=>row.id)).toEqual(['visible-matter']);
+        expect(JSON.stringify(result)).not.toContain('BOB PRIVATE TITLE');
+        return invoke({action:'get',id:'foreign-matter'});
+      case 2:
+        expect(result?.outcome).toBe('failed');
+        expect(JSON.stringify(result)).not.toContain('BOB PRIVATE TITLE');
+        response.writeHead(200,{'content-type':'text/event-stream'});
+        response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[{id:'matter-done',type:'message',content:[{type:'output_text',text:'Only your work is visible.'}]}]}})}\n\n`);
+        return;
+      default:throw new Error('Unexpected matters model request');
+    }
+  });
+  await f.kernel.agentRuntimeRequest('runtime.bot.gate.publish',{botId:'recovery-bot',profileRevision:1,activityOperationId:null,permitted:true});
+  const own=await f.runtime.createBotThread('recovery-bot','thread:matter-own','branch:matter-own-main',undefined,undefined,null);
+  const foreign=await f.runtime.createBotThread('recovery-bot','thread:matter-foreign','branch:matter-foreign-main',undefined,undefined,'bob');
+  for(const [id,title,link] of [['visible-matter','My work',own],['foreign-matter','BOB PRIVATE TITLE',foreign]] as const){
+    await f.runtime.updateBotMatter({botId:'recovery-bot',key:id,expectedRevision:0,matter:{id,title,revision:0,description:'',archived:false,
+      threads:[{...link,send:false,memory:false}]}});
+  }
+  const submitted=await f.api.submit({runtime:'agent',...own,key:'read-matters',expectedHead:null,text:'List my followed work.',model});
+  await assertModelRunCompleted(f,{runtime:'agent',...own},submitted.run_id);
+  expect(step).toBe(3);
+});

@@ -110,6 +110,7 @@ pub(super) struct UserDispatchAdmission {
     pub epoch: u64,
 }
 pub struct UserChildDispatchPreparation {
+    organization_project_id: Option<String>,
     command: UserChildDispatchCommand,
     read: Option<ChildDispatchRead>,
     parent: Run,
@@ -128,9 +129,10 @@ pub struct UserChildDispatchSelection {
 }
 impl UserChildDispatchPreparation {
     pub fn load(mut self) -> Result<UserChildDispatchSelection> {
-        let selection = self.read.take().expect("captured selection").load()?;
+        let mut selection = self.read.take().expect("captured selection").load()?;
+        selection.organization_project_id=self.organization_project_id.clone();
         let mut input = self.command.input.clone();
-        if input.project_id.is_none() {
+        if selection.project(&input)?.is_none() {
             input.tools = Some(
                 selection
                     .frozen
@@ -263,6 +265,8 @@ impl UserChildDispatchSelection {
             )?)
         };
         Ok(PreparedChildAdmission {
+            organization: p.command.input.organization.clone(),
+            organization_project_id: p.command.input.project_id.clone(),
             model_contract: super::collaboration::ModelContract::default(),
             attachments: self.attachments,
             attachment_input_ref,
@@ -434,7 +438,9 @@ impl Catalog {
         let reference = launch
             .dispatch_context_ref
             .ok_or_else(|| RuntimeError::Invalid("Handoff dispatch catalog missing".into()))?;
+        let organization_project_id=if command.input.project_id.is_none() && command.input.source_agent.is_none() && command.input.source_path.is_none() {command.input.organization.as_ref().and_then(|p|p.container_id.as_deref()).map(|id|self.organization_nearest_project(parent.principal_id.as_deref(),id)).transpose()?.flatten()}else{None};
         Ok(UserChildDispatchPreparation {
+            organization_project_id,
             command,
             parent,
             read: Some(self.capture_child_dispatch(&reference)),

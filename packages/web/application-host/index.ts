@@ -1,3 +1,14 @@
+import { freezeProjectSourceSelection } from '@varin/application-client';
+import {createManagedTerminalOwner} from './lib/terminal/managed-owner.js';
+import {authorizeManagedTerminal,registerManagedTerminalRoutes} from './lib/terminal/managed-routes.js';
+import { createManagedProjectManagementOwner } from './lib/projects/managed-project-management.js';
+import { registerProjectManagementRoutes } from './lib/projects/project-management-routes.js';
+import {createManagedExternalChildSourceOwner} from './lib/external-agents/managed-child-source.js';
+import {createManagedExternalProjectSourceOwner} from './lib/external-agents/managed-project-source.js';
+import { readConversationOrganizationLabels } from './lib/conversation-organization/labels.js';
+import { parseConversationOrganizationPlacement } from '@varin/application-client';
+import { ConversationOrganizationService } from './lib/conversation-organization/service.js';
+import { registerConversationOrganizationRoutes } from './lib/conversation-organization/routes.js';
 import { createThreadUserDispatch } from './lib/kernel/thread-user-dispatch.js';
 import { registerThreadUserDispatchRoutes } from './lib/kernel/thread-user-dispatch-routes.js';
 import { createAbsoluteAttachmentCapture } from './lib/kernel/attachment-absolute.js';
@@ -16,6 +27,8 @@ import { createStorageService } from './lib/storage/service.js';
 import { registerStorageRoutes } from './lib/storage/routes.js';
 import { createStorageCoordinator } from './lib/storage/coordinator.js';
 import { readHostConnections } from './lib/connections/hosts.js';
+import { routeProjectResourceManagement, invokeResourceManagement } from './lib/agent-resources/project-management.js';
+import { assertResourcePathAllowed } from './lib/workspace/resource-access.js';
 import { createResourceManagement } from './lib/agent-resources/management.js';
 import { registerResourceManagementRoutes } from './lib/agent-resources/management-routes.js';
 import { createModelTextService } from './lib/model-text/service.js';
@@ -91,7 +104,7 @@ import { createFollowupEventOwner } from './lib/kernel/followup-event-owner.js';
 import { createLiveSourceOwner } from './lib/kernel/live-source.js';
 import { createNativeWorkspaceOwner, type NativeWorkspaceOwner } from './lib/kernel/native-workspaces.js';
 import { registerNativeWorkspaceRoutes } from './lib/workspace/native-workspace-routes.js';
-import { createThreadSourcePreparer, createThreadSourceAdmission, createThreadSourceDirectory } from './lib/kernel/thread-sources.js';
+import { createThreadSourcePreparer, createThreadSourceAdmission, createThreadSourceDirectory, parseSourceResourceOwner } from './lib/kernel/thread-sources.js';
 import { createManagedSourceConsumers } from './lib/kernel/managed-source-consumers.js';
 import { createSourceQueryService } from './lib/kernel/source-query-service.js';
 import { createManagedMcpService } from './lib/harness/managed-mcp-service.js';
@@ -104,7 +117,7 @@ import { createManagedChildSourceService } from './lib/kernel/managed-source-col
 import { createManagedIntegrationService, createManagedIntegrationOwner } from './lib/kernel/managed-source-integration.js';
 import { createThreadIntegrations, createUserIntegrationService } from './lib/kernel/thread-integrations.js';
 import { createThreadCodeExchangeReader, createManagedCodeExchangeReader } from './lib/kernel/thread-code-exchange.js';
-import { createThreadContext } from './lib/kernel/thread-context.js';
+import { createThreadContext, resourceThreadSource } from './lib/kernel/thread-context.js';
 import { createThreadResourceScope } from './lib/kernel/thread-resource-scope.js';
 import { createThreadSkillInputPreparer } from './lib/kernel/thread-skill-input.js';
 import { createResourceOwner } from './lib/kernel/resource-owner.js';
@@ -144,7 +157,7 @@ import { registerThreadExportRoutes } from './lib/kernel/thread-export-routes.js
 import { createThreadRemember } from './lib/memory/thread-remember.js';
 import { registerThreadRememberRoutes } from './lib/memory/thread-remember-routes.js';
 import { registerThreadRoutes } from './lib/kernel/thread-routes.js';
-import { createThreadPrincipalMiddleware } from './lib/kernel/request-principal.js';
+import { currentRequestPrincipal, withRequestPrincipal, createThreadPrincipalMiddleware } from './lib/kernel/request-principal.js';
 import { ExternalAgentsService } from './lib/external-agents/service.js';
 import { createExternalSourceOwner } from './lib/external-agents/source.js';
 import { registerExternalAgentRoutes } from './lib/external-agents/routes.js';
@@ -525,7 +538,12 @@ const projectDirectoryRuntime = createProjectDirectoryRuntime({
 });
 const { resolveProjectDirectory } = projectDirectoryRuntime;
 
+let projectSourceDirectory: import('./lib/kernel/thread-sources.js').SourceDirectory | undefined;
 const settingsRuntime = createSettingsRuntime({
+  resolveProjectSource: request => {
+    if (!projectSourceDirectory) throw new Error('Project source owner is unavailable');
+    return projectSourceDirectory.resolve(request);
+  },
   fsPromises,
   path,
   SETTINGS_FILE_PATH,
@@ -1061,7 +1079,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   let releaseSourcePreparations=async(_threads:readonly string[])=>{};
   bindDocumentTextCodec(kernelClient);
   const projectTextEncoding = createProjectTextEncodingService({
-    projects: async () => sanitizeProjects((await readSettingsFromDisk()).projects) ?? [],
+    projects: async () => (sanitizeProjects((await readSettingsFromDisk()).projects) ?? []).filter(project => project.source?.resourceOwner.kind !== 'managed_host'),
     canonicalRoot: async (workspaceId): Promise<string> => {
       const registration = await documentsAuthority.admitWorkspaceRegistration(workspaceId);
       const native = await nativeWorkspaces?.resolveId(workspaceId, undefined, registration.nativeSource);
@@ -1101,7 +1119,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   activeDocumentsAuthority = documentsAuthority;
   nativeWorkspaces=createNativeWorkspaceOwner({kernel:kernelClient,documents:documentsAuthority,
-    projects:async()=>sanitizeProjects((await readSettingsFromDisk()).projects)??[],
+    projects:async()=>(sanitizeProjects((await readSettingsFromDisk()).projects)??[]).filter(project=>project.source?.resourceOwner.kind!=='managed_host'),
     update:async(id,value)=>{await updateSettingsOnDisk(current=>{
       const projects=sanitizeProjects(current.projects)??[];
       if(!projects.some(project=>project.id===id))throw new Error('The original project was removed');
@@ -1190,7 +1208,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }
     return externalAgentIdentity(cwd);
   } });
-  const externalAgents = new ExternalAgentsService({ kernel: kernelClient, spawn: externalAgentProcesses.spawn, spawnAdmitted: externalAgentProcesses.spawnAdmitted, directory: externalAgentDirectory,
+  const externalAgents = new ExternalAgentsService({ managed: () => ({coordinatorHostId:agentRuntime.coordinatorHostId,source:(owner,signal)=>agentRuntime.managedSource(owner,signal)}), kernel: kernelClient, spawn: externalAgentProcesses.spawn, spawnAdmitted: externalAgentProcesses.spawnAdmitted, directory: externalAgentDirectory,
     onError: operationId => console.error('[ExternalAgents] Execution or resource cleanup needs reconciliation:', operationId),
     resolveWorkspace: async cwd => {
       const canonicalRoot = await canonicalizePathIdentity(externalAgentDirectory);
@@ -1474,7 +1492,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const botPresence = createBotPresencePublisher({
     bots: () => botService.list(),
     scope: botId => agentRuntime.botScope(botId),
-    publish: presence => broadcastGlobalUiEvent?.({ type: 'varin:bot-presence', properties: { botId: presence.botId, presence } }),
+    publish: presence => broadcastGlobalUiEvent?.({ type: 'varin:bot-presence', properties: { botId: presence.botId } }),
     onError: () => console.error('[Bots] Bot presence projection is unavailable'),
   });
   // BC0: durable Bot identity. The profile record lives in the kernel catalog;
@@ -1485,11 +1503,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hostId,
     dataDir: VARIN_DATA_DIR,
     agent: {
-      ...createBotSessions(() => agentRuntime),
+      ...createBotSessions(() => agentRuntime, (identity, placement) => conversationOrganization.creationDefaults(currentRequestPrincipal() ?? null, identity.threadId, placement)),
       model: bot => botAgentModel(bot),
       listWork: async (bot, includeEntry) => {
-        const scope = await agentRuntime.botScope(bot.id);
-        const matters = (await agentRuntime.botMatters(bot.id)).filter(matter => !matter.archived);
+        const principalId = currentRequestPrincipal();
+        const scope = await agentRuntime.botScope(bot.id, undefined, false, principalId);
+        const matters = (await agentRuntime.botMatters(bot.id, undefined, principalId)).filter(matter => !matter.archived);
         const associated = new Map(matters.flatMap(matter => matter.threads.map(link => [link.threadId, link] as const)));
         const owned = new Map(scope.threads.map(thread => [thread.thread_id, thread] as const));
         const sessions = new Set(scope.sessions);
@@ -1506,7 +1525,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           if (error instanceof KernelClientError && error.code === 'not-found') return null;
           throw error;
         })));
-        return [...scope.threads, ...followed.filter(thread => thread !== null)].filter(thread => thread.deleted_at_ms === null).flatMap(thread => thread.branches.flatMap(branch => {
+        return [...scope.threads, ...followed.filter(thread => thread !== null)].filter(thread => thread.deleted_at_ms === null && (principalId === undefined || (thread.principal_id ?? null) === principalId)).flatMap(thread => thread.branches.flatMap(branch => {
           const entry = bot.entry.runtime === 'agent' && bot.entry.threadId === thread.thread_id && bot.entry.branchId === branch.branch_id;
           if (entry && !includeEntry) return [];
           const matterIds = matters.filter(matter => matter.threads.some(link => link.threadId === thread.thread_id && link.branchId === branch.branch_id)).map(matter => matter.id);
@@ -1789,14 +1808,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     catch (error) { res.status(503).json({ error: error instanceof Error ? error.message : String(error) }); }
   });
   const stopModelDirectory = modelsService.startDirectory(egressRuntime.fetch as typeof globalThis.fetch);
-  const resourceManagement = createResourceManagement({ dataDirectory: VARIN_DATA_DIR,
+  const resourceManagementDependencies = { dataDirectory: VARIN_DATA_DIR,
     documents: await documentsAuthority.createResourceAccess([VARIN_DATA_DIR, path.join(os.homedir(), '.agents')]), settings: modelsService.settings,
-    promptTools: (context, signal) => promptToolCatalog(context, signal),
-    resolveProjectRoot: async projectId => {
+    promptTools: (context: {projectId?:string;projectRoot?:string}, signal?:AbortSignal) => promptToolCatalog(context, signal),
+    resolveProjectRoot: async (projectId: string) => {
       const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
       const project = projects.find(entry => entry.id === projectId);
+      if (project?.source?.resourceOwner.kind === 'managed_host') throw new Error('Project resources belong to another Host');
       return project?.path ?? null;
     },
+  };
+  const resourceManagement = routeProjectResourceManagement(createResourceManagement(resourceManagementDependencies), {
+    coordinatorHostId: hostId, projects: async () => sanitizeProjects((await readSettingsFromDisk()).projects) ?? [],
+    remote: (owner, signal) => agentRuntime.managedSource(owner, signal),
   });
   registerResourceManagementRoutes(app, resourceManagement, uiAuthController.requireAuth);
   const modelExtensions = new ModelsExtensionOwner(extensionRuntime, modelsService, {
@@ -1826,7 +1850,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const workspaceId = `mcp-host:${hostId}`;
     return { workspaceId, executionWorkspaceId: workspaceId, canonicalRoot };
   } });
-  registerModelRoutes(app, modelsService, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), egressRuntime.fetch as typeof globalThis.fetch, kernelClient);
+  registerModelRoutes(app, modelsService, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), egressRuntime.fetch as typeof globalThis.fetch, kernelClient, async () => sanitizeProjects((await readSettingsFromDisk()).projects) ?? []);
   const { registerImageReadRoute } = await import('./lib/images/image-read-route.js');
   registerImageReadRoute(app, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), egressRuntime.fetch);
   const unsubscribeModelSettings = modelsService.settings.subscribe((scope, _cwd, revision) => {
@@ -2219,10 +2243,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       resources: threadResources,
       composition: createContextComposition(extensionRuntime),
       projectForWorkspace: async (workspaceId, source) => {
-        if (source.resourceOwner.kind === 'managed_host') return undefined;
+        if (source.resourceOwner.kind === 'managed_host') {
+          const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
+          const matches = projects.filter(project => project.source?.workspaceId === workspaceId
+            && isDeepStrictEqual(project.source.resourceOwner, source.resourceOwner));
+          return matches.length === 1 ? matches[0]!.id : undefined;
+        }
         const { canonicalPath: root } = await documentsAuthority.admitWorkspaceRegistration(workspaceId);
         const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
-        return projects.find(project => projectContainsPath(project, root))?.id;
+        return projects.find(project => project.source?.resourceOwner.kind !== 'managed_host' && projectContainsPath(project, root))?.id;
       },
     });
   const threadAttachments = createThreadAttachments({ kernel: kernelClient, runtime: agentRuntime, storage: materialStorage,
@@ -2239,10 +2268,52 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   app.use('/api/threads', uiAuthController.requireAuth, createThreadPrincipalMiddleware(agentRuntime,
     (req, res) => uiAuthController!.resolveAuthContext(req, res), id => hostPrincipals().isOwner(id)));
   registerThreadAttachmentRoutes(app, threadAttachments, uiAuthController.requireAuth);
-  registerThreadUserDispatchRoutes(app, createThreadUserDispatch({ runtime: agentRuntime, models: modelsService, attachments: threadAttachments }), uiAuthController.requireAuth);
+  registerThreadUserDispatchRoutes(app, createThreadUserDispatch({ runtime: agentRuntime, models: modelsService, attachments: threadAttachments,
+    ensureOrganization: async signal => { await conversationOrganization.read(currentRequestPrincipal() ?? null, { limit: 1 }, signal); } }), uiAuthController.requireAuth);
   externalAgents.bindAttachments(threadAttachments);
   registerInteractiveUiRoutes(app, interactiveUi, uiAuthController.requireAuth);
-  kernelClient.setResourceOwner(createResourceOwner({ runtime: agentRuntime, resources: threadResources, ui: interactiveUi, attachments: threadAttachments }));
+  kernelClient.setResourceOwner(createResourceOwner({ runtime: agentRuntime, resources: threadResources, ui: interactiveUi, attachments: threadAttachments,
+    organization: async (request, run, signal) => {
+      if (request.action === 'ensure_initialized') {
+        if (Object.keys(request.input).length) throw new Error('Invalid organization initialization request');
+        await conversationOrganization.read(run.principal_id ?? null, { limit: 1 }, signal);
+        return { result: { initialized: true } };
+      }
+      if (request.action === 'labels') {
+        const input = request.input;
+        if (Object.keys(input).some(key => !['botIds', 'projectIds'].includes(key)) || !Array.isArray(input.botIds) || !Array.isArray(input.projectIds)
+          || [...input.botIds, ...input.projectIds].some(id => typeof id !== 'string' || !id)) throw new Error('Invalid organization label selection');
+        return { result: await readConversationOrganizationLabels({ botIds: input.botIds as string[], projectIds: input.projectIds as string[] },
+          { bots: () => botService.list(), settings: readSettingsFromDisk }, signal) };
+      }
+      const operation = await agentRuntime.operation(request.operationId, signal);
+      if (operation.run_id !== run.id) throw new Error('Organization operation belongs to another Run');
+      return withRequestPrincipal(run.principal_id ?? null, async () => {
+        if (request.action === 'create_conversation') {
+          const input = request.input;
+          if (typeof input.key !== 'string' || Object.keys(input).some(key => !['key', 'organization'].includes(key))) throw new Error('Invalid conversation creation command');
+          return { result: await threads.create(input.key, input.organization === undefined ? undefined : { organization: parseConversationOrganizationPlacement(input.organization) }) };
+        }
+        if (request.action === 'create_bot_conversation') {
+          const input = request.input;
+          if (typeof input.botId !== 'string' || typeof input.key !== 'string' || Object.keys(input).some(key => !['botId', 'key', 'organization'].includes(key))) throw new Error('Invalid Bot conversation command');
+          const result = await botService.createSession(input.botId, { key: input.key,
+            ...(input.organization === undefined ? {} : { organization: parseConversationOrganizationPlacement(input.organization) }) });
+          return { result };
+        }
+        if (request.action !== 'external_metadata') throw new Error('Unknown organization lifecycle action');
+        const input = request.input;
+        if (typeof input.conversationId !== 'string' || typeof input.key !== 'string' || !Number.isSafeInteger(input.expectedRevision)
+          || Object.keys(input).some(key => !['conversationId', 'expectedRevision', 'key', 'title', 'pinned', 'archived', 'delete'].includes(key))) throw new Error('Invalid external metadata command');
+        const patch: {title?:string;pinned?:boolean;archived?:boolean;deleted?:boolean} = {};
+        if (input.title !== undefined) { if (typeof input.title !== 'string') throw new Error('Invalid title'); patch.title = input.title; }
+        for (const field of ['pinned', 'archived', 'delete'] as const) if (input[field] !== undefined) {
+          if (typeof input[field] !== 'boolean') throw new Error('Invalid metadata flag'); patch[field === 'delete' ? 'deleted' : field] = input[field];
+        }
+        const result = await conversationOrganization.metadata(run.principal_id ?? null, input.key, [{ conversation: { kind: 'external', id: input.conversationId }, expectedRevision: Number(input.expectedRevision), patch }], signal);
+        return { result: result.items[0] };
+      });
+    } }));
   kernelClient.setPlanOwner(createPlanOwner(getUserKnowledgeStore, agentRuntime));
   kernelClient.setMemoryOwner(createMemoryOwner({ personalization: agentPersonalization, prepareContext: threadContext,
     bot: createBotMemoryOwner({ runtime: agentRuntime, history: botHistory, memory: memoryService, organizer: memoryOrganizer, prepareContext: threadContext,
@@ -2276,12 +2347,41 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       terminal: () => terminalRuntime, resolveLiveSource: liveSources.validate,
       onError: () => console.error('[Thread] Original process terminal requires attention'),
     }), createChildProfilePreparer({ models: modelAuthority,
-      projects: async () => (sanitizeProjects((await readSettingsFromDisk()).projects) ?? []).map(project => ({ id: project.id, name: typeof project.label === 'string' && project.label || project.path, path: project.path, resource_owner: { kind: 'local' as const } })),
+      projects: async () => (sanitizeProjects((await readSettingsFromDisk()).projects) ?? []).map(project => ({ id: project.id, name: typeof project.label === 'string' && project.label || project.path, path: project.path, selection: freezeProjectSourceSelection(project), resource_owner: project.source?.resourceOwner ?? { kind: 'local' as const } })),
       externalAgents: () => externalAgents.settings(),
       settings: () => modelsService.readGlobalInferenceSettings(),
       capabilities: signal => agentRuntime.childCapabilities(signal),
     }));
   const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads });
+  projectSourceDirectory = sourceDirectory;
+  registerProjectManagementRoutes(app, { requireAuth: uiAuthController.requireAuth,
+    authorize: async (req, res) => {
+      const auth = await uiAuthController!.resolveAuthContext(req, res);
+      return !!auth && (await agentRuntime.principalCanUseHostResources?.(auth.principalId ?? null) ?? false);
+    },
+    coordinatorHostId: agentRuntime.coordinatorHostId,
+    projects: async () => sanitizeProjects((await readSettingsFromDisk()).projects) ?? [],
+    remote: (owner, signal) => agentRuntime.managedSource(owner, signal),
+    update: async (expected, workspace) => { await updateSettingsOnDisk(current => {
+      const projects = sanitizeProjects(current.projects) ?? [], project = projects.find(entry => entry.id === expected.id);
+      if (!project || project.path !== expected.path || !isDeepStrictEqual(project.source, expected.source)
+        || !isDeepStrictEqual(project.versionedWorkspace, expected.versionedWorkspace)) throw new Error('The registered project changed while its workspace operation was in progress');
+      return { ...current, projects: projects.map(entry => entry.id === expected.id ? { ...entry, versionedWorkspace: workspace } : entry) };
+    }); },
+  });
+  app.post('/api/projects/sources/resolve', uiAuthController.requireAuth, async (req, res) => {
+    try {
+      const auth = await uiAuthController!.resolveAuthContext(req, res);
+      if (!auth || !await agentRuntime.principalCanUseHostResources?.(auth.principalId ?? null)) {
+        res.status(403).json({ error: 'Project resources are not available to this user' }); return;
+      }
+      if (!req.body || typeof req.body.path !== 'string' || !req.body.path.trim()) throw new Error('Project folder path is required');
+      const result = await sourceDirectory.resolve({ resourceOwner: parseSourceResourceOwner(req.body.resourceOwner), path: req.body.path });
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'Project source is unavailable' });
+    }
+  });
   const prepareProjectSource = createChildProjectSourcePreparer({ projects: async () => sanitizeProjects((await readSettingsFromDisk()).projects) ?? [],
     inspectBackend:(projectId,signal)=>nativeWorkspaces.inspectBackend(projectId,signal),sources: sourceDirectory, prepare: prepareThreadSource });
   threads.bindBotWorkProfile(async botId => {
@@ -2300,10 +2400,47 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   threads.bindNextSteps(nextSteps);
   threads.bindContextPolicy((run, signal) => contextService.presentation(run, signal));
   threads.bindSourceDirectory(sourceDirectory);
+  threads.bindCreationDefaults((identity, signal) => agentRuntime.organizationCreationDefaults(identity.threadId, signal));
+  threads.bindOrganizationCreation((identity, placement) => conversationOrganization.creationDefaults(currentRequestPrincipal() ?? null, identity.threadId, placement));
   threads.bindDefaultDeviceSource(async identity => {
-    // An execution directory is not a registered product project. No inventory,
-    // baseline capture or mount is needed for ordinary device file access.
-    const selected = await sourceDirectory.resolve({ resourceOwner: { kind: 'local' }, path: workspaceConfig.root });
+    const thread = await agentRuntime.thread(identity.threadId);
+    const latest = thread.branches.find(branch => branch.branch_id === identity.branchId)?.latest_run;
+    const checkpoint = await agentRuntime.context(identity.branchId);
+    const inherited = checkpoint?.resources?.source ?? (latest ? (await agentRuntime.launch(latest.id))?.selection.source : null);
+    if (inherited) {
+      const source = resourceThreadSource(inherited);
+      if (!source) throw new Error('The inherited execution source is unavailable');
+      return { ...source, tools: await agentRuntime.sourceTools(source.mode) };
+    }
+    // A completed source-less round (including explicit chat only) is itself an
+    // execution choice. Creation defaults are only for a genuinely empty branch.
+    if (latest) return null;
+    const firstInput = true;
+    const defaults = await agentRuntime.organizationCreationDefaults(identity.threadId);
+    if (defaults?.source) {
+      const selected = defaults.source.selection?.mode === 'native_workspace'
+        ? {resourceOwner:defaults.source.resourceOwner, workspaceId:defaults.source.selection.workspaceId}
+        : await sourceDirectory.resolve({ resourceOwner: defaults.source.resourceOwner, path: defaults.source.path });
+      if (defaults.source.workspaceId && selected.workspaceId !== defaults.source.workspaceId) throw new Error('The conversation’s original project registration changed. Select a source explicitly.');
+      return (await threads.prepareSource({ ...identity, key: `creation-project:${identity.threadId}`,
+        resourceOwner: selected.resourceOwner, workspaceId: selected.workspaceId, mode: defaults.source.selection?.mode ?? 'live_root',
+        ...(defaults.source.selection ? { selection: defaults.source.selection } : {}),
+        content: { mode: 'saved-files' }, captureScopes: [],
+      })).source;
+    }
+    if (defaults?.projectId) {
+      const project = (sanitizeProjects((await readSettingsFromDisk()).projects) ?? []).find(project => project.id === defaults.projectId);
+      if (!project) throw new Error('The conversation’s original default project is no longer registered. Select a source explicitly.');
+      const selected = await sourceDirectory.resolve({ resourceOwner: project.source?.resourceOwner ?? { kind: 'local' }, path: project.path });
+      return (await threads.prepareSource({ ...identity, key: `creation-project:${identity.threadId}`,
+        resourceOwner: selected.resourceOwner, workspaceId: selected.workspaceId, mode: 'live_root',
+        content: { mode: 'saved-files' }, captureScopes: [],
+      })).source;
+    }
+    // A Bot's home remains its own default; neither opening another Shell nor moving
+    // a classification imports the file browser's current directory into its work.
+    const bot = firstInput && thread.bot_id && !thread.parent_thread_id ? await botService.get(thread.bot_id) : null;
+    const selected = await sourceDirectory.resolve({ resourceOwner: { kind: 'local' }, path: bot?.homeDir ?? workspaceConfig.root });
     const liveRoot = await liveSources.prepare(selected.workspaceId, selected.workspaceId, identity.threadId);
     return { resourceOwner: selected.resourceOwner, workspaceId: selected.workspaceId, executionWorkspaceId: selected.workspaceId,
       mode: 'live_root', liveRoot, tools: await agentRuntime.sourceTools('live_root') };
@@ -2317,7 +2454,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     documents: documentsAuthority, validateLiveSource: liveSources.validate, nativeWorkspaces });
   threads.bindFileResolver(userFileTarget);
   // User mutations share Documents' native gate and its lease context.
-  const resourceFiles = createResourceFilesOwner(documentsAuthority, kernelRecoveryFileResources, userFileTarget);
+  const catalogFileSearch = createFsSearchRuntimeFactory({ compute: kernelCompute });
+  const resourceFiles = createResourceFilesOwner(documentsAuthority, kernelRecoveryFileResources, userFileTarget, async (selection, signal) => {
+    const registration = await documentsAuthority.admitWorkspaceRegistration(selection.workspaceId, signal);
+    const prepared = await nativeWorkspaces!.prepareSelection(selection, 'project-files', signal);
+    return { path: prepared.path, originalRoot: registration.canonicalPath };
+  }, { files: catalogFileSearch, content: workspaceContentSearch }, (bytes,format,signal)=>officeRenderer.convert(bytes,format,'pdf',signal));
   registerResourceFileRoutes(app, { local: resourceFiles, remote: owner => managedRemoteTargets!.source(owner), runtime: agentRuntime, attachments: threadAttachments, requireAuth: uiAuthController.requireAuth });
   threads.bindMaterials(webRuntimeOwner.current.inputMaterials);
   threads.bindAttachments(threadAttachments);
@@ -2376,7 +2518,24 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     projectTrusted: cwd => projectTrust.trusted(cwd),
   });
   kernelClient.subscribeExit(() => { void targetMcpService.close(); });
+  let projectGitDispatcher: import('./lib/git/project-dispatch.js').ProjectGitDispatcher | undefined;
+  let projectGitHubReader: import('./lib/github/project-read.js').GitHubProjectReader | undefined;
   managedRemoteExecution.setSourceOwner(createManagedSourceService({ kernel: kernelClient, hostId,
+    terminal:createManagedTerminalOwner({terminal:()=>terminalRuntime,documents:documentsAuthority,nativeWorkspaces}),
+    projectManagement: createManagedProjectManagementOwner({ kernel: kernelClient, documents: documentsAuthority,
+      githubDispatch: (command, signal) => { if (!projectGitHubReader?.dispatch) throw new Error('Target GitHub owner is unavailable'); return projectGitHubReader.dispatch(command, signal); },
+      nativeWorkspaces, gitDispatch: (command, signal) => { if (!projectGitDispatcher) throw new Error('Target Git owner is unavailable'); return projectGitDispatcher(command, signal); },
+      trust: projectTrust,
+      resources: (directory, command, principal, signal) => invokeResourceManagement(createResourceManagement({ ...resourceManagementDependencies,
+        resolveProjectRoot: () => directory, authorizeRoot: root => assertResourcePathAllowed(root, principal.allowedDirectories),
+      }), { projectId: 'registered-source' }, command, signal),
+      githubRead: (command, directory, signal) => { if (!projectGitHubReader) throw new Error('Target GitHub owner is unavailable'); return projectGitHubReader(command, directory, signal); } }),
+    externalChildSource:createManagedExternalChildSourceOwner({kernel:kernelClient,hostId,sources:createExternalSourceOwner({kernel:kernelClient,storage:kernelStorageAdapter,
+      capture:{documents:documentsAuthority,prepareResources:threadResources.prepareSourceCapture,inspectInventory:(directory,signal)=>inspectSourceInventory(directory,signal)}})}),
+    externalProjectSource:createManagedExternalProjectSourceOwner({kernel:kernelClient,storage:kernelStorageAdapter,hostId}),
+    externalSettings: signal=>externalAgents.settings(signal),
+    prepareExternalLiveSource: liveSources.prepare,
+    externalLaunch: (id, harness, sessionId, signal) => externalAgents.managedLaunch(id,harness,sessionId,signal),
     workspaceFiles: resourceFiles,
     deviceFileAccess: !workspaceConfig.lockdown,
     executionEnvironment: () => executionEnvironment.snapshot(),
@@ -2401,7 +2560,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         case 'child_refresh_capture': case 'child_prepare': case 'child_result_prepare': case 'child_result_publish': case 'child_result_read': case 'child_release': case 'child_unaccepted_release':
           return targetChildSources(scope, operation, signal);
         case 'integration': return targetIntegrations(scope, operation, signal);
-        case 'code_capture': case 'code_apply': case 'code_release': return targetCodeExchange(scope, operation, signal);
+        case 'code_capture': case 'code_apply': case 'external_code_apply': case 'code_release': return targetCodeExchange(scope, operation, signal);
         case 'user_integration': return targetUserIntegrations(scope, operation, signal);
         case 'schedule': return targetSchedules(scope, operation, signal);
         default: return targetSourceQuery(scope, operation, signal);
@@ -2468,7 +2627,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (operationId, _error) => console.error('[Collaboration] Preparation or delivery requires attention:', operationId ?? 'discovery'),
   });
   collaborationOwner.current = collaboration;
-  externalAgents.startChildren(createExternalSourceOwner({ kernel: kernelClient, storage: kernelStorageAdapter, prepareProjectSource,
+  externalAgents.startChildren(createExternalSourceOwner({ managed:{coordinatorHostId:agentRuntime.coordinatorHostId,source:(owner,signal)=>agentRuntime.managedSource(owner,signal)}, kernel: kernelClient, storage: kernelStorageAdapter, prepareProjectSource,
     capture: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture, inspectInventory: (directory, signal) => inspectSourceInventory(directory, signal) } }));
   void collaboration.recover();
   const refreshThreadPersonalization = () => threads.refreshPersonalization();
@@ -2534,6 +2693,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   registerPluginEventTransportRoutes(app, { hostId, catalog: agentRuntime, sources: pluginEventSources,
     requireAuth: uiAuthController.requireAuth, isDraining: () => isShuttingDown });
   kernelClient.setFollowupEventOwner(createFollowupEventOwner(agentRuntime, pluginEventSources));
+  const conversationOrganization = new ConversationOrganizationService({ runtime: agentRuntime, threads, external: externalAgents, readSettings: readSettingsFromDisk });
+  registerConversationOrganizationRoutes(app, conversationOrganization, uiAuthController.requireAuth, (req, res) => uiAuthController!.resolveAuthContext(req, res));
   registerThreadRoutes(app, threads, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), researchRuntime.user, computerRuntimeOwner.current.user, webRuntimeOwner.current.user, userIntegrations, pluginEventSources);
   const agentProfiles = createAgentProfilesAPI({ settings: modelsService.settings,
     capabilities: signal => agentRuntime.childCapabilities(signal),
@@ -2552,6 +2713,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return thread.deleted_at_ms === null && thread.branches.some(branch => branch.branch_id === identity.branchId);
   };
   registerRuntimeMaintenanceRoutes(app, agentRuntime, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
+  app.use('/api/harness/bots', uiAuthController.requireAuth, async (req, res, next) => {
+    try {
+      const auth = await uiAuthController!.resolveAuthContext(req, res);
+      withRequestPrincipal(auth?.principalId ?? null, next);
+    } catch (error) { next(error); }
+  });
   registerBotRoutes(app, {
     bots: botService,
     work: agentRuntime,
@@ -2739,7 +2906,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return prepared;
   });
   recoverLegacyObservations();
-  const catalogFileSearch = createFsSearchRuntimeFactory({ compute: kernelCompute });
   // A grammar catalog must not be able to stop the Host from starting: an
   // unreadable manifest means "nothing is installable", not "no server".
   let grammarManifest = EMPTY_GRAMMAR_PACK_MANIFEST;
@@ -3028,6 +3194,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   relayService.registerRoutes(app);
 
   await platformRoutesRuntime.registerRoutes(app, {
+    onProjectGitDispatcher: dispatch => { projectGitDispatcher = dispatch; },
+    onGitHubProjectReader: reader => { projectGitHubReader = reader; },
     pluginFetch: (url, init) => {
       const { dispatcher: _dispatcher, ...request } = init ?? {};
       return egressRuntime.fetch(url, request);
@@ -3101,6 +3269,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     normalizePwaAppName,
     normalizePwaOrientation,
   });
+  registerManagedTerminalRoutes(app,{requireAuth:uiAuthController.requireAuth,coordinatorHostId:agentRuntime.coordinatorHostId,
+    source:(owner,signal)=>agentRuntime.managedSource(owner,signal),authorize:async(req,res)=>{
+      return authorizeManagedTerminal(await uiAuthController!.resolveAuthContext(req,res),
+        async principal=>await agentRuntime.principalCanUseHostResources?.(principal)??false);
+    }});
   const startupResult = await startupPipelineRuntime.run({
     isDraining: () => isShuttingDown,
     app,
@@ -3141,6 +3314,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     documents: documentsAuthority,
   });
   terminalRuntime = startupResult.terminalRuntime;
+
   await botService.reconcile();
   const terminalCommandSubscription = terminalRuntime.subscribeCommands((record) => {
     void terminalCommandProjector.project(record);

@@ -455,3 +455,77 @@ objects follow the new body. Navigation preparation returns original quote metad
 and image bindings alongside editable text and inline images. File-backed images are not duplicated
 as new inline uploads. External Harnesses retain the same display metadata and use their existing
 file/image capabilities for the readable projection.
+
+## Shared conversation organization
+
+`RuntimeAPIs.conversationOrganization` reads the authenticated principal's Catalog navigation space.
+It stores mixed project/group containers and typed native/external conversation positions, not another
+history or execution owner. `read` returns the durable cursor, container and parent revisions, original
+Bot provenance and a query-bound continuation. `command` retains an admission key and checks the
+actual affected parents/objects. A failed or cancelled wait is not a reversal of a committed move.
+The HTTP adapter aborts on Host replacement and fences decoded responses before publishing them.
+`observe` uses the existing multiplexed Thread durable-event channel, shared once per Host store.
+
+Use `read({ pageNodes: true, ...query })` for a navigable mixed page. `items` is the authoritative
+ordered page of `{ kind: 'container' | 'native' | 'external', id }` references; `limit` and
+`nextCursor` cover that mixed sequence, not conversations alone. `containers` contains the page's
+container metadata plus necessary ancestors/current query container. Context containers absent
+from `items` are not additional rows and do not consume the page limit. `conversations` contains
+only page conversations. Follow the query-bound cursor with the same filters. Omitted/false
+`pageNodes` retains the legacy full container metadata index and conversation-only pagination,
+without an `items` field. The public query parser rejects unknown fields and non-boolean mode flags.
+
+`metadata` accepts a fixed object selection and returns original-owner outcomes per item. Keep the
+same batch key, revision and patch when retrying unconfirmed items; confirmed successes need not be
+resent. External deletion still waits for its original turn/dispatch lifecycle. `project` coordinates
+an already committed Settings registration/removal with Catalog classification and returns both the
+actual registration state and a completed/pending navigation result. It never removes registered
+assets to pretend a cross-owner failure rolled back.
+
+Creation APIs accept `organization: { containerId }`. Omission preserves the original default/parent
+inheritance; explicit null means root. This placement is committed with the original Catalog admission,
+not assigned later by title. Project-derived draft execution intent is separate from navigation position.
+
+### Project resource bindings
+
+`ProjectEntry.source` freezes a non-secret `SourceResourceOwner` and the target Documents
+`workspaceId`. Omission preserves local-Host projects. Remote paths are resolved only by the
+selected source Host; the coordinating Settings owner validates new registrations through that
+owner and preserves already registered offline projects on metadata edits. Project selection and
+classification do not prepare execution. Files use the original resource/Documents APIs, and new
+work freezes the selected project source before preparation. A same-named path on another Host
+is not the same project.
+
+Model settings requests can carry a registered `projectId`. Local projects retain their original
+trusted `.varin/settings.json` behavior. Remote project defaults belong to the coordinating Host's
+original AgentSettingsService under the stable registered project identity, with its ordinary
+revision checks and global inheritance. This explicitly owned configuration is not a copy of the
+remote machine's settings and never reads the remote path as a local directory.
+
+For native submission, omit `source` to inherit the existing source or the conversation's frozen
+creation default. Pass `source: null` for an explicit chat-only selection. `creationDefaults`
+is a read-only creation intent: moving a conversation does not change its source, and clients
+must not infer execution authority from its current navigation parent.
+
+New project-based drafts and creation receipts freeze `ProjectSourceSelection`. A ready adoption
+records its original workspace, execution workspace, branch and adoption-operation IDs; an unadopted
+project records explicit `live_root`. Later enable/disable changes do not redirect that selection.
+`ThreadPrepareSource.selection` follows the same contract; omission retains legacy automatic source
+selection. Native selections go directly to the selected source Host rather than resolving a mount
+path on the coordinator. Preparation verifies the original committed adoption and physical registration
+before reopening the original native workspace. Explicit source selection and accepted input receipts
+still take precedence over creation defaults.
+
+Remote project file views carry the same logical selection through ResourceFiles requests, uploads
+and transfers. The target opens its original native Documents view, while the UI retains the original
+project path for display. Switching the file browser to an explicitly chosen directory clears that
+selection. File browsing does not mutate any conversation's accepted source or creation defaults.
+
+Remote project resource management keeps the original physical project registration,
+matching local Skills and instruction settings rather than silently switching to an
+adopted workspace mount. Resource targets may carry `expectedSource`; a changed
+owner or workspace is rejected before local path resolution or remote mutation.
+Skills CRUD and prompt/tool previews use the target's original resource owner.
+Project trust reads and revision-checked updates use the target trust store and
+canonical registered path. Paired capabilities and allowed roots still apply;
+Agent/Bot personalization and project model preferences retain their original owners.

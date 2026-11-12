@@ -304,3 +304,17 @@ it('submits the first message while the sidebar catalog is still loading', async
     expect(useThreadStore.getState().selectedDraftKey).toBeNull();
   } finally { catalog.resolve([summary()]); await sending; await settle(); }
 });
+
+
+it('retains the original classification and source intent across a lost creation reply', async () => {
+  const f = apiFixture(); cleanup = bindThreadStore(f.api); await settle();
+  const location = { containerId: 'release' };
+  const source = { path: '/remote/project', resourceOwner: { kind: 'managed_host' as const, hostId: 'remote', connectionId: 'connection', endpointIdentity: 'endpoint' }, mode: 'live_root' as const, contentMode: 'saved-files' as const, captureScopes: [] };
+  const key = useThreadStore.getState().openDraft({ organization: location, sourceSelection: source, projectId: 'project' });
+  location.containerId = 'moved'; source.path = '/different';
+  vi.mocked(f.api.create).mockRejectedValueOnce(new Error('reply lost'));
+  await expect(useThreadStore.getState().materializeDraft(key)).rejects.toThrow('reply lost');
+  await useThreadStore.getState().materializeDraft(key);
+  expect(vi.mocked(f.api.create).mock.calls).toEqual([[key, { organization: { containerId: 'release' } }], [key, { organization: { containerId: 'release' } }]]);
+  expect(useThreadDraftStore.getState().drafts[key]).toMatchObject({ projectId: 'project', sourceSelection: { path: '/remote/project', resourceOwner: { hostId: 'remote' } } });
+});

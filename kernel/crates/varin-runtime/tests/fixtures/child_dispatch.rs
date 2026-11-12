@@ -488,6 +488,7 @@ impl Fixture {
             db.create_thread("thread:parent", "branch:parent").unwrap();
         }
         let mut input = DispatchInput {
+            organization: None,
             attachments: Vec::new(),
             model: None,
             thinking: None,
@@ -526,13 +527,29 @@ impl Fixture {
             launch.extension_bindings.push(extension);
         }
         customize(&mut input, &mut launch);
+        if let Some(project) = &input.project_id {
+            use varin_runtime::catalog::organization::{
+                InitialProject, OrganizationInitialization,
+            };
+            db.initialize_organization(
+                None,
+                OrganizationInitialization {
+                    key: "fixture-project-registration".into(),
+                    projects: vec![InitialProject {
+                        id: project.clone(),
+                    }],
+                    positions: vec![],
+                },
+            )
+            .unwrap();
+        }
         let configuration = json!({"providerFamily":"openai-responses","endpoint":"http://127.0.0.1:1/model","allowAnonymous":false,"model":"fixture-model","configurationGeneration":2});
         let model = varin_runtime::catalog::dispatch::ChildModelBinding {
             configuration: serde_json::from_value(configuration.clone()).unwrap(),
             credential_scope: launch.credential_scope.clone(),
         };
         launch.connection_identity = model.connection_identity().unwrap();
-        launch.child_dispatch = Some(varin_runtime::catalog::dispatch::ChildDispatchCatalog { model_selection_preparation:false,projects:input.project_id.as_ref().map(|id|varin_runtime::catalog::dispatch::ChildProjectSource{id:id.clone(),name:"Project B".into(),path:"/registered/project-B".into(),resource_owner:varin_runtime::catalog::launches::SourceResourceOwner::Local}).into_iter().collect(),
+        launch.child_dispatch = Some(varin_runtime::catalog::dispatch::ChildDispatchCatalog { model_selection_preparation:false,projects:input.project_id.as_ref().map(|id|varin_runtime::catalog::dispatch::ChildProjectSource{selection:None,id:id.clone(),name:"Project B".into(),path:"/registered/project-B".into(),resource_owner:varin_runtime::catalog::launches::SourceResourceOwner::Local}).into_iter().collect(),
             native_capabilities: launch.tools.iter().map(|tool| {
                 use varin_runtime::catalog::dispatch::{ChildCapabilityDescriptor, ChildSourceRequirement};
                 ChildCapabilityDescriptor { process: matches!(tool.name.as_str(), "process_spawn" | "process_inspect" | "process_read" | "process_write" | "process_resize" | "wait_process"), name: tool.name.clone(), version: tool.version.clone(),
@@ -836,6 +853,14 @@ impl Fixture {
         }
     }
     pub(crate) fn accept(&mut self) -> varin_runtime::catalog::collaboration::ChildTask {
+        self.try_accept().unwrap()
+    }
+    pub(crate) fn try_accept(
+        &mut self,
+    ) -> Result<
+        varin_runtime::catalog::collaboration::ChildTask,
+        varin_runtime::catalog::RuntimeError,
+    > {
         if self.input.project_id.is_some() {
             let directory = self
                 .db
@@ -864,16 +889,14 @@ impl Fixture {
                 .unwrap()
                 .load()
                 .unwrap();
-            return self.db.accept_child_references(prepared).unwrap();
+            return self.db.accept_child_references(prepared);
         }
-        self.db
-            .accept_child(
-                &self.context,
-                self.input.clone(),
-                self.pin.clone(),
-                self.launch.clone(),
-            )
-            .unwrap()
+        self.db.accept_child(
+            &self.context,
+            self.input.clone(),
+            self.pin.clone(),
+            self.launch.clone(),
+        )
     }
     pub(crate) fn admit_wait(&mut self, suffix: &str) -> Wait {
         self.admit_waits(suffix, 1).remove(0)
@@ -1047,7 +1070,12 @@ impl Fixture {
             let result = ToolResult {
                 request_id: request_id.clone(),
                 call_id: call.call_id,
-                completion: self.db.capture_call_completion(&context.operation_id).unwrap().load().unwrap(),
+                completion: self
+                    .db
+                    .capture_call_completion(&context.operation_id)
+                    .unwrap()
+                    .load()
+                    .unwrap(),
             };
             self.db
                 .commit_execution(

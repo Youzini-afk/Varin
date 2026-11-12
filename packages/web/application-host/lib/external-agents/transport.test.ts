@@ -19,6 +19,16 @@ function fixture() {
 }
 
 describe('external protocol transport', () => {
+  it('uses original managed stop evidence even after its observation stream is lost', async () => {
+    const child = Object.assign(new EventEmitter(), {stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough(),
+      completion:Promise.reject(new Error('observation lost')),exitConfirmed:false,discardOutput:vi.fn(),release:vi.fn(),requestTermination:vi.fn()});
+    let confirm!:()=>void;const proof=new Promise<void>(resolve=>{confirm=resolve;});
+    const closeOwner=vi.fn(()=>proof);const peer=new HarnessTransport(child as unknown as KernelManagedProcess,'rpc',closeOwner);
+    const closing=peer.close();let settled=false;void closing.then(()=>{settled=true;});
+    await Promise.resolve();expect(settled).toBe(false);expect(child.requestTermination).not.toHaveBeenCalled();
+    confirm();await closing;expect(closeOwner).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps typed protocol failure information and method while removing the waiter', async () => {
     const f = fixture();
     const request = f.peer.request('session/new');

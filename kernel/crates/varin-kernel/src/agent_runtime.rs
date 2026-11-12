@@ -677,6 +677,7 @@ pub(crate) fn spawn(
                             "runtime.thread.create"
                                 | "runtime.input.submit"
                                 | "runtime.input.receipt"
+                                | "runtime.input.inheritedReceipt"
                                 | "runtime.input.enqueueReceipt"
                                 | "runtime.input.enqueue"
                                 | "runtime.input.edit"
@@ -1363,6 +1364,7 @@ pub(crate) fn spawn(
                             "runtime.thread.create"
                                 | "runtime.input.submit"
                                 | "runtime.input.receipt"
+                                | "runtime.input.inheritedReceipt"
                                 | "runtime.input.enqueueReceipt"
                                 | "runtime.input.enqueue"
                                 | "runtime.input.edit"
@@ -2002,6 +2004,38 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
+                        if method == "runtime.organization.invocation" {
+                            let catalog = runtime.catalog();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            thread::spawn(move || {
+                                let result = (|| -> Result<Value, KernelError> {
+                                    if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                                    let p: OrganizationInvocationParams = serde_json::from_value(params)?;
+                                    let context = varin_runtime::execution::ToolExecutionContext {
+                                        run_id: p.run_id, origin: p.origin, operation_id: p.operation_id,
+                                    };
+                                    let read = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                                        .capture_tool_invocation(&context, &p.call_id).map_err(domain)?;
+                                    // Body decoding must not hold the Catalog owner lock.
+                                    let snapshot = read.load().map_err(domain)?;
+                                    if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                                    let owner = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+                                    owner.validate_tool_invocation(&snapshot, true).map_err(domain)?;
+                                    Ok(serde_json::to_value(owner.run(&context.run_id).map_err(domain)?)?)
+                                })();
+                                let response = match result {
+                                    Ok(value) => response_ok(&response_id, value),
+                                    Err(error) => response_error(&response_id, &error),
+                                };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            });
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
                         if method == "runtime.resources.refresh"
                             || method == "runtime.resources.snapshot"
                         {
@@ -2387,7 +2421,7 @@ pub(crate) fn spawn(
                         if method == "runtime.bot.history.read" {
                             let p: BotHistoryReadParams = serde_json::from_value(params)?;
                             let read = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                                .capture_bot_history(&p.bot_id, &p.thread_id, &p.branch_id, &p.head_id, &p.item_id).map_err(domain)?;
+                                .capture_bot_history_scoped(&p.bot_id, &p.thread_id, &p.branch_id, &p.head_id, &p.item_id, p.principal_id.map(|value|value.0)).map_err(domain)?;
                             let response_id = id.clone(); let response_sender = responses.clone(); let done = finished.clone(); let cancelled = cancellation.clone();
                             content_tasks.send(Box::new(move || {
                                 let result = read.load(&|| cancelled.load(Ordering::Acquire)).map_err(domain)
@@ -2402,7 +2436,7 @@ pub(crate) fn spawn(
                             let limit = p.limit.map(usize::try_from).transpose().map_err(|_| KernelError::Protocol("activity page size must be positive".into()))?;
                             let before = p.before.map(u64::try_from).transpose().map_err(|_| KernelError::Protocol("activity cursor must be non-negative".into()))?;
                             let read = runtime.catalog().lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                                .capture_bot_activity(&p.bot_id, before, limit).map_err(domain)?;
+                                .capture_bot_activity_scoped(&p.bot_id, before, limit, p.principal_id.map(|value|value.0)).map_err(domain)?;
                             let response_id = id.clone(); let response_sender = responses.clone(); let done = finished.clone(); let cancelled = cancellation.clone();
                             content_tasks.send(Box::new(move || {
                                 let result = read.load(&|| cancelled.load(Ordering::Acquire)).map_err(domain)
@@ -2829,15 +2863,21 @@ pub(crate) fn live_mcp_binding(
 fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value, KernelError> {
     if method == "runtime.bot.matters.list" {
         let p: BotScopeParams = serde_json::from_value(params)?;
-        return Ok(serde_json::to_value(catalog.bot_matters(&p.bot_id).map_err(domain)?)?);
+        return Ok(serde_json::to_value(catalog.bot_matters_scoped(&p.bot_id, p.principal_id.map(|value|value.0)).map_err(domain)?)?);
     }
     if method == "runtime.bot.matters.update" {
+        let mut params = params;
+        let principal = params.as_object_mut().and_then(|object| object.remove("principalId"));
         let p = serde_json::from_value(params)?;
-        return Ok(serde_json::to_value(catalog.update_bot_matter(p, None).map_err(domain)?)?);
+        let result = match principal {
+            Some(value) => catalog.update_bot_matter_scoped(p, serde_json::from_value(value)?),
+            None => catalog.update_bot_matter(p, None),
+        };
+        return Ok(serde_json::to_value(result.map_err(domain)?)?);
     }
     if method == "runtime.bot.scope.inspect" {
         let p: BotScopeParams = serde_json::from_value(params)?;
-        return catalog.inspect_bot_scope_for(&p.bot_id, p.history_only.unwrap_or(false)).map_err(domain);
+        return catalog.inspect_bot_scope_scoped(&p.bot_id, p.history_only.unwrap_or(false), p.principal_id.map(|value|value.0)).map_err(domain);
     }
     if method == "runtime.bot.gate.publish" {
         let p: varin_runtime::catalog::bot::BotGate = serde_json::from_value(params)?;
@@ -2847,12 +2887,15 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
     if method == "runtime.bot.entry.resolve" {
         let p: BotThreadCreateParams = serde_json::from_value(params)?;
         return Ok(serde_json::to_value(
-            catalog.resolve_bot_entry(&p.thread_id, &p.branch_id, &p.bot_id).map_err(domain)?,
+            match p.principal_id {
+                Some(principal) => catalog.resolve_bot_entry_scoped(&p.thread_id, &p.branch_id, &p.bot_id, principal.0),
+                None => catalog.resolve_bot_entry_with_principal(&p.thread_id, &p.branch_id, &p.bot_id, None),
+            }.map_err(domain)?,
         )?);
     }
     if method == "runtime.bot.thread.create" {
         let p: BotThreadCreateParams = serde_json::from_value(params)?;
-        catalog.create_bot_thread(&p.thread_id, &p.branch_id, &p.bot_id).map_err(domain)?;
+        catalog.create_bot_thread_with_organization_defaults(&p.thread_id, &p.branch_id, &p.bot_id, p.principal_id.as_ref().and_then(|value| value.0.as_deref()), p.organization, p.creation_defaults).map_err(domain)?;
         return Ok(json!({"threadId":p.thread_id,"branchId":p.branch_id}));
     }
 
@@ -2902,6 +2945,30 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
     if method == "runtime.thread.inspect" {
         let p: ThreadParams = serde_json::from_value(params)?;
         return catalog.inspect_thread(&p.thread_id).map_err(domain);
+    }
+    if method == "runtime.organization.creationDefaults" {
+        let p: ThreadParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.organization_creation_defaults(&p.thread_id).map_err(domain)?)?);
+    }
+    if method == "runtime.organization.receipt" {
+        let p: OrganizationCommandParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.organization_receipt(p.principal_id.0.as_deref(), &p.command).map_err(domain)?)?);
+    }
+    if method == "runtime.organization.entry" {
+        let p: OrganizationEntryParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.organization_conversation(p.principal_id.0.as_deref(), &p.conversation).map_err(domain)?)?);
+    }
+    if method == "runtime.organization.read" {
+        let p: OrganizationReadParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.organization_snapshot(p.principal_id.0.as_deref(), p.query).map_err(domain)?)?);
+    }
+    if method == "runtime.organization.command" {
+        let p: OrganizationCommandParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.organization_command(p.principal_id.0.as_deref(), p.command).map_err(domain)?)?);
+    }
+    if method == "runtime.organization.initialize" {
+        let p: OrganizationInitializeParams = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.initialize_organization(p.principal_id.0.as_deref(), p.initial).map_err(domain)?)?);
     }
     if method == "runtime.thread.catalog.list" {
         let query: ThreadCatalogQuery = serde_json::from_value(params)?;
@@ -3565,7 +3632,7 @@ impl FamilyCommand {
                     varin_runtime::catalog::family::FamilyListQuery{file_path:p.file_path,parent_thread_id:p.parent_thread_id,parent_branch_id:p.parent_branch_id,workspace_id:p.workspace_id,
                         updated_after_ms:p.updated_after_ms.map(u64::try_from).transpose().map_err(|_|KernelError::Protocol("invalid updatedAfterMs".into()))?,
                         updated_before_ms:p.updated_before_ms.map(u64::try_from).transpose().map_err(|_|KernelError::Protocol("invalid updatedBeforeMs".into()))?,
-                        scope:p.scope,query:p.query,cursor:p.cursor,limit:size(p.limit)?.or(Some(20))},
+                        scope:p.scope,query:p.query,cursor:p.cursor,limit:size(p.limit)?.or(Some(20)),..Default::default()},
                 )
             }
             "runtime.family.runs" => {

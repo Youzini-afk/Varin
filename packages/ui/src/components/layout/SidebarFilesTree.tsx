@@ -1,5 +1,9 @@
+import { projectGitFileLocation, scopedProjectGit } from '@/lib/worktrees/projectGit';
 import React from 'react';
-import { getRuntimeKey } from '@varin/application-client';
+import { useProjectFileLocation, type ProjectFileContext } from '@/hooks/useProjectFileLocation';
+import { projectFileOperations, projectRelativePath } from '@/lib/projectFileOperations';
+import { openProjectResourceFile, resolveProjectEditorWorkspace } from '@/lib/workbench/editors/resource-workspace';
+import { getRuntimeKey, type FilesAPI } from '@varin/application-client';
 
 import { toast } from '@/components/ui';
 import {
@@ -44,11 +48,10 @@ import {
   openWorkbenchEditor,
   renameWorkbenchResourcePrefix,
 } from '@/lib/workbench/editors/session';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useFilesExplorerStore } from '@/stores/useFilesExplorerStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useGitStatus } from '@/stores/useGitStore';
+import { useGitStatus, useGitStore } from '@/stores/useGitStore';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -440,33 +443,49 @@ const MemoizedFileRow = React.memo(FileRow, areFileRowPropsEqual);
 
 // --- Main component ---
 
-export const SidebarFilesTree: React.FC<{
-  onEditorOpen?(): void;
-  openTarget?: 'context' | 'editor';
-}> = ({ onEditorOpen, openTarget = 'context' }) => {
+type SidebarFilesTreeProps = { onEditorOpen?(): void; openTarget?: 'context' | 'editor' };
+export const SidebarFilesTree: React.FC<SidebarFilesTreeProps> = props => {
+  const context = useProjectFileLocation(); const { t } = useI18n();
+  if (context.remote && !context.location) return <div className="p-2 typography-meta" role={context.error ? 'alert' : 'status'}>{context.error ?? t('common.loading')}{context.error && <Button variant="ghost" size="sm" onClick={context.retry}>{t('common.retry')}</Button>}</div>;
+  return <SidebarFilesTreeContent key={context.key} {...props} fileContext={context} />;
+};
+const SidebarFilesTreeContent: React.FC<SidebarFilesTreeProps & { fileContext: ProjectFileContext }> = ({ onEditorOpen, openTarget = 'context', fileContext }) => {
   const { t } = useI18n();
-  const { files, documents, runtime } = useRuntimeAPIs();
-  const workspaceId = useWorkbenchWorkspaceId();
+  const apis = useRuntimeAPIs(); const { runtime } = apis;
+  const localWorkspaceId = useWorkbenchWorkspaceId();
+  const editorContext = React.useMemo(() => fileContext.location ? resolveProjectEditorWorkspace(fileContext.location) : undefined, [fileContext.location]);
+  const workspaceId = editorContext?.workspaceId ?? localWorkspaceId;
+  const documentWorkspaceId = editorContext?.documentWorkspaceId ?? workspaceId;
+  const registry = editorContext?.scope.documents ?? getDocumentRegistry();
+  const documents = editorContext?.scope.api ?? apis.documents;
+  const files: Pick<FilesAPI, 'listDirectory' | 'createDirectory' | 'rename' | 'delete' | 'downloadFile' | 'revealPath'> = React.useMemo(() => fileContext.location ? projectFileOperations(fileContext.location) : apis.files, [fileContext.location, apis.files]);
   const isBrowserClient = isBrowserClientRuntime(runtime.platform);
-  const currentDirectory = useEffectiveDirectory() ?? '';
+  const currentDirectory = fileContext.root;
   const root = normalizePath(currentDirectory.trim());
+  const cacheRoot = fileContext.remote ? fileContext.key : root;
   const showHidden = useDirectoryShowHidden();
   const showGitignored = useFilesViewShowGitignored();
   const searchFiles = useFileSearchStore((state) => state.searchFiles);
   const openContextFile = useUIStore((state) => state.openContextFile);
-  const gitStatus = useGitStatus(currentDirectory);
+  const gitDirectory = React.useMemo(() => fileContext.location ? projectGitFileLocation(fileContext.location) : currentDirectory, [fileContext.location, currentDirectory]);
+  const gitStatus = useGitStatus(gitDirectory ?? null);
+  React.useEffect(() => { const git = gitDirectory ? scopedProjectGit(gitDirectory) : undefined; if (fileContext.location && gitDirectory && git) void useGitStore.getState().ensureStatus(gitDirectory, git); }, [fileContext.location, gitDirectory]);
 
   const [searchQuery, setSearchQuery] = React.useState('');
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 200);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const [searchResults, setSearchResults] = React.useState<FileNode[]>([]);
   const [searching, setSearching] = React.useState(false);
+  const [searchIncomplete, setSearchIncomplete] = React.useState(false);
+  const [searchError, setSearchError] = React.useState<string>();
 
   const [childrenByDir, setChildrenByDir] = React.useState<Record<string, FileNode[]>>({});
   const [loadErrorsByDir, setLoadErrorsByDir] = React.useState<Record<string, string>>({});
   const loadedDirsRef = React.useRef<Set<string>>(new Set());
   const inFlightDirsRef = React.useRef<Set<string>>(new Set());
   const refreshAbortRef = React.useRef<AbortController | null>(null);
+  const mounted = React.useRef(true);
+  React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   // Hydrate the per-root cache on mount or root change. The cache is
   // module-scoped so it survives close-and-reopen of the right sidebar;
@@ -480,7 +499,7 @@ export const SidebarFilesTree: React.FC<{
       loadedDirsRef.current = new Set();
       return;
     }
-    const cached = touchCache(root);
+    const cached = touchCache(cacheRoot);
     if (cached) {
       // Shallow-clone so the state and cache hold independent references.
       // This protects the cache from accidental in-place mutation of state
@@ -493,22 +512,22 @@ export const SidebarFilesTree: React.FC<{
       setLoadErrorsByDir({});
       loadedDirsRef.current = new Set();
     }
-  }, [root]);
+  }, [root, cacheRoot]);
 
   // Mirror local state into the per-root cache. Don't bump touchedAt here:
   // writes are frequent and the LRU should reflect user attention, not
   // background re-renders.
   React.useEffect(() => {
     if (!root) return;
-    const cache = getOrCreateCache(root);
+    const cache = getOrCreateCache(cacheRoot);
     cache.childrenByDir = childrenByDir;
-  }, [root, childrenByDir]);
+  }, [root, cacheRoot, childrenByDir]);
 
   React.useEffect(() => {
     if (!root) return;
-    const cache = getOrCreateCache(root);
+    const cache = getOrCreateCache(cacheRoot);
     cache.loadErrorsByDir = loadErrorsByDir;
-  }, [root, loadErrorsByDir]);
+  }, [root, cacheRoot, loadErrorsByDir]);
 
   // The ref's contents must be persisted to the cache so a remount (e.g.
   // close-and-reopen of the right sidebar) skips re-listing already-known
@@ -517,9 +536,9 @@ export const SidebarFilesTree: React.FC<{
   // `loadDirectory` and isn't tracked by React otherwise.
   React.useEffect(() => {
     if (!root) return;
-    const cache = getOrCreateCache(root);
+    const cache = getOrCreateCache(cacheRoot);
     cache.loadedDirs = new Set(loadedDirsRef.current);
-  }, [root, childrenByDir, loadErrorsByDir]);
+  }, [root, cacheRoot, childrenByDir, loadErrorsByDir]);
 
   // Drop the cache entry for this root on unmount when no data was loaded
   // (e.g. user opened the tab and immediately switched projects before any
@@ -527,15 +546,15 @@ export const SidebarFilesTree: React.FC<{
   // rehydrates instantly.
   React.useEffect(() => () => {
     if (!root) return;
-    const cache = fileTreeCacheByRoot.get(fileTreeCacheKey(root));
+    const cache = fileTreeCacheByRoot.get(fileTreeCacheKey(cacheRoot));
     if (cache && cache.loadedDirs.size === 0 && Object.keys(cache.childrenByDir).length === 0) {
-      dropCacheForRoot(root);
+      dropCacheForRoot(cacheRoot);
     }
-  }, [root]);
+  }, [root, cacheRoot]);
 
   const EMPTY_PATHS: string[] = React.useMemo(() => [], []);
   const EMPTY_CONTEXT_TABS: Array<{ mode: string; targetPath: string | null }> = React.useMemo(() => [], []);
-  const expandedPaths = useFilesExplorerStore((state) => (root ? (state.byRoot[root]?.expandedPaths ?? EMPTY_PATHS) : EMPTY_PATHS));
+  const expandedPaths = useFilesExplorerStore((state) => (root ? (state.byRoot[cacheRoot]?.expandedPaths ?? EMPTY_PATHS) : EMPTY_PATHS));
   const toggleExpandedPath = useFilesExplorerStore((state) => state.toggleExpandedPath);
   const collapseAllExpandedPaths = useFilesExplorerStore((state) => state.collapseAllExpandedPaths);
   const removeExpandedPathsByPrefix = useFilesExplorerStore((state) => state.removeExpandedPathsByPrefix);
@@ -621,7 +640,7 @@ export const SidebarFilesTree: React.FC<{
 
     try {
       const entries = await listPromise;
-      if (isCancelled?.()) return;
+      if (!mounted.current || isCancelled?.()) return;
       const mapped = mapDirectoryEntries(normalizedDir, entries);
 
       loadedDirsRef.current = new Set(loadedDirsRef.current);
@@ -634,7 +653,7 @@ export const SidebarFilesTree: React.FC<{
       });
       setChildrenByDir((prev) => ({ ...prev, [normalizedDir]: mapped }));
     } catch (error) {
-      if (isCancelled?.()) return;
+      if (!mounted.current || isCancelled?.()) return;
       const message = error instanceof Error ? error.message : String(error ?? '');
       console.error('Failed to load sidebar directory:', error);
       setLoadErrorsByDir((prev) => ({
@@ -661,7 +680,7 @@ export const SidebarFilesTree: React.FC<{
       // cached children visible while re-fetching so the tree stays expanded
       // and does not flash/collapse. Read expanded paths from the store at
       // call time so this callback stays stable when directories are toggled.
-      const currentExpanded = useFilesExplorerStore.getState().byRoot[root]?.expandedPaths ?? [];
+      const currentExpanded = useFilesExplorerStore.getState().byRoot[cacheRoot]?.expandedPaths ?? [];
       const normalizedExpanded = currentExpanded
         .map((p) => normalizePath(p))
         .filter((normalized): normalized is string =>
@@ -704,7 +723,7 @@ export const SidebarFilesTree: React.FC<{
         refreshAbortRef.current = null;
       }
     }
-  }, [loadDirectory, root]);
+  }, [loadDirectory, root, cacheRoot]);
 
   /**
    * Incrementally refresh a single directory without nuking the rest of the
@@ -786,9 +805,14 @@ export const SidebarFilesTree: React.FC<{
     }
 
     let cancelled = false;
+    const controller = new AbortController();
     setSearching(true);
+    setSearchError(undefined);
+    setSearchIncomplete(false);
 
-    searchFiles(currentDirectory, trimmedQuery, 150, {
+    searchFiles(currentDirectory, trimmedQuery, fileContext.remote ? Infinity : 150, {
+      location: fileContext.location,
+      signal: controller.signal,
       includeHidden: showHidden,
       respectGitignore: !showGitignored,
       type: 'file',
@@ -807,9 +831,11 @@ export const SidebarFilesTree: React.FC<{
         }));
 
         setSearchResults(mapped);
+        setSearchIncomplete(Boolean(hits.incomplete));
       })
-      .catch(() => {
-        if (!cancelled) {
+      .catch(error => {
+        if (!cancelled && !(error instanceof Error && error.name === 'AbortError')) {
+          setSearchError(error instanceof Error ? error.message : String(error));
           setSearchResults([]);
         }
       })
@@ -821,8 +847,9 @@ export const SidebarFilesTree: React.FC<{
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored]);
+  }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored, fileContext.location, fileContext.remote]);
 
   // --- Git status helpers (matching FilesView) ---
   //
@@ -888,6 +915,10 @@ export const SidebarFilesTree: React.FC<{
 
   const handleOpenFile = React.useCallback(async (node: FileNode) => {
     if (!root) return;
+    if (fileContext.location) {
+      openProjectResourceFile(fileContext.location, projectRelativePath(fileContext.location, node.path), { target: openTarget });
+      onEditorOpen?.(); return;
+    }
 
     if (openTarget === 'editor' && workspaceId) {
       const resourceId = resourceIdFromWorkspacePath(root, node.path);
@@ -905,17 +936,17 @@ export const SidebarFilesTree: React.FC<{
     }
 
     openContextFile(root, node.path);
-  }, [documents, onEditorOpen, openContextFile, openTarget, root, workspaceId]);
+  }, [documents, onEditorOpen, openContextFile, openTarget, root, workspaceId, fileContext.location]);
 
   const toggleDirectory = React.useCallback(async (dirPath: string) => {
     const normalized = normalizePath(dirPath);
     if (!root) return;
 
-    toggleExpandedPath(root, normalized);
+    toggleExpandedPath(root, normalized, cacheRoot);
     if (!loadedDirsRef.current.has(normalized)) {
       await loadDirectory(normalized);
     }
-  }, [loadDirectory, root, toggleExpandedPath]);
+  }, [loadDirectory, root, cacheRoot, toggleExpandedPath]);
 
   // --- Dialog submit (matching FilesView) ---
 
@@ -942,14 +973,14 @@ export const SidebarFilesTree: React.FC<{
       const parentPath = dialogData.path;
       const prefix = parentPath ? `${parentPath}/` : '';
       const newPath = normalizePath(`${prefix}${dialogInputValue.trim()}`);
-      const identity = documentIdentityForPath(workspaceId, root, newPath);
+      const identity = documentIdentityForPath(documentWorkspaceId!, root, newPath);
       if (!identity) {
         toast.error(t('filesView.document.outsideWorkspace'));
         done();
         return;
       }
 
-      await getDocumentRegistry().create(identity, '')
+      await registry.create(identity, '')
         .then(async () => {
           toast.success(t('sidebarFilesTree.toast.fileCreated'));
           await refreshDirectory(parentPath);
@@ -1011,7 +1042,7 @@ export const SidebarFilesTree: React.FC<{
               const to = resourceIdFromWorkspacePath(root, newPath);
               if (from !== null && to !== null) renameWorkbenchResourcePrefix(workspaceId, from, to);
             }
-            if (root) renameExpandedPathsByPrefix(root, oldPath, newPath);
+            if (root) renameExpandedPathsByPrefix(root, oldPath, newPath, cacheRoot);
           }
           closeDialog();
         })
@@ -1038,7 +1069,7 @@ export const SidebarFilesTree: React.FC<{
               const resourceId = resourceIdFromWorkspacePath(root, deletedPath);
               if (resourceId !== null) closeWorkbenchEditorsByResourcePrefix(workspaceId, resourceId);
             }
-            if (root) removeExpandedPathsByPrefix(root, deletedPath);
+            if (root) removeExpandedPathsByPrefix(root, deletedPath, cacheRoot);
           }
           closeDialog();
         })
@@ -1048,7 +1079,7 @@ export const SidebarFilesTree: React.FC<{
     }
 
     done();
-  }, [activeDialog, dialogData, dialogInputValue, files, refreshDirectory, removeExpandedPathsByPrefix, renameExpandedPathsByPrefix, root, t, workspaceId]);
+  }, [activeDialog, dialogData, dialogInputValue, files, refreshDirectory, removeExpandedPathsByPrefix, renameExpandedPathsByPrefix, root, cacheRoot, documentWorkspaceId, registry, t, workspaceId]);
 
   // --- Tree rendering (matching FilesView with indent guides) ---
 
@@ -1167,7 +1198,7 @@ export const SidebarFilesTree: React.FC<{
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  if (root) collapseAllExpandedPaths(root);
+                  if (root) collapseAllExpandedPaths(root, cacheRoot);
                 }}
                 className="h-8 w-8 p-0 flex-shrink-0"
                 title={t('sidebarFilesTree.actions.collapseAllTitle')}
@@ -1207,6 +1238,8 @@ export const SidebarFilesTree: React.FC<{
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="p-2">
         <ul className="flex flex-col">
+          {debouncedSearchQuery.trim() && searchError ? <li role="alert">{searchError}</li> : null}
+          {debouncedSearchQuery.trim() && searchIncomplete ? <li role="status">{t('files.search.incomplete')}</li> : null}
           {searching ? (
             <li className="flex items-center gap-1.5 px-2 py-1 typography-meta text-muted-foreground">
               <Icon name="loader-4" className="h-4 w-4 animate-spin" />

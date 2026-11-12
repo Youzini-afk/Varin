@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import type { ProjectEntry } from '@varin/application-client';
+import type { ProjectEntry, ConversationOrganizationCommand } from '@varin/application-client';
 import { isWorkFocusId, type WorkFocusId } from '@varin/protocol';
 import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { projectFolders, projectPathKey, parseVersionedProjectWorkspace } from '@varin/application-client';
+import { projectFolders, projectPathKey, parseProjectSourceBinding, projectResourceOwnerKey, parseVersionedProjectWorkspace } from '@varin/application-client';
 import { NO_ACTIVE_PROJECT_STORAGE_VALUE } from '@/lib/projectSelection';
 import { getDeferredSafeStorage } from './utils/safeStorage';
 import { useDirectoryStore } from './useDirectoryStore';
@@ -12,7 +12,8 @@ import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { PROJECT_COLORS } from '@/lib/projectMeta';
 import {projectExecutionPath} from '@/lib/nativeWorkspace';
 import { runtimeFetch } from '@varin/application-client';
-import { getRuntimeApiBaseUrl } from '@varin/application-client';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
+import { getRuntimeEndpointGeneration, getRuntimeApiBaseUrl } from '@varin/application-client';
 
 /** Pick a color key that's least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
@@ -43,9 +44,9 @@ interface ProjectsStore {
   activeProjectId: string | null;
   manualProjectOrder: string[];
 
-  addProject: (path: string, options?: { label?: string; id?: string; additionalPaths?: string[] }) => Promise<ProjectEntry | null>;
-  updateProjectFolders: (id: string, folders: string[]) => Promise<void>;
-  removeProject: (id: string) => void;
+  addProject: (path: string, options?: { label?: string; id?: string; additionalPaths?: string[]; source?: ProjectEntry['source'] }) => Promise<ProjectEntry | null>;
+  updateProjectFolders: (id: string, folders: string[], source?: ProjectEntry['source']) => Promise<void>;
+  removeProject: (id: string) => Promise<void>;
   setActiveProject: (id: string | null) => Promise<boolean>;
   setActiveProjectIdOnly: (id: string | null) => void;
   renameProject: (id: string, label: string) => void;
@@ -238,7 +239,9 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
     if (!rawPath) continue;
 
-    const normalizedPath = normalizeProjectPath(rawPath);
+    const source = parseProjectSourceBinding(candidate.source);
+    const normalize = source?.resourceOwner.kind === 'managed_host' ? (value: string) => value.trim() : normalizeProjectPath;
+    const normalizedPath = normalize(rawPath);
     if (!normalizedPath) continue;
 
     const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
@@ -250,9 +253,10 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     const project: ProjectEntry = {
       id,
       path: normalizedPath,
+      ...(source ? { source } : {}),
       additionalPaths: projectFolders({ path: normalizedPath, additionalPaths: Array.isArray(candidate.additionalPaths)
         ? candidate.additionalPaths.filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
-          .map(normalizeProjectPath)
+          .map(normalize)
         : [] }).slice(1),
     };
 
@@ -379,6 +383,7 @@ const persistProjects = async (
 };
 
 let activeProjectSelectionGeneration = 0;
+const pendingProjectRemovals = new Map<string, ConversationOrganizationCommand>();
 
 const persistManualProjectOrder = (manualOrder: string[]) => {
   try {
@@ -413,16 +418,21 @@ export const useProjectsStore = create<ProjectsStore>()(
       return { ok: true, normalizedPath: normalized };
     },
 
-    addProject: async (path: string, options?: { label?: string; id?: string; additionalPaths?: string[] }) => {
+    addProject: async (path: string, options?: { label?: string; id?: string; additionalPaths?: string[]; source?: ProjectEntry['source'] }) => {
+      const retained = options?.id ? get().projects.find(project => project.id === options.id) : undefined;
+      if (retained) {
+        if (!await persistProjects(get().projects, retained.id, get().manualProjectOrder)) throw new Error('Project registration outcome is unknown; retry with the same project.');
+        return retained;
+      }
       const { validateProjectPath } = get();
       const validation = validateProjectPath(path);
       if (!validation.ok || !validation.normalizedPath) {
         return null;
       }
 
-      const normalizedPath = validation.normalizedPath;
+      const normalizedPath = options?.source?.resourceOwner.kind === 'managed_host' ? path.trim() : validation.normalizedPath;
       const existing = options?.label || options?.additionalPaths?.length ? undefined
-        : get().projects.find((project) => projectPathKey(project.path) === projectPathKey(normalizedPath));
+        : get().projects.find((project) => projectResourceOwnerKey(project) === projectResourceOwnerKey({ source: options?.source }) && projectPathKey(project.path) === projectPathKey(normalizedPath));
       if (existing) {
         if (!await get().setActiveProject(existing.id)) {
           throw new Error('Failed to persist the selected workspace.');
@@ -436,7 +446,8 @@ export const useProjectsStore = create<ProjectsStore>()(
       const entry: ProjectEntry = {
         id,
         path: normalizedPath,
-        additionalPaths: projectFolders({ path: normalizedPath, additionalPaths: options?.additionalPaths?.map(normalizeProjectPath) }).slice(1),
+        ...(options?.source ? { source: options.source } : {}),
+        additionalPaths: projectFolders({ path: normalizedPath, additionalPaths: options?.additionalPaths?.map(options.source?.resourceOwner.kind === 'managed_host' ? (value: string) => value.trim() : normalizeProjectPath) }).slice(1),
         label,
         color: pickAutoColor(get().projects),
         addedAt: now,
@@ -452,27 +463,28 @@ export const useProjectsStore = create<ProjectsStore>()(
 
       const activated = await get().setActiveProject(entry.id);
       if (!activated) {
-        const current = get();
-        const remainingProjects = current.projects.filter((project) => project.id !== entry.id);
-        set({ projects: remainingProjects });
-        cacheProjects(remainingProjects, current.activeProjectId);
-        throw new Error('Failed to persist the selected workspace.');
+        // Settings may have committed before its response was lost. Retain the stable
+        // entry so retry verifies/reuses it instead of creating a second project.
+        throw new Error('Project registration outcome is unknown; retry with the same project.');
       }
-      void get().discoverProjectIcon(entry.id);
+      if (entry.source?.resourceOwner.kind !== 'managed_host') void get().discoverProjectIcon(entry.id);
       return entry;
     },
 
-    updateProjectFolders: async (id, folders) => {
-      const normalized = folders.map(normalizeProjectPath).filter(Boolean);
+    updateProjectFolders: async (id, folders, source) => {
+      const host = getRuntimeEndpointGeneration();
+      const binding = source ?? get().projects.find(project => project.id === id)?.source;
+      const normalized = folders.map(binding?.resourceOwner.kind === 'managed_host' ? (value: string) => value.trim() : normalizeProjectPath).filter(Boolean);
       const path = normalized[0];
       if (!path) throw new Error('A project needs at least one folder.');
       const current = get();
       const previous = current.projects.find((project) => project.id === id);
       if (!previous) throw new Error('Project no longer exists.');
-      const updated = { ...previous, path, additionalPaths: projectFolders({ path, additionalPaths: normalized.slice(1) }).slice(1) };
+      const updated = { ...previous, source: binding, path, additionalPaths: projectFolders({ path, additionalPaths: normalized.slice(1) }).slice(1) };
       const projects = current.projects.map((project) => project.id === id ? updated : project);
       set({ projects });
       if (!await persistProjects(projects, current.activeProjectId, current.manualProjectOrder).catch(() => false)) {
+        if (host !== getRuntimeEndpointGeneration()) throw new Error('Project Host changed');
         const rollback = get().projects.map((project) => project === updated ? previous : project);
         set({ projects: rollback });
         cacheProjects(rollback, get().activeProjectId);
@@ -480,7 +492,26 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
     },
 
-    removeProject: (id: string) => {
+    removeProject: async (id: string) => {
+      const api = getRegisteredRuntimeAPIs()?.conversationOrganization;
+      if (!api) throw new Error('Conversation organization is unavailable; project was not removed.');
+      const host = getRuntimeEndpointGeneration();
+      const key = `${host}:${id}`;
+      let command = pendingProjectRemovals.get(key);
+      if (!command) {
+        const snapshot = await api.read();
+        if (host !== getRuntimeEndpointGeneration()) throw new Error('Project Host changed');
+        const node = snapshot.containers.find(container => container.projectId === id);
+        if (node) {
+          const parent = snapshot.containers.find(container => container.id === node.parentId);
+          command = { key: `project-remove:${crypto.randomUUID()}`, operation: { action: 'dissolve', id: node.id,
+            expectedRevision: node.revision, parents: [
+              { containerId: node.parentId, childrenRevision: parent?.childrenRevision ?? snapshot.rootRevision },
+              { containerId: node.id, childrenRevision: node.childrenRevision },
+            ] } };
+          pendingProjectRemovals.set(key, command);
+        }
+      }
       const current = get();
       const nextProjects = current.projects.filter((project) => project.id !== id);
       let nextActiveId = current.activeProjectId;
@@ -490,9 +521,19 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       const nextManualOrder = get().manualProjectOrder.filter((oid) => oid !== id);
+      if (!await persistProjects(nextProjects, nextActiveId, nextManualOrder)) throw new Error('Project removal outcome is unknown; retry to verify it.');
+      if (host !== getRuntimeEndpointGeneration()) throw new Error('Project Host changed');
       set({ projects: nextProjects, activeProjectId: nextActiveId, manualProjectOrder: nextManualOrder });
       activeProjectSelectionGeneration += 1;
-      void persistProjects(nextProjects, nextActiveId, nextManualOrder);
+      if (command) {
+        const result = await api.project({ projectId: id, command });
+        if (host !== getRuntimeEndpointGeneration()) throw new Error('Project Host changed');
+        if (result.navigation !== 'completed') {
+          if (result.failure?.code === 'conflict') pendingProjectRemovals.delete(key);
+          throw new Error(`Project registration removed; navigation cleanup is pending. ${result.failure?.message ?? 'Retry to complete it.'}`);
+        }
+        pendingProjectRemovals.delete(key);
+      }
 
       if (nextActiveId) {
         const nextActive = nextProjects.find((project) => project.id === nextActiveId);
@@ -529,7 +570,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         return false;
       }
 
-      const executionPath=await projectExecutionPath(target).catch(()=>null);
+      const executionPath=target.source?.resourceOwner.kind === 'managed_host' ? target.path : await projectExecutionPath(target).catch(()=>null);
       if(!executionPath||selectionGeneration!==activeProjectSelectionGeneration)return false;
       const now = Date.now();
       const nextProjects = projects.map((project) =>
@@ -543,7 +584,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         return false;
       }
       set({ projects: nextProjects, activeProjectId: id });
-      useDirectoryStore.getState().setDirectory(executionPath, { showOverlay: false });
+      if (target.source?.resourceOwner.kind !== 'managed_host') useDirectoryStore.getState().setDirectory(executionPath, { showOverlay: false });
       return true;
     },
 
@@ -782,7 +823,7 @@ export const useProjectsStore = create<ProjectsStore>()(
 
       if (incomingActive) {
         const activeProject = incomingProjects.find((project) => project.id === incomingActive);
-        if (activeProject) {
+        if (activeProject && activeProject.source?.resourceOwner.kind !== 'managed_host') {
           const selectedGeneration=activeProjectSelectionGeneration;
           void projectExecutionPath(activeProject).then(directory=>{
             if(selectedGeneration===activeProjectSelectionGeneration&&get().activeProjectId===activeProject.id)useDirectoryStore.getState().setDirectory(directory,{showOverlay:false});

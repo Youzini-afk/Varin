@@ -21,7 +21,9 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useProjectFileLocation } from '@/hooks/useProjectFileLocation';
+import { openProjectResourceFile } from '@/lib/workbench/editors/resource-workspace';
+import { projectRelativePath } from '@/lib/projectFileOperations';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { toast } from '@/components/ui';
@@ -103,7 +105,8 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
   const catalogLoading = useThreadStore(state => state.catalogLoading);
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const projects = useProjectsStore((s) => s.projects);
-  const effectiveDirectory = useEffectiveDirectory();
+  const fileContext = useProjectFileLocation(isCommandPaletteOpen);
+  const effectiveDirectory = fileContext.root;
   const searchFiles = useFileSearchStore((s) => s.searchFiles);
   const { documents } = useRuntimeAPIs();
   const { isMobile } = useDeviceInfo();
@@ -226,8 +229,9 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
   // ---------------------------------------------------------------------------
   const [fileResults, setFileResults] = React.useState<FileHit[]>([]);
   const [fileResultsKey, setFileResultsKey] = React.useState('');
+  const [fileSearchError, setFileSearchError] = React.useState<string>();
 
-  const fileSearchKey = buildCommandPaletteFileSearchKey(currentRoot, trimmedQuery);
+  const fileSearchKey = buildCommandPaletteFileSearchKey(fileContext.remote ? fileContext.key : currentRoot, trimmedQuery);
 
   React.useEffect(() => {
     if (!isCommandPaletteOpen) {
@@ -240,13 +244,15 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
       setFileResultsKey('');
       return;
     }
-    if (!currentRoot) {
+    if (!currentRoot || fileContext.remote && !fileContext.location) {
       setFileResults([]);
       setFileResultsKey('');
       return;
     }
     let cancelled = false;
-    void searchFiles(currentRoot, trimmedQuery, 10, { type: 'file' })
+    const controller = new AbortController();
+    setFileSearchError(undefined);
+    void searchFiles(currentRoot, trimmedQuery, 10, { type: 'file', location: fileContext.location, signal: controller.signal })
       .then((results) => {
         if (cancelled) return;
         setFileResults(
@@ -258,16 +264,18 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
         );
         setFileResultsKey(fileSearchKey);
       })
-      .catch(() => {
-        if (!cancelled) {
+      .catch(error => {
+        if (!cancelled && !(error instanceof Error && error.name === 'AbortError')) {
+          setFileSearchError(error instanceof Error ? error.message : String(error));
           setFileResults([]);
           setFileResultsKey(fileSearchKey);
         }
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [isCommandPaletteOpen, currentRoot, trimmedQuery, fileSearchKey, searchFiles]);
+  }, [isCommandPaletteOpen, currentRoot, trimmedQuery, fileSearchKey, searchFiles, fileContext.location, fileContext.remote]);
 
   // ---------------------------------------------------------------------------
   // Filter visible items
@@ -360,6 +368,10 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
   const handleOpenFile = React.useCallback(
     async (filePath: string) => {
       if (!currentRoot) return;
+      if (fileContext.remote) {
+        if (!fileContext.location) return;
+        openProjectResourceFile(fileContext.location, projectRelativePath(fileContext.location, filePath), { target: fileOpenTarget }); close(); return;
+      }
       if (fileOpenTarget === 'editor' && workspaceId) {
         const resourceId = resourceIdFromWorkspacePath(currentRoot, filePath);
         if (!resourceId) {
@@ -378,7 +390,7 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
       openContextFile(currentRoot, filePath);
       close();
     },
-    [close, currentRoot, documents, fileOpenTarget, openContextFile, workspaceId],
+    [close, currentRoot, documents, fileOpenTarget, openContextFile, workspaceId, fileContext.location, fileContext.remote],
   );
 
   const handleOpenProject = React.useCallback(
@@ -417,6 +429,7 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
             placeholder={t('commandPalette.input.placeholder')}
           />
           <CommandList>
+            {(fileContext.error || fileSearchError) ? <div role="alert">{fileContext.error || fileSearchError}</div> : null}
             <CommandEmpty>{t('commandPalette.empty.noResults')}</CommandEmpty>
 
             {groupOrder.map((groupKey) => {

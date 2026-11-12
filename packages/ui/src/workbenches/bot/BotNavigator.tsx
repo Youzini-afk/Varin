@@ -1,3 +1,6 @@
+import { useConversationOrganization } from '@/stores/useConversationOrganizationStore';
+import { ConversationOrganizationTree } from '@/components/conversation/ConversationOrganizationTree';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import React from 'react';
 import type { BotSummary, ThreadIdentity } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
@@ -56,6 +59,10 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
   onOpenSettings(event: React.MouseEvent<HTMLButtonElement>): void;
 }) {
   const { t } = useI18n();
+  const apis = useRuntimeAPIs();
+  useConversationOrganization();
+  const [conversationArchived, setConversationArchived] = React.useState(false);
+  const [conversationScope, setConversationScope] = React.useState<'bots' | 'current' | 'all'>('bots');
   const list = React.useRef<HTMLDivElement>(null);
   const [query, setQuery] = React.useState('');
   const [searching, setSearching] = React.useState(false);
@@ -143,6 +150,8 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
         placeholder={t('bot.session.search')} aria-label={t('bot.session.search')}
         className="h-8 w-full rounded-md border border-border bg-transparent px-2.5 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]" />
     </div> : null}
+    {apis.conversationOrganization && <div className="flex gap-1 px-2.5 pb-2" role="group" aria-label={t('organization.scope')}>{([['bots', t('organization.bots')], ['current', t('organization.currentBot')], ['all', t('organization.allConversations')]] as const).map(([scope, label]) => <Button key={scope} variant={conversationScope === scope ? 'secondary' : 'ghost'} size="sm" disabled={scope === 'current' && !selectedId} onClick={() => setConversationScope(scope)}>{label}</Button>)}</div>}
+    {apis.conversationOrganization && conversationScope !== 'bots' ? <><Button variant="ghost" size="sm" onClick={() => setConversationArchived(value => !value)}>{conversationArchived ? t('organization.activeConversations') : t('organization.archivedConversations')}</Button><ConversationOrganizationTree archived={conversationArchived} query={query} botId={conversationScope === 'current' ? selectedId ?? undefined : undefined} viewKey="bot" /></> : <>
     <div ref={list} className="bot-nav-list min-h-0 flex-1 overflow-y-auto px-2.5">
       {organization.error && <p role="alert" className="px-2 py-2 typography-meta text-destructive">{organization.error} <button type="button" className="underline" onClick={() => { void organization.refresh(); }}>{t('common.retry')}</button></p>}
       <BotOrganizationList bots={shownBots} organization={organization} selectedId={selectedId} query={query} scope={scope} onDialog={setOrganizationDialog} renderBot={bot => {
@@ -189,6 +198,7 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
       {needle && !shownBots.length && <p role="status" className="px-2 py-3 typography-meta text-muted-foreground">{t('bot.groups.noMatch')}</p>}
       {bots && !bots.some(bot => bot.archived === showArchived) ? <p className="px-2 py-3 typography-meta text-muted-foreground">{t(showArchived ? 'settings.bots.archivedEmpty' : 'settings.bots.empty')}</p> : null}
     </div>
+    </>}
     <div className="border-t border-border px-2.5 py-2">
       <button type="button" disabled={busy || !bots} onClick={onCreateBot} className={rowClass}>
         <Icon name="add" className="size-4 shrink-0" />{t('settings.bots.create')}

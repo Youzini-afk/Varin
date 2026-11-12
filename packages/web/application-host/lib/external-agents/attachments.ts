@@ -88,7 +88,7 @@ export async function prepareHarnessInput(
     } else {
       if (!capabilities.files) throw new ExternalAgentError('attachment_unsupported', `This Agent cannot receive ${attachment.filename}: neither a supported native block nor an execution-host file path is available`);
       const prepared = await owner!.externalPath(conversation, attachment.ref, signal);
-      if (!path.isAbsolute(prepared.path) || !prepared.kernelEpoch) throw new ExternalAgentError('attachment_path_unavailable', `No current execution-host path is available for ${attachment.filename}`);
+      if (!(path.posix.isAbsolute(prepared.path) || path.win32.isAbsolute(prepared.path)) || !prepared.kernelEpoch) throw new ExternalAgentError('attachment_path_unavailable', `No current execution-host path is available for ${attachment.filename}`);
       files.push({ attachment, path: prepared.path });
       const reference = boundImages[attachment.ref];
       if (reference !== undefined) imageLabels.push(`[Image ${reference}] / [图片${reference}]: ${JSON.stringify(attachment.filename)}`);

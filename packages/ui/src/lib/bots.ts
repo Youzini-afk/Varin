@@ -29,7 +29,7 @@ export const clearBotMemoryHistory = (id: string, ids: number[]) => { const acti
 export const ensureBotEntry = (id: string, signal?: AbortSignal) => api().entry(id, signal);
 export const listBotWork = (id: string, signal?: AbortSignal) => api().work(id, signal);
 export const listBotSessions = (id: string, signal?: AbortSignal) => api().sessions.list(id, signal);
-export const createBotSession = (id: string) => api().sessions.create(id);
+export const createBotSession = (id: string, options?: Parameters<ReturnType<typeof api>['sessions']['create']>[1]) => api().sessions.create(id, options);
 export const listBotMatters = (id: string, signal?: AbortSignal) => api().matters.list(id, signal);
 // Panel reads report a missing service as a failed read rather than throwing inside an effect.
 export const readBotActivity = async (id: string, page?: { before?: number; limit?: number }, signal?: AbortSignal) => api().activity(id, page, signal);

@@ -1,4 +1,5 @@
 import React from 'react';
+import type { ProjectEntry } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -23,7 +24,7 @@ import {
   saveWorktreeSetupCommands,
   saveWorktreeSetupWaitEnabled,
 } from '@/lib/project-config';
-import { listProjectWorktrees, removeProjectWorktree } from '@/lib/worktrees/worktreeManager';
+import { listProjectWorktrees, removeProjectWorktree, remoteWorktreeProject } from '@/lib/worktrees/worktreeManager';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { formatPathForDisplay, cn } from '@/lib/utils';
 import {
@@ -33,7 +34,7 @@ import {
 import { useI18n } from '@/lib/i18n';
 
 export interface WorktreeSectionContentProps {
-  projectRef?: { id: string; path: string } | null;
+  projectRef?: { id: string; path: string; source?: ProjectEntry['source'] } | null;
   /**
    * 'all' renders setup commands + the worktree list (settings panel);
    * 'list-only' renders just the list (the Worktrees page — setup commands
@@ -50,6 +51,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   const alwaysShowActions = isMobile || isTablet;
   const activeProject = useProjectsStore((state) => state.getActiveProject());
 
+  const registeredSource = useProjectsStore(state => state.projects.find(project => project.id === (projectRefProp?.id ?? activeProject?.id))?.source);
   const projectPath = projectRefProp?.path ?? activeProject?.path ?? null;
 
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
@@ -58,6 +60,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   const [waitForSetupCommands, setWaitForSetupCommands] = React.useState(false);
   const [isLoadingCommands, setIsLoadingCommands] = React.useState(false);
   const [commandsSnapshot, setCommandsSnapshot] = React.useState<string | null>(null);
+  const [worktreeError, setWorktreeError] = React.useState<string | null>(null);
   const [isGitRepoLocal, setIsGitRepoLocal] = React.useState<boolean | null>(null);
   const [availableWorktrees, setAvailableWorktrees] = React.useState<WorktreeMetadata[]>([]);
   const [isLoadingWorktrees, setIsLoadingWorktrees] = React.useState(false);
@@ -71,13 +74,13 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
 
   const projectRef = React.useMemo(() => {
     if (projectRefProp?.id && projectRefProp?.path) {
-      return { id: projectRefProp.id, path: projectRefProp.path };
+      return { id: projectRefProp.id, path: projectRefProp.path, source: projectRefProp.source ?? registeredSource };
     }
     if (!activeProject?.id || !projectPath) {
       return null;
     }
-    return { id: activeProject.id, path: projectPath };
-  }, [activeProject?.id, projectPath, projectRefProp?.id, projectRefProp?.path]);
+    return { id: activeProject.id, path: projectPath, source: registeredSource };
+  }, [activeProject?.id, projectPath, projectRefProp?.id, projectRefProp?.path, projectRefProp?.source, registeredSource]);
 
   const refreshWorktrees = React.useCallback(async () => {
     if (!projectRef || isGitRepoLocal === false) return;
@@ -85,8 +88,9 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     try {
       const worktrees = await listProjectWorktrees(projectRef);
       setAvailableWorktrees(worktrees);
-    } catch {
-      // Ignore errors
+      setWorktreeError(null);
+    } catch (reason) {
+      setWorktreeError(reason instanceof Error ? reason.message : String(reason));
     }
   }, [projectRef, isGitRepoLocal]);
 
@@ -98,6 +102,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
 
     (async () => {
       try {
+        if (projectRef && remoteWorktreeProject(projectRef)) { if (!cancelled) setIsGitRepoLocal(true); return; }
         const repoStatus = await checkIsGitRepository(await projectExecutionPath({id:projectRef?.id??'',path:projectPath}));
         if (cancelled) return;
         setIsGitRepoLocal(repoStatus);
@@ -109,7 +114,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     return () => {
       cancelled = true;
     };
-  }, [projectPath]);
+  }, [projectPath, projectRef]);
 
   React.useEffect(() => {
     if (!projectRef) {
@@ -133,8 +138,9 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
         const worktrees = await listProjectWorktrees(projectRef);
         if (cancelled) return;
         setAvailableWorktrees(worktrees);
-      } catch {
-        // ignore
+        setWorktreeError(null);
+      } catch (reason) {
+        if (!cancelled) setWorktreeError(reason instanceof Error ? reason.message : String(reason));
       } finally {
         if (!cancelled) {
           setIsLoadingWorktrees(false);
@@ -345,6 +351,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
 
   return (
     <>
+      {worktreeError && <p role="alert" className="typography-meta text-destructive">{worktreeError} <Button size="sm" variant="ghost" onClick={() => void refreshWorktrees()}>{t('common.retry')}</Button></p>}
       {sections === 'all' ? (
       <ProjectSettingsSubsection
         title={t('settings.projects.page.section.worktree')}

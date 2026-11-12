@@ -16,7 +16,9 @@ function fixture() {
   const credentialOwner = new ExistingHostCredentialOwner({ runtime: { getAuth: async () => undefined }, providerId: 'provider', providerFamily: 'fixture',
     currentScope: async () => ({ reference: 'fixture', authority: 'fixture', account: 'fixture', generation: 1 }), endpoint: configuration.endpoint, allowAnonymous: true });
   const runtime = {
+    createThread: vi.fn<AgentRuntimeClient['createThread']>(async (threadId, branchId) => ({ threadId, branchId })),
     inputReceipt: vi.fn<AgentRuntimeClient['inputReceipt']>(async () => null),
+    inheritedInputReceipt: vi.fn<AgentRuntimeClient['inheritedInputReceipt']>(async () => null),
     thread: vi.fn(async () => ({ thread_id: identity.threadId, branches: [{ branch_id: identity.branchId, active_run_id: 'run', latest_run: { id: 'run', configuration } }] })),
     submit: vi.fn(async () => ({ thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'run', input_id: 'input', cursor: 1 })),
   };
@@ -144,4 +146,35 @@ it('applies the same pre-admission boundary to queue and delegated child sends',
   await expect(f.api.collaboration!.continueChild(continuation)).rejects.toMatchObject({ admission: 'not_started' });
   f.queued.acceptChildContinuation.mockRejectedValueOnce(new Error('lost continuation receipt'));
   await expect(f.api.collaboration!.continueChild(continuation)).rejects.toMatchObject({ admission: undefined });
+});
+
+it('replays an accepted inherited-source input before consulting a now-offline project owner', async () => {
+  const f = fixture(); const receipt = { thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'run', input_id: 'input', cursor: 1 };
+  f.runtime.inheritedInputReceipt.mockResolvedValue(receipt);
+  const offline = vi.fn(async (): Promise<never> => { throw new Error('Original project is now offline'); }); f.adapter.bindDefaultDeviceSource(offline);
+  expect(await f.api.submit(input)).toEqual(receipt); expect(offline).not.toHaveBeenCalled(); expect(f.runtime.submit).not.toHaveBeenCalled();
+  expect(f.runtime.inheritedInputReceipt).toHaveBeenCalledWith(expect.objectContaining({ input: expect.objectContaining({ text: 'Original' }), launch: expect.objectContaining({ inheritSource: true, source: null }) }));
+});
+it('does not treat an original-source intent mismatch as authorization to accept a replacement', async () => {
+  const f = fixture(); f.runtime.inheritedInputReceipt.mockRejectedValue(new KernelClientError({ code: 'operation-error', message: 'operation error: conflict: idempotency key has different input' }));
+  const prepare = vi.fn(); f.adapter.bindDefaultDeviceSource(prepare);
+  await expect(f.api.submit(input)).rejects.toMatchObject({ code: 'thread-conflict' }); expect(prepare).not.toHaveBeenCalled(); expect(f.runtime.submit).not.toHaveBeenCalled();
+});
+
+it('preserves explicit chat-only source through HTTP without applying creation defaults', async () => {
+  const f = fixture(); const prepare = vi.fn(async (): Promise<never> => { throw new Error('Project offline'); });
+  f.adapter.bindDefaultDeviceSource(prepare);
+  await expect(f.api.submit({ ...input, source: null })).resolves.toMatchObject({ run_id: 'run' });
+  expect(prepare).not.toHaveBeenCalled(); expect(f.runtime.inheritedInputReceipt).not.toHaveBeenCalled();
+  expect(f.runtime.submit).toHaveBeenCalledWith(expect.objectContaining({ launch: expect.objectContaining({ inheritSource: false, source: null, enabledTools: [] }) }));
+});
+
+it('accepts the selected organization placement through the public create HTTP allowlist', async () => {
+  const f = fixture();
+  const result = await f.api.create('organized-draft', { organization: { containerId: 'project-group' } });
+  expect(f.runtime.createThread).toHaveBeenCalledWith(result.threadId, result.branchId, undefined, undefined, { containerId: 'project-group' }, undefined);
+  await f.api.create('explicit-root', { organization: { containerId: null } });
+  expect(f.runtime.createThread.mock.calls.at(-1)?.[4]).toEqual({ containerId: null });
+  await expect(f.api.create('malformed', { organization: { containerId: 'group', principalId: 'forged' } as never })).rejects.toMatchObject({ status: 400 });
+  expect(f.runtime.createThread).toHaveBeenCalledTimes(2);
 });

@@ -30,7 +30,7 @@ export function createThreadObjectInputPreparer(owners: {
   runtime: Pick<AgentRuntimeClient, 'familyList' | 'thread' | 'launch'>;
   admitSource(source: ThreadSource, identity: ThreadIdentity, runId?: string, signal?: AbortSignal): Promise<void>;
 }) {
-  return async (input: ThreadIdentity & { text: string; references: ThreadObjectReference[]; source?: ThreadSource }, signal?: AbortSignal): Promise<string> => {
+  return async (input: ThreadIdentity & { text: string; references: ThreadObjectReference[]; source?: ThreadSource | null }, signal?: AbortSignal): Promise<string> => {
     input = { ...input, ...(input.source ? { source: structuredClone(input.source) } : {}) };
     const references = parseThreadObjectReferences(input.references, input.text) ?? [];
     if (!references.length) return input.text;
@@ -50,7 +50,7 @@ export function createThreadObjectInputPreparer(owners: {
     let source = input.source;
     let runId: string | undefined;
     if (references.some(item => item.kind === 'directory')) {
-      if (!source) {
+      if (source === undefined) {
         const thread = await owners.runtime.thread(input.threadId, signal);
         const branch = thread?.branches.find(item => item.branch_id === input.branchId);
         runId = branch?.active_run_id ?? branch?.latest_run?.id;

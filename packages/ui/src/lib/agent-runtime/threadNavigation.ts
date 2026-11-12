@@ -1,4 +1,5 @@
-import { getRuntimeEndpointGeneration, type ThreadIdentity } from '@varin/application-client';
+import { freezeProjectSourceSelection } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, projectResourceOwnerKey, projectContainsPath, type ThreadIdentity } from '@varin/application-client';
 import { useThreadStore, threadComposerKey } from '@/stores/useThreadStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { noteSwitchDirection } from '@/lib/motion/switchDirection';
@@ -9,6 +10,10 @@ import { getVarinExtensionCatalogState } from '@/lib/extensions/catalog-store';
 import { selectActiveWorkbenchProfile } from '@/lib/extensions/workbench-shell-transition';
 import { varinSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 import { getBot, openBotConversation } from '@/lib/bots';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
+import type { ConversationOrganizationPlacement } from '@varin/application-client';
+import type { DraftSourceSelection } from '@/stores/useThreadDraftStore';
 
 let navigation = 0;
 export const currentWorkbenchProfileId = (): string | null => {
@@ -37,17 +42,18 @@ export async function openThreadFromNavigation(target: { threadId: string; branc
   };
   const { identity, botId, parentThreadId } = await useThreadStore.getState().resolveThread(target);
   current();
-  const bot = botId ? await getBot(botId) : null;
-  current();
-  if (botId && (!bot || bot.id !== botId)) throw new Error('Conversation Bot is unavailable on this Host');
-  // A Bot's own conversations stay in the Bot workbench. Its delegated work is an ordinary
-  // execution Thread and opens where its files, terminals and collaboration live.
-  const botConversation = Boolean(bot) && !parentThreadId;
-  const select = () => { void useThreadStore.getState().selectThread(identity).catch(() => {}); };
-  await selectConversationShell(botConversation, current, select);
-  current();
-  if (bot && botConversation) await openBotConversation(bot.id, identity, null, bot.archived);
-  else {
+  const botConversation = Boolean(botId) && !parentThreadId;
+  // Direct Bot conversations are the same Thread in every Shell. A chosen workbench/IDE
+  // is not replaced merely because its navigation target happens to belong to a Bot.
+  const inBotShell = currentWorkbenchProfileId() === VARIN_WORKBENCH_BOT_PROFILE_ID;
+  if (botConversation && inBotShell) {
+    const bot = await getBot(botId!); current();
+    await useThreadStore.getState().selectThread(identity); current();
+    await openBotConversation(botId!, identity, bot?.model ?? null, bot?.archived);
+  } else {
+    const select = () => { void useThreadStore.getState().selectThread(identity).catch(() => {}); };
+    if (inBotShell) await selectConversationShell(false, current, select);
+    current();
     await useThreadStore.getState().selectThread(identity);
     current();
     if (target.directory) useDirectoryStore.getState().setDirectory(target.directory);
@@ -57,25 +63,59 @@ export async function openThreadFromNavigation(target: { threadId: string; branc
   useUIStore.getState().closeMainSurfaces();
   return identity;
 }
-export async function startThreadFromNavigation(target: { directory?: string | null } = {}): Promise<string> {
+export interface NewConversationTarget {
+  directory?: string | null; projectId?: string; organization?: ConversationOrganizationPlacement;
+  sourceSelection?: DraftSourceSelection; botId?: string;
+  /** Set only for a worktree returned by the original project Git owner.
+   * Retains model/project metadata, not filesystem authority. */
+  worktreeProject?: boolean;
+}
+export async function startThreadFromNavigation(target: NewConversationTarget = {}): Promise<string> {
   const host = getRuntimeEndpointGeneration(); const request = ++navigation;
   const surface = useUIStore.getState().mainSurfaceSelectionRevision;
   const current = () => { if (host !== getRuntimeEndpointGeneration() || request !== navigation || surface !== useUIStore.getState().mainSurfaceSelectionRevision) throw new Error('Conversation navigation was superseded'); };
-  await selectConversationShell(false, current);
+  if (!(target.botId && currentWorkbenchProfileId() === VARIN_WORKBENCH_BOT_PROFILE_ID)) await selectConversationShell(false, current);
   current();
-  const draftKey = useThreadStore.getState().openDraft({ workspacePath: target.directory ?? undefined });
-  if (target.directory) useDirectoryStore.getState().setDirectory(target.directory);
+  const project = target.projectId ? useProjectsStore.getState().projects.find(project => project.id === target.projectId) : undefined;
+  if (target.projectId && !project) throw new Error('The selected project is no longer registered');
+  let organization = target.organization;
+  if (!organization && project) {
+    const api = getRegisteredRuntimeAPIs()?.conversationOrganization;
+    if (!api) throw new Error('Conversation organization is unavailable');
+    const directory = await api.read({ limit: 1 }); current();
+    const container = directory.containers.find(container => container.kind === 'project' && container.projectId === project.id);
+    if (!container) throw new Error('The project is registered but its conversation location is not ready');
+    organization = { containerId: container.id };
+  }
+  // Copy defaults now rather than resolving the navigation tree again at first send.
+  const path = target.sourceSelection?.path ?? target.directory ?? project?.path;
+  const sourceSelection = target.sourceSelection ?? (project && path ? {
+    resourceOwner: project.source?.resourceOwner ?? { kind: 'local' as const }, path,
+    ...(project.source?.workspaceId && path === project.path ? { expectedWorkspaceId: project.source.workspaceId } : {}),
+    ...(path === project.path ? { selection: freezeProjectSourceSelection(project) } : {selection: {mode:'live_root' as const}}),
+    mode: path === project.path ? freezeProjectSourceSelection(project).mode : 'live_root' as const, contentMode: 'saved-files' as const, captureScopes: [],
+  } : undefined);
+  const remote = sourceSelection?.resourceOwner.kind === 'managed_host';
+  const projectDefaultsApply = project && (!target.sourceSelection ||
+    projectResourceOwnerKey(project) === projectResourceOwnerKey({ source: { resourceOwner: target.sourceSelection.resourceOwner, workspaceId: '' } })
+    && (target.worktreeProject === true || projectContainsPath(project, target.sourceSelection.path)));
+  const draftKey = useThreadStore.getState().openDraft({ workspacePath: remote ? undefined : path ?? undefined,
+    ...(sourceSelection ? { sourceSelection: structuredClone(sourceSelection) } : {}),
+    ...(organization ? { organization: { ...organization } } : {}),
+    ...(projectDefaultsApply ? { projectId: project.id } : {}), ...(target.botId ? { botId: target.botId } : {}),
+  });
+  if (path && !remote) useDirectoryStore.getState().setDirectory(path);
   useUIStore.getState().setActiveMainTab('chat');
   useUIStore.getState().closeMainSurfaces();
   return draftKey;
 }
 /** Explicit submitters need a real Thread before admitting work. Navigation alone opens a draft. */
-export async function createThreadForSubmission(target: { directory?: string | null } = {}): Promise<ThreadIdentity> {
+export async function createThreadForSubmission(target: NewConversationTarget = {}): Promise<ThreadIdentity> {
   const draftKey = await startThreadFromNavigation(target);
   return useThreadStore.getState().materializeDraft(draftKey);
 }
 const navigableThreads = () => useThreadStore.getState().threads
-  .filter(thread => !thread.bot_id && !thread.archived && thread.deleted_at_ms === null);
+  .filter(thread => !thread.archived && thread.deleted_at_ms === null);
 /** How many Threads relative navigation steps through; below two there is nowhere to go. */
 export const navigableThreadCount = (): number => navigableThreads().length;
 export async function switchRelativeThread(offset: number): Promise<void> {

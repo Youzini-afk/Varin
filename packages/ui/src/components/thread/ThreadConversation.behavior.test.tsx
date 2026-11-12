@@ -1,3 +1,9 @@
+import { ThreadOverview } from './ThreadOverview';
+import { ExternalOverview } from './ExternalOverview';
+import { conversationOrganizationEn } from '@/lib/i18n/messages/conversation-organization';
+import { useConversationOrganizationStore } from '@/stores/useConversationOrganizationStore';
+import * as threadNavigation from '@/lib/agent-runtime/threadNavigation';
+import type { ConversationOrganizationAPI, ConversationOrganizationEntry, ConversationOrganizationSnapshot } from '@varin/application-client';
 import { queuedQuoteDraft } from './queuedQuoteDraft';
 import { insertDraftMarker } from '@/lib/agent-editor/contentReferences';
 import { EditorView } from '@codemirror/view';
@@ -30,6 +36,7 @@ import { dict as zhCN } from '@/lib/i18n/messages/zh-CN';
 import { followupPanelEn } from '@/lib/i18n/messages/followups';
 import { useQuestionDraftStore } from '@/stores/useQuestionDraftStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { bindThreadStore, threadHostKey, threadComposerKey, useThreadStore } from '@/stores/useThreadStore';
 import { ChatView } from '@/components/views/ChatView';
@@ -238,6 +245,7 @@ beforeEach(() => {
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test-image');
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   useThreadDraftStore.setState({ drafts: {} });
+  useProjectsStore.setState({ projects: [], activeProjectId: null });
   useMessageQueueStore.setState({ followUpBehavior: 'queue', botFollowUpBehavior: 'steer' });
   useTimelineViewStore.setState({ views: {} });
   useWorkOverviewStore.setState({ bySession: {} });
@@ -427,7 +435,7 @@ it('sends a new conversation from its captured project workspace, independent of
   expect(useThreadDraftStore.getState().drafts[key]?.text).toBe('');
 });
 
-it('keeps Bot conversation independent of workspace drafts and saved work-overview disclosure', async () => {
+it('keeps a Bot conversation’s explicit source across Shells without inheriting work-overview disclosure', async () => {
   const f = fixture();
   f.view.thread.bot_id = 'bot';
   const key = threadComposerKey(threadHostKey(), identity);
@@ -441,7 +449,7 @@ it('keeps Bot conversation independent of workspace drafts and saved work-overvi
   expect(container.querySelector('[data-harness-overview-panel], [data-harness-overview-peek]')).toBeNull();
   await submitForm(composerForm());
   expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ text: 'Help me arrange this' }));
-  expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('source');
+  expect(f.submit.mock.calls[0]![0]).toHaveProperty('source', source);
   expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('agent');
   expect(f.api.sources.resolve).not.toHaveBeenCalled();
   expect(f.api.prepareSource).not.toHaveBeenCalled();
@@ -4636,4 +4644,179 @@ it.each([false, true])('materializes a copied queued image through the original 
   const sent = active ? vi.mocked(f.api.enqueue).mock.calls[0]?.[0] : f.submit.mock.calls[0]?.[0];
   expect(sent).toMatchObject({ ...identity, text, images: [{ mimeType: 'image/png', data: imageData, reference: 1 }], contentReferenceOccurrences: [{ kind: 'image', reference: 1, start: 8, end: text.length }] });
   expect(useThreadDraftStore.getState().drafts[key].markerObjects).toEqual([]);
+});
+
+
+it('hydrates the original empty conversation project once and does not reapply it over a later source choice', async () => {
+  const f = fixture();
+  f.view.creationDefaults = { projectId: 'original-project' };
+  useProjectsStore.setState({ projects: [{ id: 'original-project', path: '/original/project', label: 'Original', addedAt: 1 }] });
+  const preferredModel = { providerId: 'fixture-provider', modelId: 'fixture-model', thinkingLevel: 'off' as const };
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={preferredModel} />));
+  const key = threadComposerKey(threadHostKey(), identity);
+  expect(useThreadDraftStore.getState().drafts[key]).toMatchObject({ identity, projectId: 'original-project', creationDefaultsApplied: true,
+    sourceSelection: { path: '/original/project', resourceOwner: { kind: 'local' } } });
+  await act(async () => useProjectsStore.setState({ projects: [{ id: 'original-project', path: '/later/project', label: 'Renamed', addedAt: 1 }] }));
+  expect(useThreadDraftStore.getState().drafts[key]?.sourceSelection?.path).toBe('/original/project');
+  await act(async () => useThreadDraftStore.getState().patch(key, { projectId: undefined, workspacePath: undefined, sourceSelection: undefined, preparedSource: null, creationDefaultsApplied: true }));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={preferredModel} />));
+  expect(useThreadDraftStore.getState().drafts[key]?.sourceSelection).toBeUndefined();
+  expect(useThreadDraftStore.getState().drafts[key]?.projectId).toBeUndefined();
+});
+
+it('uses the already-created Bot conversation when submitting its frozen project draft', async () => {
+  const f = fixture();
+  f.view.thread.bot_id = 'original-bot';
+  f.view.creationDefaults = { projectId: 'original-project' };
+  useProjectsStore.setState({ projects: [{ id: 'original-project', path: '/original/project', label: 'Original', addedAt: 1 }] });
+  f.api.create = vi.fn(f.api.create);
+  const source = { resourceOwner: { kind: 'local' as const }, workspaceId: 'original-workspace', executionWorkspaceId: 'original-workspace', branchId: 'source', revision: 0, mode: 'materialized' as const, tools: ['file_read'] };
+  f.api.prepareSource = vi.fn(async () => ({ path: '/original/project', source }));
+  const release = bindThreadStore(f.api);
+  try {
+    await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} surface="bot" preferredModel={{ providerId: 'fixture-provider', modelId: 'fixture-model' }} />));
+    await edit('textarea[aria-label="Message thread"]', 'Use the original project');
+    await submitForm(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!);
+    await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce());
+    expect(f.api.create).not.toHaveBeenCalled();
+    expect(f.submit.mock.calls[0]?.[0]).toMatchObject({ ...identity, text: 'Use the original project', source });
+    expect(f.submit.mock.calls[0]?.[0].agent).toBeUndefined();
+  } finally { release(); }
+});
+
+
+it('opens a created conversation with its retained remote binding after the project registration changes', async () => {
+  const f = fixture();
+  const resourceOwner = { kind: 'managed_host' as const, hostId: 'original-host', connectionId: 'original-connection', endpointIdentity: 'original-endpoint' };
+  f.view.creationDefaults = { projectId: 'original-project', source: { resourceOwner, path: '/remote/original', workspaceId: 'original-workspace' } };
+  useProjectsStore.setState({ projects: [{ id: 'original-project', path: '/local/replacement', label: 'Edited project', addedAt: 1 }] });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={{ providerId: 'fixture-provider', modelId: 'fixture-model' }} />));
+  const key = threadComposerKey(threadHostKey(), identity);
+  expect(useThreadDraftStore.getState().drafts[key]).toMatchObject({ projectId: 'original-project', identity, sourceSelection: { path: '/remote/original', resourceOwner } });
+  expect(useThreadDraftStore.getState().drafts[key]?.workspacePath).toBeUndefined();
+});
+
+it('lets an explicit chat-only choice override the creation project without preparing or inheriting it', async () => {
+  const f = fixture();
+  f.view.creationDefaults = { projectId: 'project', source: { resourceOwner: { kind: 'local' }, path: '/creation/project' } };
+  f.api.prepareSource = vi.fn(f.api.prepareSource);
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} preferredModel={{ providerId: 'fixture-provider', modelId: 'fixture-model' }} />));
+  await openOverview('workspace');
+  await act(async () => button('Chat only').click());
+  await edit('[aria-label="Message thread"]', 'Discuss without project files');
+  await submitForm(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!);
+  expect(f.submit).toHaveBeenCalledOnce();
+  expect(f.submit.mock.calls[0]![0].source).toBeNull();
+  expect(f.api.prepareSource).not.toHaveBeenCalled();
+  expect(useThreadDraftStore.getState().drafts[threadComposerKey(threadHostKey(), identity)]?.sourceSelection).toBeUndefined();
+});
+
+
+/** The API supplies metadata only; assertions exercise actual overview entry, store and navigation consumers. */
+function organizationDetailsFixture() {
+  const task = { kind: 'native' as const, id: identity.threadId };
+  let cursor = 1;
+  const original: ConversationOrganizationEntry = { conversation: task, title: 'Original task', archived: false, pinned: false, revision: 1,
+    position: { conversation: task, containerId: 'release-id', order: 0, revision: 1, explicit: true, inheritedFrom: null }, path: ['project-id', 'release-id'],
+    origin: { botId: 'original-bot', directBotId: null, conversation: { kind: 'native', id: 'original-bot-session' } } };
+  const containers: ConversationOrganizationSnapshot['containers'] = [
+    { id: 'project-id', kind: 'project', projectId: 'navigation-project', parentId: null, name: null, icon: null, color: null, revision: 1, childrenRevision: 1, order: 0 },
+    { id: 'release-id', kind: 'group', projectId: null, parentId: 'project-id', name: 'Release', icon: null, color: null, revision: 1, childrenRevision: 1, order: 0 },
+  ];
+  const page = (withPath: boolean): ConversationOrganizationSnapshot => ({ initialized: true, cursor, revision: cursor, rootRevision: 1, containers: withPath ? structuredClone(containers) : [], conversations: [], items: [], nextCursor: withPath ? 'unread-siblings' : null });
+  const entry = vi.fn<ConversationOrganizationAPI['entry']>(async reference => ({ ...structuredClone(original), conversation: reference }));
+  const read = vi.fn<ConversationOrganizationAPI['read']>(async query => page(Boolean(query?.containerId)));
+  const listeners = new Set<Parameters<ConversationOrganizationAPI['observe']>[1]>();
+  const observe = vi.fn<ConversationOrganizationAPI['observe']>(async (_cursor, listener, { signal }) => new Promise<void>(resolve => {
+    listeners.add(listener); signal.addEventListener('abort', () => { listeners.delete(listener); resolve(); }, { once: true });
+  }));
+  const api: ConversationOrganizationAPI = { entry, read, observe, command: vi.fn(), metadata: vi.fn(), project: vi.fn() };
+  useConversationOrganizationStore.setState({ host: -1, snapshot: null, pages: {} });
+  useProjectsStore.setState({ projects: [{ id: 'navigation-project', path: '/different/project', label: 'Navigation Project', addedAt: 1, lastOpenedAt: 1 }] });
+  Object.assign(translations.dictionary, conversationOrganizationEn);
+  registerRuntimeAPIs({ ...getRegisteredRuntimeAPIs(), conversationOrganization: api, bots: { list: async () => [] } } as unknown as RuntimeAPIs);
+  return { original, containers, entry, read, observe, api, page, change: () => { cursor++; for (const listener of listeners) listener({ cursor, revision: cursor, subject: '', kind: 'organization', data: null }); } };
+}
+
+it.each(['native', 'external', 'bot'] as const)('shows original provenance and separately labelled category/workspace in the real %s work details without draining navigation', async kind => {
+  const f = fixture(true), organization = organizationDetailsFixture();
+  pauseView(f.view);
+  f.view.launch!.selection.source = { resource_owner: { kind: 'local' }, mode: 'live_root', workspace_id: 'original-workspace', execution_workspace_id: 'original-workspace', branch_id: null, revision: null, live_root: { hostId: 'host-a', canonicalRoot: '/execution/original', rootId: 'original-root' } };
+  const originalSource = structuredClone(f.view.launch!.selection.source);
+  const openOrigin = vi.spyOn(threadNavigation, 'openThreadFromNavigation').mockResolvedValue(identity);
+  const model = { threads: f.api, work: [], workItems: [], sessions: [], openWork: vi.fn() } as unknown as BotPanelModel;
+  const render = (active: boolean) => kind === 'native'
+    ? <ThreadOverview api={f.api} identity={identity} sessionKey="details-test" snapshot={f.view} details={{}} pending={false} readOnly={false} workspacePath="/execution/original" hasComputer={false} onAttention={() => {}} refresh={async () => {}} act={async work => { await work(); }} openProcess={async () => {}} />
+    : kind === 'external' ? <ExternalOverview id="external-original" connected cwd="/execution/original" />
+    : <BotPanelContext.Provider value={model}><BotWorkDetail identity={identity} active={active} /></BotPanelContext.Provider>;
+  await act(async () => root.render(render(false)));
+  expect(organization.read).not.toHaveBeenCalled(); expect(organization.entry).not.toHaveBeenCalled();
+  if (kind === 'bot') await act(async () => root.render(render(true)));
+  else await act(async () => container.querySelector<HTMLButtonElement>('[data-harness-overview-controls] button')!.click());
+  expect(container.textContent).toContain('Classification: Navigation Project / Release');
+  expect(container.textContent).toContain('Execution workspace');
+  expect(organization.read.mock.calls.filter(([query]) => query?.containerId)).toHaveLength(1);
+  expect(organization.read).toHaveBeenCalledWith({ pageNodes: true, containerId: 'release-id', archived: 'include', limit: 1 }, expect.any(AbortSignal));
+  expect(organization.read.mock.calls.every(([query]) => !query?.cursor)).toBe(true);
+  expect(organization.observe).toHaveBeenCalledTimes(1);
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label*="origin conversation"]')!.click());
+  expect(openOrigin).toHaveBeenCalledExactlyOnceWith({ threadId: 'original-bot-session' });
+  organization.containers[1]!.name = 'Release renamed elsewhere'; organization.containers[1]!.revision++; organization.containers[1]!.parentId = null; organization.original.path = ['release-id'];
+  await act(async () => organization.change());
+  expect(container.textContent).toContain('Classification: Release renamed elsewhere');
+  expect(container.textContent).toContain('original'); expect(f.view.launch!.selection.source).toEqual(originalSource);
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled(); expect(f.cancelRun).not.toHaveBeenCalled();
+  if (kind === 'native') {
+    organization.original.origin = { botId: null, directBotId: 'original-bot', conversation: null };
+    await act(async () => organization.change());
+    expect(container.querySelector('button[aria-label*="origin conversation"]')).toBeNull();
+  }
+});
+
+it('does not turn an unreadable detail path into Uncategorized and recovers without following sibling continuations', async () => {
+  const organization = organizationDetailsFixture();
+  organization.read.mockImplementation(async query => { if (query?.containerId) throw new Error('Classification source unavailable'); return organization.page(false); });
+  await act(async () => root.render(<ExternalOverview id="external-original" connected cwd="/execution/original" />));
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-harness-overview-controls] button')!.click());
+  expect(container.textContent).toContain('Classification is unavailable');
+  expect(container.textContent).not.toContain('Uncategorized'); expect(container.textContent).not.toContain('release-id');
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('Classification source unavailable');
+  organization.read.mockImplementation(async query => organization.page(Boolean(query?.containerId)));
+  await act(async () => button('common.retry').click());
+  expect(container.textContent).toContain('Classification: Navigation Project / Release');
+  expect(organization.read.mock.calls.every(([query]) => !query?.cursor)).toBe(true);
+});
+
+
+it('isolates a delayed detail path from the next Host and reports missing ancestor metadata without displaying IDs', async () => {
+  const organization = organizationDetailsFixture();
+  let finish!: (page: ConversationOrganizationSnapshot) => void;
+  organization.read.mockImplementation(query => query?.containerId ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(organization.page(false)));
+  const render = () => <ExternalOverview id="external-original" connected cwd="/execution/original" />;
+  await act(async () => root.render(render()));
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-harness-overview-controls] button')!.click());
+  expect(container.textContent).not.toContain('Uncategorized');
+  const oldSignal = organization.read.mock.calls.find(([query]) => query?.containerId)![1]!;
+  const oldPage = organization.page(true);
+  endpoint.generation++;
+  const next = { ...organization.api, read: vi.fn<ConversationOrganizationAPI['read']>(async () => organization.page(false)), entry: vi.fn<ConversationOrganizationAPI['entry']>(async reference => ({ ...organization.original, conversation: reference })) };
+  registerRuntimeAPIs({ ...getRegisteredRuntimeAPIs(), conversationOrganization: next } as RuntimeAPIs);
+  await act(async () => { useThreadStore.setState({ hostKey: 'host-b' }); root.render(render()); });
+  await act(async () => finish(oldPage));
+  expect(oldSignal.aborted).toBe(true);
+  expect(container.textContent).not.toContain('Navigation Project / Release');
+  expect(container.textContent).not.toContain('Uncategorized'); expect(container.textContent).not.toContain('release-id');
+  expect(container.textContent).toContain('Classification is unavailable');
+  expect(container.textContent).toContain('Execution workspace: /execution/original');
+});
+
+
+it('identifies a fixed execution workspace separately from classification instead of labelling it chat-only', async () => {
+  const f = fixture(true); pauseView(f.view); organizationDetailsFixture();
+  f.view.launch!.selection.source = { resource_owner: { kind: 'local' }, mode: 'fixed_branch', workspace_id: 'original-workspace', execution_workspace_id: 'original-workspace', branch_id: 'original-source', revision: 1, live_root: null };
+  await act(async () => root.render(<ThreadOverview api={f.api} identity={identity} sessionKey="fixed-details" snapshot={f.view} details={{}} pending={false} readOnly={false} hasComputer={false} onAttention={() => {}} refresh={async () => {}} act={async work => { await work(); }} openProcess={async () => {}} />));
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-harness-overview-controls] button')!.click());
+  expect(container.textContent).toContain('Classification: Navigation Project / Release');
+  expect(container.textContent).toContain('Execution workspace: bot.workspace.sourceFixed');
+  expect(container.textContent).not.toContain('Execution workspace: harness.overview.chatOnly');
 });

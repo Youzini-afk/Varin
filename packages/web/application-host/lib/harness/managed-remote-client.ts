@@ -1,3 +1,4 @@
+import {consumeManagedTerminalFrames} from '@varin/application-client';
 import { createHash, randomUUID } from "node:crypto";
 import { threadSourceFailureMessage } from '@varin/application-client';
 import type { StorageCleanupPreview, StorageCleanupReceipt, StorageDevice, StorageInventory, StorageScope } from '@varin/application-client';
@@ -30,7 +31,7 @@ import {
   type SourceServiceOperation,
   type SourceServiceResponse,
 } from "./managed-remote-types.js";
-import { decodeManagedSourceCancellation, decodeManagedSourceReceiptRelease, decodeManagedSourceResponse } from './managed-source-response.js';
+import { decodeManagedProjectManagementResponse, decodeManagedSourceCancellation, decodeManagedSourceReceiptRelease, decodeManagedSourceResponse } from './managed-source-response.js';
 import { consumeManagedProcessStream } from './managed-process-stream.js';
 
 const BASE_PATH = "/api/harness/managed-execution/v1";
@@ -127,7 +128,7 @@ export class ManagedTargetClient {
     return headers;
   }
 
-  async response(relativePath: string, init: Omit<RequestInit, "body"> & { body?: RequestInit["body"] | AsyncIterable<Uint8Array> } = {}): Promise<Response> {
+  async response(relativePath: string, init: Omit<RequestInit, "body"> & { body?: RequestInit["body"] | AsyncIterable<Uint8Array> } = {}, preserveErrorResponse = false): Promise<Response> {
     const url = managedEndpointUrl(this.target.connection, relativePath).toString();
     const { body, ...rest } = init;
     const asyncBody = body !== undefined && typeof (body as AsyncIterable<Uint8Array>)[Symbol.asyncIterator] === "function";
@@ -143,7 +144,7 @@ export class ManagedTargetClient {
       await response.body?.cancel().catch(() => undefined);
       throw new Error(`Managed target identity changed for ${this.target.machineId}`);
     }
-    if (!response.ok) {
+    if (!response.ok && !preserveErrorResponse) {
       const responseBody = await response.json().catch(() => null) as { error?: unknown; code?: unknown; reason?: unknown; details?: unknown } | null;
       const message = responseBody && typeof responseBody === "object" && "error" in responseBody && typeof responseBody.error === "string"
         ? responseBody.error : `Managed target request failed (${response.status})`;
@@ -427,14 +428,15 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     });
     const request = async <Method extends keyof ManagedSourceService>(method: Method, input: Parameters<ManagedSourceService[Method]>[1], signal?: AbortSignal): Promise<Awaited<ReturnType<ManagedSourceService[Method]>>> => {
       if (input.coordinatorHostId !== options.coordinatorHostId) throw new Error('Managed source request belongs to another coordinator');
-      const result = await client.json<Awaited<ReturnType<ManagedSourceService[Method]>>>(`/sources/${method}`, input, 'POST', signal).catch(error => {
+      let result = await client.json<Awaited<ReturnType<ManagedSourceService[Method]>>>(`/sources/${method}`, input, 'POST', signal).catch(error => {
         if (error instanceof ManagedResponseError && typeof error.code === 'string' && threadSourceFailureMessage(error.code)) {
           throw new SourceAdmissionError(error.code as SourceFailureCode, { cause: error });
         }
         throw error;
       });
-      if (method !== 'service' && method !== 'handoff' && method !== 'integrationReceipt' && method !== 'fileReceipt' && method !== 'authorize' && method !== 'release' && method !== 'inspectScope'
+      if (method !== 'projectManagement' && method !== 'service' && method !== 'handoff' && method !== 'integrationReceipt' && method !== 'fileReceipt' && method !== 'authorize' && method !== 'release' && method !== 'inspectScope'
         && (!result || typeof result !== 'object' || Array.isArray(result))) throw new Error('Managed source response is unconfirmed');
+      if (method === 'projectManagement') result = decodeManagedProjectManagementResponse((input as Parameters<ManagedSourceService['projectManagement']>[1]).command.action, result, (input as Parameters<ManagedSourceService['projectManagement']>[1]).command.input) as typeof result;
       if (method === 'cancelService') decodeManagedSourceCancellation(input as Parameters<ManagedSourceService['cancelService']>[1], result);
       if (method === 'releaseReceipt') decodeManagedSourceReceiptRelease(input as Parameters<ManagedSourceService['releaseReceipt']>[1], result);
       return result;
@@ -469,6 +471,19 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
         return result;
       },
       recovery: (input, signal) => request('recovery', input, signal),
+      externalCapture:(input,signal)=>request('externalCapture',input,signal),
+      externalChildSource: (input, signal) => request('externalChildSource', input, signal),
+      projectManagement: (input, signal) => request('projectManagement', input, signal),
+      externalProjectSource: (input, signal) => request('externalProjectSource', input, signal),
+      externalSettings: (input, signal) => request('externalSettings', input, signal),
+      externalPrepare: (input, signal) => request('externalPrepare', input, signal),
+      terminal:(input,signal)=>request('terminal',input,signal),
+      terminalStream:async(input,emit,signal)=>{if(input.coordinatorHostId!==options.coordinatorHostId)throw new Error('Terminal coordinator changed');
+        const response=await client.response('/sources/terminalStream',{method:'POST',body:JSON.stringify(input),headers:{'Content-Type':'application/json'},signal});
+        return consumeManagedTerminalFrames(response,emit,signal);},
+      externalBinding: (input, signal) => request('externalBinding', input, signal),
+      externalSpawn: (input, signal) => request('externalSpawn', input, signal),
+      externalControl: (input, signal) => request('externalControl', input, signal),
       scriptControl: (input, signal) => request('scriptControl', input, signal),
       scriptBinding: (input, signal) => request('scriptBinding', input, signal),
       scriptSpawn: (input, signal) => request('scriptSpawn', input, signal),
@@ -492,6 +507,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       workspace: (input, signal) => request('workspace', input, signal),
       documents: (path, method, body, signal) => client.response(`/documents/${path}`, { method, headers: { 'Content-Type': 'application/json' },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...(signal ? { signal } : {}) }),
+      workspaceAsset: (input,signal) => { if(input.coordinatorHostId!==options.coordinatorHostId)throw new Error('File asset belongs to another coordinator'); return client.response('/sources/workspaceAsset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input),...(signal?{signal}:{})},true); },
       workspaceUpload: async (input, body, signal) => {
         if (input.coordinatorHostId !== options.coordinatorHostId) throw new Error('File upload belongs to another coordinator');
         return client.request('/sources/workspaceUpload', { method: 'POST', body,

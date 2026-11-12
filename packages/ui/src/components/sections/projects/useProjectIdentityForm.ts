@@ -28,7 +28,7 @@ export type ProjectIdentitySaveData = {
 
 type EditableProject = Pick<
   ProjectEntry,
-  'id' | 'label' | 'icon' | 'color' | 'iconBackground' | 'defaultWorkFocus' | 'iconImage' | 'path'
+  'id' | 'label' | 'icon' | 'color' | 'iconBackground' | 'defaultWorkFocus' | 'iconImage' | 'path' | 'additionalPaths' | 'source'
 >;
 
 export const useProjectIdentityForm = (project: EditableProject | null) => {

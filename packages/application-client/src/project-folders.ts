@@ -35,3 +35,24 @@ export function projectContainsPath(project: ProjectFolders, directory: string):
     return target === root || target.startsWith(root === '/' ? '/' : `${root}/`);
   });
 }
+
+/** Decode strictly: malformed remote metadata must never become a local path. */
+export function parseProjectSourceBinding(value: unknown): import('./types.js').ProjectSourceBinding | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Project source binding is malformed');
+  const input = value as Record<string, unknown>;
+  const owner = input.resourceOwner as Record<string, unknown> | undefined;
+  if (Object.keys(input).some(key => key !== 'resourceOwner' && key !== 'workspaceId')
+    || typeof input.workspaceId !== 'string' || !input.workspaceId.trim() || !owner || typeof owner !== 'object' || Array.isArray(owner)) throw new Error('Project source binding is malformed');
+  if (owner.kind === 'local' && Object.keys(owner).length === 1) return { resourceOwner: { kind: 'local' }, workspaceId: input.workspaceId };
+  if (owner.kind === 'managed_host' && Object.keys(owner).length === 4
+    && ['hostId', 'connectionId', 'endpointIdentity'].every(key => typeof owner[key] === 'string' && Boolean((owner[key] as string).trim()))) {
+    return { workspaceId: input.workspaceId, resourceOwner: { kind: 'managed_host', hostId: owner.hostId as string,
+      connectionId: owner.connectionId as string, endpointIdentity: owner.endpointIdentity as string } };
+  }
+  throw new Error('Project source binding is malformed');
+}
+export function projectResourceOwnerKey(project: { source?: import('./types.js').ProjectSourceBinding }): string {
+  const owner = project.source?.resourceOwner;
+  return !owner || owner.kind === 'local' ? 'local' : JSON.stringify([owner.hostId, owner.connectionId, owner.endpointIdentity]);
+}

@@ -8,7 +8,7 @@ const safeDecodeMarkedURIComponent = (value: string, encoding: unknown): string 
   try { return decodeURIComponent(value); } catch { return value; }
 };
 
-interface ProjectEntry { id: string; path: string }
+interface ProjectEntry { id: string; path: string; source?: import('@varin/application-client').ProjectSourceBinding }
 type SettingsDocument = Record<string, unknown>;
 
 export interface ProjectDirectoryRequest {
@@ -135,7 +135,7 @@ export const createProjectDirectoryRuntime = (dependencies: ProjectDirectoryDepe
       }
     }
 
-    const projects = sanitizeProjects(settings.projects) || [];
+    const projects = (sanitizeProjects(settings.projects) || []).filter(project => project.source?.resourceOwner.kind !== 'managed_host');
     if (projects.length === 0) {
       return { directory: null, error: 'Directory parameter or active project is required' };
     }

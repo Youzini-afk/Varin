@@ -80,3 +80,18 @@ it('joins an in-flight delivery instead of starting a second admission when its 
   expect(fixture.api.submit).toHaveBeenCalledOnce();
   expect(useThreadDraftStore.getState().drafts[key()].pendingInput).toBeUndefined();
 });
+
+it('GitHub worktree first send uses the frozen target source instead of interpreting its path locally', async () => {
+  const resourceOwner = { kind: 'managed_host' as const, hostId: 'source', connectionId: 'source-connection', endpointIdentity: 'original-endpoint' };
+  useThreadDraftStore.getState().patch(key(), { projectId: 'project', sourceSelection: { resourceOwner, path: '/target/new-worktree', expectedWorkspaceId: 'worktree-documents', selection: { mode: 'live_root' }, mode: 'live_root', contentMode: 'saved-files', captureScopes: [] } });
+  fixture.api.sources.resolve.mockResolvedValue({ resourceOwner, workspaceId: 'worktree-documents' });
+  await submitThreadPrompt(identity, 'Review target issue', model, '/target/new-worktree');
+  expect(fixture.api.sources.resolve).toHaveBeenCalledWith(identity, { resourceOwner, path: '/target/new-worktree' });
+  expect(fixture.api.prepareSource).toHaveBeenCalledWith(expect.objectContaining({ resourceOwner, workspaceId: 'worktree-documents', mode: 'live_root', selection: { mode: 'live_root' } }));
+});
+
+it('refuses a replaced Documents registration before GitHub automatic first send', async () => {
+  useThreadDraftStore.getState().patch(key(), { sourceSelection: { resourceOwner: { kind: 'local' }, path: '/worktree', expectedWorkspaceId: 'original', mode: 'live_root', contentMode: 'saved-files', captureScopes: [] } });
+  await expect(submitThreadPrompt(identity, 'Review', model, '/worktree')).rejects.toThrow('original project workspace has changed');
+  expect(fixture.api.submit).not.toHaveBeenCalled();
+});

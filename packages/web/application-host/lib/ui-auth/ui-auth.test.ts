@@ -317,6 +317,17 @@ describe('ui auth client credential seam', () => {
     });
     expect(mountedServeCalled).toBe(true);
 
+    for (const mount of ['', '/api/connections/hosts/saved/proxy']) {
+      const assetPath = `${mount}/api/resource-assets/${encodeURIComponent(urlToken)}/location/serve/site/style.css`;
+      const response = createResponse(); let called = false;
+      await auth.requireAuth({ method: 'GET', originalUrl: assetPath, url: assetPath, headers: {} }, response, () => { called = true; });
+      expect(called, mount || 'direct').toBe(true);
+      const write = createResponse(); let writeCalled = false;
+      await auth.requireAuth({ method: 'POST', originalUrl: assetPath, url: assetPath, headers: {} }, write, () => { writeCalled = true; });
+      expect(writeCalled).toBe(false);
+      expect(write.statusCode).toBe(401);
+    }
+
     const dictationWsReq = {
       method: 'GET',
       path: '/api/dictation/ws',
@@ -454,6 +465,34 @@ describe('ui auth client credential seam', () => {
 });
 
 describe('stable UI user ownership', () => {
+  it('admits a non-owner to its scoped conversation organization without granting Host resources', async () => {
+    const { createPrincipalStore } = await import('./principals.js');
+    const file = path.join(dataDir, 'organization-subjects.json');
+    fs.writeFileSync(file, JSON.stringify({ version: 1, ownerId: 'owner', principals: [
+      { id: 'owner', disabled: false }, { id: 'alice', disabled: false },
+    ] }));
+    const auth = (await loadCreateUiAuth())({ password: 'owner-secret', principals: createPrincipalStore(file),
+      clientAuthController: { authenticateBearerToken: async token => token === 'alice-client'
+        ? { ok: true, clientId: 'alice-device', principalId: 'alice' } : null },
+    });
+    try {
+      for (const action of ['read', 'entry', 'command', 'metadata', 'project']) {
+        const request = { method: 'POST', path: `/api/conversation-organization/${action}`, headers: { authorization: 'Bearer alice-client' } };
+        const response = createResponse(); let admitted = false;
+        await auth.requireAuth(request, response, () => { admitted = true; });
+        expect(admitted, action).toBe(true);
+        expect((await auth.resolveAuthContext(request, null))?.principalId).toBe('alice');
+      }
+      for (const [method, pathname] of [['GET', '/api/conversation-organization/read'],
+        ['POST', '/api/conversation-organization/administration'], ['POST', '/api/settings'],
+        ['POST', '/api/resource-files'], ['POST', '/api/projects/project/management'], ['POST', '/api/threads/source/prepare']]) {
+        const response = createResponse(); let admitted = false;
+        await auth.requireAuth({ method, path: pathname, headers: { authorization: 'Bearer alice-client' } }, response, () => { admitted = true; });
+        expect(admitted, pathname).toBe(false);
+        expect(response.statusCode).toBe(403);
+      }
+    } finally { auth.dispose(); }
+  });
   it('keeps the owner across JWT rotation and passkey clearing', async () => {
     const { createPrincipalStore } = await import('./principals.js');
     const principals = createPrincipalStore(path.join(dataDir, 'subjects-test.json'));

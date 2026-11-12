@@ -24,19 +24,11 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `GET /api/fs/list`
   - Owns exec job queue state (`execJobs`) and lifecycle/TTL pruning.
   - Enforces workspace boundary checks with active project + worktree fallback support.
-- `createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn })` from `search.ts`
-  - Returns `{ searchFilesystemFiles(rootPath, options) }`.
-  - Supports fuzzy matching, hidden-file handling, and optional gitignore filtering.
-  - `respectGitignore` costs **one** `git ls-files -z --cached --others --exclude-standard`
-    for the whole walk, not one `git check-ignore` per directory. The catalog scan
-    walks an entire workspace, and the per-directory shape cost one process per
-    directory — 4363 of them on this repository, where the bare walk is 1.6 s (D-140).
-    A file present on disk but absent from that listing is ignored; a directory is
-    descended only when some listed path lives under it.
-  - Outside a Git work tree the listing fails and nothing is treated as ignored,
-    which is the answer the per-directory probe also gave on failure. Three callers
-    share this path: the workbench file picker, the settings page language
-    distribution (D-120), and the cold catalog scan (D-107).
+- `createFsSearchRuntime({ compute, path? })` from `search.ts`
+  - Returns `{ searchFilesystemFiles(rootPath, options), isSearchableFile(...) }`.
+  - Native `compute.directory` owns recursive enumeration, physical traversal and Git-visible membership. The adapter only ranks fuzzy matches and preserves enumeration completeness.
+  - Hidden-file and gitignore options retain their original native meaning. An explicit caller limit reports incomplete coverage when results were truncated; omitted limits do not introduce a separate cap.
+  - The managed ResourceFiles owner invokes this same runtime after admitting its Documents view. Logical adopted selections resolve through the original native workspace receipt, not a coordinator filesystem path.
 
 ## Composition contract with `../../index.ts`
 - `../../index.ts` provides composition-time dependencies only (platform primitives + callbacks such as `resolveProjectDirectory`, `normalizeDirectoryPath`, and `buildAugmentedPath`).
@@ -47,3 +39,7 @@ File-name search for the workbench lives at `GET /api/find/file` in `packages/we
 ## Notes for contributors
 - Keep filesystem policy (workspace root checks, error mapping, exec timeout behavior) inside this module, not in the composition root.
 - If adding new `/api/fs/*` endpoints, add them in `routes.ts` and extend this document.
+
+Managed file-name and content searches use the existing ResourceFiles request transport. `filename-search` returns root-relative file paths and explicit enumeration completeness; `content-search` preserves the native Documents resource identity, revisions, line/column, context and incomplete/error/cancellation states. Target filesystem-read authority and physical allowed-directory admission apply before resolving an adopted view. Search disconnects propagate to the original compute cancellation signal; file mutations retain their separate effect lifecycle.
+
+Read-only remote assets use ResourceFiles `asset()` after the same Documents/native-view admission. Raw images and PDF/HTML assets are streamed, not embedded in a base64 JSON response. Local and remote Office reads/previews share `office/filesystem-reader.ts`, preserving package revisions and the original renderer and cancellation signal. A fixed GET-only asset URL carries an ephemeral existing URL-auth credential and the frozen location prefix so relative HTML resources remain on that same owner; neither credential nor URL is persisted as source identity. Asset responses disallow caching and referrer propagation. Native Documents registration exposes a trusted `authorizationRoot` from its original physical source for paired-host permission checks, distinct from its mounted read view.

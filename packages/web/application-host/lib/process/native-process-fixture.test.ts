@@ -60,6 +60,37 @@ it('releases later resources and the directory even when one teardown fails', as
   expect(resources.disposeService).toHaveBeenCalledOnce();
 });
 
+it.each([false, true])('awaits Documents before revoking storage or closing the kernel (Documents failure: %s)', async (failDocuments) => {
+  const fixture = createNativeProcessTestHarness();
+  await fixture.get();
+  const order: string[] = [];
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  const failed = new Error('document teardown failed');
+  resources.disposeService.mockImplementation(async () => { order.push('processes'); });
+  resources.disposeDocuments.mockImplementation(async () => {
+    order.push('documents-start');
+    await pending;
+    order.push('documents-end');
+    if (failDocuments) throw failed;
+  });
+  resources.disposeAdapter.mockImplementation(async () => { order.push('storage'); });
+  resources.close.mockImplementation(async () => { order.push('kernel'); });
+  const closing = fixture.dispose();
+  // Observe the actual disposer entering before allowing it to complete.
+  try {
+    await vi.waitFor(() => expect(order).toEqual(['processes', 'documents-start']));
+    expect(resources.disposeAdapter).not.toHaveBeenCalled();
+    expect(resources.close).not.toHaveBeenCalled();
+  } finally {
+    release();
+    if (failDocuments) await expect(closing).rejects.toMatchObject({ errors: [failed] });
+    else await closing;
+  }
+  expect(order).toEqual(['processes', 'documents-start', 'documents-end', 'storage', 'kernel']);
+  expect(fs.existsSync(createdRoot())).toBe(false);
+});
+
 it('does not dispose a caller-owned document authority during rollback', async () => {
   resources.start.mockRejectedValue(new Error('handshake rejected'));
   const dispose = vi.fn();

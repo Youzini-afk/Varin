@@ -19,7 +19,7 @@ export const waitForTerminalExit = (
     onEvent: (event) => {
       if (event.type === 'exit' || (event.type === 'snapshot' && event.status === 'exited')) finish(true);
     },
-    onError: (_error, fatal) => { if (fatal) finish(true); },
+    onError: (_error, fatal) => { if (fatal) finish(false); },
   });
   if (settled) subscription.close();
   else timeout = setTimeout(() => finish(false), timeoutMs);

@@ -1,3 +1,4 @@
+import { ConversationOrganizationDetails } from '@/components/conversation/ConversationOrganizationDetails';
 import React from 'react';
 import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
 import { useI18n } from '@/lib/i18n';
@@ -80,10 +81,11 @@ export const ExternalOverview = React.memo(function ExternalOverview({
       ) : (
         <>
           {state}
+          <ConversationOrganizationDetails reference={{ kind: 'external', id }} active={open && !compact} />
           {preview}
           <div className="mt-4 flex min-w-0 items-start gap-2 border-t border-border/50 pt-3 typography-micro text-muted-foreground">
             <Icon name="folder" className="size-3.5 shrink-0" />
-            <span className="min-w-0 break-all">{cwd}</span>
+            <span className="min-w-0 break-all">{t('organization.executionWorkspace')}: {cwd}</span>
           </div>
         </>
       )}

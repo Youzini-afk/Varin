@@ -1,3 +1,5 @@
+import {disposeManagedTerminalSubscriptions,isManagedTerminal,createManagedTerminal,managedTerminalCommand,subscribeManagedTerminal} from './managedTerminalApi';
+import {decodeManagedTerminalRef} from '@varin/application-client';
 import { TERMINAL_PROTOCOL_VERSION } from '@varin/application-client';
 import type { CreateTerminalOptions, TerminalError, TerminalHandlers, TerminalSession, TerminalShellOption, TerminalStreamEvent } from '@varin/application-client';
 import { openRuntimeWebSocket } from './relay/runtime-socket';
@@ -358,6 +360,7 @@ export class TerminalTransport {
 let transport = new TerminalTransport();
 
 export async function createTerminalSession(options: CreateTerminalOptions): Promise<TerminalSession> {
+  if(options.resourceOwner?.kind==='managed_host')return createManagedTerminal(options);
   const response = await runtimeFetch('/api/terminal/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options) });
   if (!response.ok) throw await responseError(response, 'Failed to create terminal session');
   return response.json() as Promise<TerminalSession>;
@@ -373,8 +376,8 @@ export async function listTerminalShells(): Promise<TerminalShellOption[]> {
       ))
     : [];
 }
-export function connectTerminalStream(sessionId: string, onEvent: TerminalHandlers['onEvent'], onError?: TerminalHandlers['onError']): () => void { return transport.subscribe(sessionId, { onEvent, onError }); }
-export async function sendTerminalInput(sessionId: string, data: string): Promise<void> { await transport.write(sessionId, data); }
+export function connectTerminalStream(sessionId: string, onEvent: TerminalHandlers['onEvent'], onError?: TerminalHandlers['onError']): () => void { return isManagedTerminal(sessionId)?subscribeManagedTerminal(sessionId,onEvent,onError):transport.subscribe(sessionId, { onEvent, onError }); }
+export async function sendTerminalInput(sessionId: string, data: string): Promise<void> { if(isManagedTerminal(sessionId)){await managedTerminalCommand(sessionId,{action:'write',data,inputId:crypto.randomUUID()});return;} await transport.write(sessionId, data); }
 
 async function command(path: string, method: string, body?: unknown): Promise<Response> {
   const options: RequestInit = { method };
@@ -386,15 +389,16 @@ async function command(path: string, method: string, body?: unknown): Promise<Re
   if (!response.ok) throw await responseError(response, 'Terminal command failed');
   return response;
 }
-export async function resizeTerminal(sessionId: string, cols: number, rows: number): Promise<void> { await command(`/api/terminal/${sessionId}/resize`, 'POST', { cols, rows }); }
-export async function updateTerminalAppearance(sessionId: string, appearance: Pick<CreateTerminalOptions, 'themeMode' | 'terminalBackground' | 'terminalForeground'>): Promise<void> { await command(`/api/terminal/${sessionId}/appearance`, 'POST', appearance); }
-export async function closeTerminal(sessionId: string): Promise<void> { await command(`/api/terminal/${sessionId}`, 'DELETE'); transport.forget(sessionId); }
-export async function restartTerminalSession(currentSessionId: string, options: CreateTerminalOptions): Promise<TerminalSession> { return (await command(`/api/terminal/${currentSessionId}/restart`, 'POST', options)).json() as Promise<TerminalSession>; }
+export async function resizeTerminal(sessionId: string, cols: number, rows: number): Promise<void> { if(isManagedTerminal(sessionId)){await managedTerminalCommand(sessionId,{action:'resize',cols,rows});return;} await command(`/api/terminal/${sessionId}/resize`, 'POST', { cols, rows }); }
+export async function updateTerminalAppearance(sessionId: string, appearance: Pick<CreateTerminalOptions, 'themeMode' | 'terminalBackground' | 'terminalForeground'>): Promise<void> { if(isManagedTerminal(sessionId)){await managedTerminalCommand(sessionId,{action:'appearance',...appearance});return;} await command(`/api/terminal/${sessionId}/appearance`, 'POST', appearance); }
+export async function closeTerminal(sessionId: string): Promise<void> {if(isManagedTerminal(sessionId)){await managedTerminalCommand(sessionId,{action:'close'});return;} await command(`/api/terminal/${sessionId}`, 'DELETE'); transport.forget(sessionId); }
+export async function restartTerminalSession(currentSessionId: string, options: CreateTerminalOptions): Promise<TerminalSession> { const ref=decodeManagedTerminalRef(currentSessionId);if(ref){await managedTerminalCommand(currentSessionId,{action:'close'});return createManagedTerminal({...options,resourceOwner:ref.resourceOwner,sessionId:crypto.randomUUID()});} return (await command(`/api/terminal/${currentSessionId}/restart`, 'POST', options)).json() as Promise<TerminalSession>; }
 export async function forceKillTerminal(options: { sessionId?: string; cwd?: string }): Promise<void> {
+  if(options.sessionId&&isManagedTerminal(options.sessionId)){await managedTerminalCommand(options.sessionId,{action:'close',force:true});return;}
   const response = await command('/api/terminal/force-kill', 'POST', options);
   const result = await response.json().catch(() => null) as { killedSessionIds?: unknown } | null;
   if (Array.isArray(result?.killedSessionIds)) {
     for (const sessionId of result.killedSessionIds) if (typeof sessionId === 'string') transport.forget(sessionId);
   } else if (options.sessionId) transport.forget(options.sessionId);
 }
-export function disposeTerminalInputTransport(): void { transport.dispose(); transport = new TerminalTransport(); }
+export function disposeTerminalInputTransport(): void { disposeManagedTerminalSubscriptions(); transport.dispose(); transport = new TerminalTransport(); }

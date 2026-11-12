@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useProjectGitHub } from '@/hooks/useProjectGitHub';
 import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
@@ -60,9 +60,7 @@ export function GitHubIntegrationDialog({
 }: GitHubIntegrationDialogProps) {
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
-  const { github } = useRuntimeAPIs();
-  const githubAuthStatus = useGitHubAuthStore((state) => state.status);
-  const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
+  const { github: localGitHub } = useRuntimeAPIs();
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
@@ -70,10 +68,12 @@ export function GitHubIntegrationDialog({
   const projectDirectory = activeProject?.path ?? null;
   const projectRef: ProjectRef | null = React.useMemo(() => {
     if (projectDirectory && activeProject) {
-      return { id: activeProject.id, path: projectDirectory };
+      return { id: activeProject.id, path: projectDirectory, source: activeProject.source };
     }
     return null;
   }, [activeProject, projectDirectory]);
+  const projectGitHub = useProjectGitHub(projectRef, localGitHub, open);
+  const { github, status: githubAuthStatus, checked: githubAuthChecked } = projectGitHub;
 
   // State
   const [activeTab, setActiveTab] = React.useState<GitHubTab>('issues');
@@ -293,6 +293,7 @@ export function GitHubIntegrationDialog({
   const isGitHubConnected = githubAuthChecked && githubAuthStatus?.connected === true;
 
   const openGitHubSettings = () => {
+    if (projectGitHub.remote) { projectGitHub.refresh(); return; }
     setSettingsPage('github');
     setSettingsDialogOpen(true);
   };
@@ -349,10 +350,10 @@ export function GitHubIntegrationDialog({
           <div className="text-center">
             <p className="typography-ui-label text-foreground">{t('session.githubIntegration.connect.title')}</p>
             <p className="typography-small text-muted-foreground mt-1">
-              {t('session.githubIntegration.connect.description')}
+              {projectGitHub.remote ? (projectGitHub.error ?? 'Connect GitHub on the project source Host, then refresh. This uses that Host’s own GitHub account.') : t('session.githubIntegration.connect.description')}
             </p>
           </div>
-          <Button onClick={openGitHubSettings} size="sm">{t('session.githubIntegration.connect.action')}</Button>
+          <Button onClick={openGitHubSettings} size="sm">{projectGitHub.remote ? 'Refresh source Host connection' : t('session.githubIntegration.connect.action')}</Button>
         </div>
       ) : (
         <>

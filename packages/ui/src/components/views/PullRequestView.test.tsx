@@ -13,7 +13,7 @@ vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ git: mocks.g
 vi.mock('@/hooks/useDetectedWorktreeRoot', () => ({ useDetectedWorktreeMetadata: () => null }));
 vi.mock('@/lib/worktrees/worktreeStatus', () => ({ getRootBranch: vi.fn() }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
-vi.mock('@varin/application-client', () => ({ getRuntimeKey: () => 'host-a' }));
+vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(), getRuntimeKey: () => 'host-a' }));
 vi.mock('@/stores/useGitStore', () => ({
   useGitStatus: mocks.status,
   useGitBranches: mocks.branches,

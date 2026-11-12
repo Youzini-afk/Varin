@@ -52,6 +52,7 @@ import {
 } from '@/lib/language-services/provider-status-registry';
 
 type DocumentMonacoEditorProps = {
+  editorWorkspaceId?: string;
   scope?: { documents: import('@/lib/documents/registry').DocumentRegistry; models: import('@/lib/monaco/model-registry').FileEditorModelRegistry };
   readOnly?: boolean;
   className?: string;
@@ -79,6 +80,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   viewId,
   viewState,
   scope,
+  editorWorkspaceId,
   readOnly = false,
 }) => {
   const { t } = useI18n();
@@ -215,7 +217,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
       const selection = editorInstance.getSelection();
       const open = recordRef.current;
       const hasSelection = Boolean(selection && !selection.isEmpty());
-      if (scope) return;
+      if (scope && !editorWorkspaceId) return;
       if (!open?.documentInstanceId) return;
       publishEditorContext(ownerId, {
         documentInstanceId: open.documentInstanceId,
@@ -235,7 +237,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
           : null,
         dirty: open?.dirty === true,
         viewId,
-        workspaceId: identity.workspaceId,
+        workspaceId: editorWorkspaceId ?? identity.workspaceId,
       });
     };
     captureContextRef.current = capture;
@@ -369,6 +371,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
     if (!monaco || !editorInstance) return undefined;
     return registerFileEditorCommandTarget({
       documents: scope?.documents,
+      editorWorkspaceId,
       editor: editorInstance,
       identity,
       ownerId,
@@ -394,6 +397,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
     updateFileEditorSettings,
     viewId,
     scope?.documents,
+    editorWorkspaceId,
   ]);
 
   React.useEffect(() => {

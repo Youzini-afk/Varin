@@ -727,6 +727,7 @@ fn catalog_88_upgrade_preserves_original_work_and_does_not_replay_an_occurrence(
         .unwrap();
     // Build the released 88 representation, retaining the actual old work, queue and receipts.
     f.raw().execute_batch(include_str!("fixtures/catalog-pre-arrangements.sql")).unwrap();
+    f.raw().execute_batch("DROP TABLE IF EXISTS organization_retired_containers; DROP TABLE IF EXISTS organization_positions; DROP TABLE IF EXISTS organization_containers; DROP TABLE IF EXISTS organization_commands; DROP TABLE IF EXISTS organization_spaces;").unwrap();
     f.raw().pragma_update(None, "user_version", 88).unwrap();
     drop(db);
     let db = f.open();

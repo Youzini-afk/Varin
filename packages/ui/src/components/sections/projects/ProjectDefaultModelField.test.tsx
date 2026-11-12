@@ -45,3 +45,19 @@ test('project defaults keep their owner and restore inheritance by removing over
     expect(snapshot.global).toEqual({ defaultProvider: 'global', defaultModel: 'base', defaultThinkingLevel: 'low' });
   } finally { await act(async () => root.unmount()); vi.unstubAllGlobals(); }
 });
+
+test('remote project model editing sends the registered identity and never the remote path as a local cwd', async () => {
+  const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>');
+  vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.clearAllMocks();
+  const snapshot = { global: {}, project: {}, globalRevision: 'global', projectRevision: 'remote', projectTrusted: true };
+  fixture.read.mockResolvedValue(snapshot); fixture.write.mockResolvedValue(snapshot);
+  const container = document.getElementById('root')!, root = createRoot(container);
+  try {
+    await act(async () => root.render(<ProjectDefaultModelField directory="/same/path" projectId="remote-project" remote />));
+    expect(fixture.read).toHaveBeenCalledWith(undefined, expect.any(AbortSignal), 'remote-project');
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'Choose model')!.click());
+    expect(fixture.write).toHaveBeenCalledWith({ projectId: 'remote-project', scope: 'project', expectedRevision: 'remote',
+      set: { defaultProvider: 'provider', defaultModel: 'new' }, remove: ['defaultThinkingLevel'] });
+  } finally { await act(async () => root.unmount()); vi.unstubAllGlobals(); }
+});

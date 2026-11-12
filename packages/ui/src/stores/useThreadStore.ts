@@ -1,6 +1,7 @@
 import type { ThreadSummary } from '@varin/protocol';
 import { create } from 'zustand';
-import { useThreadDraftStore } from './useThreadDraftStore';
+import { useThreadDraftStore, type ThreadDraft } from './useThreadDraftStore';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import {
   getRuntimeApiBaseUrl, getRuntimeKey,
   subscribeRuntimeEndpointWillChange, subscribeRuntimeEndpointChanged,
@@ -28,7 +29,7 @@ interface ThreadNavigationState {
   loadCatalog(): Promise<void>;
   resolveThread(target: { threadId: string; branchId?: string }): Promise<{ identity: ThreadIdentity; botId: string | null; parentThreadId: string | null }>;
   selectThread(identity: { threadId: string; branchId?: string }): Promise<ThreadIdentity>;
-  openDraft(options?: { workspacePath?: string }): string;
+  openDraft(options?: Pick<ThreadDraft, 'workspacePath' | 'sourceSelection' | 'organization' | 'projectId' | 'botId'>): string;
   materializeDraft(draftKey: string, options?: { waitForCatalog?: boolean }): Promise<ThreadIdentity>;
   updateThread(threadId: string, patch: Partial<ThreadMetadata>): Promise<void>;
   deleteThread(threadId: string): Promise<void>;
@@ -145,7 +146,7 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
     const host = get().hostKey;
     navigation += 1;
     const key = JSON.stringify([host, 'draft', crypto.randomUUID()]);
-    useThreadDraftStore.getState().patch(key, { workspacePath: options?.workspacePath });
+    useThreadDraftStore.getState().patch(key, options ? structuredClone(options) : {});
     selections.delete(host); draftSelections.set(host, key);
     set({ selectedIdentity: null, selectedDraftKey: key });
     return key;
@@ -166,7 +167,9 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
     if (running) return running;
     const pending = (async () => {
       // The local draft ID is also the stable creation key after a lost response.
-      const identity = await api.create(draftKey);
+      const identity = draft.botId
+        ? (await (() => { const bots = getRegisteredRuntimeAPIs()?.bots; if (!bots) throw new Error('Bot service is unavailable'); return bots.sessions.create(draft.botId!, { key: draftKey, ...(draft.organization ? { organization: draft.organization } : {}) }); })()).identity
+        : await (draft.organization ? api.create(draftKey, { organization: draft.organization }) : api.create(draftKey));
       composerKeys.set(threadIdentityKey(host, identity), draftKey);
       useThreadDraftStore.getState().patch(draftKey, { identity });
       if (owner !== binding) throw new Error('Application Host changed during conversation creation');

@@ -38,15 +38,16 @@ import {
 import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useProjectGitHub } from '@/hooks/useProjectGitHub';
 import { useUIStore } from '@/stores/useUIStore';
 import { useThreadStore } from '@/stores/useThreadStore';
 import type { ThreadIdentity } from '@varin/application-client';
 import { startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 import { submitThreadPrompt } from '@/lib/agent-runtime/submitThreadPrompt';
-import { validateWorktreeCreate, createWorktree, listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
-import { withWorktreeUpstreamDefaults } from '@/lib/worktrees/worktreeCreate';
-import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
+import { validateWorktreeCreate, listProjectWorktrees, remoteWorktreeProject, waitForProjectWorktreeBootstrap } from '@/lib/worktrees/worktreeManager';
+import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
+import { manageProject, getRuntimeEndpointGeneration, type GitBranch } from '@varin/application-client';
+import { worktreeDraftSource } from '@/lib/worktrees/projectDiscovery';
 import { getWorktreeSetupCommands, getWorktreeSetupWaitEnabled } from '@/lib/project-config';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
@@ -221,19 +222,19 @@ export function NewWorktreeDialog({
   onWorktreeCreated,
 }: NewWorktreeDialogProps) {
   const { t } = useI18n();
-  const { github, git } = useRuntimeAPIs();
+  const { github: localGitHub, git } = useRuntimeAPIs();
   const isMobile = useUIStore((state) => state.isMobile);
-  const githubAuthStatus = useGitHubAuthStore((state) => state.status);
-  const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
 
   const projectDirectory = activeProject?.path ?? null;
   const projectRef: ProjectRef | null = React.useMemo(() => {
     if (projectDirectory && activeProject) {
-      return { id: activeProject.id, path: projectDirectory };
+      return { id: activeProject.id, path: projectDirectory, source: activeProject.source };
     }
     return null;
   }, [activeProject, projectDirectory]);
+  const projectGitHub = useProjectGitHub(projectRef, localGitHub, open);
+  const { github, status: githubAuthStatus, checked: githubAuthChecked } = projectGitHub;
 
   // Mode state
   const [mode, setMode] = React.useState<Mode>('new-branch');
@@ -255,8 +256,24 @@ export function NewWorktreeDialog({
   });
 
   // Use cached branches from Git store (instant if already fetched)
-  const branches = useGitBranches(projectDirectory);
-  const isLoadingBranches = useGitLoadingBranches(projectDirectory);
+  const remoteProject = Boolean(projectRef && remoteWorktreeProject(projectRef));
+  const localBranchesResult = useGitBranches(remoteProject ? null : projectDirectory);
+  const localBranchesLoading = useGitLoadingBranches(remoteProject ? null : projectDirectory);
+  const [remoteBranchSnapshot, setRemoteBranchSnapshot] = React.useState<{ project: ProjectRef; value: GitBranch }>();
+  const [remoteBranchesLoading, setRemoteBranchesLoading] = React.useState(false);
+  const [branchRefresh, setBranchRefresh] = React.useState(0);
+  const branches = remoteProject ? (remoteBranchSnapshot?.project === projectRef ? remoteBranchSnapshot.value : undefined) : localBranchesResult;
+  const isLoadingBranches = remoteProject ? remoteBranchesLoading : localBranchesLoading;
+  React.useEffect(() => {
+    if (!open || !remoteProject || !projectRef) return;
+    const controller = new AbortController();
+    setRemoteBranchesLoading(true);
+    void manageProject(projectRef.id, 'git-branches', {}, controller.signal, projectRef.source).then(value => {
+      if (!controller.signal.aborted) setRemoteBranchSnapshot({ project: projectRef, value });
+    }, error => { if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : String(error)); })
+      .finally(() => { if (!controller.signal.aborted) setRemoteBranchesLoading(false); });
+    return () => controller.abort();
+  }, [open, remoteProject, projectRef, branchRefresh]);
   const fetchBranches = useGitStore((state) => state.fetchBranches);
 
   // Compute local and remote branch lists (same pattern as GitView)
@@ -382,20 +399,21 @@ export function NewWorktreeDialog({
   const hasSourceBranchQuery = sourceBranchQuery.trim().length > 0;
   const hasExistingBranchMatches = existingBranchRankedGroups.matching.length > 0;
   const hasSourceBranchMatches = sourceBranchRankedGroups.matching.length > 0;
-  const canFetchBranches = Boolean(projectDirectory && git);
+  const canFetchBranches = Boolean(projectDirectory && (remoteProject || git));
 
   const handleFetchBranches = React.useCallback(() => {
+    if (remoteProject) { setBranchRefresh(value => value + 1); return; }
     if (!projectDirectory || !git) {
       return;
     }
     void fetchBranches(projectDirectory, git);
-  }, [projectDirectory, git, fetchBranches]);
+  }, [projectDirectory, git, fetchBranches, remoteProject]);
 
   React.useEffect(() => {
-    if (!open || !projectDirectory || !git) return;
+    if (!open || remoteProject || !projectDirectory || !git) return;
     if (branches?.all) return;
     void fetchBranches(projectDirectory, git);
-  }, [open, projectDirectory, git, branches?.all, fetchBranches]);
+  }, [open, projectDirectory, git, branches?.all, fetchBranches, remoteProject]);
 
   React.useEffect(() => {
     if (!existingBranchDropdownOpen && !existingBranchPickerOpen) {
@@ -532,7 +550,9 @@ export function NewWorktreeDialog({
 
     const loadDefaultSourceBranch = async () => {
       try {
-        const rootBranch = await getRootBranch(projectDirectory).catch(() => null);
+        const rootBranch = remoteProject && projectRef
+          ? (await manageProject(projectRef.id, 'git-root-context', {}, undefined, projectRef.source)).current
+          : await getRootBranch(projectDirectory).catch(() => null);
         if (cancelled) return;
 
         const savedSourceBranch = localStorage.getItem(LAST_WORKTREE_SOURCE_BRANCH_KEY);
@@ -566,7 +586,7 @@ export function NewWorktreeDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, branches?.all, projectDirectory, newBranchState.sourceBranch]);
+  }, [open, branches?.all, projectDirectory, newBranchState.sourceBranch, remoteProject, projectRef]);
 
   // Reset state on each open. Resetting on close would empty the form during
   // the close animation, causing visible flicker.
@@ -601,7 +621,7 @@ export function NewWorktreeDialog({
       linkedPr: null,
       includePrDiff: false,
     });
-  }, [open, generateUniqueSlug]);
+  }, [open, generateUniqueSlug, projectRef]);
 
   // Sync worktree name with branch name for new-branch mode
   React.useEffect(() => {
@@ -724,6 +744,14 @@ export function NewWorktreeDialog({
       return;
     }
 
+    const host = getRuntimeEndpointGeneration();
+    const originalProject = JSON.stringify([projectRef.id, projectRef.path, projectRef.source]);
+    const assertHost = () => {
+      const current = useProjectsStore.getState().getActiveProject();
+      if (host !== getRuntimeEndpointGeneration() || !current || originalProject !== JSON.stringify([current.id, current.path, current.source])) {
+        throw new Error('Project source or Application Host changed; any created worktree remains with its original owner');
+      }
+    };
     // Mark as touched and validate immediately
     setValidation(prev => ({ ...prev, touched: true }));
 
@@ -764,6 +792,7 @@ export function NewWorktreeDialog({
       const shouldCreateSession = Boolean(linkedIssue || linkedPrState);
 
       const setupCommands = await getWorktreeSetupCommands(projectRef);
+      assertHost();
       const sourceBranch = newBranchState.sourceBranch;
 
       let sourceLabel = '';
@@ -800,15 +829,15 @@ export function NewWorktreeDialog({
         };
       })();
 
-      const resolvedArgs = await withWorktreeUpstreamDefaults(projectDirectory, args);
-
-      const metadata = await createWorktree(projectRef, resolvedArgs);
+      const metadata = await createWorktreeWithDefaults(projectRef, args);
+      assertHost();
 
       let createdThread: ThreadIdentity | null = null;
 
       if (shouldCreateSession) {
         if (await getWorktreeSetupWaitEnabled(projectRef)) {
-          await waitForWorktreeBootstrap(metadata.path);
+          await waitForProjectWorktreeBootstrap(projectRef, metadata.path);
+          assertHost();
         }
 
         const sessionTitle = linkedIssue
@@ -817,7 +846,9 @@ export function NewWorktreeDialog({
             ? `#${linkedPrState.number} ${linkedPrState.title}`.trim()
             : t('session.newWorktree.newSessionTitle');
 
-        const draftKey = await startThreadFromNavigation({ directory: metadata.path });
+        const sourceSelection = await worktreeDraftSource(projectRef, metadata.path);
+        assertHost();
+        const draftKey = await startThreadFromNavigation({ directory: metadata.path, projectId: projectRef.id, sourceSelection, worktreeProject: true });
         if (linkedIssue || linkedPrState) {
           createdThread = await useThreadStore.getState().materializeDraft(draftKey);
           await useThreadStore.getState().updateThread(createdThread.threadId, { title: sessionTitle });
@@ -1953,6 +1984,7 @@ export function NewWorktreeDialog({
       )}
 
       <GitHubIntegrationDialog
+        key={JSON.stringify([projectRef?.id, projectRef?.source])}
         open={githubDialogOpen}
         onOpenChange={setGithubDialogOpen}
         onSelect={handleGitHubSelect}

@@ -11,6 +11,9 @@ import { ThreadDraftConversation } from '@/components/thread/ThreadDraftConversa
 import { MessageHandoff } from '@/components/conversation/messageHandoff';
 import { ExternalConversationView } from '@/components/thread/ExternalConversation';
 import { useExternalAgentStore } from '@/stores/useExternalAgentStore';
+import { useConversationBot } from '@/hooks/useConversationBot';
+import { openBotEntryFor } from '@/lib/bots';
+import { BotFigure } from '@/workbenches/bot/BotFigure';
 import { useWorkbenchShellActive } from '@/lib/workbench/shell-activity';
 
 type ChatViewProps = {
@@ -33,6 +36,8 @@ export const ChatView: React.FC<ChatViewProps> = ({ active = true, readOnly = fa
   const draftKey = useThreadStore(state => state.selectedDraftKey);
   const catalogLoaded = useThreadStore(state => state.catalogLoaded);
   const hostKey = useThreadStore(state => state.hostKey);
+  const directBotId = useThreadStore(state => { const thread = state.threads.find(item => item.thread_id === state.selectedIdentity?.threadId); return thread && !thread.parent_thread_id ? thread.bot_id : null; });
+  const conversationBot = useConversationBot(directBotId);
   const [error, setError] = React.useState<string>();
   React.useEffect(() => { setError(undefined); }, [hostKey]);
   const { directory } = useSelectedThreadWorkspace();
@@ -56,7 +61,18 @@ export const ChatView: React.FC<ChatViewProps> = ({ active = true, readOnly = fa
   </div>;
   return <ChatErrorBoundary sessionId={identity.threadId} resetKey={JSON.stringify([hostKey, 'thread', identity.threadId, identity.branchId])}>
     {conversationHeader}
-    <ThreadConversation key={hostKey} api={api} identity={identity} readOnly={readOnly} messageHandoff={handoff}
+    {directBotId && <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2 typography-meta">
+      <BotFigure {...(conversationBot.bot ? { bot: conversationBot.bot } : {})} size={20} state="idle" still />
+      <span className="min-w-0 flex-1 truncate">{conversationBot.bot?.name ?? directBotId}</span>
+      {conversationBot.error && <span role="status" className="text-muted-foreground">{conversationBot.error}</span>}
+      {conversationBot.bot && <Button variant="ghost" size="sm" onClick={() => void openBotEntryFor(directBotId).catch(cause => setError(cause instanceof Error ? cause.message : String(cause)))}>{t('bot.panel.open')}</Button>}
+      {error && <span role="alert" className="text-destructive">{error}</span>}
+    </div>}
+    <ThreadConversation key={hostKey} api={api} identity={identity}
+      readOnly={readOnly || Boolean(directBotId && (conversationBot.loading || !conversationBot.bot || conversationBot.bot.archived || conversationBot.bot.deletion))}
+      configurationReady={!directBotId || !conversationBot.loading}
+      preferredModel={conversationBot.bot?.model ?? undefined}
+      messageHandoff={handoff}
       initialWorkspacePath={directory} onBranchCreated={created => { void useThreadStore.getState().loadCatalog().then(() => useThreadStore.getState().selectThread(created)); }} />
   </ChatErrorBoundary>;
 };

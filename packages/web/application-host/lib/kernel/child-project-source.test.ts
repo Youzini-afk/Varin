@@ -33,3 +33,33 @@ it('reports an unavailable isolation backend before source resolution or directo
     {runtime:'agent',threadId:'thread:child',branchId:'branch:child'},'original-operation','isolated_write',null,new AbortController().signal)).rejects.toMatchObject({code:'workspace_backend_unavailable'});
   expect(resolve).not.toHaveBeenCalled();expect(prepare).not.toHaveBeenCalled();
 });
+
+it('uses the registered managed owner and target backend, never the coordinator backend', async () => {
+  const resourceOwner = { kind: 'managed_host' as const, hostId: 'remote', connectionId: 'configured', endpointIdentity: 'endpoint' };
+  const resolve = vi.fn(async () => ({ resourceOwner, workspaceId: 'remote-workspace', path: '/same' }));
+  const prepare = vi.fn(async (input: ThreadPrepareSource): Promise<ThreadPreparedSource> => ({ path: '/remote/view', source: {
+    resourceOwner: input.resourceOwner, workspaceId: input.workspaceId, executionWorkspaceId: 'remote-view', mode: 'materialized', branchId: 'remote-branch', revision: 0, tools: [],
+  } }));
+  const inspectBackend = vi.fn();
+  const owner = createChildProjectSourcePreparer({ projects: async () => [{ id: 'remote', path: '/same', source: { resourceOwner, workspaceId: 'remote-workspace' } }], sources: { resolve }, prepare, inspectBackend });
+  const identity = { runtime: 'agent' as const, threadId: 'thread:child', branchId: 'branch:child' };
+  const selected = { id: 'remote', name: 'Remote', path: '/same', resource_owner: resourceOwner };
+  await owner(selected, identity, 'remote-key', 'isolated_write', null, new AbortController().signal);
+  expect(inspectBackend).not.toHaveBeenCalled();
+  expect(prepare.mock.calls[0]![0]).toMatchObject({ resourceOwner, workspaceId: 'remote-workspace', mode: 'materialized' });
+  await expect(owner({ ...selected, resource_owner: { kind: 'local' } }, identity, 'wrong-owner', 'shared', null, new AbortController().signal)).rejects.toMatchObject({ code: 'project_source_changed' });
+  expect(resolve).toHaveBeenCalledTimes(1);
+});
+
+it('prepares the frozen adopted project without resolving a coordinator path or rereading current adoption', async()=>{
+  const resourceOwner={kind:'managed_host' as const,hostId:'remote',connectionId:'connection',endpointIdentity:'endpoint'};
+  const selection={mode:'native_workspace' as const,workspaceId:'registered',executionWorkspaceId:'original-view',branchId:'original-branch',adoptionOperationId:'adoption'};
+  const prepare=vi.fn(async()=>({path:'/remote/mount',source:{resourceOwner,...selection,tools:[]}})),resolve=vi.fn(),inspectBackend=vi.fn();
+  const owner=createChildProjectSourcePreparer({projects:async()=>[{id:'project',path:'/physical',source:{resourceOwner,workspaceId:'registered'}}],sources:{resolve},prepare,inspectBackend});
+  const identity={runtime:'agent' as const,threadId:'child',branchId:'main'},signal=new AbortController().signal;
+  await owner({id:'project',name:'Project',path:'/physical',resource_owner:resourceOwner,selection},identity,'dispatch','shared',null,signal);
+  expect(prepare).toHaveBeenLastCalledWith(expect.objectContaining({resourceOwner,workspaceId:'registered',selection,mode:'native_workspace'}),signal);
+  await owner({id:'project',name:'Project',path:'/physical',resource_owner:resourceOwner,selection},identity,'isolated','isolated_write','docs',signal);
+  expect(prepare).toHaveBeenLastCalledWith(expect.objectContaining({mode:'materialized',selection:{...selection,nativeScope:'docs'}}),signal);
+  expect(resolve).not.toHaveBeenCalled();expect(inspectBackend).not.toHaveBeenCalled();
+});

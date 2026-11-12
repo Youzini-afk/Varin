@@ -1,4 +1,5 @@
 import React from 'react';
+import type { ExternalAgentSettings } from '@varin/application-client';
 import { useExternalAgents } from '@/stores/useExternalAgentStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
@@ -13,16 +14,23 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-export function HarnessSelector({
+type HarnessSelectorProps = {
+  value?: string | null; disabled?: boolean; onChange?(id: string | null): void;
+  settings?: ExternalAgentSettings | null; loading?: boolean; error?: string; onRetry?(): void;
+  onOpenChange?(open: boolean): void; sourceRemote?: boolean;
+};
+export function HarnessSelector(props: HarnessSelectorProps) {
+  return props.settings === undefined ? <LocalHarnessSelector {...props} /> : <HarnessSelectorContent {...props} />;
+}
+function LocalHarnessSelector(props: HarnessSelectorProps) {
+  const settings = useExternalAgents();
+  return <HarnessSelectorContent {...props} settings={settings} />;
+}
+function HarnessSelectorContent({
   value,
   disabled,
-  onChange,
-}: {
-  value?: string | null;
-  disabled?: boolean;
-  onChange?(id: string | null): void;
-}) {
-  const settings = useExternalAgents();
+  onChange, settings, loading, error, onRetry, onOpenChange, sourceRemote,
+}: HarnessSelectorProps) {
   const { t } = useI18n();
   const agent = settings?.agents.find((v) => v.id === value);
   const label = value ? (agent?.name ?? value) : 'Varin';
@@ -45,7 +53,7 @@ export function HarnessSelector({
       </span>
     );
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
@@ -63,6 +71,9 @@ export function HarnessSelector({
           <span className="flex-1">Varin</span>
           {!value && <Icon name="check" className="size-3.5" />}
         </DropdownMenuItem>
+        {value && settings && !agent && <p role="status" className="px-2 py-2 typography-meta">{t('external.noAgent')}</p>}
+        {loading && <p role="status" className="px-2 py-2 typography-meta">{t('common.loading')}</p>}
+        {error && <div role="alert" className="max-w-72 px-2 py-2 typography-meta"><p>{error}</p><button type="button" onClick={onRetry}>{t('common.retry')}</button></div>}
         {settings?.agents
           .filter((v) => v.enabled || v.id === value)
           .map((v) => (
@@ -72,7 +83,7 @@ export function HarnessSelector({
               {v.id === value && <Icon name="check" className="size-3.5" />}
             </DropdownMenuItem>
           ))}
-        <DropdownMenuSeparator />
+        {!sourceRemote && <><DropdownMenuSeparator />
         <DropdownMenuItem
           onSelect={() => {
             useUIStore.getState().setSettingsPage('external-agents');
@@ -80,7 +91,7 @@ export function HarnessSelector({
           }}
         >
           {t('external.manage')}
-        </DropdownMenuItem>
+        </DropdownMenuItem></>}
       </DropdownMenuContent>
     </DropdownMenu>
   );

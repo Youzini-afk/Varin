@@ -2,30 +2,33 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import type { FileSearchResult } from '@varin/application-client';
-import { getRuntimeKey } from '@varin/application-client';
+import { assertFileEnumeration, projectAbsolutePath } from '@/lib/projectFileOperations';
+import { createResourceFilesHttpAPI, type ResourceFileLocation, getRuntimeKey } from '@varin/application-client';
 
 const CACHE_TTL_MS = 30_000;
 const MAX_CACHE_ENTRIES = 40;
 const DEFAULT_SEARCH_LIMIT = 60;
 
 interface FileSearchCacheEntry {
-  files: VarinFileSearchHit[];
+  files: VarinFileSearchResults;
   timestamp: number;
 }
 
 interface FileSearchStoreState {
   cache: Record<string, FileSearchCacheEntry>;
   cacheKeys: string[];
-  inFlight: Record<string, Promise<VarinFileSearchHit[]>>;
+  inFlight: Record<string, Promise<VarinFileSearchResults>>;
   searchFiles: (
     directory: string,
     query: string,
     limit?: number,
-    options?: { includeHidden?: boolean; respectGitignore?: boolean; type?: 'file' | 'directory' }
-  ) => Promise<VarinFileSearchHit[]>;
+    options?: { includeHidden?: boolean; respectGitignore?: boolean; type?: 'file' | 'directory'; location?: ResourceFileLocation; signal?: AbortSignal }
+  ) => Promise<VarinFileSearchResults>;
   invalidateDirectory: (directory?: string | null) => void;
   resetForRuntimeSwitch: () => void;
 }
+
+export type VarinFileSearchResults = VarinFileSearchHit[] & { incomplete?: boolean };
 
 export interface VarinFileSearchHit {
   extension?: string;
@@ -63,7 +66,7 @@ const toDirectoryHits = (
   results: FileSearchResult[],
   query: string,
   limit: number,
-): VarinFileSearchHit[] => {
+): VarinFileSearchResults => {
   const root = normalizePath(directory);
   const normalizedQuery = query.toLocaleLowerCase();
   const hits = new Map<string, VarinFileSearchHit>();
@@ -92,11 +95,12 @@ const buildCacheKey = (
   limit: number,
   includeHidden: boolean,
   respectGitignore: boolean,
-  type: 'file' | 'directory'
+  type: 'file' | 'directory',
+  location?: ResourceFileLocation
 ) => {
   const normalizedDirectory = directory.trim();
   const normalizedQuery = query.trim().toLowerCase();
-  return JSON.stringify([runtimeKey, normalizedDirectory, normalizedQuery, limit, includeHidden, respectGitignore, type]);
+  return JSON.stringify([runtimeKey, normalizedDirectory, normalizedQuery, limit, includeHidden, respectGitignore, type, location]);
 };
 
 const cacheKeyMatchesDirectory = (cacheKey: string, directory: string) => {
@@ -125,7 +129,7 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
         const includeHidden = Boolean(options?.includeHidden);
         const respectGitignore = options?.respectGitignore ?? true;
         const type = options?.type === 'directory' ? 'directory' : 'file';
-        const key = buildCacheKey(runtimeKey, normalizedDirectory, normalizedQuery, limit, includeHidden, respectGitignore, type);
+        const key = buildCacheKey(runtimeKey, normalizedDirectory, normalizedQuery, limit, includeHidden, respectGitignore, type, options?.location);
         const now = Date.now();
         const cached = get().cache[key];
 
@@ -134,24 +138,29 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
         }
 
         const inflight = get().inFlight[key];
-        if (inflight) {
+        if (inflight && !options?.signal) {
           return inflight;
         }
 
         const filesRuntime = getRegisteredRuntimeAPIs()?.files;
-        if (!filesRuntime) throw new Error('Files runtime is unavailable');
-        const searchPromise = filesRuntime
-          .search({
-            directory: normalizedDirectory,
-            query: normalizedQuery,
-            maxResults: type === 'directory' ? Math.max(limit * 4, limit) : limit,
-            includeHidden,
-            respectGitignore,
-          })
+        if (!filesRuntime && !options?.location) throw new Error('Files runtime is unavailable');
+        const location = options?.location;
+        let incomplete = false;
+        const request = location
+          ? createResourceFilesHttpAPI().request({ ...location, command: { kind: 'filename-search', path: '', query: normalizedQuery, ...(Number.isFinite(limit) ? { maxResults: type === 'directory' ? Math.max(limit * 4, limit) : limit } : {}), includeHidden, respectGitignore } }, options?.signal).then(result => {
+              if (result.kind !== 'filename-search') throw new Error('Source file search is unavailable');
+        assertFileEnumeration(result.enumerationStatus);
+              incomplete = result.enumerationStatus === 'incomplete';
+              return result.results.map(hit => ({ ...hit, path: projectAbsolutePath(location, hit.path), preview: [hit.path] }));
+            })
+          : filesRuntime!.search({ directory: normalizedDirectory, query: normalizedQuery, maxResults: type === 'directory' ? Math.max(limit * 4, limit) : limit, includeHidden, respectGitignore }, { signal: options?.signal });
+        const searchPromise = request
           .then((results) => {
-            const files = type === 'directory'
+            options?.signal?.throwIfAborted();
+            const files: VarinFileSearchResults = type === 'directory'
               ? toDirectoryHits(normalizedDirectory, results, normalizedQuery, limit)
               : results.map((result) => toFileHit(normalizedDirectory, result)).slice(0, limit);
+            if (incomplete) files.incomplete = true;
             set((state) => {
               if (state.inFlight[key] !== searchPromise) {
                 return state;

@@ -1,3 +1,4 @@
+import { scopedProjectGit } from '@/lib/worktrees/projectGit';
 import { runtimeFetch } from '@varin/application-client';
 
 export type IntegratePlan = {
@@ -49,26 +50,38 @@ export async function computeIntegratePlan(args: {
   sourceBranch: string;
   targetBranch: string;
 }): Promise<IntegratePlan> {
+  const project = scopedProjectGit(args.repoRoot);
+  if (project) return project.computeIntegratePlan(args);
   return postIntegrate<IntegratePlan>('plan', args);
 }
 
 export async function getIntegrateConflictDetails(tmpDir: string): Promise<IntegrateConflictDetails> {
+  const project = scopedProjectGit(tmpDir);
+  if (project) return project.getIntegrateConflictDetails(tmpDir);
   return postIntegrate<IntegrateConflictDetails>('conflict-details', { tempWorktreePath: tmpDir });
 }
 
 export async function isCherryPickInProgress(tmpDir: string): Promise<boolean> {
+  const project = scopedProjectGit(tmpDir);
+  if (project) return project.isCherryPickInProgress(tmpDir);
   const result = await postIntegrate<{ inProgress: boolean }>('cherry-pick-status', { tempWorktreePath: tmpDir });
   return result.inProgress;
 }
 
 export async function integrateWorktreeCommits(plan: IntegratePlan): Promise<IntegrateResult> {
+  const project = scopedProjectGit(plan.repoRoot);
+  if (project) return project.integrateWorktreeCommits(plan);
   return postIntegrate<IntegrateResult>('run', { plan });
 }
 
 export async function abortIntegrate(state: IntegrateInProgress): Promise<void> {
+  const project = scopedProjectGit(state.repoRoot);
+  if (project) return project.abortIntegrate(state);
   await postIntegrate<{ success: boolean }>('abort', { state });
 }
 
 export async function continueIntegrate(state: IntegrateInProgress): Promise<IntegrateResult> {
+  const project = scopedProjectGit(state.repoRoot);
+  if (project) return project.continueIntegrate(state);
   return postIntegrate<IntegrateResult>('continue', { state });
 }

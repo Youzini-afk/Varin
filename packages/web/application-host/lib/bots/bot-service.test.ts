@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
+import { withRequestPrincipal } from "../kernel/request-principal.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -361,4 +362,27 @@ it('retains the exact saved profile when live propagation fails and allows a rev
   const retried = await service.update(bot.id, { expectedRevision: saved!.revision, instructions: saved!.instructions });
   expect(retried?.revision).toBe(3);
   expect(applyProfile).toHaveBeenCalledTimes(2);
+});
+
+
+it('reuses a Bot session creation identity and passes its fixed classification after a lost reply', async () => {
+  const { service, createSession } = await setup();
+  const bot = await service.create();
+  createSession.mockRejectedValueOnce(new Error('reply lost'));
+  const options = { key: 'same-create', organization: { containerId: 'release' } };
+  await expect(service.createSession(bot.id, options)).rejects.toThrow('reply lost');
+  await service.createSession(bot.id, options);
+  expect(createSession.mock.calls[0]).toEqual(createSession.mock.calls[1]);
+  expect(createSession.mock.calls[1]?.[2]).toEqual({ containerId: 'release' });
+  await service.createSession(bot.id, { key: 'another-create', organization: { containerId: null } });
+  expect(createSession.mock.calls[2]?.[1].threadId).not.toBe(createSession.mock.calls[1]?.[1].threadId);
+});
+
+it('scopes stable Bot creation keys to the authenticated principal', async () => {
+  const { service, createSession } = await setup(); const bot = await service.create();
+  await withRequestPrincipal('alice', () => service.createSession(bot.id, { key: 'same-action' }));
+  await withRequestPrincipal('alice', () => service.createSession(bot.id, { key: 'same-action' }));
+  await withRequestPrincipal('bob', () => service.createSession(bot.id, { key: 'same-action' }));
+  expect(createSession.mock.calls[0]?.[1]).toEqual(createSession.mock.calls[1]?.[1]);
+  expect(createSession.mock.calls[0]?.[1].threadId).not.toBe(createSession.mock.calls[2]?.[1].threadId);
 });

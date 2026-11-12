@@ -283,3 +283,21 @@ not a real Rust IPC run, and no Host-wide or paid-model validation is implied.
 Model-visible skill discovery includes the resource read entry, name, description and origin. Version
 hashes remain with the captured directory and explicit activation owner; they are not extra model inputs.
 Ordinary reads use the frozen current directory, and historical activations retain their original version.
+
+### Registered remote project management
+
+The current resource editor chooses the registered project source before path
+canonicalization. `expectedSource` fences delayed reads and writes against a
+changed owner/workspace. Managed requests invoke the target's existing resource
+editor with its physical Documents registration, not a coordinator path or a
+mount path inferred from adoption. Original Documents CAS, configuration and
+trust revisions remain authoritative. Paired root restrictions also apply to
+user resources and configured dependencies; inaccessible domains are explicit
+catalog diagnostics, and out-of-bound writes are rejected.
+
+Project trust uses the target's existing trust service, original registered root,
+and revision/path-confirmed update. Resource previews are source-owned, while
+Agent/Bot personalization and project model preferences stay with the original
+Agent settings owner. Execution resource admission already forwards managed
+sources through `resources_prepare` to the target resource scope; a management
+save affects the next live capture, not a previously frozen execution snapshot.

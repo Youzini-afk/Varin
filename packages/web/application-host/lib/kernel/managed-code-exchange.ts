@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { externalCodeIntegration } from '../external-agents/code-exchange.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { ManagedSourceServiceHandler } from '../harness/managed-remote-types.js';
 import type { IntegrationOperationReceipt } from '../harness/working-state/integration-coordinator.js';
@@ -7,9 +8,17 @@ import { admitRunSourceAuthority, savedSourceLaunch, sourceToolSchemas } from '.
 import { acknowledgedCode, captureCodeSelection, codeBaseline, codeIntegration, openCodeTarget, openFixedCodeSource,
   type CodeExchangeOwners, type CodeParticipant, type CodeSelection } from './code-exchange.js';
 import type { ToolInvocationAuthority } from './tool-invocation.js';
-import { toolOperationId, validToolOrigin } from './protocol.generated.js';
+import { toolOperationId, validToolOrigin, type LaunchSource } from './protocol.generated.js';
 import { sourcePathMap } from './source-path-map.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
+
+// SourceSelection accepts an omitted environment and serializes None as null.
+// Compare that single nullable field canonically, without changing any owner,
+// workspace, branch, native scope or original materialized-view identity.
+const sameSource = (a: LaunchSource, b: LaunchSource) => isDeepStrictEqual(
+  { ...a, environment_run_id: a.environment_run_id ?? null },
+  { ...b, environment_run_id: b.environment_run_id ?? null },
+);
 
 export async function exchangeManagedCode(owners:CodeExchangeOwners,invocation:ToolInvocationAuthority,branchId:string,
   source:CodeParticipant,target:CodeParticipant,files:CodeSelection[]|undefined,signal:AbortSignal,onApply:()=>void,
@@ -77,7 +86,7 @@ export async function releaseManagedCodeResult(owners: CodeExchangeOwners, invoc
 
 export function createManagedCodeExchangeService(owners:Pick<CodeExchangeOwners,'kernel'|'storage'|'documents'|'recovery'|'metadataReader'|'coordinator'>):ManagedSourceServiceHandler {
   return async(scope,operation,suppliedSignal)=>{
-    if(operation.kind!=='code_capture'&&operation.kind!=='code_apply'&&operation.kind!=='code_release')throw new Error('Unknown code exchange operation');
+    if(operation.kind!=='code_capture'&&operation.kind!=='code_apply'&&operation.kind!=='external_code_apply'&&operation.kind!=='code_release')throw new Error('Unknown code exchange operation');
     const invocation=operation.invocation;
     if(!scope.principal.capabilities.includes('filesystem:write') || !validToolOrigin(invocation.origin)
       || toolOperationId(invocation.origin,invocation.callId)!==invocation.operationId
@@ -110,13 +119,28 @@ export function createManagedCodeExchangeService(owners:Pick<CodeExchangeOwners,
     const selected=savedSourceLaunch(scope.scope.kind==='run'?scope.scope.runId:invocation.runId,scope.source,[]);
     const target=await openCodeTarget(owners,invocation,selected,scope.physicalRoot,signal);
     try {
-      if(operation.kind==='code_capture')return captureCodeSelection({store:target.store,workspaceId:scope.source.workspace_id,ownerThreadId:operation.sourceThreadId,
+      // Capture/publication must settle before this scope retires its original grant.
+      // Coordinator Thread/conversation IDs are attribution, not local Catalog
+      // preparation owners. The admitted Source authority and Storage snapshot
+      // retain these bytes, just as for managed child-source capture.
+      if(operation.kind==='code_capture')return await captureCodeSelection({store:target.store,workspaceId:scope.source.workspace_id,
         operationId:invocation.operationId,directory:target.directory,baselineBranchId:operation.baselineBranchId,
         ...(scope.source.mode==='native_workspace'?{nativeSource:scope.source,nativeWorkspaces:owners.kernel.nativeWorkspaces}:{}),
         baselineRevision:operation.baselineRevision,...(operation.files?{files:operation.files}:{}),
         mapping: operation.mapping, baselineMapping: operation.baselineMapping,
         acknowledged:await acknowledgedCode(target.store,operation.sourceThreadId,operation.targetThreadId),signal});
-      if(!isDeepStrictEqual(operation.target.source,scope.source))throw new Error('The exchange target source changed');
+      if(operation.kind==='external_code_apply') {
+        const expected=operation.direction==='receive'?operation.self.source:operation.externalSource;
+        if(!sameSource(expected,scope.source)
+          ||operation.child.conversation_id!==`external:child:${operation.child.dispatch_operation_id??operation.child.operation_id}`
+          ||operation.externalSource.workspace_id!==scope.source.workspace_id
+          ||!isDeepStrictEqual(operation.externalSource.resource_owner,scope.source.resource_owner)
+          ||operation.result.branchId!==`code-exchange:${invocation.operationId}`)throw new Error('External exchange original source changed');
+        const input=externalCodeIntegration(invocation,operation.self,operation.child,operation.direction,operation.externalSource,operation.result,target,signal);
+        try{return await owners.coordinator.mergeResult(input);}
+        catch(error){const inspection={...input};delete inspection.signal;const receipt=await owners.coordinator.inspectIntegration(inspection);if(receipt)return receipt;throw error;}
+      }
+      if(!sameSource(operation.target.source,scope.source))throw new Error('The exchange target source changed');
       const input=codeIntegration(invocation,operation.branchId,operation.source,operation.target,operation.result,target,signal);
       try{return await owners.coordinator.mergeResult(input);}
       catch(error){const inspection={...input};delete inspection.signal;const receipt=await owners.coordinator.inspectIntegration(inspection);if(receipt)return receipt;throw error;}

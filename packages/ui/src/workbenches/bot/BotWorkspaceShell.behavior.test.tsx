@@ -1,3 +1,4 @@
+import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
@@ -55,6 +56,7 @@ vi.mock('@/components/layout/ContextPanel', () => ({ ContextPanel: ({ layoutScop
 // Shell navigation is driven by the Bot API fixture; stream transport has its
 // own tests and must not create a real observation connection for this DOM.
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
+vi.mock('@/components/thread/ThreadDraftConversation', () => ({ ThreadDraftConversation: ({ draftKey }: { draftKey: string }) => <div data-bot-draft={draftKey} /> }));
 vi.mock('@/components/thread/ThreadConversation', () => ({ ThreadConversation: ({ identity, readOnly, preferredModel, surface }: { identity: { threadId: string; branchId: string }; readOnly: boolean; preferredModel?: { providerId: string; modelId: string } | null; surface?: 'workbench' | 'bot' }) => { const openThreadContext = useOpenThreadContext(); return <div data-agent={identity.threadId} data-branch={identity.branchId} data-readonly={String(readOnly)} data-model={JSON.stringify(preferredModel)} data-surface={surface}><button onClick={() => openThreadContext({ runtime: 'agent', ...identity }, undefined, undefined, readOnly)}>Open context</button></div>; } }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: { getState: () => ({ setDirectory: () => {} }) } }));
 vi.mock('@/lib/workbench/profile-context', () => ({ useWorkbenchProfileId: () => state.profileId }));
@@ -197,7 +199,7 @@ describe('Bot workbench', () => {
     state.open.mockReset();
     state.openWork.mockReset().mockResolvedValue(undefined);
     state.fork.mockReset(); state.copy.mockReset().mockResolvedValue({ ok: true });
-    useThreadStore.setState({ hostKey: 'host-a', selectedIdentity: { runtime: 'agent', threadId: 'ordinary', branchId: 'ordinary-main' }, threads: [], catalogError: null });
+    useThreadStore.setState({ selectedDraftKey: null, hostKey: 'host-a', selectedIdentity: { runtime: 'agent', threadId: 'ordinary', branchId: 'ordinary-main' }, threads: [], catalogError: null });
     useUIStore.setState({ isSettingsDialogOpen: false, settingsPage: 'general', contextPanelByDirectory: {},
       mainSurfaceSelectionRevision: 0, isScheduledTasksDialogOpen: false, scheduledTasksFocus: null,
       isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false });
@@ -798,4 +800,36 @@ describe('Bot workbench', () => {
     expect(centre()?.getAttribute('data-readonly')).toBe('true');
     expect(state.ensure).not.toHaveBeenCalled();
   });
+  it('keeps a categorized Bot draft in this shell, then hands its real accepted identity to the original Bot conversation', async () => {
+    await render();
+    let draftKey = '';
+    await act(async () => { draftKey = useThreadStore.getState().openDraft({ botId: 'a', organization: { containerId: 'release' }, workspacePath: '/project' }); });
+    await settle();
+    expect(container.querySelector('[data-bot-draft]')?.getAttribute('data-bot-draft')).toBe(draftKey);
+    expect(centre()).toBeNull();
+    expect(useThreadDraftStore.getState().drafts[draftKey]).toMatchObject({ botId: 'a', organization: { containerId: 'release' }, workspacePath: '/project' });
+    const identity = { runtime: 'agent' as const, threadId: 'accepted-bot-thread', branchId: 'accepted-branch' };
+    await act(async () => {
+      useThreadDraftStore.getState().patch(draftKey, { identity });
+      useThreadStore.setState({ selectedDraftKey: null, selectedIdentity: identity });
+    });
+    await settle();
+    expect(centre()?.getAttribute('data-agent')).toBe('accepted-bot-thread');
+    expect(centre()?.getAttribute('data-surface')).toBe('bot');
+    expect(useBotNavigation.getState().entry).toEqual(identity);
+    expect(state.createSession).not.toHaveBeenCalled();
+  });
+
+  it('choosing an existing Bot session dismisses only the draft view and keeps its input and placement', async () => {
+    state.sessions.mockResolvedValue([sessionOf('a', 'entry-a', 'branch-a', { title: 'Existing conversation' }, true)]);
+    await render();
+    let draftKey = '';
+    await act(async () => { draftKey = useThreadStore.getState().openDraft({ botId: 'a', organization: { containerId: 'release' } }); useThreadDraftStore.getState().patch(draftKey, { text: 'Keep this draft' }); });
+    await settle(); expect(container.querySelector('[data-bot-draft]')).toBeTruthy();
+    await click('Existing conversation');
+    expect(container.querySelector('[data-bot-draft]')).toBeNull();
+    expect(centre()?.getAttribute('data-agent')).toBe('entry-a');
+    expect(useThreadDraftStore.getState().drafts[draftKey]).toMatchObject({ text: 'Keep this draft', organization: { containerId: 'release' } });
+  });
+
 });

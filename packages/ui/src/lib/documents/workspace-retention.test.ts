@@ -23,3 +23,13 @@ it('keeps a source while either an independent file view or a saved editor tab s
   await retainEditorWorkspace(documents, workspace, false);
   expect(setWorkspaceRetention).toHaveBeenLastCalledWith(expect.objectContaining({ retained: false }));
 });
+
+it('does not release another resource owner with the same Documents workspace ID', async () => {
+  const a = { setWorkspaceRetention: vi.fn(async () => undefined) } as unknown as DocumentsAPI;
+  const b = { setWorkspaceRetention: vi.fn(async () => undefined) } as unknown as DocumentsAPI;
+  const release = holdEditorWorkspace(a, 'identical-id');
+  await retainEditorWorkspace(b, 'identical-id', true);
+  await release();
+  expect(a.setWorkspaceRetention).toHaveBeenLastCalledWith(expect.objectContaining({ retained: false }));
+  expect(b.setWorkspaceRetention).toHaveBeenLastCalledWith(expect.objectContaining({ retained: true }));
+});

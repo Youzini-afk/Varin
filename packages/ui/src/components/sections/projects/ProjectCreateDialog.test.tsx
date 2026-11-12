@@ -4,7 +4,7 @@ import { parseHTML } from 'linkedom';
 import type { ProjectEntry } from '@varin/application-client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 const fixture = vi.hoisted(() => ({
-  host: 1, listeners: new Set<() => void>(), resolve: vi.fn(), fetch: vi.fn(), add: vi.fn(), start: vi.fn(), close: vi.fn(),
+  organizationRead: vi.fn(), organizationProject: vi.fn(), host: 1, listeners: new Set<() => void>(), resolve: vi.fn(), fetch: vi.fn(), add: vi.fn(), start: vi.fn(), close: vi.fn(),
   projects: [] as ProjectEntry[], decisions: new Map<string, boolean>(), revision: 1, calls: [] as string[],
 }));
 vi.mock('@varin/application-client', async original => ({
@@ -13,7 +13,7 @@ vi.mock('@varin/application-client', async original => ({
   subscribeRuntimeEndpointChanged: (listener: () => void) => { fixture.listeners.add(listener); return () => fixture.listeners.delete(listener); },
 }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
-vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ documents: { resolveWorkspace: fixture.resolve } }) }));
+vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ documents: { resolveWorkspace: fixture.resolve }, conversationOrganization: { read: fixture.organizationRead, project: fixture.organizationProject } }) }));
 vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: Object.assign(
   (select: (store: unknown) => unknown) => select({ addProject: fixture.add }),
   { getState: () => ({ projects: fixture.projects }) },
@@ -39,6 +39,8 @@ const read = (workspaceId: string) => ({ workspaceId, path: '/canonical' + works
 beforeEach(async () => {
   fixture.projects = []; fixture.host++; fixture.revision = 1; fixture.decisions.clear(); fixture.calls = [];
   vi.clearAllMocks();
+  fixture.organizationRead.mockResolvedValue({ containers: [], rootRevision: 0 });
+  fixture.organizationProject.mockResolvedValue({ registered: true, navigation: 'completed' });
   fixture.resolve.mockImplementation(async ({ path }) => ({ workspaceId: 'ws:' + path }));
   fixture.fetch.mockImplementation(async (url: string, options: RequestInit) => {
     const body = JSON.parse(String(options.body));
@@ -75,7 +77,7 @@ test('reviews canonical folders before adding a project and can continue without
   expect(fixture.add).not.toHaveBeenCalled(); expect(updates()).toHaveLength(0);
   await click('projects.create.withoutTrust');
   expect(updates()).toHaveLength(0);
-  expect(fixture.add).toHaveBeenCalledExactlyOnceWith('/one', { label: 'one', additionalPaths: ['/two'] });
+  expect(fixture.add).toHaveBeenCalledExactlyOnceWith('/one', { id: expect.stringMatching(/^project_/), label: 'one', additionalPaths: ['/two'], source: undefined });
   expect(fixture.calls).toEqual(['create', 'open']);
 });
 test('explicit trust is written in revision order before project activation, with duplicate clicks ignored', async () => {
@@ -116,4 +118,19 @@ test('unavailable trust lookup does not force a grant or prevent creating with u
   expect(fixture.add).not.toHaveBeenCalled(); expect(updates()).toHaveLength(0);
   await click('projects.create.unchangedTrust');
   expect(fixture.calls).toEqual(['create', 'open']); expect(updates()).toHaveLength(0);
+});
+
+
+test('retains the registered project and original classification command when Catalog is unavailable', async () => {
+  fixture.decisions.set('ws:/one', true); fixture.decisions.set('ws:/two', true);
+  fixture.organizationProject.mockResolvedValueOnce({ registered: true, navigation: 'pending', failure: { message: 'Host unavailable' } });
+  await create();
+  expect(container.textContent).toContain('Project registered; classification is pending');
+  expect(fixture.add).toHaveBeenCalledTimes(1);
+  expect(fixture.start).not.toHaveBeenCalled();
+  const first = fixture.organizationProject.mock.calls[0]![0];
+  await act(async () => container.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+  expect(fixture.add).toHaveBeenCalledTimes(1);
+  expect(fixture.organizationProject.mock.calls[1]![0]).toEqual(first);
+  expect(fixture.start).toHaveBeenCalledTimes(1);
 });

@@ -1,3 +1,4 @@
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useThreadStore } from '@/stores/useThreadStore';
 import React from 'react';
 import { SettingsTabs } from '../shared/SettingsTabs';
@@ -49,7 +50,9 @@ export function AgentPromptPage() {
   const thread = scope.kind === 'thread' ? regularThreads.find(thread => thread.thread_id === scope.id) : undefined;
   const threadId = thread?.thread_id;
   const branchId = thread?.branches.find(branch => branch.branch_id === selected?.branchId)?.branch_id ?? thread?.branches[0]?.branch_id;
-  const targetKey = JSON.stringify([settings.runtime, agentScopeKey(scope), branchId]);
+  const projectSource = useProjectsStore(state => scope.kind === 'project' ? state.projects.find(project => project.id === scope.id)?.source : undefined);
+  const sourceKey = JSON.stringify(projectSource);
+  const targetKey = JSON.stringify([settings.runtime, agentScopeKey(scope), branchId, sourceKey]);
   const view = loaded?.owner === targetKey ? loaded.view : null;
   const snapshot = view?.checkpoint;
   const tools = threadId ? view?.tools : toolCatalog?.owner === targetKey ? toolCatalog.tools : undefined;
@@ -68,7 +71,7 @@ export function AgentPromptPage() {
     if (!view || scope.kind === 'thread' || previewPart !== 'tools') return;
     const controller = new AbortController();
     setToolsLoading(true); setToolsError(null);
-    const query = projectTarget ? `?projectId=${encodeURIComponent(projectTarget)}` : '';
+    const query = projectTarget ? `?projectId=${encodeURIComponent(projectTarget)}${projectSource ? `&expectedSource=${encodeURIComponent(JSON.stringify(projectSource))}` : ''}` : '';
     void runtimeFetch(`/api/agent-personalization/tools${query}`, { signal: controller.signal, cache: 'no-store' }).then(async response => {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || response.statusText);
@@ -77,11 +80,11 @@ export function AgentPromptPage() {
       if (!controller.signal.aborted && owner.current === targetKey) setToolsError(failure instanceof Error ? failure.message : String(failure));
     }).finally(() => { if (!controller.signal.aborted && owner.current === targetKey) setToolsLoading(false); });
     return () => controller.abort();
-  }, [scope.kind, previewPart, projectTarget, targetKey, settings.runtime, view]);
+  }, [scope.kind, previewPart, projectTarget, projectSource, targetKey, settings.runtime, view]);
   const reload = React.useCallback(async (signal?: AbortSignal): Promise<PromptView | null> => {
     if (!threadId) {
       if (scope.kind === 'thread') return null;
-      const query = projectTarget ? `?projectId=${encodeURIComponent(projectTarget)}` : '';
+      const query = projectTarget ? `?projectId=${encodeURIComponent(projectTarget)}${projectSource ? `&expectedSource=${encodeURIComponent(JSON.stringify(projectSource))}` : ''}` : '';
       const response = await runtimeFetch(`/api/agent-personalization/prompt${query}`, { signal, cache: 'no-store' });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || response.statusText);
@@ -100,7 +103,7 @@ export function AgentPromptPage() {
       personalization: { mode: 'agent', revision: basis.revision, threadId, threadRole: basis.threadRole as 'main' | 'worker' | 'read-only',
         ...(basis.projectId ? { projectId: basis.projectId } : {}), profiles: [], memories: basis.memorySnapshot.memories as AgentMemoryNote[] },
       memorySnapshot: { revision: basis.memorySnapshot.revision, threadId, ...(basis.projectId ? { projectId: basis.projectId } : {}), memories: basis.memorySnapshot.memories as AgentMemoryNote[] } } };
-  }, [runtime, threadId, branchId, scope.kind, projectTarget]);
+  }, [runtime, threadId, branchId, scope.kind, projectTarget, projectSource]);
   const refresh = React.useCallback(async (signal?: AbortSignal) => {
     const current = ++request.current;
     setLoading(true);

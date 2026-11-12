@@ -1,3 +1,4 @@
+import { conversationOrganizationZhCN } from './conversation-organization';
 import { companionAttentionZh } from './companion-attention';
 import { dict as enDict, type I18nKey } from './en';
 import { externalAgentZh } from './external-agents';
@@ -14,6 +15,8 @@ import { usageMessages } from './usage';
 import { imageAnnotationsZhCN } from './imageAnnotations';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  'files.search.incomplete': '部分结果无法枚举，以下结果并不完整。',
+  ...conversationOrganizationZhCN,
   'filesView.encoding.search': '搜索编码…',
   'filesView.encoding.noMatches': '没有匹配的编码',
   'filesView.encoding.retry': '编码列表加载失败 · 重试',

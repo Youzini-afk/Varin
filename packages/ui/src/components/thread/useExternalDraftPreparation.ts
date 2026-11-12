@@ -9,7 +9,9 @@ export function useExternalDraftPreparation({ draftKey, host, configurationId, c
   draftKey: string; host: number; configurationId?: string | null; cwd?: string; name?: string;
 }) {
   const { t } = useI18n();
-  const scope = React.useMemo(() => ({ draftKey, host, configurationId, cwd }), [draftKey, host, configurationId, cwd]);
+  const draft = useThreadDraftStore(value => value.drafts[draftKey] ?? EMPTY_THREAD_DRAFT);
+  const sourceOwnerKey = JSON.stringify([draft.sourceSelection?.resourceOwner ?? { kind: 'local' }, draft.sourceSelection?.expectedWorkspaceId]);
+  const scope = React.useMemo(() => ({ draftKey, host, configurationId, cwd, sourceOwnerKey }), [draftKey, host, configurationId, cwd, sourceOwnerKey]);
   const currentScope = React.useRef(scope); currentScope.current = scope;
   const api = React.useMemo(() => createExternalAgentsHttpAPI(host), [host]);
   const [state, setState] = React.useState<{ scope: object; snapshot?: ExternalConversationSnapshot; error?: unknown; busy?: boolean; cancelling?: boolean }>({ scope });
@@ -23,7 +25,6 @@ export function useExternalDraftPreparation({ draftKey, host, configurationId, c
   const current = () => alive.current && currentScope.current === scope && host === getRuntimeEndpointGeneration();
   const update = (value: Partial<typeof state>) => { if (current()) setState(old => ({ ...(old.scope === scope ? old : {}), scope, ...value })); };
   React.useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  const draft = useThreadDraftStore(value => value.drafts[draftKey] ?? EMPTY_THREAD_DRAFT);
   const id = draft.externalConversationHost === host ? draft.externalConversationId : undefined;
   React.useEffect(() => {
     if (!id || !configurationId) return;
@@ -54,7 +55,7 @@ export function useExternalDraftPreparation({ draftKey, host, configurationId, c
     useThreadDraftStore.getState().patch(draftKey, { externalPreparationKey: key, externalConversationHost: host });
     const token = { scope, promise: Promise.resolve(undefined) as Promise<string | undefined> };
     creating.current = token;
-    token.promise = api.create({ key, configurationId, cwd, title: name || 'Agent' }).then(conversation => {
+    token.promise = api.create({ key, configurationId, cwd, ...(latest.sourceSelection ? {source:{resourceOwner:latest.sourceSelection.resourceOwner,path:latest.sourceSelection.path,expectedWorkspaceId:latest.sourceSelection.expectedWorkspaceId}} : {}), title: name || 'Agent', ...(latest.organization ? { organization: latest.organization } : {}) }).then(conversation => {
       if (!current()) return;
       useThreadDraftStore.getState().patch(draftKey, { externalConversationId: conversation.id });
       return conversation.id;

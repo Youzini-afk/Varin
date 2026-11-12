@@ -165,6 +165,7 @@ fn supported_generations_include_both_published_catalog_92_layouts() {
             db.db.execute_batch(DROP_INDEX).unwrap();
             db.db.execute_batch(DROP_COLUMNS).unwrap();
         }
+        if from < 95 { crate::catalog::organization::remove_for_legacy_fixture(&db.db); }
         db.db.pragma_update(None, "user_version", from).unwrap();
         drop(db);
         let bodies = root.bodies();
@@ -249,6 +250,7 @@ fn catalog_partial_or_malformed_reference_indexes_are_read_only_rejections() {
         for sql in &corruptions {
             let (root, db, _, _) = seed();
             db.db.execute_batch(sql).unwrap();
+            if version < 95 { crate::catalog::organization::remove_for_legacy_fixture(&db.db); }
             db.db.pragma_update(None, "user_version", version).unwrap();
             let original_epoch = epoch(&db.db);
             drop(db);
@@ -282,6 +284,7 @@ fn catalog_92_upgrade_failure_rolls_back_both_layouts_then_retries_once() {
             db.db.execute_batch(DROP_INDEX).unwrap();
             db.db.execute_batch(DROP_COLUMNS).unwrap();
         }
+        if 92 < 95 { crate::catalog::organization::remove_for_legacy_fixture(&db.db); }
         db.db.pragma_update(None, "user_version", 92).unwrap();
         db.db.execute_batch("CREATE TRIGGER fail_reference_upgrade BEFORE INSERT ON events WHEN NEW.kind='catalog.upgraded' BEGIN SELECT RAISE(ABORT,'reference upgrade interrupted'); END;").unwrap();
         let original_epoch = epoch(&db.db);
@@ -333,6 +336,7 @@ fn current_or_newer_catalog_never_accepts_quote_only_reference_layout() {
         let (root, db, _, _) = seed();
         db.db.execute_batch(DROP_INDEX).unwrap();
         db.db.execute_batch(DROP_COLUMNS).unwrap();
+        if version < 95 { crate::catalog::organization::remove_for_legacy_fixture(&db.db); }
         db.db.pragma_update(None, "user_version", version).unwrap();
         drop(db);
         let bytes = std::fs::read(root.0.join("conversation.sqlite")).unwrap();
@@ -375,6 +379,7 @@ fn empty_reference_indexes_preserve_valid_allocator_states_and_json_targets() {
             let target = json!(["fixed", 1, null]);
             db.freeze_model_target("original-operation", "projection", &original, &target)
                 .unwrap();
+            if version < 95 { crate::catalog::organization::remove_for_legacy_fixture(&db.db); }
             db.db.pragma_update(None, "user_version", version).unwrap();
             let space = db.model_reference_space().unwrap();
             drop(db);

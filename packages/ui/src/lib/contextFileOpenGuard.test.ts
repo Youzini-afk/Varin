@@ -1,5 +1,5 @@
 import { unconfiguredWorkspaceEdits } from './documents/workspace-edit.test-helper';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import type { DocumentsAPI, VarinDocumentReadResult, VarinResourceReference } from '@varin/application-client';
 import { validateContextFileOpen } from './contextFileOpenGuard';
@@ -56,6 +56,16 @@ describe('validateContextFileOpen', () => {
 
   test('allows ordinary text files', async () => {
     expect(await validateContextFileOpen(documentsApi('hello\nworld\n'), '/repo/notes.txt', { directory: '/repo' })).toEqual({ ok: true });
+  });
+
+  test('reads a selected native view by its original identity without resolving the live root again', async () => {
+    const documents = documentsApi('adopted branch content');
+    documents.resolveWorkspace = vi.fn(async () => { throw new Error('Must not change the frozen view'); });
+    documents.read = vi.fn(documents.read);
+    const selected = { workspaceId: 'adopted-view', resourceId: 'notes.txt' };
+    expect(await validateContextFileOpen(documents, '/repo/notes.txt', { directory: '/repo', resource: selected })).toEqual({ ok: true });
+    expect(documents.read).toHaveBeenCalledWith(selected);
+    expect(documents.resolveWorkspace).not.toHaveBeenCalled();
   });
 
   test('does not impose the retired 5000-line editor limit', async () => {

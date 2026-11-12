@@ -26,6 +26,11 @@ impl Storage {
     }
 
     fn require_native_grant(grant: &Grant) -> Result<(), KernelError> {
+        if grant.external_transport_id.as_deref().is_some_and(|transport|
+            transport.is_empty() || grant.thread_id.as_deref().is_none_or(str::is_empty)
+            || grant.run_id.is_some() || grant.operation_id.as_deref() != Some(transport)) {
+            return Err(KernelError::Authorization("External grant identity is corrupt".into()));
+        }
         if grant.authority_instance_id.is_some()
             || grant.worker_id.is_some()
             || grant.worker_generation.is_some()
@@ -133,6 +138,7 @@ impl Storage {
             thread_id: parse_optional("threadId")?,
             run_id: parse_optional("runId")?,
             operation_id: parse_optional("operationId")?,
+            external_transport_id: parse_optional("externalTransportId")?,
             owning_workspace,
             execution_workspace,
             storage_identity: storage_identity.to_string(),
@@ -142,7 +148,11 @@ impl Storage {
             state: GrantState::Active,
             handoff_operation_id: None,
         };
-        if grant.operation_id.is_some() && (grant.thread_id.is_none() || grant.run_id.is_none()) {
+        if grant.external_transport_id.is_some() && (grant.thread_id.is_none() || grant.run_id.is_some()
+            || grant.operation_id != grant.external_transport_id) {
+            return Err(KernelError::Authorization("external grant requires its exact conversation and transport operation".into()));
+        }
+        if grant.external_transport_id.is_none() && grant.operation_id.is_some() && (grant.thread_id.is_none() || grant.run_id.is_none()) {
             return Err(KernelError::Authorization(
                 "operation-owned grant requires its actual Thread and source Run".into(),
             ));

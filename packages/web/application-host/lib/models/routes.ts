@@ -21,11 +21,18 @@ const networkMessages: Record<EgressErrorKind, string> = {
   unknown: 'The model network request failed.',
 };
 
-export function registerModelRoutes(app: Express, models: ModelsService, requireAuth: RequestHandler, fetchImpl: EgressFetch, kernel?: Pick<KernelClient, 'agentRuntimeRequest'>) {
+export function registerModelRoutes(app: Express, models: ModelsService, requireAuth: RequestHandler, fetchImpl: EgressFetch, kernel?: Pick<KernelClient, 'agentRuntimeRequest'>, projects?: () => Promise<readonly import('@varin/application-client').ProjectEntry[]>) {
   const validateRetry = async (settings: unknown, failure: ModelRetryFailure = {}) => {
     if (!kernel) throw new ModelConfigurationError('retry-owner-unavailable', 'Retry matching is unavailable', 503);
     try { return await evaluateRetry(kernel, settings, failure); }
     catch (error) { throw new ModelConfigurationError('invalid_retry_settings', error instanceof Error ? error.message : 'Invalid retry settings'); }
+  };
+  const projectScope = async (input: Record<string, unknown>): Promise<{ cwd?: string; registeredProjectId?: string }> => {
+    if (input.projectId === undefined) return typeof input.cwd === 'string' ? { cwd: input.cwd } : {};
+    if (typeof input.projectId !== 'string' || !input.projectId) throw new ModelConfigurationError('invalid_params', 'A registered project identity is required');
+    const project = (await projects?.())?.find(project => project.id === input.projectId);
+    if (!project) throw new ModelConfigurationError('project_unavailable', 'The registered project is unavailable', 404);
+    return project.source?.resourceOwner.kind === 'managed_host' ? { registeredProjectId: project.id } : { cwd: project.path };
   };
   const actions = {
     read: () => models.read(),
@@ -41,10 +48,13 @@ export function registerModelRoutes(app: Express, models: ModelsService, require
     'authorization/read': (input: Record<string, unknown>) => models.authorizations.read(input.id as string),
     'authorization/reply': (input: Record<string, unknown>) => { models.authorizations.reply(input.id as string, input.redirect as string); return {}; },
     'authorization/cancel': (input: Record<string, unknown>) => { models.authorizations.cancel(input.id as string); return {}; },
-    'settings/read': (input: Record<string, unknown>) => models.settings.snapshot(input.cwd as string | undefined),
+    'settings/read': async (input: Record<string, unknown>) => { const scope = await projectScope(input); return models.settings.snapshot(scope.cwd, scope.registeredProjectId); },
     'settings/update': async (input: Record<string, unknown>) => {
       if (object(input.set) && input.set.retry !== undefined) await validateRetry(input.set.retry);
-      return models.settings.update(input as Parameters<ModelsService['settings']['update']>[0]);
+      const scope = await projectScope(input);
+      // Never accept an internal namespace selector from a renderer.
+      const { registeredProjectId: _untrusted, cwd: _cwd, ...request } = input;
+      return models.settings.update({ ...request, ...scope } as Parameters<ModelsService['settings']['update']>[0]);
     },
     'retry/test': (input: Record<string, unknown>) => validateRetry(input.settings, input.failure as ModelRetryFailure),
   };

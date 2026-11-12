@@ -1,7 +1,9 @@
+import {createManagedTerminalOwner} from './managed-owner.js';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import { WebSocket } from 'ws';
@@ -132,6 +134,101 @@ describe('terminal runtime', () => {
     });
     return { routes, processes, runtime };
   };
+
+  it('keeps an adopted managed terminal on its frozen logical source while authorizing its physical registration', async () => {
+    const physical = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'terminal-original-root-'));
+    const f = createHarness();
+    const selection = { mode: 'native_workspace' as const, workspaceId: 'original-project', executionWorkspaceId: 'adopted-execution', branchId: 'adopted-branch', adoptionOperationId: 'original-adoption' };
+    const nativePath = path.resolve('/managed/native-view');
+    const resolveWorkspace = vi.fn(async () => { throw new Error('A mounted view must not be reinterpreted as a physical workspace'); });
+    const registration = vi.fn(async () => ({ canonicalPath: physical }));
+    const prepareSelection = vi.fn(async () => ({ path: nativePath, source: { ...selection, resourceOwner: { kind: 'local' as const }, tools: [] } }));
+    const owner = createManagedTerminalOwner({ terminal: () => f.runtime,
+      documents: { resolveWorkspace, admitWorkspaceRegistration: registration } as never, nativeWorkspaces: { prepareSelection } });
+    const principal = { principalId: 'paired', capabilities: ['terminal:use','process:control'], allowedDirectories: [physical] };
+    const base = { coordinatorHostId: 'coordinator', sessionId: 'frozen-action' };
+    try {
+      const create = { ...base, command: { action: 'create' as const, options: { cwd: physical, selection } } };
+      const created = await owner.command(principal, create);
+      expect(created.cwd).toBe(nativePath);
+      expect(f.processes[0]?.options.cwd).toBe(nativePath);
+      await owner.command(principal, create);
+      expect(prepareSelection).toHaveBeenCalledTimes(1); expect(f.processes).toHaveLength(1);
+      await expect(owner.command(principal, { ...base, command: { action: 'create', options: { cwd: physical, selection: { ...selection, branchId: 'another-branch' } } } })).rejects.toThrow('another frozen source');
+      await expect(owner.command(principal, { ...base, command: { action: 'create', options: { cwd: physical } } })).rejects.toThrow('original adopted source');
+      await owner.command(principal, { ...base, command: { action: 'write', inputId: 'input', data: 'original-view-command' } });
+      expect(f.processes[0]?.writes).toContain('original-view-command');
+      const frames: Record<string,unknown>[] = [], controller = new AbortController();
+      const watching = owner.stream(principal, base, frame => { frames.push(frame); }, controller.signal);
+      await vi.waitFor(() => expect(frames[0]?.t).toBe('snapshot'));
+      controller.abort(); await watching;
+      expect(resolveWorkspace).not.toHaveBeenCalled();
+      await expect(owner.command({ ...principal, allowedDirectories: ['/another-project'] }, { ...base, command: { action: 'inspect' } })).rejects.toThrow('access');
+      const revoked = { ...principal, allowedDirectories: ['/another-project'] };
+      registration.mockRejectedValue(new Error('Original physical directory is gone'));
+      await expect(owner.command(revoked, { ...base, command: { action: 'write', inputId: 'denied', data: 'must-not-run' } })).rejects.toThrow('gone');
+      await expect(owner.command({ ...revoked, principalId: 'another-user' }, { ...base, command: { action: 'stop', force: true } })).rejects.toThrow('unavailable');
+      await expect(owner.command({ ...revoked, capabilities: ['terminal:use'] }, { ...base, command: { action: 'stop', force: true } })).rejects.toThrow('denied');
+      registration.mockClear();
+      f.processes[0]!.kill = vi.fn(() => queueMicrotask(() => f.processes[0]!.emitExit()));
+      expect((await owner.command(revoked, { ...base, command: { action: 'stop', force: true } })).status).toBe('exited');
+      expect(f.processes[0]!.kill).toHaveBeenCalled();
+      expect((await owner.command(revoked, { ...base, command: { action: 'close', force: true } })).status).toBe('exited');
+      expect(registration).not.toHaveBeenCalled();
+      expect(prepareSelection).toHaveBeenCalledTimes(1);
+      expect(f.processes[0]?.writes).not.toContain('must-not-run');
+    } finally { for (const process of f.processes) process.emitExit(); await f.runtime.shutdown(); await fs.promises.rm(physical, { recursive: true, force: true }); }
+  });
+
+  it('managed sessions reuse the original terminal owner and replay its original frames without another PTY',async()=>{
+    const f=createHarness();
+    const owner=createManagedTerminalOwner({terminal:()=>f.runtime,documents:{resolveWorkspace:async({path}:{path:string})=>({workspaceId:path}),inspectWorkspace:async(id:string)=>({root:id}),admitWorkspaceRegistration:async()=>({})} as never});
+    const principal={principalId:'paired-user',capabilities:['terminal:use','process:control']};
+    const base={coordinatorHostId:'coordinator',sessionId:'same-ui-tab'};
+    const create={...base,command:{action:'create' as const,options:{cwd:'/tmp',shell:'sh' as const}}};
+    try{
+      await owner.command(principal,create);await owner.command(principal,create);
+      expect(f.processes).toHaveLength(1);
+      await expect(owner.command(principal,{...create,command:{action:'create',options:{cwd:'/different-target',shell:'sh'}}})).rejects.toThrow('different working directory');
+      const frames:Record<string,unknown>[]=[];const controller=new AbortController();
+      const watching=owner.stream(principal,base,frame=>{frames.push(frame);},controller.signal);
+      await vi.waitFor(()=>expect(frames[0]?.t).toBe('snapshot'));
+      f.processes[0]!.emitData('original-target-output');
+      await vi.waitFor(()=>expect(frames.some(frame=>frame.t==='output'&&frame.d==='original-target-output')).toBe(true));
+      controller.abort();await watching;
+      const reconnectFrames:Record<string,unknown>[]=[];const reconnect=new AbortController();
+      const rewatch=owner.stream(principal,base,frame=>{reconnectFrames.push(frame);},reconnect.signal);
+      await vi.waitFor(()=>expect(reconnectFrames[0]?.history).toContain('original-target-output'));
+      reconnect.abort();await rewatch;expect(f.processes).toHaveLength(1);
+      let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});
+      const slowFrames:Record<string,unknown>[]=[];const slowController=new AbortController();
+      const slow=owner.stream(principal,base,async frame=>{slowFrames.push(frame);if(slowFrames.length===1)await held;},slowController.signal);
+      await vi.waitFor(()=>expect(slowFrames).toHaveLength(1));
+      for(let i=0;i<1000;i++)f.processes[0]!.emitData(`retained-output-${i}\n`);
+      expect(slowFrames).toHaveLength(1);release();
+      await vi.waitFor(()=>expect(slowFrames.at(-1)?.history).toContain('retained-output-999'));
+      expect(slowFrames).toHaveLength(2);expect(slowFrames[1]?.t).toBe('snapshot');
+      slowController.abort();await slow;
+
+      await expect(owner.command({...principal,principalId:'another-user'},{...base,command:{action:'inspect'}})).rejects.toThrow('unavailable');
+      await expect(owner.command({...principal,capabilities:[]},create)).rejects.toThrow('denied');
+      f.processes[0]!.kill=()=>queueMicrotask(()=>f.processes[0]!.emitExit());
+      let stopped=false;const stop=owner.command(principal,{...base,command:{action:'stop',force:true}}).then(()=>{stopped=true;});
+      expect(stopped).toBe(false);await stop;
+      expect((await owner.command(principal,{...base,command:{action:'inspect'}})).status).toBe('exited');
+      expect((await owner.command(principal,{...base,command:{action:'close'}})).status).toBe('exited');
+      expect((await owner.command(principal,{...base,command:{action:'close'}})).status).toBe('exited');
+      await expect(owner.command(principal,create)).rejects.toThrow();
+      // Closed receipts do not consume the original active-session capacity.
+      for(let index=0;index<21;index++){
+        const next={...base,sessionId:`next-action-${index}`};
+        await owner.command(principal,{...next,command:create.command});
+        const process=f.processes.at(-1)!;process.kill=()=>queueMicrotask(()=>process.emitExit());
+        expect((await owner.command(principal,{...next,command:{action:'close',force:true}})).status).toBe('exited');
+      }
+
+    }finally{await f.runtime.shutdown();}
+  });
 
   it('rejects regular files as terminal working directories', async () => {
     const previousWorkspaceRoot = process.env.VARIN_WORKSPACE_ROOT;

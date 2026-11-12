@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { stripWindowsNamespacePrefix } from '../workspace/path-safety.js';
 import { attachmentMimeType } from '@varin/protocol';
 import type { KernelClient } from './kernel-client.js';
 import type { KernelBranchState } from './protocol.generated.js';
@@ -21,8 +22,12 @@ const captureRecordId = (owner: CaptureOwner, key: string) => `${owner.captureSc
 /** Reuses the admitted execution root and Rust's consistent single-file capture. */
 export async function captureOwnedAttachment(kernel: KernelClient, conversation: CaptureOwner, key: string, selectedPath: string,
   source: { workspaceId: string; executionWorkspaceId: string; canonicalRoot: string }, signal?: AbortSignal, recoverOnly = false, captureOperationId?: string): Promise<CapturedAttachmentFile> {
-  const target = path.resolve(source.canonicalRoot, selectedPath);
-  const relative = path.relative(source.canonicalRoot, target);
+  // Windows Rust canonicalize returns verbatim drive/UNC paths while Node's
+  // admitted Documents path may use the equivalent ordinary spelling. Remove
+  // only that namespace syntax on the resource Host; never case-fold roots.
+  const localPath = (value: string) => path.sep === '\\' ? stripWindowsNamespacePrefix(value) : value;
+  const target = path.resolve(localPath(source.canonicalRoot), localPath(selectedPath));
+  const relative = path.relative(localPath(source.canonicalRoot), target);
   if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
     throw new AttachmentCaptureError('attachment_source', 'Select a file within this admitted execution source');
   const recordId = captureRecordId(conversation, key);
@@ -38,15 +43,25 @@ export async function captureOwnedAttachment(kernel: KernelClient, conversation:
   };
   try {
     let retained = await actor.getRecord(source.workspaceId, recordId, signal);
+    let admittedCanonicalRoot = source.canonicalRoot;
     if (!retained && recoverOnly) throw new AttachmentCaptureError('attachment_source', 'The retained original capture was released during recovery');
     if (!retained) {
       const root = await actor.fileRootRegister({ workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, canonicalRoot: source.canonicalRoot }, signal);
+      admittedCanonicalRoot = root.canonicalRoot;
       await actor.fileCapture({ operationId: captureOperationId ?? recordId, workspaceId: source.workspaceId, rootId: root.rootId, path: relative.replaceAll('\\', '/'), store: true, retentionRecordId: recordId }, signal);
       retained = await actor.getRecord(source.workspaceId, recordId, signal);
     }
     if (!retained || retained.state === 'released') throw new AttachmentCaptureError('attachment_source', 'The retained original file is unavailable');
     const receipt = JSON.parse(retained.payloadJson) as { path: string; stateJson: string; executionWorkspaceId: string; canonicalRoot: string };
-    if (retained.recordType !== 'attachment.capture' || retained.threadId !== conversation.id || receipt.executionWorkspaceId !== source.executionWorkspaceId || receipt.canonicalRoot !== source.canonicalRoot || receipt.path !== relative.replaceAll('\\', '/')) throw new AttachmentCaptureError('attachment_changed', 'This capture key belongs to another selected path');
+    if (retained.recordType !== 'attachment.capture' || retained.threadId !== conversation.id || receipt.executionWorkspaceId !== source.executionWorkspaceId || receipt.path !== relative.replaceAll('\\', '/')) throw new AttachmentCaptureError('attachment_changed', 'This capture key belongs to another selected path');
+    if (localPath(receipt.canonicalRoot) !== localPath(admittedCanonicalRoot)) {
+      // A spelling difference beyond the Windows namespace (including case or
+      // symlinks) needs the original root owner to prove identity. Recovery from
+      // a retained receipt never reopens the mutable path or invents that proof.
+      if (recoverOnly) throw new AttachmentCaptureError('attachment_changed', 'This capture key belongs to another selected path');
+      const root = await actor.fileRootRegister({ workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, canonicalRoot: source.canonicalRoot }, signal);
+      if (localPath(receipt.canonicalRoot) !== localPath(root.canonicalRoot)) throw new AttachmentCaptureError('attachment_changed', 'This capture key belongs to another selected path');
+    }
     const state = JSON.parse(receipt.stateJson) as KernelBranchState;
     if (state.kind !== 'regular-file') throw new AttachmentCaptureError('attachment_source', `The selected attachment is ${state.kind}, not a regular file`);
     const { objectHash, byteLength } = state;

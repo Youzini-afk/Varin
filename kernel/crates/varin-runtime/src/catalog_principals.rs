@@ -123,6 +123,7 @@ impl Catalog {
             )?;
             followups::events::claim_legacy(&tx, owner)?;
             external::claim_public_principals(&tx, owner)?;
+            organization::claim_legacy(&tx, owner)?;
         }
         tx.execute("UPDATE runs SET body=json_set(body,'$.principal_id',(SELECT t.principal_id FROM branches b JOIN threads t ON t.id=b.thread_id WHERE b.id=runs.branch_id)) WHERE json_type(body,'$.thread_id')='text'", [])?;
         tx.commit()?;
@@ -157,7 +158,7 @@ impl Catalog {
             validate(principal)?;
         }
         let sql = format!(
-            "SELECT e.cursor,e.subject,e.revision,e.kind,e.data FROM events e WHERE e.cursor>?1 AND EXISTS(SELECT 1 FROM threads t WHERE (t.principal_id IS NULL OR t.principal_id=?3) AND t.id=(SELECT min(thread_id) FROM ({SUBJECTS}) subjects WHERE subjects.subject=e.subject HAVING count(DISTINCT thread_id)=1)) ORDER BY e.cursor LIMIT ?2"
+            "SELECT e.cursor,e.subject,e.revision,e.kind,e.data FROM events e WHERE e.cursor>?1 AND (EXISTS(SELECT 1 FROM threads t WHERE (t.principal_id IS NULL OR t.principal_id=?3) AND t.id=(SELECT min(thread_id) FROM ({SUBJECTS}) subjects WHERE subjects.subject=e.subject HAVING count(DISTINCT thread_id)=1)) OR (e.kind='organization.changed' AND e.subject='organization:'||json_quote(?3) AND EXISTS(SELECT 1 FROM organization_spaces WHERE scope=json_quote(?3)))) ORDER BY e.cursor LIMIT ?2"
         );
         let mut query = self.db.prepare(&sql)?;
         let mut result = Vec::new();
@@ -329,6 +330,7 @@ mod tests {
         create(&mut c, "legacy", None);
         let receipt = submit(&mut c, "legacy");
         followups::events::restore_pre_arrangement_fixture(&c.db).unwrap();
+        crate::catalog::organization::remove_for_legacy_fixture(&c.db);
         c.db.execute_batch("DROP TABLE thread_creations;DROP TABLE calendar_invocations;DROP TABLE calendar_legacy_manual_boundaries;DROP INDEX thread_principals; ALTER TABLE threads DROP COLUMN principal_id; DROP TABLE catalog_principal_owner; UPDATE runs SET body=json_remove(body,'$.principal_id'); PRAGMA user_version=86;").unwrap();
         drop(c);
         let mut c = f.open();
@@ -370,6 +372,7 @@ mod tests {
         c.initialize_principals("alice", true).unwrap();
         create(&mut c, "private", Some("alice"));
         let receipt = submit(&mut c, "private");
+        crate::catalog::organization::remove_for_legacy_fixture(&c.db);
         c.db.pragma_update(None, "user_version", 86).unwrap();
         let before: String =
             c.db.query_row(

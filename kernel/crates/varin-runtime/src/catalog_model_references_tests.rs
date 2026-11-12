@@ -223,7 +223,7 @@ fn previous_format_upgrades_metadata_without_rewriting_history() {
         .unwrap();
     let run = submit(&mut db, "legacy", "main");
     let before = db.history("main").unwrap();
-    db.db.execute_batch("DROP TABLE model_reference_holders;DROP TABLE model_references;DROP TABLE model_reference_space;DROP TABLE model_execution_aliases;DROP TABLE model_executions;DROP TABLE model_agents;DROP TABLE model_bound_targets;ALTER TABLE external_items DROP COLUMN kind;ALTER TABLE external_items DROP COLUMN tool_status;PRAGMA user_version=89;").unwrap();
+    db.db.execute_batch("DROP TABLE model_reference_holders;DROP TABLE model_references;DROP TABLE model_reference_space;DROP TABLE model_execution_aliases;DROP TABLE model_executions;DROP TABLE model_agents;DROP TABLE model_bound_targets;ALTER TABLE external_items DROP COLUMN kind;ALTER TABLE external_items DROP COLUMN tool_status;DROP TABLE IF EXISTS organization_retired_containers;DROP TABLE IF EXISTS organization_positions;DROP TABLE IF EXISTS organization_containers;DROP TABLE IF EXISTS organization_commands;DROP TABLE IF EXISTS organization_spaces;PRAGMA user_version=89;").unwrap();
     drop(db);
     let db = root.open();
     assert_eq!(db.history("main").unwrap(), before);
@@ -379,6 +379,7 @@ fn released_main_without_reference_tables_upgrades_and_existing_space_is_never_r
         let original=db.register_model_reference(ReferenceKind::File,"owner",&json!({"path":"kept"}),&run.run_id).unwrap();
         let space=db.model_reference_space().unwrap();let history=db.history("main").unwrap();
         if !retained {db.db.execute_batch("DROP TABLE model_reference_holders;DROP TABLE model_references;DROP TABLE model_reference_space;DROP TABLE model_execution_aliases;DROP TABLE model_executions;DROP TABLE model_agents;DROP TABLE model_bound_targets;ALTER TABLE external_items DROP COLUMN kind;ALTER TABLE external_items DROP COLUMN tool_status;").unwrap();}
+        crate::catalog::organization::remove_for_legacy_fixture(&db.db);
         db.db.pragma_update(None,"user_version",if retained {90}else{91}).unwrap();drop(db);
         let db=root.open();assert_eq!(db.history("main").unwrap(),history);assert_eq!(db.execution_reference(&run.run_id).unwrap().sequence,1);
         if retained {assert_eq!(db.model_reference_space().unwrap(),space);assert_eq!(db.resolve_model_reference(ReferenceKind::File,&original).unwrap().target["path"],"kept");}

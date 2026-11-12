@@ -1,3 +1,4 @@
+import { conversationOrganizationEn } from './conversation-organization';
 import { companionAttentionEn } from './companion-attention';
 import { browserMessages } from './browser';
 import { externalAgentEn } from './external-agents';
@@ -14,6 +15,8 @@ import { companionLibraryMessages } from './companion-library';
 import { usageMessages } from './usage';
 import { imageAnnotationsEn } from './imageAnnotations';
 export const dict = {
+  'files.search.incomplete': 'Some results could not be enumerated. The results below are incomplete.',
+  ...conversationOrganizationEn,
   'filesView.encoding.search': 'Search encodings…',
   'filesView.encoding.noMatches': 'No matching encoding',
   'filesView.encoding.retry': 'Could not load encodings · Retry',

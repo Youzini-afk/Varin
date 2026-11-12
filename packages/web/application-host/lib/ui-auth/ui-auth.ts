@@ -335,6 +335,14 @@ const getUrlAuthTokenFromRequest = (req: UiAuthRequest): string | null => {
   const headerToken = req?.headers?.['x-varin-application-token'];
   const normalizedHeader = Array.isArray(headerToken) ? headerToken[0] : headerToken;
   if (typeof normalizedHeader === 'string' && normalizedHeader.trim()) return normalizedHeader.trim();
+  // Relative HTML assets retain this existing short-lived credential in their
+  // fixed read-only route prefix. It never authorizes a document or write API.
+  const assetPath = typeof req.originalUrl === 'string' ? req.originalUrl : req.url;
+  if (String(req.method).toUpperCase() === 'GET' && typeof assetPath === 'string') {
+    const innerPath = assetPath.replace(/^\/api\/connections\/hosts\/[^/]+\/proxy(?=\/)/u, '');
+    const match = /^\/api\/resource-assets\/([^/]+)\/[^/]+\/(?:raw|serve|office-preview)\//.exec(innerPath);
+    if(match && match[1] !== '-') {try{return decodeURIComponent(match[1]!);}catch{return null;}}
+  }
   const queryToken = req?.query?.varin_url_token;
   let token = Array.isArray(queryToken) ? queryToken[0] : queryToken;
   if (typeof token !== 'string' && typeof req?.url === 'string') {
@@ -392,6 +400,7 @@ const isUrlAuthReadableHttpPath = (pathname: string): boolean => {
     || pathname === '/api/varin/extensions/v1/host-state'
     || pathname === '/api/varin/realtime-proxy/sse'
     || pathname === '/api/notifications/stream'
+    || /^\/api\/resource-assets\/[^/]+\/[^/]+\/(?:raw|serve|office-preview)\/.+/.test(pathname)
     || pathname === '/api/fs/raw'
     || pathname === '/api/fs/serve'
     || pathname.startsWith('/api/fs/serve/')
@@ -627,7 +636,12 @@ export const createUiAuth = ({
     if (typeof subject !== 'string' || await principals.isOwner(subject)) return next();
     const pathname = getRequestPathname(req);
     const privateResourceRoute = /^\/api\/threads\/(?:source|resources|research|computer|process|recovery)(?:\/|$)/.test(pathname);
+    // Organization commands carry the authenticated subject into Catalog. They
+    // only manage that subject's navigation, not Host-wide project registration.
+    const conversationOrganization = req.method === 'POST'
+      && /^\/api\/conversation-organization\/(?:read|entry|command|metadata|project)$/.test(pathname);
     const scoped = !privateResourceRoute && (pathname === '/api/varin/observations/ws' || pathname === '/api/threads' || pathname.startsWith('/api/threads/') || pathname.startsWith('/auth/')
+      || conversationOrganization
       || /^\/api\/client-auth\/(?:clients|pairing\/(?:sessions|transports)|connection\/candidates)(?:\/|$)/.test(pathname)
       || /^\/api\/varin\/extensions\/v1\/(?:catalog|contracts\/query|host-state(?:\/wait)?|services\/(?:invoke|lease)|assets\/read|entrypoints\/read)$/.test(pathname));
     if (scoped) return next();

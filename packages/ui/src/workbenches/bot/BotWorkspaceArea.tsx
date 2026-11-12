@@ -1,3 +1,4 @@
+import { ExternalConversationView } from '@/components/thread/ExternalConversation';
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { ComputerDesktopPane } from '@/components/sections/computers/ComputerDesktopView';
@@ -48,7 +49,7 @@ export function BotWorkspaceArea({ model, active, expanded, onExpand }: { model:
     <div className="bot-space-body">
       <div className="bot-space-page" data-leaving={leaving === null || undefined} hidden={Boolean(navigation.activeKey) && leaving !== null} inert={Boolean(navigation.activeKey)}><BotPanelBody model={model} /></div>
       {navigation.views.map(view => <div key={view.key} className="bot-space-page" data-leaving={leaving === view.key || undefined} hidden={navigation.activeKey !== view.key && leaving !== view.key} inert={navigation.activeKey !== view.key}>
-        {view.kind === 'work' ? <BotWorkDetail identity={view.identity} active={active && navigation.activeKey === view.key} />
+        {view.kind === 'external' ? (active && navigation.activeKey === view.key ? <ExternalConversationView id={view.id} /> : null) : view.kind === 'work' ? <BotWorkDetail identity={view.identity} active={active && navigation.activeKey === view.key} />
           : view.kind === 'files' ? <BotFilesView view={view} active={active && navigation.activeKey === view.key} setCloseGuard={guardFor(view.key)} />
             : active && navigation.activeKey === view.key ? <div className="bot-computer-view"><h2><Icon name="computer" className="size-4" />{view.desktop.label}</h2><ComputerDesktopPane desktop={view.desktop} /></div> : null}
       </div>)}

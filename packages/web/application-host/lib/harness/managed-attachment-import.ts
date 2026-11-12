@@ -18,10 +18,13 @@ const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(va
 const validHash = (value: string) => /^(?:ranges-)?sha256-[0-9a-f]{64}$/.test(value);
 const scopeKey = (scope: Pick<ManagedSourceLocalScope, 'principal' | 'coordinatorHostId' | 'authorityId' | 'resourceEpoch'>) =>
   JSON.stringify([scope.principal.principalId, scope.coordinatorHostId, scope.authorityId, scope.resourceEpoch]);
-const identity = (scope: ManagedSourceCleanupScope | ManagedSourceLocalScope, operationId: string) => {
-  if (scope.scope.kind !== 'run' || !operationId) throw new SourceAdmissionError('source_authority_denied');
+const identity = (scope: ManagedSourceCleanupScope | ManagedSourceLocalScope, operationId: string): {
+  principalId: string; coordinatorHostId: string; authorityId: string; threadId: string;
+  runId?: string; externalTransportId?: string; operationId: string;
+} => {
+  if (scope.scope.kind === 'source_read' || !operationId) throw new SourceAdmissionError('source_authority_denied');
   return { principalId: scope.principal.principalId, coordinatorHostId: scope.coordinatorHostId, authorityId: scope.authorityId,
-    threadId: scope.scope.threadId, runId: scope.scope.runId, operationId };
+    threadId: scope.scope.kind === 'external' ? scope.scope.conversationId : scope.scope.threadId, ...(scope.scope.kind === 'run' ? {runId:scope.scope.runId} : {externalTransportId:scope.scope.transportId}), operationId };
 };
 const addresses = (owner: ReturnType<typeof identity>) => {
   const id = digest(owner);
@@ -34,11 +37,15 @@ export function createManagedAttachmentImport(kernel: KernelClient) {
   const flights = new Map<string, { closing: boolean; pending: Set<Promise<unknown>>; controller: AbortController }>();
   const withWriter = async <T>(scope: ManagedSourceCleanupScope | ManagedSourceLocalScope,
     action: (client: KernelScopedClient) => Promise<T>, operationId?: string): Promise<T> => {
-    if (scope.scope.kind !== 'run') throw new SourceAdmissionError('source_authority_denied');
+    if (scope.scope.kind === 'source_read') throw new SourceAdmissionError('source_authority_denied');
     const grant = await kernel.issueGrant({ grantId: `attachment-import:${randomUUID()}`,
       owningWorkspace: scope.source.workspace_id, executionWorkspace: scope.source.execution_workspace_id,
-      threadId: scope.scope.threadId, runId: scope.scope.runId,
-      ...(operationId ? { operationId: addresses(identity(scope, operationId)).recordId } : {}),
+      threadId: scope.scope.kind === 'external' ? scope.scope.conversationId : scope.scope.threadId, ...(scope.scope.kind === 'run' ? {runId:scope.scope.runId} : {}),
+      // External imports belong to the already admitted transport, not a native
+      // operation/Run. The per-attachment key stays in its original record intent.
+      ...(scope.scope.kind === 'external'
+        ? { externalTransportId: scope.scope.transportId, operationId: scope.scope.transportId }
+        : operationId ? { operationId: addresses(identity(scope, operationId)).recordId } : {}),
       capabilities: ['storage.read', 'storage.write', 'storage.maintenance'], pathScopes: [] });
     try { return await action(kernel.scoped(grant)); }
     finally { await kernel.retireGrant(grant.grantId); }
@@ -84,7 +91,7 @@ export function createManagedAttachmentImport(kernel: KernelClient) {
             throw new Error('Attachment import retry changed its original content or recipient');
         } else {
           await client.putRecord({ operationId: `begin:${location.recordId}`, workspaceId: scope.source.workspace_id,
-            recordId: location.recordId, recordType, state: 'preparing', threadId: owner.threadId, runId: owner.runId,
+            recordId: location.recordId, recordType, state: 'preparing', threadId: owner.threadId, ...(owner.runId ? {runId:owner.runId} : {}),
             payloadJson: JSON.stringify(payload), ownerIds: [], references: [] }, signal);
         }
         const root = await client.getRecord(scope.source.workspace_id, `${location.recordId}:${request.contentHash}`, signal);
@@ -123,7 +130,7 @@ export function createManagedAttachmentImport(kernel: KernelClient) {
         }
         const blob = await client.putBlobStream(chunks, { operationId: `upload:${id}:${randomUUID()}`, expectedHash: request.objectHash, byteLength: request.byteLength }, signal);
         await client.putRecord({ operationId: `retain:${id}`, workspaceId: scope.source.workspace_id, recordId: id, recordType,
-          state: 'ready', threadId: original.threadId, runId: original.runId,
+          state: 'ready', threadId: original.threadId, ...(original.runId ? {runId:original.runId} : {}),
           payloadJson: JSON.stringify({ ...original, objectHash: blob.hash, byteLength: blob.byteLength, wireByteLength: request.byteLength }),
           ownerIds: [blob.ownerId], references: [{ slot: 'source', objectHash: blob.hash }] }, signal);
         return { hash: blob.hash, byteLength: blob.byteLength, ownerId: '' };
@@ -141,7 +148,7 @@ export function createManagedAttachmentImport(kernel: KernelClient) {
           || JSON.parse(record.payloadJson).byteLength !== original.attachment.byteLength)
           throw new Error('Original attachment import is incomplete');
         return client.objectViewPrepare({ workspaceId: scope.source.workspace_id, executionWorkspaceId: scope.source.execution_workspace_id,
-          recordId, slot: 'source', viewId: location.viewId, filename: original.attachment.filename, runId: original.runId }, signal);
+          recordId, slot: 'source', viewId: location.viewId, filename: original.attachment.filename, ...(original.runId ? {runId:original.runId} : {externalConversationId:original.threadId}) }, signal);
       });
     },
     async drain(scope: ManagedSourceCleanupScope): Promise<void> {
@@ -154,14 +161,15 @@ export function createManagedAttachmentImport(kernel: KernelClient) {
     /** Called after native retirement. The view owner independently refuses
      * deletion while any original process still lacks a confirmed exit. */
     async cleanup(scope: ManagedSourceCleanupScope): Promise<void> {
-      if (scope.scope.kind !== 'run') return;
-      const runId = scope.scope.runId;
+      if (scope.scope.kind === 'source_read') return;
+      const runId = scope.scope.kind === 'run' ? scope.scope.runId : undefined;
+      const threadId=scope.scope.kind==='external'?scope.scope.conversationId:scope.scope.threadId;
       await withWriter(scope, async client => {
         const owned: KernelRecordResult[] = [];
         let cursor: number | undefined;
         do {
           const page = await client.listRecords({ workspaceId: scope.source.workspace_id, recordType,
-            threadId: scope.scope.threadId, runId, ...(cursor === undefined ? {} : { cursor }) });
+            threadId, ...(runId ? {runId} : {}), ...(cursor === undefined ? {} : { cursor }) });
           owned.push(...page.records.filter(record => {
             const value = JSON.parse(record.payloadJson);
             return value.principalId === scope.principal.principalId && value.coordinatorHostId === scope.coordinatorHostId && value.authorityId === scope.authorityId;

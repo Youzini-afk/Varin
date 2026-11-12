@@ -1,7 +1,8 @@
+import { createProjectGitRoutes, type ProjectGitDispatcher, type GitRouteResponse } from './project-dispatch.js';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { Express, Response } from 'express';
+import type { Express } from 'express';
 import type { GitDocumentAuthority, ProcessWriter } from './types.js';
 import type { GitIdentityProfile } from './identity-storage.js';
 
@@ -126,7 +127,7 @@ const runGitMutation = async <Result>({ documents, scopes, ownerId, purpose, ope
   }
 };
 
-const runDirectoryMutation = async <Result>(
+export const runDirectoryMutation = async <Result>(
   documents: GitDocumentAuthority | undefined,
   git: GitLibraries,
   directory: string,
@@ -151,7 +152,7 @@ const errorMessage = (error: unknown, fallback: string): string => (
   error instanceof Error && error.message ? error.message : fallback
 );
 
-const sendGitError = (res: Response, error: unknown, fallback: string): Response => {
+const sendGitError = (res: GitRouteResponse, error: unknown, fallback: string): GitRouteResponse => {
   const failure = errorRecord(error);
   const statusCode = typeof failure.statusCode === 'number' && Number.isInteger(failure.statusCode) && failure.statusCode >= 400
     ? failure.statusCode
@@ -162,10 +163,13 @@ const sendGitError = (res: Response, error: unknown, fallback: string): Response
 export function registerGitRoutes(app: Express, {
   documents,
   onStatus,
+  readDefaultGitIdentity,
 }: {
   documents?: GitDocumentAuthority;
+  readDefaultGitIdentity?: () => Promise<string | null>;
   onStatus?: (directory: string, status: unknown) => void | Promise<void>;
-} = {}): void {
+} = {}): ProjectGitDispatcher {
+  const routes = createProjectGitRoutes(app);
   let gitLibraries: GitLibraries | null = null;
   const getGitLibraries = async (): Promise<GitLibraries> => {
     if (!gitLibraries) {
@@ -174,7 +178,12 @@ export function registerGitRoutes(app: Express, {
     return gitLibraries;
   };
 
-  app.get('/api/git/identities', async (req, res) => {
+  routes.get('/api/git/default-identity', async (_req, res) => {
+    if (!readDefaultGitIdentity) return res.status(503).json({ error: 'Target settings owner unavailable' });
+    return res.json({ id: await readDefaultGitIdentity() });
+  });
+
+  routes.get('/api/git/identities', async (req, res) => {
     const { getProfiles } = await getGitLibraries();
     try {
       const profiles = getProfiles();
@@ -185,7 +194,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/identities', async (req, res) => {
+  routes.post('/api/git/identities', async (req, res) => {
     const { createProfile } = await getGitLibraries();
     try {
       const profile = createProfile(req.body);
@@ -197,9 +206,10 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.put('/api/git/identities/:id', async (req, res) => {
+  routes.put('/api/git/identities/:id', async (req, res) => {
     const { updateProfile } = await getGitLibraries();
     try {
+      if (typeof req.params.id !== 'string' || !req.params.id.trim()) return res.status(400).json({ error: 'Identity id is required' });
       const profile = updateProfile(req.params.id, req.body);
       console.log(`Updated git identity profile: ${profile.name} (${profile.id})`);
       res.json(profile);
@@ -209,9 +219,10 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.delete('/api/git/identities/:id', async (req, res) => {
+  routes.delete('/api/git/identities/:id', async (req, res) => {
     const { deleteProfile } = await getGitLibraries();
     try {
+      if (typeof req.params.id !== 'string' || !req.params.id.trim()) return res.status(400).json({ error: 'Identity id is required' });
       deleteProfile(req.params.id);
       console.log(`Deleted git identity profile: ${req.params.id}`);
       res.json({ success: true });
@@ -221,7 +232,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/global-identity', async (req, res) => {
+  routes.get('/api/git/global-identity', async (req, res) => {
     const { getGlobalIdentity } = await getGitLibraries();
     try {
       const identity = await getGlobalIdentity();
@@ -232,7 +243,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/discover-credentials', async (req, res) => {
+  routes.get('/api/git/discover-credentials', async (req, res) => {
     try {
       const { discoverGitCredentials } = await import('./index.js');
       const credentials = discoverGitCredentials();
@@ -243,7 +254,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/clone', async (req, res) => {
+  routes.post('/api/git/clone', async (req, res) => {
     const git = await getGitLibraries();
     try {
       const remoteUrl = typeof req.body?.remoteUrl === 'string' ? req.body.remoteUrl.trim() : '';
@@ -357,7 +368,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/check', async (req, res) => {
+  routes.get('/api/git/check', async (req, res) => {
     const { isGitRepository } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -373,7 +384,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/remote-url', async (req, res) => {
+  routes.get('/api/git/remote-url', async (req, res) => {
     const { getRemoteUrl } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -390,7 +401,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/current-identity', async (req, res) => {
+  routes.get('/api/git/current-identity', async (req, res) => {
     const { getCurrentIdentity } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -406,7 +417,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/has-local-identity', async (req, res) => {
+  routes.get('/api/git/has-local-identity', async (req, res) => {
     const { hasLocalIdentity } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -422,7 +433,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/set-identity', async (req, res) => {
+  routes.post('/api/git/set-identity', async (req, res) => {
     const git = await getGitLibraries();
     const { getProfile, setLocalIdentity, getGlobalIdentity } = git;
     try {
@@ -479,7 +490,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/status', async (req, res) => {
+  routes.get('/api/git/status', async (req, res) => {
     const { getStatus, isGitRepository } = await getGitLibraries();
 
     const extractGitErrorText = (error: unknown): string => {
@@ -520,7 +531,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/primary-root', async (req, res) => {
+  routes.get('/api/git/primary-root', async (req, res) => {
     const { resolvePrimaryWorktreeRoot } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -535,7 +546,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/toplevel', async (req, res) => {
+  routes.get('/api/git/toplevel', async (req, res) => {
     const { resolveWorktreeTopLevel } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -550,7 +561,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/commit-summaries', async (req, res) => {
+  routes.post('/api/git/commit-summaries', async (req, res) => {
     const { getCommitSummaries } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -596,7 +607,7 @@ export function registerGitRoutes(app: Express, {
     action: string,
     loadHandler: () => Promise<(body: Record<string, unknown>) => Promise<unknown>>,
   ): void => {
-    app.post(`/api/git/integrate/${action}`, async (req, res) => {
+    routes.post(`/api/git/integrate/${action}`, async (req, res) => {
       try {
         const handler = await loadHandler();
         const body = req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {};
@@ -642,7 +653,7 @@ export function registerGitRoutes(app: Express, {
     return (body) => continueIntegrate(errorRecord(body.state));
   });
 
-  app.get('/api/git/diff', async (req, res) => {
+  routes.get('/api/git/diff', async (req, res) => {
     const { getDiff } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -671,7 +682,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/file-diff', async (req, res) => {
+  routes.get('/api/git/file-diff', async (req, res) => {
     const { getFileDiff } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -703,7 +714,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/revert', async (req, res) => {
+  routes.post('/api/git/revert', async (req, res) => {
     const git = await getGitLibraries();
     const { revertFile } = git;
     try {
@@ -731,7 +742,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/stage', async (req, res) => {
+  routes.post('/api/git/stage', async (req, res) => {
     const git = await getGitLibraries();
     const { stageFiles } = git;
     try {
@@ -760,7 +771,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/unstage', async (req, res) => {
+  routes.post('/api/git/unstage', async (req, res) => {
     const git = await getGitLibraries();
     const { unstageFiles } = git;
     try {
@@ -789,7 +800,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/apply-hunk', async (req, res) => {
+  routes.post('/api/git/apply-hunk', async (req, res) => {
     const git = await getGitLibraries();
     const { applyHunk } = git;
     try {
@@ -823,7 +834,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/pull', async (req, res) => {
+  routes.post('/api/git/pull', async (req, res) => {
     const git = await getGitLibraries();
     const { pull } = git;
     try {
@@ -846,7 +857,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/push', async (req, res) => {
+  routes.post('/api/git/push', async (req, res) => {
     const git = await getGitLibraries();
     const { push } = git;
     try {
@@ -869,7 +880,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/stashes', async (req, res) => {
+  routes.get('/api/git/stashes', async (req, res) => {
     const { listStashes } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -881,7 +892,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/stashes/file-counts', async (req, res) => {
+  routes.post('/api/git/stashes/file-counts', async (req, res) => {
     const { countStashFiles } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -893,7 +904,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/stash', async (req, res) => {
+  routes.post('/api/git/stash', async (req, res) => {
     const git = await getGitLibraries();
     const { stashPush } = git;
     try {
@@ -912,7 +923,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/stash/apply', async (req, res) => {
+  routes.post('/api/git/stash/apply', async (req, res) => {
     const git = await getGitLibraries();
     const { stashApply } = git;
     try {
@@ -931,7 +942,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/stash/pop', async (req, res) => {
+  routes.post('/api/git/stash/pop', async (req, res) => {
     const git = await getGitLibraries();
     const { stashPop } = git;
     try {
@@ -950,7 +961,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/stash/drop', async (req, res) => {
+  routes.post('/api/git/stash/drop', async (req, res) => {
     const git = await getGitLibraries();
     const { stashDrop } = git;
     try {
@@ -969,7 +980,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/fetch', async (req, res) => {
+  routes.post('/api/git/fetch', async (req, res) => {
     const git = await getGitLibraries();
     const { fetch: gitFetch } = git;
     try {
@@ -992,7 +1003,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/remotes', async (req, res) => {
+  routes.get('/api/git/remotes', async (req, res) => {
     const { getRemotes } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -1008,7 +1019,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.delete('/api/git/remotes', async (req, res) => {
+  routes.delete('/api/git/remotes', async (req, res) => {
     const git = await getGitLibraries();
     const { removeRemote } = git;
     try {
@@ -1036,7 +1047,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/rebase', async (req, res) => {
+  routes.post('/api/git/rebase', async (req, res) => {
     const git = await getGitLibraries();
     const { rebase } = git;
     try {
@@ -1059,7 +1070,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/rebase/abort', async (req, res) => {
+  routes.post('/api/git/rebase/abort', async (req, res) => {
     const git = await getGitLibraries();
     const { abortRebase } = git;
     try {
@@ -1082,7 +1093,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/merge', async (req, res) => {
+  routes.post('/api/git/merge', async (req, res) => {
     const git = await getGitLibraries();
     const { merge } = git;
     try {
@@ -1105,7 +1116,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/merge/abort', async (req, res) => {
+  routes.post('/api/git/merge/abort', async (req, res) => {
     const git = await getGitLibraries();
     const { abortMerge } = git;
     try {
@@ -1128,7 +1139,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/rebase/continue', async (req, res) => {
+  routes.post('/api/git/rebase/continue', async (req, res) => {
     const git = await getGitLibraries();
     const { continueRebase } = git;
     try {
@@ -1151,7 +1162,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/merge/continue', async (req, res) => {
+  routes.post('/api/git/merge/continue', async (req, res) => {
     const git = await getGitLibraries();
     const { continueMerge } = git;
     try {
@@ -1174,7 +1185,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/conflict-details', async (req, res) => {
+  routes.get('/api/git/conflict-details', async (req, res) => {
     const { getConflictDetails } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -1190,7 +1201,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/commit', async (req, res) => {
+  routes.post('/api/git/commit', async (req, res) => {
     const git = await getGitLibraries();
     const { commit } = git;
     try {
@@ -1222,7 +1233,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/branches', async (req, res) => {
+  routes.get('/api/git/branches', async (req, res) => {
     const { getBranches } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -1238,7 +1249,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/branches', async (req, res) => {
+  routes.post('/api/git/branches', async (req, res) => {
     const git = await getGitLibraries();
     const { createBranch } = git;
     try {
@@ -1266,7 +1277,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.delete('/api/git/branches', async (req, res) => {
+  routes.delete('/api/git/branches', async (req, res) => {
     const git = await getGitLibraries();
     const { deleteBranch } = git;
     try {
@@ -1295,7 +1306,7 @@ export function registerGitRoutes(app: Express, {
   });
 
 
-  app.put('/api/git/branches/rename', async (req, res) => {
+  routes.put('/api/git/branches/rename', async (req, res) => {
     const git = await getGitLibraries();
     const { renameBranch } = git;
     try {
@@ -1325,7 +1336,7 @@ export function registerGitRoutes(app: Express, {
       sendGitError(res, error, 'Failed to rename branch');
     }
   });
-  app.delete('/api/git/remote-branches', async (req, res) => {
+  routes.delete('/api/git/remote-branches', async (req, res) => {
     const git = await getGitLibraries();
     const { deleteRemoteBranch } = git;
     try {
@@ -1353,7 +1364,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/checkout', async (req, res) => {
+  routes.post('/api/git/checkout', async (req, res) => {
     const git = await getGitLibraries();
     const { checkoutBranch } = git;
     try {
@@ -1381,7 +1392,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/checkout-commit', async (req, res) => {
+  routes.post('/api/git/checkout-commit', async (req, res) => {
     const git = await getGitLibraries();
     const { checkoutCommit } = git;
     try {
@@ -1407,7 +1418,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/cherry-pick', async (req, res) => {
+  routes.post('/api/git/cherry-pick', async (req, res) => {
     const git = await getGitLibraries();
     const { cherryPick } = git;
     try {
@@ -1433,7 +1444,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/revert-commit', async (req, res) => {
+  routes.post('/api/git/revert-commit', async (req, res) => {
     const git = await getGitLibraries();
     const { revertCommit } = git;
     try {
@@ -1459,7 +1470,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/reset-to-commit', async (req, res) => {
+  routes.post('/api/git/reset-to-commit', async (req, res) => {
     const git = await getGitLibraries();
     const { resetToCommit } = git;
     try {
@@ -1488,7 +1499,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/worktrees', async (req, res) => {
+  routes.get('/api/git/worktrees', async (req, res) => {
     const { getWorktrees } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -1507,7 +1518,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/worktrees/validate', async (req, res) => {
+  routes.post('/api/git/worktrees/validate', async (req, res) => {
     const { validateWorktreeCreate } = await getGitLibraries();
     if (typeof validateWorktreeCreate !== 'function') {
       return res.status(501).json({ error: 'Worktree validation is not available' });
@@ -1527,7 +1538,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/worktrees', async (req, res) => {
+  routes.post('/api/git/worktrees', async (req, res) => {
     const git = await getGitLibraries();
     const { createWorktree } = git;
     if (typeof createWorktree !== 'function') {
@@ -1558,7 +1569,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/worktrees/preview', async (req, res) => {
+  routes.post('/api/git/worktrees/preview', async (req, res) => {
     const { previewWorktreeCreate } = await getGitLibraries();
     if (typeof previewWorktreeCreate !== 'function') {
       return res.status(501).json({ error: 'Worktree preview is not available' });
@@ -1578,7 +1589,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/worktrees/bootstrap-status', async (req, res) => {
+  routes.get('/api/git/worktrees/bootstrap-status', async (req, res) => {
     const { getWorktreeBootstrapStatus } = await getGitLibraries();
     if (typeof getWorktreeBootstrapStatus !== 'function') {
       return res.status(501).json({ error: 'Worktree bootstrap status is not available' });
@@ -1598,7 +1609,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.delete('/api/git/worktrees', async (req, res) => {
+  routes.delete('/api/git/worktrees', async (req, res) => {
     const git = await getGitLibraries();
     const { removeWorktree } = git;
     if (typeof removeWorktree !== 'function') {
@@ -1634,7 +1645,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/worktree-type', async (req, res) => {
+  routes.get('/api/git/worktree-type', async (req, res) => {
     const { isLinkedWorktree } = await getGitLibraries();
     try {
       const { directory } = req.query;
@@ -1649,7 +1660,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/validate-directory', async (req, res) => {
+  routes.post('/api/git/validate-directory', async (req, res) => {
     const { validateWorktreeDirectory } = await getGitLibraries();
     if (typeof validateWorktreeDirectory !== 'function') {
       return res.status(501).json({ error: 'validateWorktreeDirectory is not available' });
@@ -1670,7 +1681,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.post('/api/git/canonicalize-worktree-state', async (req, res) => {
+  routes.post('/api/git/canonicalize-worktree-state', async (req, res) => {
     const { canonicalizeWorktreeState } = await getGitLibraries();
     if (typeof canonicalizeWorktreeState !== 'function') {
       return res.status(501).json({ error: 'canonicalizeWorktreeState is not available' });
@@ -1688,7 +1699,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/log', async (req, res) => {
+  routes.get('/api/git/log', async (req, res) => {
     const { getLog } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -1712,7 +1723,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/commit-files', async (req, res) => {
+  routes.get('/api/git/commit-files', async (req, res) => {
     const { getCommitFiles } = await getGitLibraries();
     try {
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
@@ -1732,7 +1743,7 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
-  app.get('/api/git/commit-file-diff', async (req, res) => {
+  routes.get('/api/git/commit-file-diff', async (req, res) => {
     const { getCommitFileDiff } = await getGitLibraries();
     try {
       const { directory, hash, path: filePath } = req.query;
@@ -1758,4 +1769,5 @@ export function registerGitRoutes(app: Express, {
     }
   });
 
+  return routes.dispatch;
 }

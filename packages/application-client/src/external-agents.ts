@@ -98,6 +98,7 @@ export interface ExternalConversation {
   title: string;
   cwd: string;
   workspaceId?: string;
+  executionSource?: import("@varin/protocol").LaunchSource;
   nativeWorkspace?: {resource_owner:{kind:'local'};mode:'native_workspace';workspace_id:string;execution_workspace_id:string;
     branch_id:string;revision:null;live_root:null;native_scope?:string};
   sessionId?: string;
@@ -276,7 +277,7 @@ export interface ExternalDelegation {
   finishedAtMs?: number;
 }
 export interface ExternalAgentsAPI {
-  settings(signal?: AbortSignal): Promise<ExternalAgentSettings>;
+  settings(signal?: AbortSignal, resourceOwner?: import('@varin/protocol').SourceResourceOwner): Promise<ExternalAgentSettings>;
   configure(
     value: Pick<ExternalAgentSettings, 'agents' | 'defaultAgent'>,
     expectedRevision: number,
@@ -292,8 +293,10 @@ export interface ExternalAgentsAPI {
   create(input: {
     key: string;
     configurationId: string;
+    source?: {resourceOwner: import('@varin/protocol').SourceResourceOwner;path:string;expectedWorkspaceId?:string};
     cwd?: string;
     title?: string;
+    organization?: import('./conversation-organization.js').ConversationOrganizationPlacement;
   }): Promise<ExternalConversation>;
   read(id: string, before?: number, signal?: AbortSignal): Promise<ExternalConversationSnapshot>;
   send(id: string, key: string, input: ExternalInput): Promise<ExternalTurn>;
@@ -351,7 +354,7 @@ export function createExternalAgentsHttpAPI(generation = getRuntimeEndpointGener
     return result as T;
   };
   return {
-    settings: (signal) => request('settings', {}, signal),
+    settings: (signal, resourceOwner) => request('settings', resourceOwner ? {resourceOwner} : {}, signal),
     configure: (value, expectedRevision, key) => request('configure', { value, expectedRevision, key }),
     detect: (id, signal) => request('detect', { id }, signal),
     list: (signal) => request('list', {}, signal),

@@ -59,12 +59,16 @@ pub struct ActivityRead {
     bot_id: String,
     before: Option<u64>,
     limit: usize,
+    principal: Option<Option<String>>,
     content: crate::content::ContentStore,
     _publication: crate::content::ContentPublication,
 }
 
 impl Catalog {
     pub fn capture_bot_activity(&self, bot_id: &str, before: Option<u64>, limit: Option<usize>) -> Result<ActivityRead> {
+        self.capture_bot_activity_scoped(bot_id, before, limit, None)
+    }
+    pub fn capture_bot_activity_scoped(&self, bot_id: &str, before: Option<u64>, limit: Option<usize>, principal: Option<Option<String>>) -> Result<ActivityRead> {
         super::bot_work::entry(&self.db, bot_id)?;
         let limit = limit.unwrap_or(30);
         if limit == 0 || i64::try_from(limit.saturating_add(1)).is_err() {
@@ -76,6 +80,7 @@ impl Catalog {
             bot_id: bot_id.to_owned(),
             before,
             limit,
+            principal,
             content: self.content.clone(),
             _publication: self.content.begin_publication(),
         })
@@ -86,21 +91,22 @@ impl Catalog {
 // older page boundary. Dispatches and reports are the sessions' own; changes are the work
 // updates this Bot was told about, minus the ones delivery suppressed as duplicates or
 // inaccessible. Retrieval workers are private tool executions, not delegated work.
-const ACTIVITY: &str = "WITH sessions(id) AS (SELECT thread_id FROM bot_thread_bindings WHERE bot_id=?1),
+const ACTIVITY: &str = "WITH sessions(id) AS (SELECT binding.thread_id FROM bot_thread_bindings binding JOIN threads t ON t.id=binding.thread_id WHERE bot_id=?1 AND (NOT ?4 OR t.principal_id IS ?5)),
     activity(kind,subject,cursor,data) AS (
         SELECT 'dispatch',c.id,e.cursor,e.data FROM child_tasks c
         JOIN delegated_executions d ON d.child_operation_id=c.id AND json_extract(d.body,'$.trigger.kind')='dispatch'
         JOIN events e ON e.subject=c.id AND e.kind='child.accepted' JOIN operations o ON o.id=c.id
         WHERE json_extract(c.body,'$.parent_thread_id') IN (SELECT id FROM sessions)
-          AND coalesce(json_extract(o.body,'$.executor'),'')!='code_retrieval'
+          AND coalesce(json_extract(o.body,'$.executor'),'')!='code_retrieval' AND (NOT ?4 OR EXISTS(SELECT 1 FROM threads t WHERE t.id=c.child_thread_id AND t.principal_id IS ?5))
         UNION ALL
         SELECT 'report',d.id,e.cursor,e.data FROM delegated_executions d JOIN child_tasks c ON c.id=d.child_operation_id
         JOIN events e ON e.subject=d.id AND e.kind='child.report_ready' JOIN operations o ON o.id=c.id
         WHERE json_extract(c.body,'$.parent_thread_id') IN (SELECT id FROM sessions) AND json_extract(d.body,'$.report') IS NOT NULL
-          AND coalesce(json_extract(o.body,'$.executor'),'')!='code_retrieval'
+          AND coalesce(json_extract(o.body,'$.executor'),'')!='code_retrieval' AND (NOT ?4 OR EXISTS(SELECT 1 FROM threads t WHERE t.id=c.child_thread_id AND t.principal_id IS ?5))
         UNION ALL
         SELECT 'change','',e.cursor,e.data FROM events e
         WHERE e.subject='bot-work-pending' AND e.kind='bot.work_pending' AND json_extract(e.data,'$.botId')=?1
+          AND (NOT ?4 OR (json_extract(e.data,'$.targetThreadId') IN (SELECT id FROM sessions) AND EXISTS(SELECT 1 FROM threads t WHERE t.id=json_extract(e.data,'$.sourceThreadId') AND t.principal_id IS ?5)))
           AND json_extract(e.data,'$.kind') IN ('user_input','workspace_change','history_changed')
           AND NOT EXISTS(SELECT 1 FROM deliveries WHERE observer='bot-work-suppressed' AND fact_cursor=e.cursor)
         UNION ALL
@@ -124,7 +130,7 @@ impl ActivityRead {
         let bound = self.before.map(sql_number).transpose()?.unwrap_or(i64::MAX);
         let mut statement = db.prepare(ACTIVITY)?;
         let records = statement
-            .query_map(params![self.bot_id, bound, (self.limit + 1) as i64], |r| {
+            .query_map(params![self.bot_id, bound, (self.limit + 1) as i64, self.principal.is_some(), self.principal.as_ref().and_then(|p|p.as_deref())], |r| {
                 Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, read_number(r, 2)?, r.get::<_, String>(3)?))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -184,7 +190,14 @@ impl ActivityRead {
                 }
                 "quiet" => {
                     let run: Run = record(&db, "runs", &subject)?;
-                    let inputs = quiet_inputs(&db, &run.id)?;
+                    let mut inputs = quiet_inputs(&db, &run.id)?;
+                    if let Some(principal) = &self.principal {
+                        let mut visible = Vec::new();
+                        for input in inputs { if let Some(thread) = &input.thread_id {
+                            if !db.query_row("SELECT EXISTS(SELECT 1 FROM threads WHERE id=?1 AND principal_id IS ?2)", params![thread,principal], |r|r.get::<_,bool>(0))? { continue; }
+                        } visible.push(input); }
+                        inputs = visible;
+                    }
                     participants.extend(inputs.iter().filter_map(|input| input.thread_id.clone()));
                     ActivityEvent {
                         cursor, at_ms: data["atMs"].as_u64(), session_thread_id: run.thread_id, session_branch_id: run.branch_id,

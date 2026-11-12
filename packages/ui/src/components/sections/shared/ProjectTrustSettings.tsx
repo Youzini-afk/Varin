@@ -1,5 +1,5 @@
 import React from 'react';
-import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { type ProjectEntry, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useI18n } from '@/lib/i18n';
@@ -10,8 +10,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 type Review = { snapshot: ProjectTrust; decision: boolean; settle(accepted: boolean): void };
 
 /** The displayed canonical root is also the Host's revision-checked mutation target. */
-export function ProjectTrustSettings({ directory: selectedDirectory, label, showDescription = true }: {
-  directory?: string | null; label?: string; showDescription?: boolean;
+export function ProjectTrustSettings({ directory: selectedDirectory, project, label, showDescription = true }: {
+  directory?: string | null; project?: ProjectEntry; label?: string; showDescription?: boolean;
 }) {
   const { t } = useI18n();
   const currentDirectory = useDirectoryStore(state => state.currentDirectory);
@@ -28,7 +28,8 @@ export function ProjectTrustSettings({ directory: selectedDirectory, label, show
   const pending = React.useRef<Review | null>(null);
   const saving = React.useRef(false);
   const sequence = React.useRef(0);
-  const key = JSON.stringify([host, directory]);
+  const remoteSource = project?.source?.resourceOwner.kind === 'managed_host' ? project.source : undefined;
+  const key = JSON.stringify([host, directory, project?.id, remoteSource]);
   const owner = React.useRef(key); owner.current = key;
   const finishReview = React.useCallback((accepted: boolean) => {
     const previous = pending.current; pending.current = null; setReview(null); previous?.settle(accepted);
@@ -41,15 +42,15 @@ export function ProjectTrustSettings({ directory: selectedDirectory, label, show
     const request = ++sequence.current;
     const controller = new AbortController();
     finishReview(false); setSnapshot(null); setReadError('');
-    if (directory) void documents.resolveWorkspace({ path: directory }).then(async workspace => {
+    if (directory) void (remoteSource ? Promise.resolve({workspaceId:remoteSource.workspaceId}) : documents.resolveWorkspace({ path: directory })).then(async workspace => {
       if (controller.signal.aborted || request !== sequence.current || owner.current !== key) return;
-      const value = await readProjectTrust(workspace.workspaceId, controller.signal);
+      const value = await readProjectTrust(workspace.workspaceId, controller.signal, remoteSource && project ? {projectId:project.id,expectedSource:structuredClone(remoteSource)} : undefined);
       if (!controller.signal.aborted && request === sequence.current && owner.current === key) setSnapshot(value);
     }).catch(error => {
       if (!controller.signal.aborted && request === sequence.current && owner.current === key) setReadError(error instanceof Error ? error.message : String(error));
     });
     return () => { controller.abort(); sequence.current += 1; pending.current?.settle(false); pending.current = null; };
-  }, [directory, documents, finishReview, host, key, reload, trustVersion]);
+  }, [directory, documents, finishReview, host, key, reload, trustVersion, project, remoteSource]);
 
   const change = async (decision: boolean) => {
     if (!snapshot || saving.current) return;

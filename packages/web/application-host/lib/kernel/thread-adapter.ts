@@ -117,7 +117,7 @@ export class ThreadAdapter {
   bindMaterials(owner: ThreadInputMaterials): void { this.inputMaterials = owner; }
   private messageTime?: () => Promise<MessageTimeSettings>;
   bindMessageTime(settings: () => Promise<MessageTimeSettings>): void { this.messageTime = settings; }
-  private async prepareInput(input: ThreadIdentity & ContentReferenceInput & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: AttachmentSelection[]; attachmentImageReferences?: Record<string, number>; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; source?: ThreadSource; clientTime?: MessageTimeObservation }, signal?: AbortSignal, options: { rawReferences?: boolean; acceptsImages?: boolean } = {}) {
+  private async prepareInput(input: ThreadIdentity & ContentReferenceInput & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; attachments?: AttachmentSelection[]; attachmentImageReferences?: Record<string, number>; skills?: ThreadSkillSelection[]; references?: ThreadObjectReference[]; source?: ThreadSource | null; clientTime?: MessageTimeObservation }, signal?: AbortSignal, options: { rawReferences?: boolean; acceptsImages?: boolean } = {}) {
     const sentTime = this.messageTime ? messageSentTime(await this.messageTime(), input.clientTime) : undefined;
     const selected = parseThreadMaterials(input.materials);
     const quoteSelection = prepareQuoteSelections(input);
@@ -226,8 +226,12 @@ export class ThreadAdapter {
     }
   }
   bindSourceDirectory(directory: SourceDirectory): void { this.sourceDirectory = directory; }
-  private defaultDeviceSource?: (identity: ThreadIdentity) => Promise<ThreadSource>;
-  bindDefaultDeviceSource(prepare: (identity: ThreadIdentity) => Promise<ThreadSource>): void { this.defaultDeviceSource = prepare; }
+  private creationDefaults?: (identity: ThreadIdentity, signal?: AbortSignal) => Promise<NonNullable<ThreadSnapshot['creationDefaults']> | null>;
+  bindCreationDefaults(read: NonNullable<ThreadAdapter['creationDefaults']>): void { this.creationDefaults = read; }
+  private organizationCreation?: (identity: ThreadIdentity, placement: import('@varin/application-client').ConversationOrganizationPlacement) => Promise<import('@varin/application-client').ConversationCreationDefaults | null>;
+  bindOrganizationCreation(prepare: NonNullable<ThreadAdapter['organizationCreation']>): void { this.organizationCreation = prepare; }
+  private defaultDeviceSource?: (identity: ThreadIdentity) => Promise<ThreadSource | null>;
+  bindDefaultDeviceSource(prepare: (identity: ThreadIdentity) => Promise<ThreadSource | null>): void { this.defaultDeviceSource = prepare; }
   private fileResolver?: import('./thread-file-target.js').ThreadFileTargetResolver;
   private codeExchangeReader?: import('./thread-code-exchange.js').ThreadCodeExchangeReader;
   private exchangeQueue?: ReturnType<typeof import('./code-exchange-queue.js').createCodeExchangeQueue>;
@@ -767,11 +771,12 @@ export class ThreadAdapter {
     return this.runtime.markThreadRead(command);
   }
 
-  async create(key: string): Promise<ThreadIdentity> {
+  async create(key: string, options?: { organization?: import('@varin/application-client').ConversationOrganizationPlacement }): Promise<ThreadIdentity> {
     const principalId = currentRequestPrincipal();
     const digest = createHash('sha256').update(principalId ? `${principalId}\0${key}` : key).digest('hex');
     const identity: ThreadIdentity = { runtime: 'agent', threadId: `thread:${digest}`, branchId: `branch:${digest}` };
-    await this.runtime.createThread(identity.threadId, identity.branchId, undefined, principalId);
+    const defaults = options?.organization && this.organizationCreation ? await this.organizationCreation(identity, options.organization) : undefined;
+    await this.runtime.createThread(identity.threadId, identity.branchId, undefined, principalId, options?.organization, defaults ?? undefined);
     return identity;
   }
 
@@ -1043,15 +1048,30 @@ export class ThreadAdapter {
       const model = await this.models.resolveModel(input.model);
       try {
         this.assertImagesSupported(input.images, model.configuration);
-        // Keep this fallback stable even on retries. Catalog decides inheritance
-        // atomically; the latest selected project/remote source always wins.
-        const candidateSource = input.source ?? await this.defaultDeviceSource?.(input) ?? null;
+        const preparedInput = await this.prepareInput(input, undefined, { rawReferences: Boolean(input.references?.length || input.contentReferences?.length || input.contentReferenceOccurrences?.length), acceptsImages: model.configuration.acceptsImages !== false });
+        const credentialScope = await model.credentialOwner.scope();
+        if (input.source === undefined && this.runtime.inheritedInputReceipt) {
+          // Resolve only the original Host-derived fallback before consulting mutable project,
+          // device or source owners. Rust still compares the complete original input intent.
+          const accepted = await this.runtime.inheritedInputReceipt({ key: input.key, threadId: input.threadId, branchId: input.branchId,
+            expectedHead: input.expectedHead, input: preparedInput, configuration: model.configuration,
+            launch: { ...(input.agent ? { agent: { ...input.agent, name: null, tools: null } } : {}), inheritSource: true,
+              source: null, enabledTools: [], credentialScope } });
+          if (accepted) {
+            admissionStarted = true;
+            this.titles?.schedule(thread, input.branchId);
+            void this.continueLaunch(accepted.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
+            return accepted;
+          }
+        }
+        // Existing branch source wins; a fresh source-less conversation uses its creation default.
+        const candidateSource = input.source === undefined ? await this.defaultDeviceSource?.(input) ?? null : input.source;
         const command: InputSubmitParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
-          expectedHead: input.expectedHead, input: await this.prepareInput(input, undefined, { rawReferences: Boolean(input.references?.length || input.contentReferences?.length || input.contentReferenceOccurrences?.length), acceptsImages: model.configuration.acceptsImages !== false }), configuration: model.configuration,
+          expectedHead: input.expectedHead, input: preparedInput, configuration: model.configuration,
           launch: { ...(input.agent ? { agent: { ...input.agent, name: null, tools: null } } : {}), inheritSource: input.source === undefined, source: candidateSource ? {
             resourceOwner: candidateSource.resourceOwner, workspaceId: candidateSource.workspaceId, executionWorkspaceId: candidateSource.executionWorkspaceId,
             ...(candidateSource.mode==='native_workspace'&&candidateSource.nativeScope?{nativeScope:candidateSource.nativeScope}:{}),branchId: candidateSource.branchId ?? null, revision: candidateSource.revision ?? null, mode: candidateSource.mode, liveRoot: candidateSource.liveRoot ?? null, ...(candidateSource.environmentRunId ? { environmentRunId: candidateSource.environmentRunId } : {}),
-          } : null, enabledTools: candidateSource?.tools ?? [], credentialScope: await model.credentialOwner.scope() },
+          } : null, enabledTools: candidateSource?.tools ?? [], credentialScope },
         };
         if (input.references?.length || input.contentReferences?.length || input.contentReferenceOccurrences?.length || input.skills?.length || parseExplicitSkillCommand(input.text) || this.prepareContext || this.prepareChildProfiles || input.agent) {
           const accepted = await this.runtime.inputReceipt(command);
@@ -1093,7 +1113,7 @@ export class ThreadAdapter {
           try {
             const agent = input.agent ? await this.prepareAgent(input.agent) : undefined;
             if (agent) command.launch!.agent = agent.selection;
-            if (this.prepareContext && checkpoint && replacingSource && candidateSource) {
+            if (this.prepareContext && checkpoint && replacingSource) {
               if (!this.prepareContext!.forSource) throw new Error('Resource source preparation is unavailable');
               initialContext = await this.prepareContext!.forSource(checkpoint, candidateSource);
               command.expectedContextCheckpoint = checkpoint.id;
@@ -1518,7 +1538,7 @@ export class ThreadAdapter {
     ]);
     const policySelection = shownRun && launch ? await this.runtime.inspectPolicy(shownRun.id, signal) : null;
     signal?.throwIfAborted();
-    return { identity, ...(recovery ? { recovery } : {}), eventCursor, thread, activeRun, runFailure, history, historyPage: { head: page.head, previous: page.previous }, inputs,
+    return { identity, ...(this.creationDefaults ? { creationDefaults: await this.creationDefaults(identity, signal) } : {}), ...(recovery ? { recovery } : {}), eventCursor, thread, activeRun, runFailure, history, historyPage: { head: page.head, previous: page.previous }, inputs,
       operations: [...operations.values()], followups, goals, launch, modelSelection, policySelection, context,
       children: childState.children, childExecutions: childState.executions, childDirectory:childState.directory,childActivity, delegatedExecutions };
   }

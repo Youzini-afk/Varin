@@ -61,3 +61,14 @@ describe('files explorer state', () => {
     expect(useFilesExplorerStore.getState().byRoot['/repo']?.expandedPaths).toHaveLength(paths.length);
   });
 });
+
+test('persists physical expansion paths under opaque source keys across Host switches', () => {
+  const scope = JSON.stringify(['host-a', { endpointIdentity: 'https://example.test' }, '/same/path']);
+  const store = useFilesExplorerStore.getState();
+  store.expandPaths('/same/path', ['/same/path/deep', '/outside'], scope);
+  store.resetForRuntimeSwitch('runtime-b');
+  useFilesExplorerStore.getState().expandPath('/same/path', '/same/path/other', 'host-b');
+  useFilesExplorerStore.getState().resetForRuntimeSwitch('runtime-a');
+  expect(useFilesExplorerStore.getState().byRoot[scope]?.expandedPaths).toEqual(['/same/path/deep']);
+  expect(useFilesExplorerStore.getState().byRoot['host-b']).toBeUndefined();
+});

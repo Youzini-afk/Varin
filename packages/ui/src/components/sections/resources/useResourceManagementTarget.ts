@@ -7,8 +7,10 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 export function useResourceManagementTarget(): { resourceTarget: ResourceManagementTarget; targetKey: string; projectDirectory: string | null; trustVersion: number } {
   const projectId = useProjectsStore(state => state.projects.some(project => project.id === state.activeProjectId) ? state.activeProjectId : null);
   const projectDirectory = useProjectsStore(state => state.projects.find(project => project.id === projectId)?.path ?? null);
+  const source = useProjectsStore(state => state.projects.find(project => project.id === projectId)?.source);
+  const sourceKey = JSON.stringify(source);
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const trustVersion = React.useSyncExternalStore(subscribeProjectTrustChanges, getProjectTrustGeneration, getProjectTrustGeneration);
-  const resourceTarget = React.useMemo<ResourceManagementTarget>(() => projectId ? { projectId } : {}, [projectId]);
-  return { resourceTarget, projectDirectory, trustVersion, targetKey: JSON.stringify([host, projectId]) };
+  const resourceTarget = React.useMemo<ResourceManagementTarget>(() => projectId ? { projectId, ...(source ? {expectedSource: structuredClone(source)} : {}) } : {}, [projectId, source]);
+  return { resourceTarget, projectDirectory, trustVersion, targetKey: JSON.stringify([host, projectId, sourceKey]) };
 }

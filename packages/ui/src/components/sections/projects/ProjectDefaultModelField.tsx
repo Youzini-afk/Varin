@@ -10,7 +10,7 @@ import { getProjectTrustGeneration, subscribeProjectTrustChanges } from '@/lib/p
 import { useI18n } from '@/lib/i18n';
 
 /** Edits the same project defaults consumed when a new conversation selects its model. */
-export function ProjectDefaultModelField({ directory }: { directory: string }) {
+export function ProjectDefaultModelField({ directory, projectId, remote = false }: { directory: string; projectId?: string; remote?: boolean }) {
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const trust = React.useSyncExternalStore(subscribeProjectTrustChanges, getProjectTrustGeneration, getProjectTrustGeneration);
@@ -26,17 +26,17 @@ export function ProjectDefaultModelField({ directory }: { directory: string }) {
     const current = ++generation.current;
     const controller = new AbortController();
     setSnapshot(undefined); setError(''); setBusy(false); writing.current = false;
-    void api.readSettings(directory, controller.signal).then(value => {
+    void api.readSettings(remote ? undefined : directory, controller.signal, projectId).then(value => {
       if (current === generation.current) setSnapshot(value);
     }, cause => { if (!controller.signal.aborted && current === generation.current) setError(String(cause)); });
     return () => { generation.current = current + 1; controller.abort(); };
-  }, [api, directory, trust, attempt]);
+  }, [api, directory, projectId, remote, trust, attempt]);
   const save = async (set: Record<string, JsonValue>, remove: string[]) => {
     if (!snapshot?.projectTrusted || writing.current) return;
     const current = generation.current;
     writing.current = true; setBusy(true); setError('');
     try {
-      const value = await api.updateSettings({ cwd: directory, scope: 'project', expectedRevision: snapshot.projectRevision,
+      const value = await api.updateSettings({ ...(remote ? {} : { cwd: directory }), ...(projectId ? { projectId } : {}), scope: 'project', expectedRevision: snapshot.projectRevision,
         set, remove });
       if (current === generation.current) setSnapshot(value);
     } catch (cause) {
@@ -49,6 +49,7 @@ export function ProjectDefaultModelField({ directory }: { directory: string }) {
   const selectedModel = channels.find(channel => channel.id === effective.defaultProvider)?.models.find(model => model.id === effective.defaultModel);
   const levels = selectedModel ? modelThinkingLevels(selectedModel) : [];
   return <div className="space-y-2">
+    {remote && <p className="typography-meta text-muted-foreground">Defaults for this registered project on the coordinating Host. The remote directory is not read as local configuration.</p>}
     <SettingsFieldRow label={t('settings.varin.agents.detail.model')}>
       <ModelSelector providerId={value(snapshot?.project.defaultProvider)} modelId={value(snapshot?.project.defaultModel)}
         displayProviderId={value(effective.defaultProvider)} displayModelId={value(effective.defaultModel)}

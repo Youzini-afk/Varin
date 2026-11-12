@@ -50,6 +50,9 @@ export interface DraftFileAttachment {
   error?: string;
 }
 export interface DraftSourceSelection {
+  selection?: ThreadPrepareSource['selection'];
+  /** Original project registration, checked after resolving the actual owner. */
+  expectedWorkspaceId?: string;
   path: string;
   resourceOwner: ThreadPrepareSource['resourceOwner'];
   mode: ThreadPrepareSource['mode'];
@@ -75,6 +78,8 @@ export interface ThreadFirstSend extends ContentReferenceInput {
   agent?: ThreadAgentChoice;
   workspacePath?: string;
   sourceSelection?: DraftSourceSelection;
+  /** Explicit chat-only source intent, distinct from omitted/inherited source. */
+  sourceDisabled?: boolean;
   editorContext: readonly EditorContextAttachment[];
   inlineContext: ReadonlyArray<{ key: string; drafts: readonly InlineCommentDraft[] }>;
   goalObjective?: string;
@@ -83,6 +88,12 @@ export interface ThreadFirstSend extends ContentReferenceInput {
   error?: string;
 }
 export interface ThreadDraft {
+  /** Frozen at draft creation. Navigation moves never reselect this work's project/source. */
+  organization?: import('@varin/application-client').ConversationOrganizationPlacement;
+  projectId?: string;
+  /** Original creation default consumed once; explicit source changes never reapply it. */
+  creationDefaultsApplied?: boolean;
+  botId?: string;
   /** Bound content and media objects share this draft's CodeMirror history. */
   markerObjects?: readonly ComposerMarkerObject[];
   editorState?: EditorState;
@@ -128,6 +139,8 @@ export interface ThreadDraft {
   firstMessageReceipt?: Pick<ThreadFirstSend, 'key' | 'text' | 'editorText' | 'images' | 'files' | 'selectedAttachments' | 'attachmentImageReferences' | 'contentReferences' | 'contentReferenceOccurrences'> & { inputId: string };
   sendError?: string;
   sourceSelection?: DraftSourceSelection;
+  /** Explicit chat-only source intent, distinct from omitted/inherited source. */
+  sourceDisabled?: boolean;
   /** Unsent collaboration input and exact per-recipient attempts, retained in memory only. */
   collaboration?: {
     afterCurrent?: boolean;

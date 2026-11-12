@@ -1,9 +1,10 @@
-import type { BotSession, BotSummary, ThreadIdentity } from '@varin/application-client';
+import type { BotSession, BotSummary, ConversationOrganizationPlacement, ThreadIdentity } from '@varin/application-client';
+import { currentRequestPrincipal } from '../kernel/request-principal.js';
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 
-export function createBotSessions(getRuntime: () => Pick<AgentRuntimeClient, 'botScope' | 'thread' | 'createBotThread' | 'resolveBotEntry'>) {
+export function createBotSessions(getRuntime: () => Pick<AgentRuntimeClient, 'botScope' | 'thread' | 'createBotThread' | 'resolveBotEntry'>, prepareOrganization?: (identity: ThreadIdentity, placement: ConversationOrganizationPlacement) => Promise<import('@varin/application-client').ConversationCreationDefaults | null>) {
   async function listSessions(bot: BotSummary): Promise<BotSession[]> {
-    const scope = await getRuntime().botScope(bot.id, undefined, true);
+    const scope = await getRuntime().botScope(bot.id, undefined, true, currentRequestPrincipal());
     const threads = new Map(scope.threads.map(thread => [thread.thread_id, thread]));
     return scope.sessions.flatMap(threadId => {
       const thread = threads.get(threadId);
@@ -15,9 +16,10 @@ export function createBotSessions(getRuntime: () => Pick<AgentRuntimeClient, 'bo
     });
   }
 
-  async function createSession(bot: BotSummary, identity: ThreadIdentity): Promise<BotSession> {
+  async function createSession(bot: BotSummary, identity: ThreadIdentity, organization?: ConversationOrganizationPlacement): Promise<BotSession> {
     const runtime = getRuntime();
-    await runtime.createBotThread(bot.id, identity.threadId, identity.branchId);
+    const defaults = organization && prepareOrganization ? await prepareOrganization(identity, organization) : undefined;
+    await runtime.createBotThread(bot.id, identity.threadId, identity.branchId, undefined, organization, currentRequestPrincipal(), defaults ?? undefined);
     const thread = await runtime.thread(identity.threadId);
     return { identity: { runtime: 'agent', threadId: thread.thread_id, branchId: thread.main_branch_id }, thread, primary: false };
   }
@@ -26,7 +28,7 @@ export function createBotSessions(getRuntime: () => Pick<AgentRuntimeClient, 'bo
   // resolves or creates a usable entry in one transaction, including after GC.
   async function ensureEntry(bot: BotSummary): Promise<ThreadIdentity> {
     if (bot.entry.runtime !== 'agent') throw new Error('Agent Bot identity is required');
-    const identity = await getRuntime().resolveBotEntry(bot.id, bot.entry.threadId, bot.entry.branchId);
+    const identity = await getRuntime().resolveBotEntry(bot.id, bot.entry.threadId, bot.entry.branchId, undefined, currentRequestPrincipal());
     return { runtime: 'agent', ...identity };
   }
 

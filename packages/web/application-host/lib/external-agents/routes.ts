@@ -1,8 +1,10 @@
+import { parseSourceResourceOwner } from '../kernel/thread-sources.js';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Express, Request, Response, RequestHandler } from 'express';
 import {
   ExternalAgentError,
+  parseConversationOrganizationPlacement,
   type ExternalAgentSettings,
   type ExternalInput,
 } from '@varin/application-client';
@@ -29,11 +31,27 @@ export function registerExternalAgentRoutes(
   requireAuth: RequestHandler,
   resolveAuthContext?: (request: Request, response: Response) => Promise<unknown>,
 ) {
+  const principal = async (req: Request, res: Response): Promise<string | null> => {
+    const auth = await resolveAuthContext?.(req, res) as { principalId?: unknown } | null | undefined;
+    return typeof auth?.principalId === 'string' && auth.principalId ? auth.principalId : null;
+  };
+  const authorize = async (id: string, owner: string | null, signal?: AbortSignal) => {
+    const conversation = await service.inspect(id, signal);
+    if ((conversation.principalId ?? null) !== owner) throw new ExternalAgentError('forbidden', 'Conversation access denied', 403);
+  };
+  const childrenFor = async (owner: string | null, signal?: AbortSignal) => {
+    const children = await service.children();
+    const principals = new Map<string, Promise<string | null>>();
+    for (const child of children) if (!principals.has(child.parent_run_id)) principals.set(child.parent_run_id, service.childPrincipal(child, signal));
+    const visible = await Promise.all(children.map(async child => (await principals.get(child.parent_run_id)) === owner));
+    return children.filter((_child, index) => visible[index]);
+  };
   app.post('/api/external-agents/attachments/upload', requireAuth, async (req, res) => {
     const controller = new AbortController();
     const close = () => { if (!res.writableEnded) controller.abort(); };
     res.on('close', close);
     try {
+      await authorize(string(req.query.id), await principal(req, res), controller.signal);
       if (req.headers['content-type']?.split(';')[0] !== 'application/octet-stream') throw new ExternalAgentError('invalid_attachment', 'Send original file bytes as an octet stream');
       const byteLength = Number(req.query.byteLength);
       if (!Number.isSafeInteger(byteLength) || byteLength < 0) throw new ExternalAgentError('invalid_attachment', 'A valid original byte length is required');
@@ -54,6 +72,7 @@ export function registerExternalAgentRoutes(
     const close = () => { if (!res.writableEnded) controller.abort(); };
     res.on('close', close);
     try {
+      await authorize(string(req.query.id), await principal(req, res), controller.signal);
       const { attachment, stream } = await service.readAttachment(string(req.query.id), string(req.query.ref), controller.signal);
       res.setHeader('Content-Type', attachment.mimeType);
       res.setHeader('Content-Length', String(attachment.byteLength));
@@ -69,13 +88,13 @@ export function registerExternalAgentRoutes(
     } finally { res.off('close', close); }
   });
   const fields: Record<string, string[]> = {
-    settings: [],
+    settings: ['resourceOwner'],
     configure: ['value', 'expectedRevision', 'key'],
     detect: ['id'],
     list: [],
     children: [],
     'child-presentation': ['operationId'],
-    create: ['key', 'configurationId', 'cwd', 'title'],
+    create: ['key', 'configurationId', 'cwd', 'title', 'organization', 'source'],
     read: ['id', 'before'],
     connect: ['id'],
     authenticate: ['id', 'methodId'],
@@ -97,10 +116,12 @@ export function registerExternalAgentRoutes(
         const body = object(req.body);
         if (Object.keys(body).some((key) => !allowed.includes(key)))
           throw new ExternalAgentError('invalid_request', 'Unexpected external Agent request field');
+        const owner = await principal(req, res);
+        if (['read', 'connect', 'authenticate', 'continue', 'disconnect', 'send', 'stop', 'respond', 'update'].includes(action)) await authorize(string(body.id), owner, controller.signal);
         let result: unknown;
         switch (action) {
           case 'settings':
-            result = await service.settings(controller.signal);
+            result = await service.settings(controller.signal,body.resourceOwner===undefined?undefined:parseSourceResourceOwner(body.resourceOwner));
             break;
           case 'configure':
             result = await service.configure(
@@ -113,10 +134,10 @@ export function registerExternalAgentRoutes(
             result = await service.detect(string(body.id), controller.signal);
             break;
           case 'list':
-            result = await service.list(controller.signal);
+            result = (await service.list(controller.signal)).filter(conversation => (conversation.principalId ?? null) === owner);
             break;
           case 'children':
-            result = (await service.children()).map((c) => ({
+            result = (await childrenFor(owner, controller.signal)).map((c) => ({
               operationId: c.operation_id,
               conversationId: c.conversation_id,
               parentThreadId: c.parent_thread_id,
@@ -133,16 +154,19 @@ export function registerExternalAgentRoutes(
             }));
             break;
           case 'child-presentation':
+            if (!(await childrenFor(owner, controller.signal)).some(child => child.operation_id === string(body.operationId))) throw new ExternalAgentError('forbidden', 'Conversation access denied', 403);
             result = await service.childPresentation(string(body.operationId), controller.signal);
             break;
           case 'create': {
-            const auth = await resolveAuthContext?.(req, res) as { principalId?: unknown } | null | undefined;
+            if (body.source !== undefined && Object.keys(object(body.source)).some(key => !['resourceOwner', 'path', 'expectedWorkspaceId'].includes(key))) throw new ExternalAgentError('invalid_request', 'Unexpected source selection field');
             result = await service.create({
               key: string(body.key),
               configurationId: string(body.configurationId),
+              ...(body.source === undefined ? {} : {source:{resourceOwner:parseSourceResourceOwner(object(body.source).resourceOwner),path:string(object(body.source).path),...(object(body.source).expectedWorkspaceId===undefined?{}:{expectedWorkspaceId:string(object(body.source).expectedWorkspaceId)})}}),
               ...(body.cwd === undefined ? {} : { cwd: string(body.cwd) }),
               ...(body.title === undefined ? {} : { title: string(body.title) }),
-            }, typeof auth?.principalId === 'string' ? auth.principalId : null);
+              ...(body.organization === undefined ? {} : { organization: parseConversationOrganizationPlacement(body.organization) }),
+            }, owner);
             break;
           }
           case 'read':
@@ -218,7 +242,7 @@ export function registerExternalAgentRoutes(
   app.get('/api/external-agents/observe', requireAuth, async (req, res) => {
     try {
       const id = string(req.query.id);
-      if (id !== '*') await service.read(id);
+      if (id !== '*') { await authorize(id, await principal(req, res)); await service.read(id); }
       if (res.destroyed) return;
       res
         .status(200)
@@ -234,7 +258,7 @@ export function registerExternalAgentRoutes(
       if (res.destroyed) close();
     } catch (error) {
       if (!res.destroyed)
-        res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+        res.status(error instanceof ExternalAgentError ? error.status : 503).json({ code: error instanceof ExternalAgentError ? error.code : 'external_agent_failed', error: error instanceof Error ? error.message : String(error) });
     }
   });
 }

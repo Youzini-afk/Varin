@@ -35,6 +35,8 @@ pub enum ExternalCommand {
         value: Value,
     },
     Create {
+        #[serde(default, skip_serializing_if="Option::is_none")]
+        organization: Option<super::organization::Placement>,
         key: String,
         id: String,
         configuration_id: String,
@@ -43,12 +45,24 @@ pub enum ExternalCommand {
         cwd: String,
         workspace_id: Option<String>,
         native_workspace: Option<super::launches::SourceSelection>,
+        #[serde(default,skip_serializing_if="Option::is_none")]
+        execution_source: Option<super::launches::SourceSelection>,
         parent: Option<Value>,
         private_workspace: Option<bool>,
         #[serde(default, deserialize_with = "principals::optional_principal", skip_serializing_if = "Option::is_none")]
         principal_id: Option<Option<String>>,
     },
+    /// Recover accepted UI creation before rechecking mutable program/source readiness.
+    CreateReceipt {
+        key:String, configuration_id:String, cwd:Option<String>, title:Option<String>,
+        #[serde(default)] source:Option<Value>,
+        #[serde(default)] organization:Option<super::organization::Placement>,
+        #[serde(default, deserialize_with="principals::optional_principal")] principal_id:Option<Option<String>>,
+    },
     List,
+    /// Trusted owner metadata, including tombstones; does not read Harness history.
+    Inspect { id: String },
+    UpdateReceipt { command: Box<ExternalCommand> },
     ArrangementPending,
     Defer { id: String, turn_id: String, reason: String },
     CleanupList,
@@ -61,6 +75,8 @@ pub enum ExternalCommand {
         limit: Option<u64>,
     },
     Update {
+        #[serde(default, skip_serializing_if="Option::is_none")]
+        key: Option<String>,
         id: String,
         expected_revision: u64,
         title: Option<String>,
@@ -68,6 +84,11 @@ pub enum ExternalCommand {
         archived: Option<bool>,
         deleted: Option<bool>,
     },
+    /// Durable target process admission; pending is not proof that dispatch failed.
+    TransportPrepare { id: String },
+    TransportBind { id: String, transport_id: String, authority_id: String, resource_epoch: String, configuration_identity: String },
+    /// Trusted Host calls only after the original target confirms executor stop.
+    TransportClosed { id: String, transport_id: String },
     Bind {
         id: String,
         session_id: String,
@@ -135,6 +156,37 @@ mod tests {
     }
     fn create(c: &mut Catalog, id: &str) {
         call(c,json!({"action":"create","id":id,"key":id,"configurationId":"codex","harness":"codex","title":"Task","cwd":"/workspace"})).unwrap();
+    }
+    #[test]
+    fn external_creation_receipt_preserves_legacy_identity_after_principal_claim() {
+        let directory=Fixture::new();let mut c=Catalog::open(directory.path()).unwrap();
+        create(&mut c,"legacy-original-id");
+        // The existing principal migration claims the original record, not its old receipt.
+        c.db.execute("UPDATE external_conversations SET body=json_set(body,'$.principalId','owner') WHERE id='legacy-original-id'",[]).unwrap();
+        let query=json!({"action":"create_receipt","key":"legacy-original-id","configurationId":"codex","cwd":"/workspace","title":"Task","principalId":"owner"});
+        let receipt=call(&mut c,query.clone()).unwrap();assert_eq!(receipt["id"],"legacy-original-id");
+        let mut changed=query.clone();changed["title"]=json!("Different");assert!(call(&mut c,changed).is_err());
+        let mut foreign=query.clone();foreign["principalId"]=json!("other");assert_eq!(call(&mut c,foreign).unwrap(),Value::Null);
+        drop(c);let mut c=Catalog::open(directory.path()).unwrap();assert_eq!(call(&mut c,query).unwrap()["id"],"legacy-original-id");
+    }
+    #[test]
+    fn external_transport_retains_pending_identity_and_fences_replacement() {
+        let directory=Fixture::new();let mut c=Catalog::open(directory.path()).unwrap();
+        let source=json!({"resource_owner":{"kind":"local"},"mode":"live_root","workspace_id":"workspace","execution_workspace_id":"workspace","branch_id":null,"revision":null,
+            "live_root":{"hostId":"target","rootId":"root","canonicalRoot":"/workspace"}});
+        call(&mut c,json!({"action":"create","id":"external","key":"external","configurationId":"codex","harness":"codex","title":"Remote","cwd":"/workspace","executionSource":source})).unwrap();
+        let first=call(&mut c,json!({"action":"transport_prepare","id":"external"})).unwrap();
+        assert_eq!(first["state"],"pending");
+        drop(c);let mut c=Catalog::open(directory.path()).unwrap();
+        assert_eq!(first,call(&mut c,json!({"action":"transport_prepare","id":"external"})).unwrap());
+        let bind=json!({"action":"transport_bind","id":"external","transportId":first["id"],"authorityId":"authority","resourceEpoch":"epoch","configurationIdentity":"launch"});
+        let bound=call(&mut c,bind.clone()).unwrap();assert_eq!(bound,call(&mut c,bind.clone()).unwrap());
+        let mut changed=bind;changed["configurationIdentity"]=json!("changed");assert!(call(&mut c,changed).is_err());
+        assert_eq!(bound,call(&mut c,json!({"action":"transport_prepare","id":"external"})).unwrap());
+        call(&mut c,json!({"action":"transport_closed","id":"external","transportId":first["id"]})).unwrap();
+        let next=call(&mut c,json!({"action":"transport_prepare","id":"external"})).unwrap();assert_ne!(first["id"],next["id"]);
+        assert!(call(&mut c,json!({"action":"transport_closed","id":"external","transportId":first["id"]})).is_err());
+        assert_eq!(call(&mut c,json!({"action":"inspect","id":"external"})).unwrap()["revision"],1);
     }
     #[test]
     fn external_capability_cache_preserves_defaults_and_fences_launch_and_version_changes() {
@@ -454,6 +506,21 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
     ] {
         db.prepare(sql)?;
     }
+    let mut statement=db.prepare("SELECT body FROM external_conversations")?;
+    let rows=statement.query_map([],|row|row.get::<_,String>(0))?;
+    for row in rows {
+        let value:Value=serde_json::from_str(&row?)?;
+        if let Some(source)=value.get("executionSource") { let source:super::launches::SourceSelection=serde_json::from_value(source.clone())?;source.validate()?; }
+        if let Some(transport)=value.get("transport") {
+            if transport["conversationId"]!=value["id"] || transport["source"]!=value["executionSource"] || transport["configurationId"]!=value["configurationId"]
+                || transport["harness"]!=value["harness"] || transport["id"]!=transport["processId"]
+                || !matches!(transport["state"].as_str(),Some("pending"|"bound"|"closed")) {
+                return Err(RuntimeError::Invalid("External transport storage identity is invalid".into()));
+            }
+            required(transport["id"].as_str().unwrap_or(""))?;
+            if transport["state"]=="bound" { for field in ["authorityId","resourceEpoch","configurationIdentity"] { required(transport[field].as_str().unwrap_or(""))?; } }
+        }
+    }
     Ok(())
 }
 pub struct ExternalPreparation {
@@ -697,8 +764,10 @@ impl Catalog {
         let tx = self.db.transaction()?;
         let key = match &p.command {
             ExternalCommand::Configure { key, .. } => Some(format!("configure:{key}")),
+            ExternalCommand::Create { key, principal_id: Some(Some(principal)), .. } => Some(format!("create:{}", serde_json::to_string(&(principal,key))?)),
             ExternalCommand::Create { key, .. } => Some(format!("create:{key}")),
             ExternalCommand::Admit { id, key, .. } => Some(format!("admit:{id}:{key}")),
+            ExternalCommand::Update { id, key:Some(key), .. } => Some(format!("update:{id}:{key}")),
             _ => None,
         };
         if let Some(key) = &key {
@@ -715,6 +784,13 @@ impl Catalog {
                         "external command key was reused with different input".into(),
                     ));
                 }
+                if let ExternalCommand::Create {principal_id:Some(requested),..}=&p.command {
+                    let receipt:Value=serde_json::from_str(&body)?;
+                    if let Some(id)=receipt["id"].as_str() {
+                        let current:Value=record(&tx,"external_conversations",id)?;
+                        if current["principalId"].as_str()!=requested.as_deref(){return Err(RuntimeError::Conflict("Original external creation belongs to another principal".into()));}
+                    }
+                }
                 return Ok(ExternalRead {
                     result: serde_json::from_str(&body)?,
                     content: self.content.clone(),
@@ -724,6 +800,67 @@ impl Catalog {
         }
         let result = match p.command {
             ExternalCommand::Settings => external_settings(&tx)?,
+            ExternalCommand::CreateReceipt {key,configuration_id,cwd,title,source,organization,principal_id} => {
+                required(&key)?;required(&configuration_id)?;
+                let principal=match principal_id {Some(value)=>value,None=>tx.query_row("SELECT owner_principal_id FROM catalog_principal_owner WHERE id=1",[],|r|r.get::<_,String>(0)).optional()?};
+                if let Some(value)=&principal {principals::validate(value)?;}
+                let scoped_key=principal.as_ref().map(|owner|serde_json::to_string(&(owner,&key)).map(|key|format!("create:{key}"))).transpose()?;
+                let mut keys=scoped_key.iter().cloned().collect::<Vec<_>>();
+                keys.push(format!("create:{key}"));
+                let mut found=Value::Null;
+                for command_key in keys {
+                    let saved:Option<(String,String)>=tx.query_row("SELECT intent,receipt FROM external_commands WHERE id=?1",[&command_key],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+                    let Some((intent,body))=saved else{continue};
+                    let receipt:Value=serde_json::from_str(&body)?;
+                    let id=receipt["id"].as_str().ok_or_else(||RuntimeError::Invalid("External create receipt has no identity".into()))?.to_owned();
+                    let current:Value=record(&tx,"external_conversations",&id)?;
+                    if current["principalId"].as_str()!=principal.as_deref(){
+                        if scoped_key.as_ref()==Some(&command_key){return Err(RuntimeError::Conflict("Original external creation belongs to another principal".into()));}
+                        continue;
+                    }
+                    let selected_source=receipt.get("executionSource").cloned();
+                    if let Some(input)=&source {
+                        let owner=selected_source.as_ref().map(|s|s["resource_owner"].clone()).unwrap_or_else(||json!({"kind":"local"}));
+                        let workspace=selected_source.as_ref().map(|s|s["workspace_id"].clone()).unwrap_or_else(||receipt["workspaceId"].clone());
+                        if input["resourceOwner"]!=owner || input["path"]!=receipt["cwd"]
+                            || input.get("expectedWorkspaceId").is_some_and(|expected| expected!=&workspace) {
+                            return Err(RuntimeError::Conflict("External creation source changed".into()));
+                        }
+                    } else if selected_source.as_ref().is_some_and(|value| value["resource_owner"]["kind"]=="managed_host") {
+                        return Err(RuntimeError::Conflict("External creation source was omitted".into()));
+                    }
+                    let requested_cwd=source.as_ref().and_then(|v|v["path"].as_str()).map(str::to_owned).or(cwd.clone());
+                    let private=receipt["privateWorkspace"]==true;
+                    if requested_cwd.as_ref().is_some_and(|path|receipt["cwd"]!=*path) || requested_cwd.is_none()!=private {
+                        return Err(RuntimeError::Conflict("External creation directory changed".into()));
+                    }
+                    let mut matched=false;
+                    for historical_principal in [None,Some(None),Some(principal.clone())] {
+                        for historical_private in [Some(private),None] {
+                            let original=ExternalCommand::Create {key:key.clone(),id:id.clone(),configuration_id:configuration_id.clone(),
+                                harness:receipt["harness"].as_str().unwrap_or("").into(),title:title.clone().unwrap_or_else(||receipt["title"].as_str().unwrap_or("").into()),
+                                cwd:receipt["cwd"].as_str().unwrap_or("").into(),workspace_id:receipt["workspaceId"].as_str().map(str::to_owned),
+                                native_workspace:receipt.get("nativeWorkspace").cloned().map(serde_json::from_value).transpose()?,
+                                execution_source:selected_source.clone().map(serde_json::from_value).transpose()?,parent:None,
+                                private_workspace:historical_private,principal_id:historical_principal.clone(),organization:organization.clone()};
+                            use sha2::{Digest,Sha256};
+                            if hex::encode(Sha256::digest(serde_json::to_vec(&original)?))==intent {matched=true;break;}
+                        }
+                        if matched{break;}
+                    }
+                    if !matched{return Err(RuntimeError::Conflict("External creation key was reused with different input".into()));}
+                    found=receipt;break;
+                }
+                found
+            }
+            ExternalCommand::Inspect { id } => record::<Value>(&tx,"external_conversations",&id)?,
+            ExternalCommand::UpdateReceipt { command } => {
+                use sha2::{Digest,Sha256};
+                let ExternalCommand::Update{id,key:Some(key),..}=command.as_ref() else{return Err(RuntimeError::Invalid("metadata receipt requires the original keyed Update command".into()));};
+                let intent=hex::encode(Sha256::digest(serde_json::to_vec(command.as_ref())?));
+                let old:Option<(String,String)>=tx.query_row("SELECT intent,receipt FROM external_commands WHERE id=?1",[format!("update:{id}:{key}")],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+                if let Some((original,receipt))=old {if original!=intent{return Err(RuntimeError::Conflict("external command key was reused with different input".into()));}serde_json::from_str(&receipt)?}else{Value::Null}
+            },
             ExternalCommand::ArrangementPending => json!(followups::external::pending(&tx)?),
             ExternalCommand::Defer { id,turn_id,reason } => followups::external::deferred(&tx,&id,&turn_id,&reason)?,
             ExternalCommand::InspectCapabilities { configuration_id, configuration } => {
@@ -819,6 +956,7 @@ impl Catalog {
                 external_settings(&tx)?
             }
             ExternalCommand::Create {
+                organization,
                 id,
                 configuration_id,
                 harness,
@@ -826,6 +964,7 @@ impl Catalog {
                 cwd,
                 workspace_id,
                 native_workspace,
+                execution_source,
                 parent,
                 private_workspace,
                 principal_id,
@@ -847,11 +986,17 @@ impl Catalog {
                     if source.mode!=crate::SourceMode::NativeWorkspace||!source.resource_owner.is_local(){return Err(RuntimeError::Invalid("External workspace must be a native source on its execution Host".into()));}
                     v["nativeWorkspace"]=serde_json::to_value(source)?;
                 }
+                if let Some(source)=execution_source {
+                    source.validate()?;
+                    super::source_retention::assert_record_available(&tx,"external_conversations",&json!({"executionSource":source}))?;
+                    v["executionSource"]=serde_json::to_value(source)?;
+                }
                 let owner = if let Some(parent_thread)=parent.as_ref().and_then(|p|p["threadId"].as_str()) {
                     principals::thread(&tx,parent_thread)?
                 } else if let Some(principal)=principal_id { if let Some(value)=&principal {principals::validate(value)?;} principal }
                 else { tx.query_row("SELECT owner_principal_id FROM catalog_principal_owner WHERE id=1",[],|r|r.get::<_,String>(0)).optional()? };
                 v["principalId"]=json!(owner);
+                let organization_parent = parent.as_ref().and_then(|p|p["threadId"].as_str()).map(|id|super::organization::ConversationRef::Native{id:id.into()});
                 if let Some(parent) = parent { v["parent"] = parent; }
                 if private_workspace == Some(true) {
                     v["privateWorkspace"] = json!(true);
@@ -860,6 +1005,7 @@ impl Catalog {
                     "INSERT INTO external_conversations VALUES(?1,?2)",
                     params![id, encode(&v)?],
                 )?;
+                super::organization::admit(&tx,owner.as_deref(),&super::organization::ConversationRef::External{id:id.clone()},organization.as_ref(),organization_parent.as_ref(),&format!("external-create:{id}"))?;
                 super::model_references::admit_external_agent(&tx,&id)?;
                 event(
                     &tx,
@@ -945,6 +1091,7 @@ impl Catalog {
                 pinned,
                 archived,
                 deleted,
+                ..
             } => {
                 let mut v = conversation(&tx, &id)?;
                 if v["revision"].as_u64() != Some(expected_revision) {
@@ -1015,6 +1162,43 @@ impl Catalog {
                 }
                 touch(&tx, &mut v)?;
                 v
+            }
+            ExternalCommand::TransportPrepare { id } => {
+                let mut v = conversation(&tx, &id)?;
+                let source = v.get("executionSource").cloned().ok_or_else(|| RuntimeError::Invalid("External execution source is missing".into()))?;
+                if let Some(old) = v.get("transport").filter(|old| old["state"] != "closed") {
+                    if old["source"] != source { return Err(RuntimeError::Conflict("External transport source changed".into())); }
+                    old.clone()
+                } else {
+                    let transport_id = format!("external-process:{}", Uuid::new_v4());
+                    let receipt = json!({"id":transport_id,"processId":transport_id,"conversationId":id,"source":source,
+                        "configurationId":v["configurationId"],"harness":v["harness"],"state":"pending"});
+                    v["transport"] = receipt.clone();
+                    put(&tx,"external_conversations",&id,&v)?;
+                    receipt
+                }
+            }
+            ExternalCommand::TransportBind { id, transport_id, authority_id, resource_epoch, configuration_identity } => {
+                for value in [&transport_id,&authority_id,&resource_epoch,&configuration_identity] { required(value)?; }
+                let mut v = conversation(&tx, &id)?;
+                let mut receipt = v.get("transport").cloned().ok_or_else(|| RuntimeError::Conflict("External transport was not prepared".into()))?;
+                if receipt["id"] != transport_id || receipt["state"] == "closed" {
+                    return Err(RuntimeError::Conflict("External transport generation changed".into()));
+                }
+                if receipt["state"] == "bound" && (receipt["authorityId"] != authority_id || receipt["resourceEpoch"] != resource_epoch || receipt["configurationIdentity"] != configuration_identity) {
+                    return Err(RuntimeError::Conflict("External transport binding changed".into()));
+                }
+                receipt["state"] = json!("bound"); receipt["authorityId"] = json!(authority_id);
+                receipt["resourceEpoch"] = json!(resource_epoch); receipt["configurationIdentity"] = json!(configuration_identity);
+                v["transport"] = receipt.clone(); put(&tx,"external_conversations",&id,&v)?; receipt
+            }
+            ExternalCommand::TransportClosed { id, transport_id } => {
+                // Cleanup must also remain possible after product deletion.
+                let mut v: Value = record(&tx,"external_conversations",&id)?;
+                let mut receipt = v.get("transport").cloned().ok_or_else(|| RuntimeError::Conflict("External transport was not prepared".into()))?;
+                if receipt["id"] != transport_id { return Err(RuntimeError::Conflict("External transport generation changed".into())); }
+                if receipt["state"] != "closed" { receipt["state"] = json!("closed"); v["transport"] = receipt.clone(); put(&tx,"external_conversations",&id,&v)?; }
+                receipt
             }
             ExternalCommand::Bind { id, session_id } => {
                 required(&session_id)?;

@@ -1,6 +1,7 @@
+import { currentRequestPrincipal } from '../kernel/request-principal.js';
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { THINKING_LEVELS } from '@varin/protocol';
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { BotExecutionGate, KernelRecordResult } from "../kernel/protocol.generated.js";
@@ -9,6 +10,7 @@ import { createBotOrganization } from './bot-organization.js';
 import { createBotAppearances } from './bot-appearances.js';
 import { parseBotAppearance } from '@varin/application-client';
 import type {
+  ConversationOrganizationPlacement,
   BotActivity,
   BotCreateInput,
   BotUpdateInput,
@@ -67,7 +69,7 @@ export interface BotServiceOptions {
     /** Directly bound conversations, primary entry first. */
     listSessions(bot: BotSummary): Promise<BotSession[]>;
     /** Bind a new conversation to the Bot under fresh native identities. */
-    createSession(bot: BotSummary, identity: ThreadIdentity): Promise<BotSession>;
+    createSession(bot: BotSummary, identity: ThreadIdentity, organization?: ConversationOrganizationPlacement): Promise<BotSession>;
     applyProfile?(bot: BotSummary): Promise<void>;
   };
   onError?(error: unknown): void;
@@ -175,7 +177,7 @@ export interface BotService {
   /** The Bot's own conversations; each is an independent Thread bound to the Bot. */
   listSessions(botId: string): Promise<BotSession[]>;
   /** Start another conversation with the same Bot identity, memory and profile. */
-  createSession(botId: string): Promise<BotSession>;
+  createSession(botId: string, options?: { key?: string; organization?: ConversationOrganizationPlacement }): Promise<BotSession>;
 }
 
 export function createBotService(options: BotServiceOptions): BotService {
@@ -604,15 +606,18 @@ export function createBotService(options: BotServiceOptions): BotService {
     return options.agent.listSessions(bot);
   };
 
-  const createSession: BotService["createSession"] = (botId) => serialize(botId, async () => {
+  const createSession: BotService["createSession"] = (botId, input) => serialize(botId, async () => {
     const bot = await get(botId);
     if (!bot) throw new HarnessServiceError("not-found", `Unknown Bot "${botId}"`);
     if (bot.deletion) throw new HarnessServiceError('unavailable', 'This Bot is being deleted');
     if (bot.archived) throw new HarnessServiceError("invalid-params", `Bot "${botId}" is archived`);
     // A sleeping Bot cannot start new work; the Catalog gate enforces the same rule.
     if (!permitted(bot)) throw new HarnessServiceError('unavailable', 'Wake the Bot before starting a new conversation');
-    const id = randomUUID();
-    return options.agent.createSession(bot, { runtime: 'agent', threadId: `thread:bot:${botId}:${id}`, branchId: `branch:bot:${botId}:${id}` });
+    if (input?.key !== undefined && !input.key.trim()) throw new HarnessServiceError('invalid-params', 'A non-empty creation key is required');
+    const principal = currentRequestPrincipal();
+    const key = input?.key === undefined ? undefined : principal ? `${principal}\0${botId}\0${input.key}` : `${botId}\0${input.key}`;
+    const id = key === undefined ? randomUUID() : createHash('sha256').update(key).digest('hex');
+    return options.agent.createSession(bot, { runtime: 'agent', threadId: `thread:bot:${botId}:${id}`, branchId: `branch:bot:${botId}:${id}` }, input?.organization);
   });
 
   return {

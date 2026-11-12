@@ -10,7 +10,7 @@ fn error(value: impl ToString) -> ExecutionError {
 }
 pub(crate) fn schema() -> ToolSchema {
     ToolSchema { requirements:None, name:"matters".into(), version:"2".into(), output_schema:None, metadata:None,
-        description:"Find, read or maintain matters you are following. A matter connects a free description to original work; its description does not change task status. projects lists registered project IDs for dispatch projectId. list returns brief paged references; get opens one. set uses its exact revision (0 for new), and preserves original conversations. Use matters to organize ongoing work. Bot sessions can discover and read the user's ordinary conversations directly. Use threads/read_thread/send for actual work.".into(),
+        description:"Find, read or maintain matters you are following. A matter connects a free description to original work; its description does not change task status. projects lists registered project IDs for dispatch projectId. list returns brief paged references; get opens one. set uses its exact revision (0 for new), and preserves original conversations. Matters retain explicit ongoing-work associations; shared conversation groups and locations belong to organization. Direct Bot sessions can discover and read the same user's ordinary and direct Bot conversations, including their own other sessions. Use threads/read_thread/send for actual work.".into(),
         schema:json!({"type":"object","properties":{"action":{"type":"string","enum":["list","get","set","projects"]},"id":{"type":"string"},"query":{"type":"string"},"cursor":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1},"expectedRevision":{"type":"integer","minimum":0},"matter":{"type":"object","properties":{"id":{"type":"string"},"revision":{"type":"integer","minimum":0},"title":{"type":"string"},"description":{"type":"string"},"archived":{"type":"boolean"},"threads":{"type":"array","items":{"type":"object","properties":{"threadId":{"type":"string"},"branchId":{"type":"string"},"send":{"type":"boolean"},"memory":{"type":"boolean"}},"required":["threadId","branchId"],"additionalProperties":false}}},"required":["id","title","description","archived","threads","revision"],"additionalProperties":false}},"required":["action"],"additionalProperties":false}) }
 }
 #[derive(Deserialize)]
@@ -166,7 +166,7 @@ impl ToolExecutor for Tools {
                 "get" => Ok((
                     serde_json::to_value(
                         owner
-                            .bot_matters(&bot)
+                            .bot_matters_scoped(&bot, Some(run.principal_id.clone()))
                             .map_err(error)?
                             .into_iter()
                             .find(|row| Some(&row.id) == args.id.as_ref())
@@ -177,7 +177,7 @@ impl ToolExecutor for Tools {
                 )),
                 _ => {
                     let rows = owner
-                        .bot_matters(&bot)
+                        .bot_matters_scoped(&bot, Some(run.principal_id.clone()))
                         .map_err(error)?
                         .into_iter()
                         .filter(|row| {

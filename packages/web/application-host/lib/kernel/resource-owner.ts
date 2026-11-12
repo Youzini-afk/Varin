@@ -14,24 +14,48 @@ export type AttachmentOwnerRequest =
   | { kind: 'attachment_report'; refs: string[]; sourceThreadId?: string; sourceBranchId?: string }
   | { kind: 'attachment_release'; operationId: string; targetThreadId: string; targetBranchId?: string }
   | { kind: 'attachment'; ref: string; view?: 'path' | 'content' | 'bytes'; offset?: number; limit?: number };
-export interface ResourceQuery extends Omit<ResourceSnapshotParams, 'activationId'> { request: AgentResourceRequest | AttachmentOwnerRequest }
+export interface OrganizationOwnerRequest { kind: 'organization'; operationId: string; action: 'create_bot_conversation' | 'external_metadata' | 'labels' | 'create_conversation' | 'ensure_initialized'; input: Record<string, unknown> }
+export interface ResourceQuery extends Omit<ResourceSnapshotParams, 'activationId' | 'resourceCheckpointId'> { resourceCheckpointId?: string | null; request: AgentResourceRequest | AttachmentOwnerRequest | OrganizationOwnerRequest }
 export type ResourceToolResult = (AgentResourceRead | ({ status: 'ready' } & Record<string, unknown>)) & { snapshotId?: string; resourceCheckpointId?: string };
 export type ResourceOwner = (query: ResourceQuery, signal: AbortSignal) => Promise<ResourceToolResult>;
 export function resourceQueryFailure(status: ResourceFailureStatus, reason: string, query?: ResourceQuery, snapshotId?: string, code?: string): ResourceToolResult {
-  const target = query?.request.kind === 'attachment' ? query.request.ref : query?.request.kind === 'attachment_prepare' || query?.request.kind === 'attachment_release' || query?.request.kind === 'attachment_report' ? '' : query?.request.kind === 'ui' ? query.request.ref : query?.request.kind === 'instruction-scope' ? query.request.targetPath
+  const target = query?.request.kind === 'organization' ? query.request.operationId : query?.request.kind === 'attachment' ? query.request.ref : query?.request.kind === 'attachment_prepare' || query?.request.kind === 'attachment_release' || query?.request.kind === 'attachment_report' ? '' : query?.request.kind === 'ui' ? query.request.ref : query?.request.kind === 'instruction-scope' ? query.request.targetPath
     : query?.request.kind === 'skill-resource' ? query.request.relativePath : query?.request.resourceId ?? '';
   return { status, reason, ...(code ? { code } : {}), domainId: 'agent-resources', viewId: snapshotId ?? query?.resourceCheckpointId ?? 'unbound', path: target,
-    ...(snapshotId ? { snapshotId } : {}), ...(query ? { resourceCheckpointId: query.resourceCheckpointId } : {}) };
+    ...(snapshotId ? { snapshotId } : {}), ...(query?.resourceCheckpointId ? { resourceCheckpointId: query.resourceCheckpointId } : {}) };
 }
 /** No Host snapshot cache: each call resolves the immutable checkpoint selected by its actual origin. */
 export function createResourceOwner(options: {
-  runtime: Pick<AgentRuntimeClient, 'run' | 'resourceSnapshot'>;
+  runtime: Pick<AgentRuntimeClient, 'run' | 'resourceSnapshot'> & Partial<Pick<AgentRuntimeClient, 'organizationInvocation'>>;
   resources: ThreadResourceScope;
   ui?: InteractiveUiRuntime;
   attachments?: ThreadAttachmentOwner;
+  organization?: (request: OrganizationOwnerRequest, run: Awaited<ReturnType<AgentRuntimeClient['run']>>, signal: AbortSignal) => Promise<Record<string, unknown>>;
 }): ResourceOwner {
   const authority = createAgentResourceAuthority();
-  return async (query, signal) => {
+  return async (incoming, signal) => {
+    // Organization metadata has no filesystem Source. Only the exact original
+    // invocation can authorize it; absence of a file snapshot is not a permit.
+    if (incoming.request.kind === 'organization') {
+      let run:Awaited<ReturnType<AgentRuntimeClient['run']>>;
+      try {
+        signal.throwIfAborted();
+        if (!options.runtime.organizationInvocation || !options.organization) return resourceQueryFailure('unavailable','Organization invocation owner is unavailable',incoming);
+        run=await options.runtime.organizationInvocation({runId:incoming.runId,origin:incoming.origin,callId:incoming.callId,operationId:incoming.request.operationId},signal);
+        if(run.cancel_requested || ['completed','failed','cancelled'].includes(run.state))return resourceQueryFailure('cancelled','Organization invocation Run is closed',incoming);
+      } catch(error) {
+        if(signal.aborted)return resourceQueryFailure('cancelled','Organization invocation was cancelled',incoming);
+        return resourceQueryFailure('denied',error instanceof Error?error.message:'Organization invocation is unavailable',incoming);
+      }
+      try { return {status:'ready',...await options.organization(incoming.request,run,signal)}; }
+      catch(error) {
+        // Owner work may already have committed. Do not relabel a lost receipt
+        // as an authorization denial or as proof that the action never started.
+        return resourceQueryFailure('unavailable',error instanceof Error?error.message:'Organization owner could not confirm the original result',incoming);
+      }
+    }
+    if (!incoming.resourceCheckpointId) return resourceQueryFailure('denied','A bound resource checkpoint is required',incoming);
+    const query:Omit<ResourceQuery,'request'> & {resourceCheckpointId:string;request:Exclude<ResourceQuery['request'],OrganizationOwnerRequest>}={...incoming,request:incoming.request,resourceCheckpointId:incoming.resourceCheckpointId};
     let snapshotId: string | undefined;
     try {
       signal.throwIfAborted();

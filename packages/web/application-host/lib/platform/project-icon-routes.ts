@@ -352,6 +352,7 @@ export const registerProjectIconRoutes = (app: Express, dependencies: {
         return res.status(404).json({ error: 'Project not found' });
       }
 
+      if (project.source?.resourceOwner.kind === 'managed_host') return res.json({ project, skipped: true, reason: 'remote-source-icon-discovery-unavailable' });
       const force = req.body?.force === true;
       if (asRecord(project.iconImage).source === 'custom' && !force) {
         return res.json({

@@ -6,6 +6,7 @@ import { bindThreadStore, useThreadStore } from '@/stores/useThreadStore';
 import { openBotEntryFor, returnToBot, useBotNavigation } from '@/lib/bots';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { openThreadFromNavigation, startThreadFromNavigation } from './threadNavigation';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { buildDeepLink, parseDeepLink } from '@/apps/deepLinks';
@@ -46,17 +47,17 @@ it('opens global drafts without a project and attaches only an explicitly chosen
   const chatOnly = await startThreadFromNavigation({ directory: null });
   expect(useThreadDraftStore.getState().drafts[chatOnly].workspacePath).toBeUndefined();
 });
-it('follows Bot notification links using Catalog ownership and the exact target branch while retaining ordinary selection', async () => {
+it('opens a direct Bot conversation in the current workbench using its exact native identity', async () => {
   const hostKey = JSON.stringify(['https://host.test', 'host']);
   const intent = parseDeepLink(buildDeepLink({ type: 'thread', hostKey, threadId: 'child', branchId: 'child:review' }));
   if (intent?.type !== 'thread') throw new Error('Thread link required');
   await followThreadDeepLink(intent, { currentHostKey: () => hostKey, currentRuntimeKey: () => 'host', endpointGeneration: () => state.host,
     isCurrent: () => true, connectHost: async () => true, loadCatalog: () => useThreadStore.getState().loadCatalog(), openThread: openThreadFromNavigation, openInstances: vi.fn() });
-  expect(state.select).toHaveBeenCalledWith('varin.bot', undefined, expect.objectContaining({ enableShell: true, beforeCommit: expect.any(Function) }));
-  expect(useBotNavigation.getState()).toMatchObject({ botId: bot.id, entry: { threadId: 'child', branchId: 'child:review' } });
-  expect(useThreadStore.getState().selectedIdentity?.threadId).toBe('ordinary');
+  expect(state.select).not.toHaveBeenCalled();
+  expect(useBotNavigation.getState().entry).toBeNull();
+  expect(useThreadStore.getState().selectedIdentity).toMatchObject({ threadId: 'child', branchId: 'child:review' });
   expect(state.directory).not.toHaveBeenCalled();
-  expect(get).toHaveBeenCalledWith(bot.id, undefined);
+  expect(get).not.toHaveBeenCalled();
 });
 it('leaves the Bot shell before selecting an ordinary deep link, without remaining on the restored old branch', async () => {
   state.document!.activeProfileId = 'varin.bot';
@@ -65,24 +66,27 @@ it('leaves the Bot shell before selecting an ordinary deep link, without remaini
   expect(useThreadStore.getState().selectedIdentity).toMatchObject({ threadId: 'ordinary', branchId: 'ordinary:review' });
   expect(get).not.toHaveBeenCalled();
 });
-it('never falls back to ordinary presentation for a missing Bot or invalid Bot branch', async () => {
+it('keeps readable history when its Bot profile is missing and still rejects a foreign branch', async () => {
   get.mockResolvedValue(null);
-  await expect(openThreadFromNavigation({ threadId: 'child', branchId: 'child:review' })).rejects.toThrow('Bot is unavailable');
+  await expect(openThreadFromNavigation({ threadId: 'child', branchId: 'child:review' })).resolves.toMatchObject({ threadId: 'child', branchId: 'child:review' });
   await expect(openThreadFromNavigation({ threadId: 'child', branchId: 'foreign' })).rejects.toThrow('branch is unavailable');
   expect(state.select).not.toHaveBeenCalled(); expect(useBotNavigation.getState().entry).toBeNull();
 });
 it('fences a delayed Bot lookup after a Host switch or newer ordinary navigation', async () => {
+  state.document!.activeProfileId = 'varin.bot';
   let finish!: (bot: BotSummary) => void; get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   const old = openThreadFromNavigation({ threadId: 'child', branchId: 'child:review' });
   await vi.waitFor(() => expect(get).toHaveBeenCalledOnce());
   await openThreadFromNavigation({ threadId: 'ordinary', branchId: 'ordinary:review' });
   finish(bot); await expect(old).rejects.toThrow('superseded');
   expect(useBotNavigation.getState().entry).toBeNull();
+  state.document!.activeProfileId = 'varin.bot';
   get.mockImplementationOnce(async () => { state.host++; return bot; });
   await expect(openThreadFromNavigation({ threadId: 'child' })).rejects.toThrow('superseded');
 });
 
-it('prevents a prepared Bot shell from committing over a newer ordinary navigation', async () => {
+it('prevents a prepared workbench switch from committing over a newer Bot navigation', async () => {
+  state.document!.activeProfileId = 'varin.bot';
   let commit!: () => Promise<void>;
   let finish!: () => void;
   state.select.mockImplementationOnce(async (_profile: string, _workspace: string | undefined, options: { beforeCommit(): Promise<void> }) => {
@@ -90,15 +94,16 @@ it('prevents a prepared Bot shell from committing over a newer ordinary navigati
     await new Promise<void>(resolve => { finish = resolve; });
     await commit();
   });
-  const old = openThreadFromNavigation({ threadId: 'child', branchId: 'child:review' });
+  const old = openThreadFromNavigation({ threadId: 'ordinary', branchId: 'ordinary:main' });
   await vi.waitFor(() => expect(state.select).toHaveBeenCalledOnce());
-  await openThreadFromNavigation({ threadId: 'ordinary', branchId: 'ordinary:review' });
+  await openThreadFromNavigation({ threadId: 'child', branchId: 'child:review' });
   finish(); await expect(old).rejects.toThrow('superseded');
-  expect(useBotNavigation.getState().entry).toBeNull();
-  expect(useThreadStore.getState().selectedIdentity?.branchId).toBe('ordinary:review');
+  expect(useBotNavigation.getState().entry?.branchId).toBe('child:review');
+  expect(useThreadStore.getState().selectedIdentity).toEqual({ runtime: 'agent', threadId: 'child', branchId: 'child:review' });
 });
 
 it('keeps a newer main surface when a pending conversation lookup finishes', async () => {
+  state.document!.activeProfileId = 'varin.bot';
   let finish!: (bot: BotSummary) => void;
   get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   const old = openThreadFromNavigation({ threadId: 'child', branchId: 'child:review' });
@@ -137,4 +142,47 @@ it('prevents a prepared return-to-Bot shell from committing over a newer page', 
   expect(state.document!.activeProfileId).toBe('default');
   expect(useBotNavigation.getState().entry).toBeNull();
   expect(useUIStore.getState().isScheduledTasksDialogOpen).toBe(true);
+});
+
+
+it('freezes a remote project source but an explicit different source never inherits its model/default project', async () => {
+  const owner = { kind: 'managed_host' as const, hostId: 'remote', connectionId: 'saved', endpointIdentity: 'endpoint' };
+  useProjectsStore.setState({ projects: [{ id: 'remote-project', path: '/same', source: { resourceOwner: owner, workspaceId: 'remote-workspace' } }] });
+  const key = await startThreadFromNavigation({ projectId: 'remote-project', organization: { containerId: 'project-container' } });
+  const draft = useThreadDraftStore.getState().drafts[key];
+  expect(draft.projectId).toBe('remote-project'); expect(draft.workspacePath).toBeUndefined();
+  expect(draft.sourceSelection).toMatchObject({ resourceOwner: owner, path: '/same' });
+  expect(state.directory).not.toHaveBeenCalled();
+  useProjectsStore.setState({ projects: [{ id: 'remote-project', path: '/changed', source: { resourceOwner: owner, workspaceId: 'remote-workspace' } }] });
+  expect(useThreadDraftStore.getState().drafts[key].sourceSelection?.path).toBe('/same');
+  const override = await startThreadFromNavigation({ projectId: 'remote-project', organization: { containerId: 'project-container' },
+    sourceSelection: { resourceOwner: { kind: 'local' }, path: '/explicit', mode: 'live_root', contentMode: 'saved-files', captureScopes: [] } });
+  expect(useThreadDraftStore.getState().drafts[override]).toMatchObject({ workspacePath: '/explicit', organization: { containerId: 'project-container' } });
+  expect(useThreadDraftStore.getState().drafts[override].projectId).toBeUndefined();
+  expect(state.directory).toHaveBeenLastCalledWith('/explicit');
+});
+
+it('freezes native adoption identity and keeps previously live drafts live after enable', async()=>{
+  const resourceOwner={kind:'managed_host' as const,hostId:'remote',connectionId:'connection',endpointIdentity:'endpoint'};
+  const project={id:'project',path:'/physical',source:{resourceOwner,workspaceId:'registered'}};
+  useProjectsStore.setState({projects:[project]});
+  const live=await startThreadFromNavigation({projectId:'project',organization:{containerId:'node'}});
+  const versionedWorkspace={workspaceId:'registered',executionWorkspaceId:'view',branchId:'adopted',adoptionOperationId:'admission',state:'ready' as const};
+  useProjectsStore.setState({projects:[{...project,versionedWorkspace}]});
+  const native=await startThreadFromNavigation({projectId:'project',organization:{containerId:'node'}});
+  useProjectsStore.setState({projects:[{...project,versionedWorkspace:{...versionedWorkspace,state:'disabled'}}]});
+  expect(useThreadDraftStore.getState().drafts[live].sourceSelection?.selection).toEqual({mode:'live_root'});
+  expect(useThreadDraftStore.getState().drafts[native].sourceSelection).toMatchObject({mode:'native_workspace',selection:{mode:'native_workspace',workspaceId:'registered',executionWorkspaceId:'view',branchId:'adopted',adoptionOperationId:'admission'}});
+  expect(state.directory).not.toHaveBeenCalled();
+});
+
+it('keeps an owner-created sibling worktree project while freezing its independent live source', async () => {
+  const resourceOwner = { kind: 'managed_host' as const, hostId: 'target', connectionId: 'original', endpointIdentity: 'endpoint' };
+  useProjectsStore.setState({ projects: [{ id: 'project', path: '/repo', source: { resourceOwner, workspaceId: 'parent-root' } }] });
+  const sourceSelection = { resourceOwner, path: '/worktrees/new', expectedWorkspaceId: 'new-root', mode: 'live_root' as const, selection: { mode: 'live_root' as const }, contentMode: 'saved-files' as const, captureScopes: [] };
+  const key = await startThreadFromNavigation({ projectId: 'project', organization: { containerId: 'project-node' }, worktreeProject: true, sourceSelection });
+  expect(useThreadDraftStore.getState().drafts[key]).toMatchObject({ projectId: 'project', sourceSelection });
+  const otherOwner = await startThreadFromNavigation({ projectId: 'project', organization: { containerId: 'project-node' }, worktreeProject: true,
+    sourceSelection: { ...sourceSelection, resourceOwner: { kind: 'local' } } });
+  expect(useThreadDraftStore.getState().drafts[otherOwner].projectId).toBeUndefined();
 });

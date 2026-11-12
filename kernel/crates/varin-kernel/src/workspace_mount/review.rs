@@ -433,7 +433,7 @@ fn native_workspace_mounts_share_storage_and_keep_fork_independent() {
         .fork("child", "native-fork", &AtomicBool::new(false))
         .unwrap();
     boundary.release().unwrap();
-    let child = Session::open(port.clone(), "child".into(), grant).unwrap();
+    let child = Session::open(port.clone(), "child".into(), grant.clone()).unwrap();
     let mut child_mount = Mount::start(child.clone(), &child_path).unwrap();
     child_mount.wait_ready().unwrap();
     #[cfg(windows)]
@@ -469,6 +469,43 @@ fn native_workspace_mounts_share_storage_and_keep_fork_independent() {
         std::fs::read(child_path.join("written.txt")).unwrap(),
         expected
     );
+    #[cfg(windows)]
+    {
+        // CloseHandle has completed, but both the read-only and writable mapped
+        // sections still own their original native file objects.
+        std::fs::write(child_path.join("mapped-read.bin"), b"read mapping").unwrap();
+        std::fs::write(child_path.join("mapped-write.bin"), b"old mapping").unwrap();
+        let mut open_reader = std::fs::File::open(child_path.join("written.txt")).unwrap();
+        let read_mapping = WindowsMapping::open(&child_path.join("mapped-read.bin"), false);
+        let write_mapping = WindowsMapping::open(&child_path.join("mapped-write.bin"), true);
+        assert_eq!(read_mapping.bytes(), b"read mapping");
+        let (submitted, notifications) = std::sync::mpsc::channel();
+        child_mount.observe_cache_invalidation(submitted);
+        assert!(matches!(child_mount.stop(), Err(KernelError::Execution(error))
+            if error.code == "workspace_native_handles_active"));
+        // Synchronize with real WinFsp notification submissions, not a sleep or
+        // a synthetic Close. The same mapped inodes must remain pending after
+        // earlier requests were unable to release their live mappings.
+        let mut notified = std::collections::BTreeMap::from([
+            (child.lookup("mapped-read.bin").unwrap().id, 0),
+            (child.lookup("mapped-write.bin").unwrap().id, 0),
+        ]);
+        while notified.values().any(|count| *count < 2) {
+            let inode = notifications.recv_timeout(std::time::Duration::from_secs(15))
+                .expect("Native cache invalidation was not submitted");
+            if let Some(count) = notified.get_mut(&inode) { *count += 1; }
+        }
+        assert!(matches!(child_mount.stop(), Err(KernelError::Execution(error))
+            if error.code == "workspace_native_handles_active"));
+        assert_eq!(read_mapping.bytes(), b"read mapping");
+        let mut still_readable = Vec::new();
+        std::io::Read::read_to_end(&mut open_reader, &mut still_readable).unwrap();
+        assert_eq!(still_readable, expected);
+        write_mapping.write(b"new"); // late write after Cleanup must survive
+        std::fs::write(parent_path.join("sibling-still-live.txt"), b"sibling").unwrap();
+        assert_eq!(std::fs::read(parent_path.join("sibling-still-live.txt")).unwrap(), b"sibling");
+        drop((open_reader, read_mapping, write_mapping));
+    }
     // Windows may deliver native Close after the ordinary process has exited.
     // Follow the original close notification just like the product owner.
     let stop = |mount: &mut Mount, session: &Arc<Session>| {
@@ -484,6 +521,18 @@ fn native_workspace_mounts_share_storage_and_keep_fork_independent() {
         }
     };
     stop(&mut child_mount, &child);
+    #[cfg(windows)]
+    {
+        // Only now, after actual native Close and detach, reopen the durable
+        // branch to verify the original late mapped write was not discarded.
+        let reopened = Session::open(port.clone(), "child".into(), grant).unwrap();
+        let node = reopened.lookup("mapped-write.bin").unwrap();
+        let mut bytes = [0; 11];
+        reopened.read(&node, 0, &mut bytes).unwrap();
+        assert_eq!(&bytes, b"new mapping");
+        drop(node);
+        reopened.close().unwrap();
+    }
     stop(&mut mount, &parent);
     drop((child_mount, mount, child, parent, port));
     stopping.send(None).unwrap();
@@ -491,6 +540,50 @@ fn native_workspace_mounts_share_storage_and_keep_fork_independent() {
     // Both explicit native mounts are detached before touching their empty
     // target directories. Never delete through a live workspace mount.
     std::fs::remove_dir_all(&directory).unwrap();
+}
+
+#[cfg(windows)]
+struct WindowsMapping {
+    mapping: windows_sys::Win32::Foundation::HANDLE,
+    view: windows_sys::Win32::System::Memory::MEMORY_MAPPED_VIEW_ADDRESS,
+    length: usize,
+    writable: bool,
+}
+#[cfg(windows)]
+impl WindowsMapping {
+    fn open(path: &Path, writable: bool) -> Self {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::Memory::*;
+        let file = std::fs::OpenOptions::new().read(true).write(writable).open(path).unwrap();
+        let length = file.metadata().unwrap().len() as usize;
+        let mapping = unsafe { CreateFileMappingW(file.as_raw_handle(), std::ptr::null(),
+            if writable { PAGE_READWRITE } else { PAGE_READONLY }, 0, 0, std::ptr::null()) };
+        assert!(!mapping.is_null(), "{}", std::io::Error::last_os_error());
+        let view = unsafe { MapViewOfFile(mapping, if writable { FILE_MAP_WRITE } else { FILE_MAP_READ }, 0, 0, 0) };
+        if view.Value.is_null() {
+            let error = std::io::Error::last_os_error();
+            unsafe { windows_sys::Win32::Foundation::CloseHandle(mapping); }
+            panic!("{error}");
+        }
+        drop(file); // force original Cleanup while the mapping remains alive
+        Self { mapping, view, length, writable }
+    }
+    fn bytes(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.view.Value.cast::<u8>(), self.length) }
+    }
+    fn write(&self, bytes: &[u8]) {
+        assert!(self.writable && bytes.len() <= self.length);
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.view.Value.cast::<u8>(), bytes.len()); }
+    }
+}
+#[cfg(windows)]
+impl Drop for WindowsMapping {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::System::Memory::UnmapViewOfFile(self.view);
+            windows_sys::Win32::Foundation::CloseHandle(self.mapping);
+        }
+    }
 }
 
 #[cfg(unix)]

@@ -535,3 +535,88 @@ fn managed_attachment_capture_intent_has_exact_native_identity() {
     assert!(invoke(&mut storage,"storage.record.put",&changed).is_err());
     drop(storage);fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn attachment_import_requires_exact_native_or_external_consumer() {
+    let (mut storage, root) = fixture();
+    let mut external = grant_params("external-actor");
+    external["threadId"] = json!("external-conversation");
+    external["runId"] = Value::Null;
+    external["operationId"] = json!("external-transport");
+    external["externalTransportId"] = json!("external-transport");
+    storage.issue_grant(&external,"host","generation",&root.to_string_lossy(),"epoch").unwrap();
+    let payload = json!({"principalId":"paired","coordinatorHostId":"coordinator","authorityId":"authority",
+        "threadId":"external-conversation","externalTransportId":"external-transport","operationId":"delivery",
+        "ref":"attachment:original","attachment":{"ref":"attachment:original","filename":"input.txt","mimeType":"text/plain","byteLength":0},
+        "contentHash":format!("sha256-{}","0".repeat(64))});
+    let input = json!({"operationId":"import","workspaceId":"workspace","recordId":"attachment-import:original",
+        "recordType":"attachment.import","state":"preparing","threadId":"external-conversation",
+        "payloadJson":payload.to_string(),"ownerIds":[],"references":[]});
+    storage.domain_record_put(&input,"external-actor").unwrap();
+    for (field,value) in [("externalTransportId",json!("foreign")),("threadId",json!("foreign")),("runId",json!("fake-run"))] {
+        let mut changed = input.clone();
+        changed["operationId"] = json!(format!("reject:{field}"));
+        changed["recordId"] = json!(format!("attachment-import:reject:{field}"));
+        let mut changed_payload = payload.clone();changed_payload[field] = value;
+        changed["payloadJson"] = json!(changed_payload.to_string());
+        assert!(storage.domain_record_put(&changed,"external-actor").is_err(),"{field}");
+    }
+    let mut native = input.clone();native["threadId"] = json!("thread");native["runId"] = json!("run");
+    native["recordId"] = json!("attachment-import:native");native["operationId"] = json!("native-import");
+    let mut native_payload = payload.clone();native_payload.as_object_mut().unwrap().remove("externalTransportId");
+    native_payload["threadId"] = json!("thread");native_payload["runId"] = json!("run");
+    native["payloadJson"] = json!(native_payload.to_string());
+    storage.domain_record_put(&native,"actor").unwrap();
+    native_payload.as_object_mut().unwrap().remove("runId");native.as_object_mut().unwrap().remove("runId");
+    native["operationId"] = json!("missing-native-run");native["recordId"] = json!("attachment-import:missing-native-run");
+    native["payloadJson"] = json!(native_payload.to_string());
+    assert!(storage.domain_record_put(&native,"actor").is_err());
+    drop(storage);fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn isolated_external_source_authority_uses_the_original_derived_execution_identity() {
+    use crate::source_resources::SourceAuthorityOpenParams;
+    let (mut storage, root) = fixture();
+    let directory = root.join("parent-source");
+    fs::create_dir(&directory).unwrap();
+    let physical = invoke(&mut storage, "file.root.register", &json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":directory})).unwrap();
+    let live_root = json!({"hostId":"host","rootId":physical["rootId"],"canonicalRoot":physical["canonicalRoot"]});
+    let parent_source = json!({"resource_owner":{"kind":"managed_host","hostId":"host","connectionId":"connection","endpointIdentity":"endpoint"},
+        "workspace_id":"workspace","execution_workspace_id":"workspace","mode":"live_root","branch_id":null,"revision":null,"live_root":live_root});
+    let parent = storage.source_authority_open(serde_json::from_value::<SourceAuthorityOpenParams>(json!({
+        "principalId":"principal","coordinatorHostId":"coordinator","scope":{"kind":"run","threadId":"thread","runId":"run","epoch":1},
+        "source":parent_source,"grantId":"actor","enabledTools":[],"purpose":"source"})).unwrap(),"epoch","host").unwrap();
+    // Persist the original handoff through Storage's actual operation owner.
+    let handoff = json!({"operation_id":"child-source-handoff:dispatch","source":parent_source,
+        "root":{"kind":"physical","root":live_root},"resource_authority":{"authority_id":parent["authorityId"],"resource_epoch":parent["resourceEpoch"]}});
+    storage.operation_begin("child-source-handoff:dispatch","source.handoff","original-intent").unwrap();
+    storage.operation_finish("child-source-handoff:dispatch",&handoff).unwrap();
+    let derived = varin_runtime::catalog::launches::native_execution_workspace_id("dispatch");
+    let open = |storage: &mut Storage, id: &str, execution: &str, principal: &str, conversation: &str, native: bool| {
+        let external = native;
+        let mut grant = json!({"grantId":id,"hostGeneration":"generation","owningWorkspace":"workspace","executionWorkspace":execution,
+            "threadId":conversation,"capabilities":["storage.read","storage.write","process"],"pathScopes":[""]});
+        if external {grant["operationId"]=json!(id);grant["externalTransportId"]=json!(id);}
+        storage.issue_grant(&grant,"host","generation",&root.to_string_lossy(),"epoch").unwrap();
+        let mut source = parent_source.clone();
+        source["mode"]=json!(if native {"native_workspace"}else{"fixed_branch"});
+        source["branch_id"]=json!("child-source:dispatch");source["execution_workspace_id"]=json!(execution);
+        source["live_root"]=Value::Null;source["revision"]=if native {Value::Null}else{json!(0)};
+        let scope = if external {json!({"kind":"external","conversationId":conversation,"transportId":id})}
+            else {json!({"kind":"source_read","threadId":conversation,"branchId":"child-branch","key":id})};
+        let mut input=json!({"principalId":principal,"coordinatorHostId":"coordinator","scope":scope,"source":source,
+            "grantId":id,"enabledTools":[],"purpose":if external {"external_harness"}else{"read"}});
+        if external {input["operationId"]=json!(id);}
+        storage.source_authority_open(serde_json::from_value(input).unwrap(),"epoch","host")
+    };
+    let ready = open(&mut storage,"external-correct",&derived,"principal","external:child:dispatch",true).unwrap();
+    assert_eq!(ready["source"]["execution_workspace_id"],derived);
+    assert!(open(&mut storage,"external-parent","workspace","principal","external:child:dispatch",true).is_err());
+    assert!(open(&mut storage,"external-foreign","foreign-view","principal","external:child:dispatch",true).is_err());
+    assert!(open(&mut storage,"external-principal",&derived,"another-principal","external:child:dispatch",true).is_err());
+    assert!(open(&mut storage,"external-conversation",&derived,"principal","external:child:another",true).is_err());
+    assert!(open(&mut storage,"fixed-correct","workspace","principal","thread:child:dispatch",false).is_ok());
+    assert!(open(&mut storage,"fixed-derived",&derived,"principal","thread:child:dispatch",false).is_err());
+    drop(storage);fs::remove_dir_all(root).unwrap();
+}

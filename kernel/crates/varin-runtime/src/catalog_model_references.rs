@@ -21,6 +21,7 @@ pub enum ReferenceKind {
     Forward,
     Job,
     Report,
+    Container,
 }
 impl ReferenceKind {
     pub fn prefix(self) -> &'static str {
@@ -40,6 +41,7 @@ impl ReferenceKind {
             Self::Forward => "forward",
             Self::Job => "job",
             Self::Report => "report",
+            Self::Container => "container",
         }
     }
     pub fn from_prefix(prefix: &str) -> Option<Self> {
@@ -59,6 +61,7 @@ impl ReferenceKind {
             Self::Forward,
             Self::Job,
             Self::Report,
+            Self::Container,
         ]
         .into_iter()
         .find(|kind| kind.prefix() == prefix)
@@ -128,7 +131,7 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
         "SELECT (SELECT count(*) FROM model_reference_space)!=1
         OR (SELECT count(*) FROM model_reference_space WHERE id=1 AND typeof(space_id)='text' AND length(space_id)>0)!=1
         OR EXISTS(SELECT 1 FROM model_references WHERE typeof(id)!='integer' OR id<=0
-            OR typeof(kind)!='text' OR kind NOT IN ('msg','item','file','media','read','proc','env','page','obs','settings','material','followup','forward','job','report')
+            OR typeof(kind)!='text' OR kind NOT IN ('msg','item','file','media','read','proc','env','page','obs','settings','material','followup','forward','job','report','container')
             OR typeof(owner)!='text' OR length(owner)=0 OR typeof(target)!='text'
             OR CASE WHEN json_valid(target) THEN json_type(target)!='object' ELSE 1 END)
         OR EXISTS(SELECT 1 FROM model_agents WHERE typeof(owner_kind)!='text' OR owner_kind NOT IN ('thread','external')

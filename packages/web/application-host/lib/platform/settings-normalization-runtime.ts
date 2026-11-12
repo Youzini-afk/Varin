@@ -1,4 +1,4 @@
-import { projectFolders, parseVersionedProjectWorkspace } from '@varin/application-client';
+import { projectFolders, parseProjectSourceBinding, parseVersionedProjectWorkspace } from '@varin/application-client';
 import { isWorkFocusId } from '@varin/protocol';
 
 export interface SettingsPathModule {
@@ -23,6 +23,8 @@ export interface SettingsNormalizationDependencies {
 }
 
 export interface NormalizedProject extends Record<string, unknown> {
+  versionedWorkspace?: import('@varin/application-client').VersionedProjectWorkspace;
+  source?: import('@varin/application-client').ProjectSourceBinding;
   id: string;
   path: string;
   additionalPaths?: string[];
@@ -176,12 +178,14 @@ export const createSettingsNormalizationRuntime = (dependencies: SettingsNormali
 
       const candidate = entry as Record<string, unknown>;
       const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
-      const resolvedPath = rawPath ? safeRealpathSync(path.resolve(normalizeDirectoryPath(rawPath))) : '';
-      const normalizedPath = resolvedPath ? normalizePathForPersistence(resolvedPath, { resolveRealpath: false }) : '';
+      const source = parseProjectSourceBinding(candidate.source);
+      const remote = source?.resourceOwner.kind === 'managed_host';
+      const resolvedPath = remote ? rawPath : rawPath ? safeRealpathSync(path.resolve(normalizeDirectoryPath(rawPath))) : '';
+      const normalizedPath = remote ? rawPath : resolvedPath ? normalizePathForPersistence(resolvedPath, { resolveRealpath: false }) : '';
       const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
       const additionalPaths = projectFolders({ path: normalizedPath, additionalPaths: Array.isArray(candidate.additionalPaths)
         ? candidate.additionalPaths.filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
-          .map((value) => normalizePathForPersistence(safeRealpathSync(path.resolve(normalizeDirectoryPath(value))), { resolveRealpath: false }))
+          .map((value) => remote ? value.trim() : normalizePathForPersistence(safeRealpathSync(path.resolve(normalizeDirectoryPath(value))), { resolveRealpath: false }))
         : [] }).slice(1);
       const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
       const icon = typeof candidate.icon === 'string' ? candidate.icon.trim() : '';
@@ -209,6 +213,7 @@ export const createSettingsNormalizationRuntime = (dependencies: SettingsNormali
       const project: NormalizedProject = {
         id,
         path: normalizedPath,
+        ...(source ? { source } : {}),
         ...(additionalPaths.length ? { additionalPaths } : {}),
         ...(label ? { label } : {}),
         ...(icon ? { icon } : {}),

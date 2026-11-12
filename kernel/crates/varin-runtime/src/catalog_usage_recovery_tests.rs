@@ -45,6 +45,7 @@ impl Fixture {
             )
             .unwrap();
         catalog.db.execute("INSERT INTO commands(id,intent,receipt) VALUES('original-command','original intent','original receipt')", []).unwrap();
+        if version < 95 { crate::catalog::organization::remove_for_legacy_fixture(&catalog.db); }
         catalog.db.pragma_update(None, "user_version", version).unwrap();
         drop(catalog);
         Self { root, reference }

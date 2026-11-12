@@ -9,6 +9,12 @@ use varin_runtime::ExecutorOwner;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum SourceAuthorityScope {
+    External {
+        #[serde(rename = "conversationId")]
+        conversation_id: String,
+        #[serde(rename = "transportId")]
+        transport_id: String,
+    },
     Run {
         #[serde(rename = "threadId")]
         thread_id: String,
@@ -28,6 +34,7 @@ impl SourceAuthorityScope {
     pub fn thread_id(&self) -> &str {
         match self {
             Self::Run { thread_id, .. } | Self::SourceRead { thread_id, .. } => thread_id,
+            Self::External { conversation_id, .. } => conversation_id,
         }
     }
     pub fn run_id(&self) -> Option<&str> {
@@ -44,6 +51,7 @@ impl SourceAuthorityScope {
     }
     pub fn identity(&self) -> Value {
         match self {
+            Self::External { conversation_id, transport_id } => json!(["external", conversation_id, transport_id]),
             Self::Run {
                 thread_id, run_id, ..
             } => json!(["run", thread_id, run_id]),
@@ -58,6 +66,7 @@ impl SourceAuthorityScope {
         !self.thread_id().is_empty()
             && match self {
                 Self::Run { run_id, .. } => !run_id.is_empty(),
+                Self::External { transport_id, .. } => !transport_id.is_empty(),
                 Self::SourceRead { branch_id, key, .. } => !branch_id.is_empty() && !key.is_empty(),
             }
     }
@@ -353,6 +362,19 @@ pub(crate) struct SourceProcessAccessParams {
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceExternalControlParams {
+    pub principal_id: String,
+    pub coordinator_host_id: String,
+    pub conversation_id: String,
+    pub transport_id: String,
+    pub process_id: String,
+    pub source: SourceSelection,
+    pub stop: bool,
+    #[serde(default)]
+    pub release: bool,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SourceScriptControlParams {
     pub principal_id: String,
     pub coordinator_host_id: String,
@@ -634,12 +656,28 @@ pub(crate) struct SourceContinuation {
     pub root: String,
 }
 #[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum ExternalChildHandoffScope {
+    ExternalChild {
+        #[serde(rename = "conversationId")]
+        conversation_id: String,
+        #[serde(rename = "operationId")]
+        operation_id: String,
+    },
+}
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum SourceHandoffClaimScope {
+    Native(SourceAuthorityScope),
+    External(ExternalChildHandoffScope),
+}
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SourceHandoffClaimParams {
     pub principal_id: String,
     pub coordinator_host_id: String,
     pub grant_id: String,
-    pub scope: SourceAuthorityScope,
+    pub scope: SourceHandoffClaimScope,
     pub source: SourceSelection,
     pub handoff: Option<varin_runtime::catalog::collaboration::ChildSourceHandoff>,
     pub continuation: Option<SourceContinuation>,
@@ -902,6 +940,7 @@ pub(crate) fn prepare_request(
 ) -> Result<SourceDispatch, KernelError> {
     crate::protocol::validate_method_params(method, &params)?;
     let value = match method {
+        "source.external.control" => storage.control_source_external(serde_json::from_value(params)?, epoch, host)?,
         "source.script.control" => storage.control_source_script(serde_json::from_value(params)?, epoch, host)?,
         "source.process.access" => {
             let p: SourceProcessAccessParams = serde_json::from_value(params)?;
@@ -909,6 +948,9 @@ pub(crate) fn prepare_request(
                 coordinator_host_id: p.coordinator_host_id, authority_id: p.authority_id,
                 resource_epoch: p.resource_epoch };
             let record = storage.source_authority(&address, true, epoch)?;
+            if record.purpose == "external_harness" {
+                return Ok(SourceDispatch::Ready(storage.external_process_access(&address, &p.process_id, epoch, host, generation)?));
+            }
             if !matches!(record.purpose.as_str(), "source" | "process_view" | "script_environment") || record.result.phase != "ready"
                 || matches!(record.purpose.as_str(), "process_view" | "script_environment") && record.operation_id.as_deref() != Some(p.process_id.as_str()) {
                 return Err(denied("Original process source is unavailable"));
@@ -931,8 +973,8 @@ pub(crate) fn prepare_request(
                 resource_epoch: p.resource_epoch,
             };
             let record = storage.source_authority(&address, false, epoch)?;
-            if record.purpose == "mcp_owner" {
-                return Err(denied("MCP owner does not admit file observations"));
+            if matches!(record.purpose.as_str(), "mcp_owner" | "external_harness") {
+                return Err(denied("This source owner does not admit file observations"));
             }
             let r = p.action.request();
             let mut source = r.source.clone();
@@ -1134,7 +1176,7 @@ pub(crate) fn prepare_request(
                 };
                 let record = storage.source_authority(&address, true, epoch)?;
                 if record.purpose == "mcp_owner" { return Err(denied("MCP owner only admits its dedicated process pipe")); }
-                if record.purpose == "process_view" { return Err(denied("Process view only admits its original process projection")); }
+                if matches!(record.purpose.as_str(), "process_view" | "external_harness") { return Err(denied("Process authority only admits its original process projection")); }
                 if record.purpose == "script_environment" && !matches!(&action, SourceResourceAction::ProcessObservation { process_id, .. } if record.operation_id.as_deref() == Some(process_id.as_str())) {
                     return Err(denied("Script authority only observes its original evaluator process"));
                 }

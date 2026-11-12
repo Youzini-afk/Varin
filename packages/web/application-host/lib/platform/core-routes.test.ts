@@ -112,6 +112,7 @@ describe('core-routes', () => {
     '/api/language-support/status',
     '/api/tasks/run',
     '/api/agent-profiles/read',
+    '/api/conversation-organization/command',
     '/api/runtime/content/collect',
     '/api/bot-memory/preview',
     '/api/computers/automation/stop',

@@ -1,3 +1,5 @@
+import {sendResourceAsset} from '../workspace/asset-response.js';
+import {writeTerminalFrame} from '../terminal/stream-backpressure.js';
 import type { Express, NextFunction, Request, RequestHandler, Response } from "express";
 import type { VarinAuthenticatedClient } from "../client-auth/request-context.js";
 import type { ManagedRemoteExecutionService } from "./managed-remote-service.js";
@@ -132,7 +134,7 @@ export function registerManagedRemoteRoutes(
           if (typeof object.workspaceId === 'string') {
             const workspace = await documents.resolveWorkspace({ workspaceId: object.workspaceId });
             const registration = await documents.admitWorkspaceRegistration(workspace.workspaceId);
-            await assertResourcePathAllowed(registration.canonicalPath, allowed);
+            await assertResourcePathAllowed(registration.authorizationRoot, allowed);
           }
           for (const nested of Object.values(object)) if (nested && typeof nested === 'object') await check(nested);
         };
@@ -149,8 +151,8 @@ export function registerManagedRemoteRoutes(
     registerDocumentRoutes(app, { documents, base: `${base}/documents` });
   }
 
-  const sourceMethods = ['workspace', 'attachmentBegin', 'attachmentPath', 'recovery', 'scriptBinding', 'scriptSpawn', 'scriptControl', 'processAccess', 'processControl', 'processWrite', 'processResize', 'capabilities', 'handoff', 'integrationReceipt', 'fileReceipt', 'codeExchange', 'resolve', 'skills', 'files', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation'] as const;
-  const receiptMethods: ReadonlySet<string> = new Set(['scriptControl', 'processControl', 'handoff', 'integrationReceipt', 'fileReceipt', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation']);
+  const sourceMethods = ['terminal', 'projectManagement', 'externalChildSource', 'externalProjectSource', 'externalCapture','externalSettings','externalPrepare', 'externalBinding', 'externalSpawn', 'externalControl', 'workspace', 'attachmentBegin', 'attachmentPath', 'recovery', 'scriptBinding', 'scriptSpawn', 'scriptControl', 'processAccess', 'processControl', 'processWrite', 'processResize', 'capabilities', 'handoff', 'integrationReceipt', 'fileReceipt', 'codeExchange', 'resolve', 'skills', 'files', 'prepare', 'bind', 'authorize', 'execute', 'service', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation'] as const;
+  const receiptMethods: ReadonlySet<string> = new Set(['externalControl', 'scriptControl', 'processControl', 'handoff', 'integrationReceipt', 'fileReceipt', 'cancelService', 'observe', 'releaseReceipt', 'cancel', 'release', 'inspectScope', 'releaseScope','inspectReadScope','closeReadScope','fileObservation']);
   for (const method of sourceMethods) {
     const methodAuth: RequestHandler = (request, response, next) => {
       const operation = value(value(request.body).operation);
@@ -179,7 +181,7 @@ export function registerManagedRemoteRoutes(
       // Cancellation and retirement have their own original-owner receipts.
       const sourceOperation = value(body.operation);
       const mcpObserver = method === 'service' && sourceOperation.kind === 'mcp' && ['changed', 'resource_watch', 'interaction_watch'].includes(String(value(sourceOperation.action).kind));
-      const result = !mcpObserver && (method === 'workspace' && !['open', 'locations', 'list', 'bytes', 'readlink'].includes(String(value(body.command).kind)) || method === 'recovery' || method === 'scriptSpawn' || method === 'scriptControl' || method === 'processWrite' || method === 'processResize' || method === 'processControl' || method === 'execute' || method === 'service' || method === 'cancelService' || method === 'cancel' || method === 'releaseReceipt' || method === 'release' || method === 'releaseScope')
+      const result = !mcpObserver && (method === 'workspace' && !['open', 'locations', 'list', 'bytes', 'readlink', 'filename-search', 'content-search'].includes(String(value(body.command).kind)) || method === 'recovery' || method === 'terminal' || method === 'externalCapture' || method === 'externalChildSource' || method === 'externalProjectSource' || method === 'projectManagement' || method === 'externalControl' || method === 'externalSpawn' || method === 'scriptSpawn' || method === 'scriptControl' || method === 'processWrite' || method === 'processResize' || method === 'processControl' || method === 'execute' || method === 'service' || method === 'cancelService' || method === 'cancel' || method === 'releaseReceipt' || method === 'release' || method === 'releaseScope')
         ? await invoke() : await whileResponseOpen(response, invoke);
       if (!response.destroyed) {
         response.setHeader('Cache-Control', 'no-store');
@@ -187,6 +189,21 @@ export function registerManagedRemoteRoutes(
       }
     }));
   }
+
+  app.post(`${base}/sources/terminalStream`,requireAuth,requireSourceAuth,route(async(request,response)=>{
+    const input=value(request.body) as unknown as Parameters<ManagedSourceService['terminalStream']>[1];authorize(request,input.coordinatorHostId);
+    const controller=new AbortController(),close=()=>controller.abort();response.once('close',close);
+    try{await service.sources().terminalStream(principals.get(request)!,input,frame=>writeTerminalFrame(response,frame,controller.signal),controller.signal);if(!response.destroyed)response.end();}finally{response.off('close',close);}
+  }));
+
+  app.post(`${base}/sources/workspaceAsset`,requireAuth,requireSourceAuth,route(async(request,response)=>{
+    const input=value(request.body) as unknown as Parameters<ManagedSourceService['workspaceAsset']>[1];
+    authorize(request,input.coordinatorHostId);
+    const controller=new AbortController(),close=()=>{if(!response.writableEnded)controller.abort();};
+    response.once('close',close);
+    try{await sendResourceAsset(await service.sources().workspaceAsset(principals.get(request)!,input,controller.signal),response);}
+    finally{response.off('close',close);}
+  }));
 
   app.post(`${base}/sources/workspaceUpload`, requireAuth, requireSourceAuth, route(async (request, response) => {
     const input = JSON.parse(decodeURIComponent(asString(request.header('x-varin-file-upload'), 'Upload metadata'))) as Parameters<ManagedSourceService['workspaceUpload']>[1];

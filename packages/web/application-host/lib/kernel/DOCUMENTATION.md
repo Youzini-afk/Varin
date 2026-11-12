@@ -114,6 +114,10 @@ preparation; the last cancelled observer drains the original capture before its 
 replacement prepares context before publishing the new input/Run/source transaction. A failed or stale
 candidate leaves the active source/checkpoint intact.
 
+Managed code capture keeps coordinator Thread and external conversation IDs as attribution only.
+Its Source authority and Storage snapshot own the capture through publication and cleanup; those IDs
+do not identify local Catalog Threads and must not be used for native preparation retention.
+
 Pinned-source branch creation calls native `branch.fork`, preserving the exact pin and source
 provenance. Preparation grants admit only their original child target and handed-off source/pin;
 refreshed continuation forks only its owned merged revision. The Host does not select a later root
@@ -334,3 +338,94 @@ and auto-rendered image media do not change that intent. Queue promotion uses th
 plain-text edits preserve objects while discarding obsolete ranges. Recovery exposes the original
 file/image binding so restoring a file-backed image does not duplicate its visual payload. A
 text-only model can receive the original image file with an explicit non-visual notice.
+
+## Conversation organization boundary
+
+`../conversation-organization/service.ts` initializes navigation only after a successful, validated
+Settings project read. Catalog owns the one-time generation, mixed tree, placement, CAS and admission
+receipts. The Host supplies the authenticated principal, never a client-selected user ID. Project
+registration/removal remains with Settings; navigation coordination returns its true partial result.
+Native and external metadata batches call their existing owners with per-object stable keys and retain
+busy, conflict, failure and unknown outcomes. No Host-side directory or receipt database is introduced.
+
+`resource-owner.ts` also carries the existing invocation-bound lifecycle bridge for organization tools:
+it validates the frozen resource checkpoint and original Run before reaching BotService or the external
+service. Bot creation keeps its gate, serialized session admission and principal; external mutations
+keep their turn cleanup and original Catalog receipt. Navigation events reuse Catalog durable observation.
+Organization command retries consult the original Catalog receipt before rechecking mutable project
+registration preconditions. External metadata authorization uses the original lightweight record,
+including tombstones; `update_receipt` resolves the retained key/intent before active-turn preflight.
+A confirmed deletion replay still asks the original external service to finish pending cleanup.
+
+Organization placement creation freezes the selected project's original source owner and path in
+its Catalog creation receipt. The Host resolves Settings metadata before admission, without
+starting a device or executing a tool. Subsequent folder moves or project-binding edits do not
+reinterpret that creation intent. An uncertain create retry reads the original receipt before
+consulting mutable Settings; legacy receipts are not retrofitted with a new intent.
+
+`runtime.input.inheritedReceipt` is a read-only original-input comparison, not admission or a
+key-only receipt lookup. It reuses only the retained Host-derived source, selected tools and tool
+schema generation for an inherited-source retry, then compares the complete original normalized
+input intent. Explicit source selection, model, input and credential changes still conflict.
+This allows an accepted first send to be recovered after its project/device goes offline.
+An omitted public submit source inherits; explicit `source: null` selects chat only and clears
+source resources through the original context preparation owner.
+
+Organization labels are a batched read through the existing frozen resource invocation bridge.
+Only requested source IDs are returned, with original Bot/Settings names or explicit missing /
+unavailable states. The label projection is neither a profile directory nor a new authority.
+
+Public Bot sessions, work, activity, matters and historical source reads carry the authenticated
+request's principal, including explicit null for public work. An omitted private principal is
+reserved for the existing whole-Bot lifecycle owner. Generated nullable principal fields preserve
+this distinction with a presence-aware decoder. Global presence events contain only an
+invalidation; clients re-read their scoped projection. Shared Bot configuration and its original
+entry identity are not a per-user registry. Public lifecycle profiles retain state but disclose
+only authorized work handles, not unattributed operation IDs from the shared lifecycle record.
+
+External Agent HTTP routes enforce the same request ownership boundary before reads, mutations,
+attachments or single-conversation progress subscription. Tombstone metadata is used for this
+check, so an original authorized deletion receipt remains recoverable. Pending delegate visibility
+comes from its original parent Run, including before an external session exists. Host-shared
+program configuration and background lifecycle enumeration retain their original scope; global
+external observation carries invalidation only, not conversation identities or transcript data.
+
+### Mixed navigation pages
+
+The authenticated organization read route forwards the strict `pageNodes` boolean to the original
+Catalog query without imposing another page cap or sorting owner. In mixed mode, `items` alone
+identifies ordered page nodes; extra `containers` are ancestry/query context and not rendered page
+rows. Limits/cursors cover both container and conversation nodes. Omitted/false mode preserves
+the original complete container metadata index with conversation-only pagination. Neither mode
+accepts a caller-supplied principal; request authentication selects the Catalog scope.
+
+Non-empty navigation searches read one current Settings project-name index (`label || path`) before
+Catalog pagination. The index travels only over the trusted private query boundary and participates
+in continuation validation; public queries cannot supply `projectNames`. A changed name generation
+requires a fresh search cursor. Unreadable Settings produces `projects_unavailable`, not empty search
+results. Ordinary initialized directory reads do not load Settings or contact execution devices.
+
+Organization Host callbacks validate the original frozen tool invocation through
+`runtime.organization.invocation`, independently of file-source availability. The owner captures
+run/origin/call/operation identity, loads frozen content outside the Catalog lock, then revalidates
+the live epoch and invocation before returning the original Run. Read-only labels need no durable
+operation record. This does not relax `runtime.resources.snapshot` or file-resource checkpoint checks.
+
+Explicit-project dispatch without explicit organization placement uses the registered project's
+navigation node. Before first admission, the model dispatch checks its principal's initialization
+marker and asks the existing authenticated organization bridge to initialize the complete Settings
+generation only if needed. User handoff performs the same preparation after original receipt lookup.
+Receipt replay precedes this work, so later Settings/device unavailability cannot invalidate accepted
+work. Initialization reads registration metadata only; it does not mount or prepare every project.
+An initialized space with a missing project node remains a conflict, not an implicit recreation.
+
+Frozen project source selection is carried in original creation/child-dispatch metadata, not navigation
+nodes. `native_workspace` includes the original adoption operation and logical workspace/branch IDs;
+`live_root` explicitly disables later automatic adoption selection. Missing selection retains old
+receipt behavior. The target `NativeWorkspaceOwner.prepareSelection` verifies the committed adoption
+against the admitted registration's original physical root, then uses the existing open/acquire owners. Managed project configuration adapters use `projectLifecycle` on that same Host owner, sharing original
+mount grants, in-flight opens, document views and retained references. They do not instantiate another
+filesystem owner for the same branch. Project adoptions retain their original project lifecycle;
+only derived temporary snapshots use conversation preparation retention. Managed preparation checks the authenticated target's allowed
+directories. The coordinating Host never registers target mount paths as local directories. Scoped
+child source snapshots retain their original native scope and use the existing snapshot owner.

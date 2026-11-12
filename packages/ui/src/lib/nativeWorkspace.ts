@@ -37,7 +37,7 @@ export async function projectWorkspaceRequest(id: string, action: 'enable' | 'di
         throw new Error(result.message ?? 'Workspace is unavailable');
     return result;
 }
-export async function projectExecutionPath(project: Pick<ProjectEntry, 'id' | 'path'> & Partial<Pick<ProjectEntry, 'versionedWorkspace'>>): Promise<string> {
+export async function projectExecutionPath(project: Pick<ProjectEntry, 'id' | 'path'> & Partial<Pick<ProjectEntry, 'versionedWorkspace' | 'source'>>): Promise<string> {
     // Navigation and worktree consumers commonly carry a small project reference.
     // Resolve its current configuration only when it is the registered root;
     // a worktree/subdirectory using the same project ID keeps its own path.
@@ -47,6 +47,7 @@ export async function projectExecutionPath(project: Pick<ProjectEntry, 'id' | 'p
         if (saved)
             project = saved;
     }
+    if (project.source?.resourceOwner.kind === 'managed_host') throw new Error('This project belongs to another Host. Open its source workspace instead of a local directory.');
     if (project.versionedWorkspace?.state !== 'ready')
         return project.path;
     const status = await projectWorkspaceRequest(project.id, 'inspect');

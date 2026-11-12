@@ -53,7 +53,7 @@ pub enum RuntimeError {
     },
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 94;
+pub(crate) const FORMAT: i64 = 96;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -146,6 +146,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
 
 fn check_catalog_schema(db: &Connection, version: i64) -> Result<()> {
     threads::check_format(db)?;
+    if version >= 95 { organization::check_format(db,version)?; } else { organization::check_legacy_format(db)?; }
     if version >= 93 { model_references::check_format(db)?; }
     else if version == 92 { model_references::check_optional_format(db)?; }
     if version >= 87 { principals::check_format(db)?; }
@@ -242,6 +243,7 @@ fn initialize_metadata(
         driver::initialize(&tx)?;
         attachments::initialize(&tx)?;
         model_references::initialize(&tx)?;
+        organization::initialize(&tx)?;
     }
     titles::initialize(&tx)?;
     let epoch = tx.query_row(
@@ -365,14 +367,8 @@ impl Catalog {
     pub fn create_thread_with_principal(&mut self, thread_id: &str, branch_id: &str, principal: Option<&str>) -> Result<()> {
         self.create_thread_owned(thread_id, branch_id, None, principal)
     }
-    fn create_thread_with_bot(&mut self, thread_id: &str, branch_id: &str, bot_id: Option<&str>) -> Result<()> {
-        self.create_thread_owned(thread_id, branch_id, bot_id, None)
-    }
     fn create_thread_owned(&mut self, thread_id: &str, branch_id: &str, bot_id: Option<&str>, principal: Option<&str>) -> Result<()> {
-        let tx = self.db.transaction()?;
-        identity::create_public(&tx, thread_id, branch_id, bot_id, principal, self.epoch)?;
-        tx.commit()?;
-        Ok(())
+        self.create_thread_owned_with_placement(thread_id, branch_id, bot_id, principal, None)
     }
     pub fn head(&self, branch: &str) -> Result<Option<String>> {
         Ok(self
@@ -2175,3 +2171,6 @@ mod read_performance_tests;
 #[cfg(test)]
 #[path = "catalog_quote_tests.rs"]
 mod quote_tests;
+
+#[path = "catalog_organization.rs"]
+pub mod organization;

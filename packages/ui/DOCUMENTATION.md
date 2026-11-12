@@ -136,6 +136,41 @@ inputs; file bytes do not enter JSON model input. Preparation failures retain th
 uncertain sends keep exact accepted-intent keys. Typed file actions stay visible outside collapsed
 message text and use their enclosing conversation's binary reader. Unknown formats remain downloadable.
 
+## Shared conversation organization
+
+`useConversationOrganizationStore` holds the current Host's Catalog navigation projection and one
+cursor observation. It reads the root's first page; opening a container, selecting a Bot scope, or
+searching adds a shared query page. Continuations are explicit, and refresh preserves only the window
+already loaded. Navigation uses `pageNodes: true`: `items` is the mixed container/native/external
+page membership; `containers` includes only its container metadata and necessary ancestor context.
+Ancestors do not consume page slots. Stable IDs merge loaded pages, and refresh restores the loaded
+`items` window even when every item is an empty category. New branches remain closed until opened.
+Search, Bot views and destination browsing use their own query membership, not incidental global
+cache coverage. The observation cursor is independent of newer query reads, so loading a picker
+cannot suppress a durable change to an older visible page. A failed page retains its last good
+projection and reports the failure instead of an empty directory. Full descendant reads happen
+when a person explicitly selects that action's scope.
+
+`ConversationOrganizationTree` is shared by the workbench, IDE picker, archive and Bot navigator.
+Container identity, mixed order and effective placement come from the Catalog; local collapse, focus
+and display sorting do not rewrite them. Inherited tasks remain under their real parent; an explicit
+move gives them one independent navigation row. Typed native/external keys prevent ID collisions.
+Moves retain the original row until acceptance, preserve ambiguous acceptance keys, and derive undo
+from the original receipt. Undo is a new atomic restore with the receipt's object revisions, real
+sibling anchors and inheritance intent, so it cannot overwrite another client's subsequent move.
+Before moving, only the selected source parents' complete sibling pages are read; Catalog's scoped
+cursor and the captured parent/object revisions protect the original undo anchors without conflicting
+on unrelated branches. The inline destination picker browses and searches pages on demand and
+labels same-name targets with full paths and stable IDs; it never assumes every category was loaded.
+
+`ConversationOrigin` reads the same original provenance for normal, flat, search, archive and work
+detail views. Bot profiles are read together and their assets reuse the existing figure cache;
+missing/unreadable Bot profiles remain explicit rather than being replaced by a same-named Bot.
+The Bot shell retains the shared `ThreadDraftConversation`, fixed placement/source and first-send
+handoff, then opens the actual accepted Bot identity. Selecting another session hides only the draft
+view, not its input or assets. Native and external delegated work open in the Bot's existing side
+workspace; explicit full-workbench navigation remains separate.
+
 ## Motion
 
 The product uses four springs and two tweens from `lib/motion/tokens.ts`:
@@ -712,3 +747,10 @@ behind advanced management. Business/account state belongs to each plugin's conf
 View filters and scroll are persisted per Host; changing Host unmounts its pending confirmation and fences
 late results. Source management, explicit source installation and archive file upload remain independently
 available when discovery is unavailable.
+
+External draft agent choices follow the draft's source resource owner. Opening the agent selector
+or restoring an external draft reads that source Host's saved settings, not program discovery;
+remote failures never fall back to the coordinating Host's same-ID configuration or capability cache.
+Model/options drafts are scoped by source owner and configuration. Source changes retain the original
+preparation key and source until the prior binding's cleanup is confirmed; a lost cleanup response is
+not successful cancellation. Accepted external conversations retain the existing conversation owner.

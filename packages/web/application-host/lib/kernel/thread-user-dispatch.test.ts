@@ -11,8 +11,9 @@ const file={ref:'attachment:original',filename:'notes.txt',mimeType:'text/plain'
 function fixture() {
   const runtime={thread:vi.fn(async()=>({deleted_at_ms:null,branches:[{branch_id:input.branchId,head:input.expectedHead,active_run_id:null,latest_run:{id:input.runId}}]})),userChildDispatchCatalog:vi.fn(async()=>({runId:input.runId,headId:input.expectedHead,projects:[{id:'project',name:'Project',path:'/original',resource_owner:{kind:'local'}}]})),userChildDispatchReceipt:vi.fn(async()=>null as typeof original|null),acceptUserChildDispatch:vi.fn(async()=>original)};
   const attachments={prepare:vi.fn(async()=>[file]),read:vi.fn(async()=>({stream:(async function*(){yield Buffer.from('image');})()})),releaseUnpublished:vi.fn(async()=>{})};
-  const owners={runtime,attachments,models:{}} as unknown as Parameters<typeof createThreadUserDispatch>[0];
-  return {runtime,attachments,api:createThreadUserDispatch(owners)};
+  const ensureOrganization=vi.fn(async()=>{});
+  const owners={runtime,attachments,models:{},ensureOrganization} as unknown as Parameters<typeof createThreadUserDispatch>[0];
+  return {runtime,attachments,ensureOrganization,api:createThreadUserDispatch(owners)};
 }
 beforeEach(()=>{vi.mocked(readDelegationModelCatalog).mockReset().mockResolvedValue({selector:null,candidates:[{id:'chosen',name:'Chosen',channelName:'Original channel',providerId:'channel',modelId:'model',configurationFingerprint:'fixed',input:['text','image'],thinkingLevels:['high'],defaultThinkingLevel:'high',billing:'local'}]});});
 it('reads original native source catalog and exposes no tool/model credential authority',async()=>{
@@ -75,4 +76,20 @@ it('cancels a User-admitted child through the original tree owner', async () => 
   await adapter.cancelOperation('user-operation');
   expect(runtime.cancelTree).toHaveBeenCalledExactlyOnceWith({ kind: 'child', operation_id: 'user-operation' });
   expect(runtime.cancelOperation).not.toHaveBeenCalled();
+});
+
+it('initializes project navigation after original receipt lookup and before new admission', async () => {
+  const f=fixture();
+  await f.api.dispatch({...input, projectId:'registered'});
+  expect(f.ensureOrganization).toHaveBeenCalledOnce();
+  expect(f.runtime.userChildDispatchReceipt.mock.invocationCallOrder[0]).toBeLessThan(f.ensureOrganization.mock.invocationCallOrder[0]!);
+  expect(f.ensureOrganization.mock.invocationCallOrder[0]).toBeLessThan(f.runtime.acceptUserChildDispatch.mock.invocationCallOrder[0]!);
+  f.runtime.userChildDispatchReceipt.mockResolvedValue(original);
+  f.ensureOrganization.mockRejectedValue(new Error('Settings now unavailable'));
+  expect(await f.api.dispatch({...input,projectId:'registered'})).toEqual(original);
+  expect(f.ensureOrganization).toHaveBeenCalledOnce();
+  const g=fixture(); g.ensureOrganization.mockRejectedValue(new Error('Settings unavailable'));
+  await expect(g.api.dispatch({...input,projectId:'registered'})).rejects.toBeInstanceOf(ThreadPreAdmissionError);
+  expect(g.runtime.acceptUserChildDispatch).not.toHaveBeenCalled();
+  const inherited=fixture(); await inherited.api.dispatch(input); expect(inherited.ensureOrganization).not.toHaveBeenCalled();
 });

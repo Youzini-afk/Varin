@@ -1,3 +1,4 @@
+import { getEditorResourceWorkspace } from '@/lib/workbench/editors/resource-workspace';
 import React from 'react';
 
 import { TerminalView } from '@/components/views/TerminalView';
@@ -59,20 +60,24 @@ export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({
   replaceable = false,
 }) => {
   const { t } = useI18n();
+  const resource = getEditorResourceWorkspace(workspaceId);
+  const registry = resource?.scope.documents ?? getDocumentRegistry();
+  const documentWorkspaceId = resource?.documentWorkspaceId ?? workspaceId;
+  const terminalSource = React.useMemo(() => resource ? { cwd: resource.location.root, resourceOwner: resource.location.resourceOwner, selection: resource.location.selection } : undefined, [resource]);
   const layout = React.useSyncExternalStore(
     subscribeWorkbenchPanels,
     () => peekWorkbenchPanelLayout(workspaceId) ?? HIDDEN_LAYOUT,
     () => HIDDEN_LAYOUT,
   );
-  const dirtyIds = useDirtyResourceIds(workspaceId);
+  const dirtyIds = useDirtyResourceIds(documentWorkspaceId, registry);
   const hints = React.useSyncExternalStore(
     subscribeAgentFileChangeHints,
     () => listAgentFileChangeHints(workspaceId),
     () => EMPTY_HINTS,
   );
   const documentEpoch = React.useSyncExternalStore(
-    (onStoreChange) => getDocumentRegistry().subscribeWorkspace(workspaceId, onStoreChange),
-    () => getDocumentRegistry().workspaceVersion(workspaceId),
+    (onStoreChange) => registry.subscribeWorkspace(documentWorkspaceId, onStoreChange),
+    () => registry.workspaceVersion(documentWorkspaceId),
     () => 0,
   );
   const problems = getWorkbenchProblems(workspaceId);
@@ -91,7 +96,7 @@ export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({
             aria-pressed={layout.activePanelId === panelId}
             onClick={() => {
               setWorkbenchPanelLayout(workspaceId, { activePanelId: panelId });
-              if (panelId === 'terminal') useUIStore.getState().openContextSurface(directory, 'terminal');
+              if (panelId === 'terminal' && !resource) useUIStore.getState().openContextSurface(directory, 'terminal');
             }}
             className={cn(layout.activePanelId === panelId && 'bg-[var(--interactive-selection)]')}
           >
@@ -102,7 +107,7 @@ export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="min-h-0 flex-1 overflow-hidden">
           <div className={cn('h-full min-h-0', layout.activePanelId !== 'terminal' && 'hidden')}>
-            <TerminalView visible={layout.activePanelId === 'terminal'} />
+            <TerminalView visible={layout.activePanelId === 'terminal'} directoryOverride={resource ? `project-terminal:${workspaceId}` : undefined} source={terminalSource} />
           </div>
           {layout.activePanelId === 'problems' ? (
             <div className="h-full overflow-auto p-3 typography-ui text-muted-foreground">
@@ -170,7 +175,7 @@ export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({
                 return (
                   <ul className="flex flex-col gap-1">
                     {resourceIds.map((resourceId) => {
-                      const meta = getDocumentRegistry().meta({ workspaceId, resourceId });
+                      const meta = registry.meta({ workspaceId: documentWorkspaceId, resourceId });
                       const hint = hints.find((item) => item.resourceId === resourceId);
                       const link = peekEditorSessionLink({ workspaceId, resourceId });
                       const stateLabel = meta?.status === 'conflict'

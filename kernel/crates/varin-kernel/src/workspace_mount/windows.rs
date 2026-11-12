@@ -204,11 +204,58 @@ fn path(name: &U16CStr) -> winfsp::Result<String> {
     Ok(value)
 }
 type Writers = Arc<Mutex<BTreeMap<u64, (std::sync::Weak<Node>, usize)>>>;
+/// Native Close remains the sole release boundary, including after Cleanup.
+/// Weak inode references request cache invalidation without becoming new owners.
+#[derive(Default)]
+struct NativeHandles {
+    total: std::sync::atomic::AtomicUsize,
+    directories: std::sync::atomic::AtomicUsize,
+    cleanup_completed: std::sync::atomic::AtomicUsize,
+    closing_callbacks: std::sync::atomic::AtomicUsize,
+    files: Mutex<BTreeMap<u64, NativeFile>>,
+    #[cfg(test)]
+    invalidation_observer: Mutex<Option<std::sync::mpsc::Sender<u64>>>,
+}
+struct NativeFile {
+    node: std::sync::Weak<Node>,
+    handles: usize,
+    cleaned: usize,
+}
+impl NativeHandles {
+    fn retain_file(&self, node: &Arc<Node>) {
+        let mut files = self.files.lock().unwrap_or_else(|p| p.into_inner());
+        let file = files.entry(node.id).or_insert_with(|| NativeFile {
+            node: Arc::downgrade(node), handles: 0, cleaned: 0,
+        });
+        file.handles += 1;
+    }
+    fn clean_file(&self, id: u64) {
+        if let Some(file) = self.files.lock().unwrap_or_else(|p| p.into_inner()).get_mut(&id) {
+            file.cleaned += 1;
+        }
+    }
+    fn release_file(&self, id: u64, cleaned: bool) {
+        let mut files = self.files.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(file) = files.get_mut(&id) {
+            file.handles -= 1;
+            file.cleaned -= usize::from(cleaned);
+            if file.handles == 0 { files.remove(&id); }
+        }
+    }
+    fn cleaned_files(&self) -> Vec<Arc<Node>> {
+        self.files.lock().unwrap_or_else(|p| p.into_inner()).values()
+            .filter(|file| file.handles == file.cleaned)
+            .filter_map(|file| file.node.upgrade()).collect()
+    }
+}
 pub(super) struct Handle {
     node: Arc<Node>,
     _content: Option<Arc<PrivateFile>>,
     writer: Option<Writers>,
-    opens: Arc<std::sync::atomic::AtomicUsize>,
+    opens: Arc<NativeHandles>,
+    directory: bool,
+    cleanup_completed: std::sync::atomic::AtomicBool,
+    close_started: bool,
 }
 impl Drop for Handle {
     fn drop(&mut self) {
@@ -223,7 +270,18 @@ impl Drop for Handle {
                 }
             }
         }
-        self.opens.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+        if self.directory {
+            self.opens.directories.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+        }
+        let cleaned = self.cleanup_completed.load(std::sync::atomic::Ordering::Acquire);
+        if !self.directory { self.opens.release_file(self.node.id, cleaned); }
+        if cleaned {
+            self.opens.cleanup_completed.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+        }
+        if self.close_started {
+            self.opens.closing_callbacks.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+        }
+        self.opens.total.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
     }
 }
 struct PendingCleanup {
@@ -237,7 +295,7 @@ pub(super) struct Backend {
     errors: Pending,
     writers: Writers,
     open_boundary: Arc<std::sync::RwLock<()>>,
-    opens: Arc<std::sync::atomic::AtomicUsize>,
+    opens: Arc<NativeHandles>,
     closing: Arc<std::sync::atomic::AtomicBool>,
     inodes: namespace::Inodes,
 }
@@ -412,11 +470,19 @@ impl FileSystemContext for Backend {
             None
         };
         let writer = self.retain_writer(&node, !directory && access & 6 != 0)?;
-        self.opens.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        self.opens.total.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        if directory {
+            self.opens.directories.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        } else {
+            self.opens.retain_file(&node);
+        }
         Ok(Handle {
             node,
             _content: content,
             opens: self.opens.clone(),
+            directory,
+            cleanup_completed: std::sync::atomic::AtomicBool::new(false),
+            close_started: false,
             writer,
         })
     }
@@ -495,15 +561,25 @@ impl FileSystemContext for Backend {
             None
         };
         let writer = self.retain_writer(&node, !directory && access & 6 != 0)?;
-        self.opens.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        self.opens.total.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        if directory {
+            self.opens.directories.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        } else {
+            self.opens.retain_file(&node);
+        }
         Ok(Handle {
             node,
             _content: content,
             opens: self.opens.clone(),
+            directory,
+            cleanup_completed: std::sync::atomic::AtomicBool::new(false),
+            close_started: false,
             writer,
         })
     }
-    fn close(&self, context: Handle) {
+    fn close(&self, mut context: Handle) {
+        context.close_started = true;
+        self.opens.closing_callbacks.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         self.remember(&context.node, false, &self.session.flush(&context.node));
         let node = context.node.clone();
         drop(context);
@@ -609,6 +685,10 @@ impl FileSystemContext for Backend {
             self.remember(&context.node, true, &result);
         } else {
             self.remember(&context.node, false, &self.session.flush(&context.node));
+        }
+        if !context.cleanup_completed.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            if !context.directory { self.opens.clean_file(context.node.id); }
+            self.opens.cleanup_completed.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         }
     }
     fn flush(&self, context: Option<&Handle>, info: &mut FileInfo) -> winfsp::Result<()> {
@@ -889,7 +969,7 @@ pub(crate) struct Mount {
     errors: Pending,
     writers: Writers,
     open_boundary: Arc<std::sync::RwLock<()>>,
-    opens: Arc<std::sync::atomic::AtomicUsize>,
+    opens: Arc<NativeHandles>,
     closing: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Mount {
@@ -905,7 +985,7 @@ impl Mount {
         let errors = Arc::new(Mutex::new(BTreeMap::new()));
         let writers = Arc::new(Mutex::new(BTreeMap::new()));
         let open_boundary = Arc::new(std::sync::RwLock::new(()));
-        let opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let opens = Arc::new(NativeHandles::default());
         let closing = Arc::new(std::sync::atomic::AtomicBool::new(false));
         namespace.insert(&name, Arc::new(Backend {
                 session: session.clone(),
@@ -929,6 +1009,10 @@ impl Mount {
         })
     }
     pub(crate) fn path(&self) -> &Path { &self.path }
+    #[cfg(test)]
+    pub(crate) fn observe_cache_invalidation(&self, observer: std::sync::mpsc::Sender<u64>) {
+        *self.opens.invalidation_observer.lock().unwrap() = Some(observer);
+    }
     pub(crate) fn wait_ready(&self) -> Result<(), KernelError> {
         self.session.check_mounted()
     }
@@ -985,9 +1069,18 @@ impl Mount {
                 .map_err(|_| unsupported("Native open boundary failed"))?;
             self.closing
                 .store(true, std::sync::atomic::Ordering::Release);
-            let remaining = self.opens.load(std::sync::atomic::Ordering::Acquire);
+            let remaining = self.opens.total.load(std::sync::atomic::Ordering::Acquire);
             if remaining != 0&&!self.session.is_mount_disconnected() {
-                return Err(KernelError::Execution(varin_runtime::execution::ExecutionError::new("workspace_native_handles_active",format!("Waiting for {remaining} original native file/directory handles to close before detaching the workspace"))));
+                return Err(KernelError::Execution(varin_runtime::execution::ExecutionError::new(
+                    "workspace_native_handles_active",
+                    format!("Waiting for {remaining} original native file/directory handles to close before detaching the workspace"),
+                ).with_details(serde_json::json!({
+                    "nativeHandles": remaining,
+                    "directoryHandles": self.opens.directories.load(std::sync::atomic::Ordering::Acquire),
+                    "cleanupCompletedHandles": self.opens.cleanup_completed.load(std::sync::atomic::Ordering::Acquire),
+                    "closingCallbacks": self.opens.closing_callbacks.load(std::sync::atomic::Ordering::Acquire),
+                    "writableHandles": self.writers.lock().unwrap_or_else(|p| p.into_inner()).values().map(|(_, count)| count).sum::<usize>(),
+                }))));
             }
         }
         // The volume is shared, but each source retains its own open boundary,

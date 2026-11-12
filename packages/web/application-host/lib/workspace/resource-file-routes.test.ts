@@ -3,12 +3,13 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, expect, it, vi } from 'vitest';
 import { registerResourceFileRoutes } from './resource-file-routes.js';
+import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
 
 const servers: Server[] = [];
 afterEach(async () => { await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }))); });
 const owner = { kind: 'managed_host', connectionId: 'files-device', hostId: 'files-owner', endpointIdentity: 'original-endpoint' } as const;
 async function server(remote: unknown, local: unknown = {}) {
-  const app = express(); app.use(express.json());
+  const app = express(); registerCommonRequestMiddleware(app, { express });
   const select = vi.fn(async selected => { expect(selected).toEqual(owner); return remote; });
   const requireAuth: RequestHandler = (_request, _response, next) => next();
   registerResourceFileRoutes(app, { local, remote: select, runtime: { coordinatorHostId: 'agent-host' }, attachments: {}, requireAuth } as unknown as Parameters<typeof registerResourceFileRoutes>[1]);
@@ -24,12 +25,26 @@ it('routes file views and original document watches to their explicit resource o
   const f = await server({ workspace, documents }, local);
   const response = await fetch(`${f.base}/api/resource-files`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resourceOwner: owner, root: '/srv/work', workspaceId: 'original-workspace', command: { kind: 'list', path: '' } }) });
   expect(response.status).toBe(200);
-  expect(workspace).toHaveBeenCalledWith(expect.objectContaining({ coordinatorHostId: 'agent-host', root: '/srv/work', workspaceId: 'original-workspace' }));
+  expect(workspace).toHaveBeenCalledWith(expect.objectContaining({ coordinatorHostId: 'agent-host', root: '/srv/work', workspaceId: 'original-workspace' }), undefined);
   expect(local.request).not.toHaveBeenCalled();
   const watch = await fetch(`${f.base}/api/resource-documents/watch?workspaceId=original-workspace&resourceOwner=${encodeURIComponent(JSON.stringify(owner))}`);
   expect(watch.headers.get('content-type')).toContain('text/event-stream');
   expect(await watch.text()).toContain('data:');
   expect(documents).toHaveBeenCalledWith('watch?workspaceId=original-workspace', 'GET', undefined, expect.any(AbortSignal));
+});
+
+it('reads an Office document through the production JSON middleware and its original remote owner', async () => {
+  const result = { kind: 'document', content: 'Original target Office content' };
+  const workspaceAsset = vi.fn(async () => Response.json(result));
+  const local = { asset: vi.fn() };
+  const f = await server({ workspaceAsset }, local);
+  const input = { resourceOwner: owner, root: '/srv/work', workspaceId: 'original-workspace', path: 'design.docx',
+    asset: { kind: 'office-read', input: { view: 'content' } } };
+  const response = await fetch(`${f.base}/api/resource-office`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual(result);
+  expect(workspaceAsset).toHaveBeenCalledWith({ ...input, coordinatorHostId: 'agent-host' }, expect.any(AbortSignal));
+  expect(local.asset).not.toHaveBeenCalled();
 });
 
 it('reports a copied destination and preserves a changed source when a cross-device move cannot finish', async () => {
@@ -51,4 +66,21 @@ it('reports a copied destination and preserves a changed source when a cross-dev
   expect(await response.json()).toMatchObject({ copied: 1, removed: 0, error: expect.stringContaining('source changed') });
   expect(written).toEqual(bytes);
   expect(sourceRequest).toHaveBeenLastCalledWith(expect.objectContaining({ command: expect.objectContaining({ kind: 'remove', path: 'note.txt', expectedHash: expect.stringMatching(/^sha256-[0-9a-f]{64}$/) }) }));
+});
+
+it('propagates a cancelled recursive search to its original target owner', async () => {
+  let started!: () => void, cancelled!: () => void;
+  const entered = new Promise<void>(resolve => { started = resolve; });
+  const stopped = new Promise<void>(resolve => { cancelled = resolve; });
+  const workspace = vi.fn(async (_input, signal: AbortSignal) => {
+    started();
+    await new Promise<void>(resolve => {signal.addEventListener('abort', () => {cancelled();resolve();}, {once:true});});
+    return {kind:'content-search',result:{status:'cancelled',generation:0}};
+  });
+  const f = await server({workspace});
+  const controller = new AbortController();
+  const request = fetch(`${f.base}/api/resource-files`, {method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
+    body:JSON.stringify({resourceOwner:owner,root:'/target',workspaceId:'view',command:{kind:'content-search',path:'',query:'needle'}})}).catch(() => undefined);
+  await entered;controller.abort();await stopped;await request;
+  expect(workspace.mock.calls[0]?.[1].aborted).toBe(true);
 });

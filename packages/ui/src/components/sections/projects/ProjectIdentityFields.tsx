@@ -80,7 +80,7 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
 
       <ProjectSettingsSubsection title={t('settings.projectTrust.title')} description={t('settings.projectTrust.description')} settingsItem="projects.trust">
         <div className="divide-y divide-border/50">
-          {projectFolders(project).map(directory => <ProjectTrustSettings key={directory} directory={directory}
+          {project.source?.resourceOwner.kind === 'managed_host' ? <ProjectTrustSettings project={project} directory={project.path} showDescription={false} /> : projectFolders(project).map(directory => <ProjectTrustSettings key={directory} directory={directory}
             label={directory.replace(/\\/g, '/').split('/').filter(Boolean).at(-1) || directory} showDescription={false} />)}
         </div>
       </ProjectSettingsSubsection>
@@ -90,7 +90,7 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
         info={t('settings.projects.page.field.defaultModelDescription')}
         settingsItem="projects.default-model"
       >
-        <ProjectDefaultModelField key={project.id} directory={project.path} />
+        <ProjectDefaultModelField key={project.id} directory={project.path} projectId={project.id} remote={project.source?.resourceOwner.kind === 'managed_host'} />
       </ProjectSettingsSubsection>
 
       <ProjectSettingsSubsection

@@ -137,6 +137,9 @@ pub struct FamilyBranch {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FamilyMember {
+    pub organization: super::organization::ConversationEntry,
+    pub backend: String,
+    pub conversation_type: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
     pub source: Option<launches::SourceSelection>,
@@ -163,6 +166,17 @@ pub struct FamilyList {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all="camelCase",deny_unknown_fields)]
 pub struct FamilyListQuery {
+    pub container_id: Option<String>,
+    #[serde(default)]
+    pub root_only: bool,
+    #[serde(default)]
+    pub recursive: bool,
+    pub archived: Option<String>,
+    pub bot_id: Option<String>,
+    pub conversation_type: Option<String>,
+    pub backend: Option<String>,
+    /// Navigation nearest project, unlike workspace_id which selects execution source.
+    pub project_id: Option<String>,
     pub file_path: Option<String>,
     pub parent_thread_id: Option<String>,
     pub parent_branch_id: Option<String>,
@@ -177,7 +191,41 @@ pub struct FamilyListQuery {
 #[derive(Serialize, Deserialize)]
 struct MemberCursor { caller:String, root:String, before:i64, maximum:i64, scope:String, query:Option<String>,filters:String }
 #[derive(Serialize,Deserialize)]
-struct DirectoryCursor {kind:String,caller:String,query:FamilyListQuery,include_self:bool,native:Option<MemberCursor>,external:bool,external_before:i64,external_maximum:i64}
+struct DirectoryCursor {organization_revision:u64,kind:String,caller:String,query:FamilyListQuery,include_self:bool,native:Option<MemberCursor>,external:bool,external_before:i64,external_maximum:i64}
+
+/// One metadata projection and filter for both native and external discovery.
+/// The Catalog organization owner resolves inherited placement and original provenance.
+fn directory_entry(db:&Connection,caller:&str,reference:super::organization::ConversationRef,query:&FamilyListQuery)
+    ->Result<Option<(super::organization::ConversationEntry,String)>> {
+    let backend=match &reference {super::organization::ConversationRef::Native{..}=>"native",_=>"external"};
+    let principal=super::principals::thread(db,caller)?;
+    let entry=super::organization::conversation(db,principal.as_deref(),&reference)?;
+    let kind=if entry.origin.direct_bot_id.is_some() {"bot"} else if entry.origin.conversation.is_some() {"delegated"} else {"ordinary"};
+    let archive=query.archived.as_deref().unwrap_or("exclude");
+    if !["exclude","include","only"].contains(&archive)
+        || query.backend.as_deref().is_some_and(|v| !["native","external"].contains(&v))
+        || query.conversation_type.as_deref().is_some_and(|v| !["ordinary","bot","delegated"].contains(&v)) {
+        return Err(RuntimeError::Invalid("Invalid conversation directory filter".into()));
+    }
+    if (query.root_only && query.container_id.is_none() && entry.position.container_id.is_some())
+        || (archive=="exclude" && entry.archived) || (archive=="only" && !entry.archived)
+        || query.backend.as_deref().is_some_and(|v|v!=backend)
+        || query.conversation_type.as_deref().is_some_and(|v|v!=kind)
+        || query.bot_id.as_deref().is_some_and(|v|entry.origin.bot_id.as_deref()!=Some(v) && entry.origin.direct_bot_id.as_deref()!=Some(v))
+        || query.container_id.as_ref().is_some_and(|id| if query.recursive { !entry.path.contains(id) } else {entry.position.container_id.as_ref()!=Some(id)}) {
+        return Ok(None);
+    }
+    if let Some(project)=&query.project_id {
+        let scope=serde_json::to_string(&principal)?;
+        let mut nearest=None;
+        for id in entry.path.iter().rev() {
+            let value:Option<String>=db.query_row("SELECT json_extract(body,'$.projectId') FROM organization_containers WHERE scope=?1 AND id=?2",params![scope,id],|r|r.get(0)).optional()?.flatten();
+            if value.is_some() {nearest=value;break;}
+        }
+        if nearest.as_ref()!=Some(project) {return Ok(None);}
+    }
+    Ok(Some((entry,kind.into())))
+}
 
 // Current work is projected from the owners that already track execution and delivery.
 pub(super) const CURRENT: &str = r#"(
@@ -338,6 +386,7 @@ pub struct FamilyRead {
     epoch: u64,
     key: [u8; 32],
     caller: String,
+    principal: Option<String>,
     target: Option<(String, String, Option<String>)>,
     invocation: Option<Invocation>,
 }
@@ -522,6 +571,7 @@ impl Catalog {
             epoch: self.epoch,
             key: self.plan_cursor_key,
             caller: caller.into(),
+            principal: super::principals::thread(&self.db,caller)?,
             target,
             invocation: None,
         })
@@ -565,10 +615,11 @@ impl FamilyRead {
     fn finish(&self, cancel: &dyn Fn() -> bool) -> Result<()> {
         check(cancel)?;
         let current = super::history_views::current_history_owner(&self.database, self.epoch)?;
+        if super::principals::thread(&current,&self.caller)?!=self.principal {return Err(RuntimeError::Conflict("Reader principal changed during read".into()));}
         if let Some((target, branch, _)) = &self.target {
             super::threads::require_available(&current, target)?;
             if super::scheduling::thread_family(&current, target)? != super::scheduling::thread_family(&current, &self.caller)?
-                && !super::bot_work::ordinary_conversation(&current, &self.caller, target)?
+                && !super::bot_work::readable_conversation(&current, &self.caller, target)?
                 && !super::bot_work::linked(&current, &self.caller, target, Some(branch), false, false)? {
                 return Err(RuntimeError::Conflict("followed conversation access changed during read".into()));
             }
@@ -630,10 +681,11 @@ impl FamilyRead {
                 ));
             }
         }
+        if super::principals::thread(&db,&self.caller)?!=self.principal {return Err(RuntimeError::Conflict("Reader principal changed before read".into()));}
         let root = super::scheduling::thread_family(&db, &self.caller)?;
         if let Some((target, branch, _)) = &self.target {
             if super::scheduling::thread_family(&db, target)? != root
-                && !super::bot_work::ordinary_conversation(&db, &self.caller, target)?
+                && !super::bot_work::readable_conversation(&db, &self.caller, target)?
                 && !super::bot_work::linked(&db, &self.caller, target, Some(branch), false, false)? {
                 return Err(RuntimeError::Conflict(
                     "Thread is outside the caller's task family".into(),
@@ -699,15 +751,20 @@ impl FamilyRead {
     pub fn list(self, include_self: bool, cancel: &dyn Fn() -> bool) -> Result<FamilyList> {
         self.list_page(include_self, FamilyListQuery { scope:Some("all".into()),..Default::default() },cancel)
     }
-    pub fn list_page(self, include_self: bool, query:FamilyListQuery, cancel: &dyn Fn() -> bool) -> Result<FamilyList> {
+    pub fn list_page(self, include_self: bool, mut query:FamilyListQuery, cancel: &dyn Fn() -> bool) -> Result<FamilyList> {
+        // Existing family consumers use this view for task/resource authority and
+        // active-work summaries. Archiving changes browsing, never those rights.
+        query.archived.get_or_insert_with(||"include".into());
         let db = self.open(cancel)?;
         self.list_page_in(&db,include_self,query,true,cancel)
     }
     /// Model discovery deliberately avoids the detailed UI task/branch/source projection.
     pub fn directory_page(self, include_self: bool, mut query:FamilyListQuery, cancel: &dyn Fn() -> bool) -> Result<FamilyList> {
         let db=self.open(cancel)?;
+        let organization_scope=serde_json::to_string(&super::principals::thread(&db,&self.caller)?)?;
+        let organization_revision=db.query_row("SELECT revision FROM organization_spaces WHERE scope=?1",[organization_scope],|r|read_number(r,0)).optional()?.unwrap_or(0);
         let cursor=query.cursor.take().map(|token|self.decode::<DirectoryCursor>(&token)).transpose()?;
-        if cursor.as_ref().is_some_and(|cursor|cursor.kind!="model_directory" || cursor.caller!=self.caller || cursor.query!=query || cursor.include_self!=include_self) {
+        if cursor.as_ref().is_some_and(|cursor|cursor.organization_revision!=organization_revision || cursor.kind!="model_directory" || cursor.caller!=self.caller || cursor.query!=query || cursor.include_self!=include_self) {
             return Err(RuntimeError::Conflict("Task directory continuation belongs to another query".into()));
         }
         let maximum=cursor.as_ref().map(|c|c.external_maximum).unwrap_or(db.query_row("SELECT coalesce(max(rowid),0) FROM external_conversations",[],|r|r.get(0))?);
@@ -719,7 +776,7 @@ impl FamilyRead {
             self.list_page_in(&db,include_self,native_query,false,cancel)?
         };
         if let Some(next)=page.next_cursor.take() {
-            page.next_cursor=Some(self.sign(&DirectoryCursor{kind:"model_directory".into(),caller:self.caller.clone(),query,include_self,native:Some(self.decode(&next)?),external:false,external_before:before,external_maximum:maximum})?);
+            page.next_cursor=Some(self.sign(&DirectoryCursor{organization_revision,kind:"model_directory".into(),caller:self.caller.clone(),query,include_self,native:Some(self.decode(&next)?),external:false,external_before:before,external_maximum:maximum})?);
             return Ok(page);
         }
         let limit=query.limit.unwrap_or(usize::MAX);
@@ -727,7 +784,7 @@ impl FamilyRead {
         let (mut external_members,next)=self.external_directory_in(&db,&query,maximum,before,remaining,cancel)?;
         page.members.append(&mut external_members);
         if let Some(next)=next {
-            page.next_cursor=Some(self.sign(&DirectoryCursor{kind:"model_directory".into(),caller:self.caller.clone(),query,include_self,native:None,external:true,external_before:next,external_maximum:maximum})?);
+            page.next_cursor=Some(self.sign(&DirectoryCursor{organization_revision,kind:"model_directory".into(),caller:self.caller.clone(),query,include_self,native:None,external:true,external_before:next,external_maximum:maximum})?);
         }
         self.finish(cancel)?;
         Ok(page)
@@ -751,15 +808,24 @@ impl FamilyRead {
             AND (?9 IS NULL OR json_extract(e.body,'$.updatedAt')>=?9) AND (?10 IS NULL OR json_extract(e.body,'$.updatedAt')<=?10)
             AND (?11 IS NULL OR EXISTS(SELECT 1 FROM child_result_files f JOIN external_children c ON c.id=f.execution_id WHERE json_extract(c.body,'$.conversation_id')=e.id AND f.path=?11))
             ORDER BY e.rowid DESC LIMIT ?12");
-        let read_limit=if limit>=(i64::MAX as usize) {-1}else{sql_number(limit.saturating_add(1) as u64)?};
+        let read_limit:i64=-1;
         let mut statement=db.prepare(&sql)?;
         let rows=statement.query_map(params![root,self.caller,maximum,before,query.query,parent,query.parent_branch_id,query.workspace_id,query.updated_after_ms.map(sql_number).transpose()?,query.updated_before_ms.map(sql_number).transpose()?,query.file_path,read_limit],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,read_number(r,4)?,r.get::<_,bool>(5)?,r.get::<_,String>(6)?,r.get::<_,Option<String>>(7)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
-        let more=rows.len()>limit;
-        let next=if more {Some(if limit==0 {before}else{rows[limit-1].1})}else{None};
-        let mut members=Vec::new();
-        for (thread_id,_,agent_id,name,updated_at_ms,current,state,parent_thread_id) in rows.into_iter().take(limit) {
+        let mut selected=Vec::new();
+        for row in rows {
             check(cancel)?;
-            members.push(FamilyMember{avatar:None,source:None,source_run_id:None,operation_id:None,latest_execution_id:None,thread_id,agent_id,name,current,updated_at_ms,parent_thread_id,task:None,state,branches:Vec::new()});
+            if let Some(metadata)=directory_entry(db,&self.caller,super::organization::ConversationRef::External{id:row.0.clone()},query)? {
+                selected.push((row,metadata));
+                if selected.len()>limit {break;}
+            }
+        }
+        let rows=selected;
+        let more=rows.len()>limit;
+        let next=if more {Some(if limit==0 {before}else{rows[limit-1].0.1})}else{None};
+        let mut members=Vec::new();
+        for ((thread_id,_,agent_id,name,updated_at_ms,current,state,parent_thread_id),(organization,conversation_type)) in rows.into_iter().take(limit) {
+            check(cancel)?;
+            members.push(FamilyMember{organization,conversation_type,backend:"external".into(),avatar:None,source:None,source_run_id:None,operation_id:None,latest_execution_id:None,thread_id,agent_id,name,current,updated_at_ms,parent_thread_id,task:None,state,branches:Vec::new()});
         }
         Ok((members,next))
     }
@@ -769,26 +835,36 @@ impl FamilyRead {
         if !["current","history","all"].contains(&scope) || query.limit == Some(0) { return Err(RuntimeError::Invalid("invalid task directory query".into())); }
         let maximum:i64 = db.query_row("SELECT coalesce(max(rowid),0) FROM threads",[],|r|r.get(0))?;
         let parent=query.parent_thread_id.as_deref().map(|id|super::threads::resolve(&db,id)).transpose()?;
-        let filters=serde_json::to_string(&json!([include_self,parent,query.parent_branch_id,query.workspace_id,query.updated_after_ms,query.updated_before_ms,query.file_path,query.limit]))?;
+        let mut filter_query=query.clone(); filter_query.cursor=None;
+        let filters=serde_json::to_string(&json!([include_self,parent,filter_query]))?;
         let cursor = query.cursor.as_deref().map(|v|self.decode::<MemberCursor>(v)).transpose()?;
         if cursor.as_ref().is_some_and(|c|c.caller!=self.caller || c.root!=root || c.scope!=scope || c.query!=query.query || c.filters!=filters) { return Err(RuntimeError::Conflict("task directory cursor belongs to another query".into())); }
         let maximum=cursor.as_ref().map_or(maximum,|c|c.maximum);
         let before=cursor.as_ref().map_or(maximum.saturating_add(1),|c|c.before);
         let scope_filter = match scope { "current"=>CURRENT.to_owned(),"history"=>format!("NOT {CURRENT}"),_=>"1".into() };
         let limit=query.limit.unwrap_or(usize::MAX);
-        let read_limit=query.limit.map(|limit|sql_number(limit.saturating_add(1) as u64)).transpose()?.unwrap_or(-1);
-        let sql=format!("WITH RECURSIVE family(id) AS (SELECT ?1 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id), readable(id) AS (SELECT id FROM family UNION SELECT candidate.id FROM threads candidate JOIN threads caller ON caller.id=?5 JOIN bot_thread_bindings bot ON bot.thread_id=caller.id WHERE candidate.principal_id IS caller.principal_id AND NOT EXISTS(SELECT 1 FROM bot_thread_bindings other WHERE other.thread_id=candidate.id)) SELECT t.id,t.rowid,{CURRENT},t.updated_at_ms FROM threads t JOIN readable f ON t.id=f.id WHERE t.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id=t.id AND json_extract(owner.body,'$.executor')='code_retrieval') AND t.rowid<=?2 AND t.rowid<?3 AND (?4 OR t.id!=?5) AND ({scope_filter}) AND (?6 IS NULL OR t.id=?6 OR instr(lower(t.title),lower(?6))>0 OR t.agent_code=?6 COLLATE NOCASE)
+        let read_limit:i64=-1;
+        let sql=format!("WITH RECURSIVE family(id) AS (SELECT ?1 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id), readable(id) AS (SELECT id FROM family UNION SELECT candidate.id FROM threads candidate JOIN threads caller ON caller.id=?5 JOIN bot_thread_bindings bot ON bot.thread_id=caller.id WHERE candidate.principal_id IS caller.principal_id AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN context_jobs c ON c.run_id=r.id WHERE b.thread_id=candidate.id) AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN operations o ON o.run_id=r.id WHERE b.thread_id=candidate.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1')) SELECT t.id,t.rowid,{CURRENT},t.updated_at_ms FROM threads t JOIN readable f ON t.id=f.id WHERE t.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id=t.id AND json_extract(owner.body,'$.executor')='code_retrieval') AND t.rowid<=?2 AND t.rowid<?3 AND (?4 OR t.id!=?5) AND ({scope_filter}) AND (?6 IS NULL OR t.id=?6 OR instr(lower(t.title),lower(?6))>0 OR t.agent_code=?6 COLLATE NOCASE)
           AND (?8 IS NULL OR EXISTS(SELECT 1 FROM child_tasks c WHERE c.child_thread_id=t.id AND json_extract(c.body,'$.parent_thread_id')=?8 AND (?9 IS NULL OR json_extract(c.body,'$.parent_branch_id')=?9)))
           AND (?10 IS NULL OR EXISTS(SELECT 1 FROM runs r JOIN branches b ON b.id=r.branch_id JOIN run_launches l ON l.id=r.id WHERE b.thread_id=t.id AND json_extract(l.body,'$.selection.source.workspace_id')=?10))
           AND (?11 IS NULL OR t.updated_at_ms>=?11) AND (?12 IS NULL OR t.updated_at_ms<=?12)
           AND (?13 IS NULL OR EXISTS(SELECT 1 FROM child_result_files f JOIN delegated_executions d ON d.id=f.execution_id JOIN child_tasks c ON c.id=d.child_operation_id WHERE c.child_thread_id=t.id AND f.path=?13)) ORDER BY t.rowid DESC LIMIT ?7");
         let candidates = db.prepare(&sql)?.query_map(params![root,maximum,before,include_self,self.caller,query.query,read_limit,parent,query.parent_branch_id,query.workspace_id,query.updated_after_ms.map(sql_number).transpose()?,query.updated_before_ms.map(sql_number).transpose()?,query.file_path], |r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,bool>(2)?,read_number(r,3)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        let mut selected=Vec::new();
+        for candidate in candidates {
+            check(cancel)?;
+            if let Some(metadata)=directory_entry(db,&self.caller,super::organization::ConversationRef::Native{id:candidate.0.clone()},&query)? {
+                selected.push((candidate,metadata));
+                if selected.len()>limit {break;}
+            }
+        }
+        let candidates=selected;
         let mut members = Vec::new();
-        let next_cursor=if candidates.len()>limit { Some(self.sign(&MemberCursor{caller:self.caller.clone(),root:root.clone(),before:candidates[limit-1].1,maximum,scope:scope.into(),query:query.query.clone(),filters})?) } else {None};
-        for (thread,_,current,updated_at_ms) in candidates.into_iter().take(limit) {
+        let next_cursor=if candidates.len()>limit { Some(self.sign(&MemberCursor{caller:self.caller.clone(),root:root.clone(),before:candidates[limit-1].0.1,maximum,scope:scope.into(),query:query.query.clone(),filters})?) } else {None};
+        for ((thread,_,current,updated_at_ms),(organization,conversation_type)) in candidates.into_iter().take(limit) {
             check(cancel)?;
             if super::scheduling::thread_family(&db, &thread)? != root
-                && !super::bot_work::ordinary_conversation(&db, &self.caller, &thread)? {
+                && !super::bot_work::readable_conversation(&db, &self.caller, &thread)? {
                 return Err(RuntimeError::Invalid("inconsistent task lineage".into()));
             }
             let child: Option<String> = db
@@ -877,6 +953,7 @@ impl FamilyRead {
                 selected.filter(|l|l.selection.source.is_some()).map(|_|dispatch::agent_file_source(db,&run)).transpose()
             }).transpose()?.flatten();
             members.push(FamilyMember {
+                organization, conversation_type, backend:"native".into(),
                 avatar: child.as_ref().and_then(|child| child.avatar.clone()),
                 source,source_run_id,
                 operation_id:child.as_ref().map(|c|c.operation_id.clone()),latest_execution_id,
@@ -982,7 +1059,8 @@ impl FamilyRead {
             }
         }).transpose()?;
         self.finish(cancel)?;
-        Ok(json!({"threadId":thread,"branchId":branch,"agentId":agent_id,"name":name,"task":task,
+        let organization=super::organization::conversation(&db,super::principals::thread(&db,&self.caller)?.as_deref(),&super::organization::ConversationRef::Native{id:thread.clone()})?;
+        Ok(json!({"threadId":thread,"branchId":branch,"agentId":agent_id,"name":name,"task":task,"organization":organization,
             "state":if executions.is_empty() {json!("idle")} else if executions.len()==1 {executions[0]["state"].clone()} else {json!("parallel")},
             "executions":executions,"branches":branches}))
     }

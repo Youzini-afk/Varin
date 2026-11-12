@@ -1,7 +1,6 @@
+import { useProjectGit } from '@/hooks/useProjectGit';
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
-import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useDetectedWorktreeMetadata } from '@/hooks/useDetectedWorktreeRoot';
 import { useGitStatus, useGitBranches, useGitStore } from '@/stores/useGitStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -33,9 +32,9 @@ export const PullRequestView: React.FC<{
   navigationDirectory?: string | null;
 }> = ({ isActive = true, directoryOverride, navigationDirectory }) => {
   const { t } = useI18n();
-  const { git } = useRuntimeAPIs();
-  const sessionDirectory = useEffectiveDirectory();
-  const currentDirectory = directoryOverride ?? sessionDirectory;
+  const projectGit = useProjectGit(directoryOverride);
+  const git = projectGit.git;
+  const currentDirectory = projectGit.directory;
   const status = useGitStatus(currentDirectory ?? null);
   const branches = useGitBranches(currentDirectory ?? null);
   const { ensureAll } = useGitStore(useShallow((state) => ({ ensureAll: state.ensureAll })));

@@ -111,6 +111,21 @@ export function normalizeThreadSourcePreparation(input: ThreadPrepareSource): Th
     || typeof input.workspaceId !== 'string' || !input.workspaceId || !Array.isArray(input.captureScopes)
     || input.captureScopes.some(scope => typeof scope !== 'string')
     || !['fixed_branch', 'materialized', 'live_root','native_workspace'].includes(input.mode)) throw new Error('Source preparation request is malformed');
+  let selection: ThreadPrepareSource['selection'];
+  if (input.selection !== undefined) {
+    const raw = input.selection;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid frozen project source selection');
+    const fields = raw.mode === 'live_root' ? ['mode'] : ['mode', 'workspaceId', 'executionWorkspaceId', 'branchId', 'adoptionOperationId', 'nativeScope'];
+    if (!['live_root', 'native_workspace'].includes(raw.mode) || Object.keys(raw).some(key => !fields.includes(key))
+      || raw.mode === 'native_workspace' && (!fields.slice(1,5).every(key => typeof (raw as unknown as Record<string,unknown>)[key] === 'string' && String((raw as unknown as Record<string,unknown>)[key]).trim()) || raw.workspaceId !== input.workspaceId)
+      || input.mode === 'native_workspace' && raw.mode !== 'native_workspace'
+      || input.mode === 'live_root' && raw.mode !== 'live_root') throw new Error('Frozen project source selection does not match this preparation');
+    selection = structuredClone(raw);
+    if (selection.mode === 'native_workspace' && selection.nativeScope !== undefined) {
+      if (typeof selection.nativeScope !== 'string') throw new Error('Invalid native source scope');
+      selection.nativeScope = normalizeWorkspaceRelativePath(selection.nativeScope);
+    }
+  }
   const resourceOwner = parseSourceResourceOwner(input.resourceOwner);
   const captureScopes = [...new Set(input.captureScopes.map(scope => normalizeWorkspaceRelativePath(scope) || '.'))].sort();
   let content: ThreadPrepareSource['content'];
@@ -129,7 +144,7 @@ export function normalizeThreadSourcePreparation(input: ThreadPrepareSource): Th
   }
   if (resourceOwner.kind === 'managed_host' && content.mode !== 'saved-files') throw new Error('Editor drafts belong to this Host; select saved files for a managed source');
   return { runtime: 'agent', resourceOwner, threadId: input.threadId, branchId: input.branchId, key: input.key,
-    workspaceId: input.workspaceId, mode: input.mode, content, captureScopes };
+    workspaceId: input.workspaceId, mode: input.mode, content, captureScopes, ...(selection ? { selection } : {}) };
 }
 
 /** Documents supplies original drafts; WorkingState's branch-create receipt owns the fixed source. */
@@ -144,8 +159,11 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
     // A saved registration is a namespace, not authority to read a physical directory.
     // Look up the durable receipt before reopening a now-moved directory or expired draft.
     const workspaceId = input.workspaceId;
+    const selectedNative = async () => input.selection?.mode === 'native_workspace'
+      ? nativeWorkspaces?.prepareSelection(input.selection, input.threadId, signal)
+      : input.selection ? undefined : nativeWorkspaces?.prepare(workspaceId,signal);
     if(input.mode==='live_root'||input.mode==='native_workspace'){
-      const native=await nativeWorkspaces?.prepare(workspaceId,signal);
+      const native=await selectedNative();
       if(native)return {...native,source:{...native.source,tools:await sourceTools('native_workspace')}};
       if(input.mode==='native_workspace')throw new SourceAdmissionError('source_unavailable');
     }
@@ -190,7 +208,7 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
           branchId, revision: 0, mode: input.mode, tools }, provenance: restored.provenance } as ThreadPreparedSource;
       }
       if (await store.getBranchRoot(branchId, { signal })) throw new Error('Source preparation has no original receipt');
-      const native=await nativeWorkspaces?.prepare(workspaceId,signal);
+      const native=await selectedNative();
       if(native?.source.mode==='native_workspace'){
         if(native.source.workspaceId!==owningWorkspace)throw new SourceAdmissionError('source_changed');
         const selected=native.source;

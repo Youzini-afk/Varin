@@ -1,3 +1,4 @@
+import { getEditorResourceWorkspace } from '@/lib/workbench/editors/resource-workspace';
 import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import { languageIdFromResourceId } from '@/lib/language-services/language-id';
@@ -21,8 +22,9 @@ export const attachEditorContext = (input: {
   text?: string;
 }): EditorContextAttachment | { status: 'wrong-runtime' } | { status: 'missing-document' } => {
   const runtimeKey = getRuntimeKey();
-  const identity = { workspaceId: input.workspaceId, resourceId: input.resourceId };
-  const record = getDocumentRegistry().get(identity);
+  const resource = getEditorResourceWorkspace(input.workspaceId);
+  const identity = { workspaceId: resource?.documentWorkspaceId ?? input.workspaceId, resourceId: input.resourceId };
+  const record = (resource?.scope.documents ?? getDocumentRegistry()).get(identity);
   const dirty = record?.dirty === true;
   const source = input.kind === 'selection' || (dirty && (input.kind === 'editor' || input.kind === 'diff'))
     ? 'unsaved-buffer'
@@ -34,7 +36,7 @@ export const attachEditorContext = (input: {
   }
   const project = useProjectsStore.getState().projects.find(project => project.id === input.workspaceId
     || project.versionedWorkspace?.workspaceId === input.workspaceId || project.versionedWorkspace?.executionWorkspaceId === input.workspaceId);
-  const sourceLabel = input.sourceLabel ?? (project ? project.label ? `${project.label} (${project.path})` : project.path : undefined);
+  const sourceLabel = input.sourceLabel ?? (resource ? `${resource.location.resourceOwner.kind === 'managed_host' ? resource.location.resourceOwner.hostId : 'local'} · ${resource.location.root}` : undefined) ?? (project ? project.label ? `${project.label} (${project.path})` : project.path : undefined);
   const attachment: EditorContextAttachment = {
     id: crypto.randomUUID(),
     runtimeKey,

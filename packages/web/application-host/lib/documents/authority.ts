@@ -548,7 +548,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     if (!await waitWithSignal(trustedRoot(native?.originalPath??mapping.canonicalPath), signal)) throw new DocumentUntrustedError();
     if(native&&!saved)await registry.registerNative(workspaceId,native.originalPath,native.reference);
     signal?.throwIfAborted();
-    return mapping;
+    return {...mapping, authorizationRoot: native?.originalPath ?? mapping.canonicalPath};
   };
 
   const loadWorkspace = async (workspaceId: string): Promise<LoadedWorkspace> => {

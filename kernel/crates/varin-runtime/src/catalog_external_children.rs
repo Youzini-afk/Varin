@@ -32,6 +32,38 @@ pub struct ExternalChild {
     pub accepted_at_ms: u64,
     pub finished_at_ms: Option<u64>,
 }
+impl ExternalChild {
+    /// The preparation owner resolves the executable on the actual target Host.
+    /// Keep the model's original input and preset immutable; this is a distinct
+    /// frozen preparation receipt, copied with the original conversation on send.
+    pub(super) fn prepared_launch_value(&self) -> Result<Value> {
+        let mut launch = serde_json::to_value(self.prepared_launch()?)?;
+        if let Some(identity) = self.source.as_ref().and_then(|source| source.get("executionBinding")).and_then(|binding| binding.get("configurationIdentity")) {
+            launch["configurationIdentity"] = identity.clone();
+        }
+        Ok(launch)
+    }
+    pub(super) fn prepared_launch(&self) -> Result<dispatch::ExternalLaunch> {
+        let Some(prepared) = self.source.as_ref().and_then(|source| source.get("executionBinding")) else {
+            if self.source.as_ref().is_some_and(|source| source["executionSource"]["resource_owner"]["kind"] == "managed_host") {
+                return Err(RuntimeError::Conflict("external target executable preparation is unavailable".into()));
+            }
+            return Ok(self.binding.launch.clone());
+        };
+        let source = self.source.as_ref().unwrap();
+        let owner = &source["executionSource"]["resource_owner"];
+        if owner["kind"] != "managed_host" || prepared["resourceOwner"] != *owner
+            || prepared["configurationId"] != self.binding.configuration_id
+            || prepared["harness"] != self.binding.harness
+            || prepared["configurationIdentity"].as_str().is_none_or(str::is_empty)
+        {
+            return Err(RuntimeError::Conflict("external prepared target binding changed".into()));
+        }
+        let launch: dispatch::ExternalLaunch = serde_json::from_value(prepared["launch"].clone())?;
+        if launch.command.is_empty() { return Err(RuntimeError::Invalid("external target command is empty".into())); }
+        Ok(launch)
+    }
+}
 pub struct ExternalChildAdmission {
     database: std::path::PathBuf,
     context: ToolExecutionContext,
@@ -443,6 +475,11 @@ impl Catalog {
                 "external dispatch is no longer admitted".into(),
             ));
         }
+        super::organization::admit_dispatch(&tx,run.principal_id.as_deref(),
+            &super::organization::ConversationRef::External{id:child.conversation_id.clone()},
+            p.admission.expected_input.organization.as_ref(),p.admission.expected_input.project_id.as_deref(),
+            &super::organization::ConversationRef::Native{id:child.parent_thread_id.clone()},
+            &format!("external-child:{}",child.operation_id))?;
         child.cursor = event(
             &tx,
             &op.id,
@@ -571,7 +608,7 @@ pub fn deliver_waits(owner: &std::sync::Mutex<Catalog>) -> Result<()> {
             let mut output:crate::output::OutputBody=report.clone().into();
             if !model_contract.preserve_original {
             output.model_data=Some(json!({"kind":"child_report","agentId":agent_id,"name":child.name,"ref":reference,"executionRef":if is_execution {Some(&reference)} else {None},
-                "status":report["report"]["outcome"],"previewPartial":report["page"]["next_offset"].is_number(),
+                "status":report["report"]["status"],"detail":report["report"]["detail"],"previewPartial":report["page"]["next_offset"].is_number(),
                 "read":if model_contract.report {Some(read)} else {None}}));
             }
             output.parts.push(crate::output::OutputPart::Text{text});
@@ -778,7 +815,8 @@ pub fn execute(owner: &std::sync::Mutex<Catalog>, raw: Value) -> Result<Value> {
             let content = db.content.clone();
             let publication = content.begin_publication();
             drop(db);
-            let input = content.load(&child.input_ref)?;
+            let mut input = content.load(&child.input_ref)?;
+            input["_launch"] = child.prepared_launch_value()?;
             drop(publication);
             Ok(input)
         }
@@ -868,6 +906,7 @@ pub fn execute(owner: &std::sync::Mutex<Catalog>, raw: Value) -> Result<Value> {
                 ));
             }
             child.source = Some(source);
+            child.prepared_launch()?;
             child.revision += 1;
             let tx = db.db.transaction()?;
             put(&tx, "external_children", &operation_id, &child)?;

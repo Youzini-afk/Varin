@@ -1,3 +1,4 @@
+import {sendResourceAsset} from './asset-response.js';
 import type { Express, RequestHandler, Response } from 'express';
 import { isDeepStrictEqual } from 'node:util';
 import type { ResourceFileRequest, ResourceFileLocation, ResourceFileResult, ResourceFileTransfer, ThreadIdentity } from '@varin/application-client';
@@ -44,7 +45,7 @@ export function registerResourceFileRoutes(app: Express, options: {
     const owner = parseSourceResourceOwner(location.resourceOwner);
     const remote = owner.kind === 'managed_host' ? await options.remote(owner) : null;
     return {
-      request: (command: ResourceFileRequest['command']) => remote ? remote.workspace({ root: location.root, workspaceId: location.workspaceId, coordinatorHostId: options.runtime.coordinatorHostId, command }) : options.local.request({ ...location, command }),
+      request: (command: ResourceFileRequest['command']) => remote ? remote.workspace({ root: location.root, workspaceId: location.workspaceId, ...(location.selection !== undefined ? {selection:location.selection} : {}), coordinatorHostId: options.runtime.coordinatorHostId, command }) : options.local.request({ ...location, command }),
       upload: (request: ResourceWorkspaceUpload, body: AsyncIterable<Uint8Array>) => remote ? remote.workspaceUpload({ ...request, coordinatorHostId: options.runtime.coordinatorHostId }, body) : options.local.upload(request, body),
     };
   };
@@ -62,14 +63,41 @@ export function registerResourceFileRoutes(app: Express, options: {
     return { resourceOwner, taskSource: { runId, source } };
   };
   app.post('/api/resource-files', options.requireAuth, async (request, response) => {
+    const controller = new AbortController();
+    const closed = () => { if (!response.writableEnded) controller.abort(); };
+    request.once('aborted', closed); response.once('close', closed);
     try {
       const input = request.body as ResourceFileRequest;
+      const signal = input.command?.kind === 'filename-search' || input.command?.kind === 'content-search' ? controller.signal : undefined;
       const { resourceOwner, taskSource } = await route(input);
-      const command = { command: input.command, ...(input.root ? { root: input.root } : {}), ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}), ...(taskSource ? { taskSource } : {}) };
-      const result = resourceOwner.kind === 'local' ? await options.local.request(command)
-        : await (await options.remote(resourceOwner)).workspace({ ...command, coordinatorHostId: options.runtime.coordinatorHostId });
-      response.json(result);
-    } catch (error) { failure(response, error); }
+      const command = { command: input.command, ...(input.selection !== undefined ? {selection:input.selection} : {}), ...(input.root ? { root: input.root } : {}), ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}), ...(taskSource ? { taskSource } : {}) };
+      const result = resourceOwner.kind === 'local' ? await options.local.request(command, signal)
+        : await (await options.remote(resourceOwner)).workspace({ ...command, coordinatorHostId: options.runtime.coordinatorHostId }, signal);
+      if (!response.destroyed) response.json(result);
+    } catch (error) { if (!controller.signal.aborted) failure(response, error); }
+    finally { request.off('aborted', closed); response.off('close', closed); }
+  });
+  const asset = async (input:import('@varin/application-client').ResourceAssetRequest,response:Response) => {
+    const controller=new AbortController(),close=()=>{if(!response.writableEnded)controller.abort();};
+    response.once('close',close);
+    try {
+      const owner=parseSourceResourceOwner(input.resourceOwner);
+      const result=owner.kind==='local'?await options.local.asset(input,controller.signal)
+        :await (await options.remote(owner)).workspaceAsset({...input,coordinatorHostId:options.runtime.coordinatorHostId},controller.signal);
+      await sendResourceAsset(result,response);
+    }catch(error){if(!controller.signal.aborted&&!response.headersSent)failure(response,error);else if(!response.destroyed)response.end();}
+    finally{response.off('close',close);}
+  };
+  app.get(/^\/api\/resource-assets\/[^/]+\/([^/]+)\/(raw|serve|office-preview)\/(.+)$/,options.requireAuth,async(request,response)=>{
+    try {
+      const location=JSON.parse(request.params[0]!) as ResourceFileLocation;
+      const kind=request.params[1] as 'raw'|'serve'|'office-preview';
+      await asset({...location,path:request.params[2]!,asset:{kind,...(typeof request.query.expectedRevision==='string'?{expectedRevision:request.query.expectedRevision}:{})}},response);
+    }catch(error){failure(response,error);}
+  });
+  app.post('/api/resource-office',options.requireAuth,async(request,response)=>{
+    if(request.body?.asset?.kind!=='office-read'){response.status(400).json({error:'An Office read is required'});return;}
+    await asset(request.body,response);
   });
   app.post('/api/resource-files/upload', options.requireAuth, async (request, response) => {
     try {
@@ -98,7 +126,7 @@ export function registerResourceFileRoutes(app: Express, options: {
       }
       const remote = owner.kind === 'managed_host' ? await options.remote(owner) : null;
       const read = (offset: number) => remote
-        ? remote.workspace({ root: location.root, workspaceId: location.workspaceId, coordinatorHostId: options.runtime.coordinatorHostId, command: { kind: 'bytes', path, offset } })
+        ? remote.workspace({ root: location.root, workspaceId: location.workspaceId, ...(location.selection !== undefined ? {selection:location.selection} : {}), coordinatorHostId: options.runtime.coordinatorHostId, command: { kind: 'bytes', path, offset } })
         : options.local.request({ ...location, command: { kind: 'bytes', path, offset } });
       const first = await read(0);
       if (first.kind !== 'bytes') throw new Error('The original file could not be read');
@@ -124,9 +152,14 @@ export function registerResourceFileRoutes(app: Express, options: {
       if (!input.key || !input.path || !input.destinationPath) throw new Error('Source and destination are required');
       const [source, target] = await Promise.all([endpoint(input.source), endpoint(input.destination)]);
       // Reject a directory copying into itself before creating any entries.
-      if (isDeepStrictEqual(input.source.resourceOwner, input.destination.resourceOwner)) {
+      const sourceNative = input.source.selection?.mode === 'native_workspace' ? input.source.selection : undefined;
+      const targetNative = input.destination.selection?.mode === 'native_workspace' ? input.destination.selection : undefined;
+      const sameView = sourceNative || targetNative ? sourceNative && targetNative
+        && sourceNative.workspaceId === targetNative.workspaceId && sourceNative.executionWorkspaceId === targetNative.executionWorkspaceId
+        && sourceNative.branchId === targetNative.branchId : true;
+      if (isDeepStrictEqual(input.source.resourceOwner, input.destination.resourceOwner) && sameView) {
         const normalize = (root: string, relative: string) => path.posix.normalize(`${root.replaceAll('\\', '/')}/${relative}`).replace(/\/$/, '');
-        const from = normalize(input.source.root, input.path), to = normalize(input.destination.root, input.destinationPath);
+        const from = normalize(sourceNative?.nativeScope ?? (sourceNative ? '/' : input.source.root), input.path), to = normalize(targetNative?.nativeScope ?? (targetNative ? '/' : input.destination.root), input.destinationPath);
         const folded = /^[a-z]:/i.test(from) ? [from.toLowerCase(), to.toLowerCase()] : [from, to];
         if (folded[1] === folded[0] || folded[1]!.startsWith(`${folded[0]}/`)) throw new Error('Choose a destination outside the source');
       }
@@ -167,7 +200,7 @@ export function registerResourceFileRoutes(app: Express, options: {
             page = next;
           }
         };
-        await target.upload({ root: input.destination.root, workspaceId: input.destination.workspaceId, path: to, key, byteLength: first.byteLength }, stream()); copied++;
+        await target.upload({ ...(input.destination.selection !== undefined ? {selection:input.destination.selection} : {}), root: input.destination.root, workspaceId: input.destination.workspaceId, path: to, key, byteLength: first.byteLength }, stream()); copied++;
         if (input.move) { await source.request({ kind: 'remove', path: from, key: `${key}:remove`, expectedHash: `sha256-${hash.digest('hex')}` }); removed++; }
       };
       const parent = path.posix.dirname(input.path), name = path.posix.basename(input.path);

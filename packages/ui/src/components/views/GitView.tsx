@@ -1,11 +1,10 @@
+import { useProjectGit, useProjectGitIdentities } from '@/hooks/useProjectGit';
 import React from 'react';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
 import { useFireworksCelebration } from '@/contexts/FireworksContext';
 import type { GitIdentityProfile, CommitFileEntry, GitStatus } from '@varin/application-client';
-import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 import { useShallow } from 'zustand/react/shallow';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useGitmojiList } from '@/hooks/useGitmojiList';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import {
@@ -45,7 +44,6 @@ import {
 } from '@/components/ui/command';
 import { Icon } from "@/components/icon/Icon";
 
-import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDetectedWorktreeMetadata } from '@/hooks/useDetectedWorktreeRoot';
 import { IntegrateCommitsSection } from './git/IntegrateCommitsSection';
@@ -89,8 +87,8 @@ type GitViewProps = {
   followDirectoryLabel?: string;
   onDirectoryChange?: (directory: string) => void;
   onFollowSessionDirectory?: () => void;
-  onViewDiff?: (path: string, staged: boolean) => void;
-  onViewPullRequest?: () => void;
+  onViewDiff?: (path: string, staged: boolean, directory?: string) => void;
+  onViewPullRequest?: (directory?: string) => void;
 };
 
 const GIT_RECONCILE_DELAY_MS = 15000;
@@ -219,22 +217,14 @@ export const GitView: React.FC<GitViewProps> = ({
   onViewPullRequest,
 }) => {
   const { t } = useI18n();
-  const { git } = useRuntimeAPIs();
-  const effectiveDirectory = useEffectiveDirectory();
-  const currentDirectory = directoryOverride ?? effectiveDirectory;
+  const { git, directory: currentDirectory } = useProjectGit(directoryOverride);
+  const effectiveDirectory = currentDirectory;
   const [worktreeBootstrapStatus, setWorktreeBootstrapStatus] = React.useState<'pending' | 'ready' | 'failed' | null>(null);
   const [isWaitingForGitRefreshAfterBootstrap, setIsWaitingForGitRefreshAfterBootstrap] = React.useState(false);
   const currentSessionId = useThreadStore(state => selectedComposerKey(state));
 
-  const { profiles, globalIdentity, defaultGitIdentityId, loadProfiles, loadGlobalIdentity, loadDefaultGitIdentityId } =
-    useGitIdentitiesStore(useShallow((s) => ({
-      profiles: s.profiles,
-      globalIdentity: s.globalIdentity,
-      defaultGitIdentityId: s.defaultGitIdentityId,
-      loadProfiles: s.loadProfiles,
-      loadGlobalIdentity: s.loadGlobalIdentity,
-      loadDefaultGitIdentityId: s.loadDefaultGitIdentityId,
-    })));
+  const { profiles, globalIdentity, defaultGitIdentityId, loadProfiles, loadGlobalIdentity, loadDefaultGitIdentityId, error: identityLoadError } = useProjectGitIdentities(currentDirectory);
+  React.useEffect(() => { if (identityLoadError) toast.error(identityLoadError, { id: 'project-git-identity-unavailable' }); }, [identityLoadError]);
 
   const isGitRepo = useIsGitRepo(currentDirectory ?? null);
   const status = useGitStatus(currentDirectory ?? null);
@@ -1704,7 +1694,7 @@ export const GitView: React.FC<GitViewProps> = ({
 
   const handleViewChangeDiff = React.useCallback((path: string, staged: boolean) => {
     if (onViewDiff) {
-      onViewDiff(path, staged);
+      onViewDiff(path, staged, currentDirectory ?? undefined);
       return;
     }
     if (currentDirectory && !isMobile) {
@@ -2315,7 +2305,7 @@ export const GitView: React.FC<GitViewProps> = ({
             pullRequest={prChipStatus?.pr ?? null}
             prChecks={prChipStatus?.checks ?? null}
             onOpenPullRequest={
-              currentDirectory ? onViewPullRequest ?? (() => openContextPanelTab(effectiveDirectory ?? currentDirectory, {
+              currentDirectory ? (onViewPullRequest ? () => onViewPullRequest(currentDirectory) : undefined) ?? (() => openContextPanelTab(effectiveDirectory ?? currentDirectory, {
                 mode: 'pr', targetDirectory: currentDirectory,
               })) : undefined
             }

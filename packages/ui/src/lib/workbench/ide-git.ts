@@ -1,3 +1,4 @@
+import { projectGitLocation, projectGitDisplayPath } from '@varin/application-client';
 import {
   resourceIdFromWorkspacePath,
   workspacePathFromResourceId,
@@ -20,12 +21,17 @@ export const gitRepositoryRootWithinWorkspace = (
   workspaceRoot: string,
   repositoryRoot: string,
 ): string | null => {
-  const normalizedWorkspace = normalizeDirectory(workspaceRoot);
-  const normalizedRepository = normalizeDirectory(repositoryRoot);
+  const workspace = projectGitLocation(workspaceRoot), repository = projectGitLocation(repositoryRoot);
+  if (Boolean(workspace) !== Boolean(repository)) return null;
+  if (workspace && repository && (workspace.projectId !== repository.projectId
+    || JSON.stringify(workspace.source) !== JSON.stringify(repository.source)
+    || JSON.stringify(workspace.selection) !== JSON.stringify(repository.selection))) return null;
+  const normalizedWorkspace = normalizeDirectory(projectGitDisplayPath(workspaceRoot));
+  const normalizedRepository = normalizeDirectory(projectGitDisplayPath(repositoryRoot));
   if (!normalizedWorkspace || !normalizedRepository) return null;
   return resourceIdFromWorkspacePath(normalizedWorkspace, normalizedRepository) === null
     ? null
-    : normalizedRepository;
+    : repository ? repositoryRoot : normalizedRepository;
 };
 
 export const resolveIdeGitResourceId = (
@@ -37,7 +43,7 @@ export const resolveIdeGitResourceId = (
   const containedRepository = gitRepositoryRootWithinWorkspace(workspaceRoot, repositoryRoot);
   if (!normalizedGitPath || !containedRepository) return null;
   return resourceIdFromWorkspacePath(
-    workspaceRoot,
-    workspacePathFromResourceId(containedRepository, normalizedGitPath),
+    projectGitDisplayPath(workspaceRoot),
+    workspacePathFromResourceId(projectGitDisplayPath(containedRepository), normalizedGitPath),
   );
 };

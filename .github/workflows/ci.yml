@@ -527,6 +527,16 @@ jobs:
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do call "%%i\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
           set "LIBCLANG_PATH=%ProgramFiles%\LLVM\bin"
           cargo test -p varin-kernel --lib workspace --features workspace-mount --locked
+      - if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        name: Verify WinFsp mapped-file close and sibling lifetime
+        shell: cmd
+        working-directory: kernel
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do call "%%i\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          set "LIBCLANG_PATH=%ProgramFiles%\LLVM\bin"
+          cargo test -p varin-kernel --lib workspace_mount::review::native_workspace_mounts_share_storage_and_keep_fork_independent --features workspace-mount --locked -- --exact --ignored --list | findstr /L /C:"workspace_mount::review::native_workspace_mounts_share_storage_and_keep_fork_independent: test"
+          if errorlevel 1 exit /b 1
+          cargo test -p varin-kernel --lib workspace_mount::review::native_workspace_mounts_share_storage_and_keep_fork_independent --features workspace-mount --locked -- --exact --ignored --nocapture
 
   macos-storage:
     name: macOS platform

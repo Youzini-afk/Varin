@@ -36,3 +36,29 @@ test('does not create a conversation when workspace setup fails', async () => {
   await expect(createWorktreeThreadWithRuntime(makeRuntime({ shouldWaitForBootstrap: async () => true, waitForBootstrap: async () => { throw new Error('setup failed'); }, openDraft }))).rejects.toThrow('setup failed');
   expect(openDraft).not.toHaveBeenCalled();
 });
+
+test('remote worktree creation carries original project owner through check, setup and draft', async () => {
+  const source = { resourceOwner: { kind: 'managed_host' as const, hostId: 'remote', connectionId: 'remote-connection', endpointIdentity: 'remote-endpoint' }, workspaceId: 'root-documents' };
+  const checkIsGitRepository = vi.fn(async () => true);
+  const createWorktree = vi.fn(async () => worktree);
+  const waitForBootstrap = vi.fn(async () => {});
+  const openDraft = vi.fn(async () => draftKey);
+  await createWorktreeThreadWithRuntime(makeRuntime({ getActiveProject: () => ({ id: 'remote-project', path: '/repo', source }), checkIsGitRepository, createWorktree, waitForBootstrap, openDraft, shouldWaitForBootstrap: async () => true }));
+  const project = { id: 'remote-project', path: '/repo', source };
+  expect(checkIsGitRepository).toHaveBeenCalledWith('/repo', project);
+  expect(createWorktree).toHaveBeenCalledWith(project, 'work');
+  expect(waitForBootstrap).toHaveBeenCalledWith(worktree.path, project);
+  expect(openDraft).toHaveBeenCalledWith({ directory: worktree.path, projectId: 'remote-project', source });
+});
+
+test('a project owner change during discovery cannot redirect the later create', async () => {
+  let project: import('@varin/application-client').ProjectEntry = { id: 'project', path: '/same' };
+  const createWorktree = vi.fn();
+  await expect(createWorktreeThreadWithRuntime(makeRuntime({ getActiveProject: () => project, createWorktree,
+    checkIsGitRepository: async () => {
+      project = { ...project, source: { resourceOwner: { kind: 'managed_host', hostId: 'replacement', connectionId: 'replacement', endpointIdentity: 'replacement' }, workspaceId: 'replacement-root' } };
+      return true;
+    },
+  }))).rejects.toThrow('Project source or Application Host changed');
+  expect(createWorktree).not.toHaveBeenCalled();
+});

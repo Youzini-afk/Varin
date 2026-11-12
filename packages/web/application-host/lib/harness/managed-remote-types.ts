@@ -12,6 +12,12 @@ export type ManagedHostSourceOwner = Extract<SourceResourceOwner, { kind: 'manag
 /** Obtained from the verified authenticated client, never from a request body. */
 export interface ManagedSourcePrincipal { principalId: string; capabilities: readonly string[]; allowedDirectories?: readonly string[] }
 export type SourceAuthorityScope = import('../kernel/protocol.generated.js').SourceAuthorityScope;
+export interface ManagedExternalChildSourceRequest {coordinatorHostId:string;action:'prepare'|'release'|'remove';child:import('../kernel/protocol.generated.js').ExternalChild;unstarted?:boolean}
+export type ManagedExternalChildSourceResult={status:'prepared';source:import('../external-agents/source.js').ExternalPreparedSource}|{status:'released'};
+export interface ManagedExternalProjectSourceRequest {
+  coordinatorHostId:string;action:'baseline'|'remove';identity:import('@varin/application-client').ThreadIdentity;key:string;source:LaunchSource;
+}
+export type ManagedExternalProjectSourceResult = {status:'baseline';baseline:import('../kernel/child-source-store.js').ChildSourcePreparation & {origin?:LaunchSource}}|{status:'removed'};
 export interface ManagedSourceCapabilities {
   executionEnvironment?: import('../kernel/protocol.generated.js').ExecutionEnvironment;
   tools: LaunchTool[];
@@ -35,7 +41,7 @@ export interface ManagedSourceBindRequest {
   coordinatorHostId: string;
   scope: SourceAuthorityScope;
   source: ThreadSource;
-  purpose: 'source' | 'read' | 'integration' | 'result' | 'process_view' | 'script_environment' | 'mcp_owner';
+  purpose: 'source' | 'read' | 'integration' | 'result' | 'process_view' | 'script_environment' | 'mcp_owner' | 'external_harness';
   operationId?: string;
   retention: 'run' | 'caller';
   handoff?: ChildSourceHandoff;
@@ -58,6 +64,12 @@ export interface ManagedSourceAddress {
   resourceEpoch: string;
 }
 export interface ManagedSourceProcessAddress extends ManagedSourceAddress { processId: string }
+/** Target-owned executable/profile resolution. Environment values never leave that Host. */
+export interface ManagedExternalLaunchRequest { coordinatorHostId: string; source: LaunchSource; configurationId: string; harness: import('@varin/application-client').ExternalHarness; sessionId?: string }
+export interface ManagedExternalLaunchBinding { configurationIdentity: string; configuration: import('@varin/application-client').ExternalAgentConfiguration; command: string; args: string[]; version?: string }
+export interface ManagedExternalSpawnRequest extends ManagedSourceProcessAddress { launch: ManagedExternalLaunchBinding; sessionId?: string }
+export interface ManagedExternalControlRequest { coordinatorHostId: string; conversationId: string; transportId: string; processId: string; source: LaunchSource; stop: boolean; releaseCaptures?:boolean; release?:boolean }
+export interface ManagedExternalControlReceipt { conversationId: string; transportId: string; processId: string; source: LaunchSource; accepted: boolean; executorStopped: boolean; notStarted?:boolean; outputReleased?:boolean; process: (import('../kernel/protocol.generated.js').KernelProcessSnapshot & {treeConfirmed?:boolean}) | null; authorities: Array<{authorityId:string;resourceEpoch:string;phase:string}> }
 export interface ManagedScriptBindingRequest { coordinatorHostId: string; source: LaunchSource }
 export type ManagedScriptControlRequest = Omit<import('../kernel/protocol.generated.js').SourceScriptControlParams, 'principalId'>;
 export interface ManagedScriptControlReceipt { processId: string; source: LaunchSource; runId: string; threadId: string; accepted: boolean; executorStopped: boolean; process: (import('../kernel/protocol.generated.js').KernelProcessSnapshot & { treeConfirmed?: boolean }) | null }
@@ -89,7 +101,7 @@ export interface ManagedSourceScopeRequest { coordinatorHostId: string; threadId
 export interface ManagedSourceScopeReleaseRequest extends ManagedSourceScopeRequest { mode: 'retire' | 'revoke' }
 export interface ManagedSourceReadScopeRequest { coordinatorHostId:string;scope:Extract<SourceAuthorityScope,{kind:'source_read'}>;source:LaunchSource }
 export interface ManagedFileObservationRequest extends ManagedSourceAddress { requestId:string;action:import('../kernel/protocol.generated.js').SourceFileObservationAction }
-export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: 'preparing' | 'ready' | 'retaining' | 'draining' | 'retired' | 'revoked'; purpose: 'source' | 'read' | 'integration' | 'result' | 'process_view' | 'script_environment' | 'mcp_owner'; operationId: string | null; mcpHolders: import('../kernel/protocol.generated.js').SourceMcpHolder[]; mcpDeliveries: import('../kernel/protocol.generated.js').SourceMcpDeliveryReceipt[]; mcpChildren: import('../kernel/protocol.generated.js').SourceMcpChildReference[]; binding: ManagedSourceBinding }
+export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: 'preparing' | 'ready' | 'retaining' | 'draining' | 'retired' | 'revoked'; purpose: 'source' | 'read' | 'integration' | 'result' | 'process_view' | 'script_environment' | 'mcp_owner' | 'external_harness'; operationId: string | null; mcpHolders: import('../kernel/protocol.generated.js').SourceMcpHolder[]; mcpDeliveries: import('../kernel/protocol.generated.js').SourceMcpDeliveryReceipt[]; mcpChildren: import('../kernel/protocol.generated.js').SourceMcpChildReference[]; binding: ManagedSourceBinding }
 
 /** Closed, non-model source services. A command cannot name an arbitrary kernel method,
  * mint a grant, change a source, or select a different physical root. */
@@ -104,6 +116,7 @@ export type SourceServiceOperation =
   | { kind: 'binary_write'; invocation: import('../kernel/tool-invocation.js').ToolInvocationAuthority; journal: RecoveryAnchor;
       path: string; expectedRevision: string | null; bytesBase64: string; byteLength: number }
   | {kind:'code_capture';invocation:import('../kernel/tool-invocation.js').ToolInvocationAuthority;baselineBranchId:string;baselineRevision:number;files?:import('../kernel/code-exchange.js').CodeSelection[];sourceThreadId:string;targetThreadId:string;mapping?:import('../kernel/source-path-map.js').SourcePathMap;baselineMapping?:import('../kernel/source-path-map.js').SourcePathMap}
+  | {kind:'external_code_apply';invocation:import('../kernel/tool-invocation.js').ToolInvocationAuthority;self:import('../kernel/code-exchange.js').CodeParticipant;child:import('../kernel/protocol.generated.js').ExternalChild;direction:'receive'|'send';externalSource:LaunchSource;result:import('./working-state/types.js').WorkingResult}
   | {kind:'code_apply';invocation:import('../kernel/tool-invocation.js').ToolInvocationAuthority;branchId:string;source:import('../kernel/code-exchange.js').CodeParticipant;target:import('../kernel/code-exchange.js').CodeParticipant;result:import('./working-state/types.js').WorkingResult}
   | {kind:'code_release';invocation:import('../kernel/tool-invocation.js').ToolInvocationAuthority;result:{branchId:string;resultRevision?:number}}
   | { kind: 'user_integration'; request: import('../kernel/thread-integrations.js').UserIntegrationRequest }
@@ -173,12 +186,25 @@ export type ManagedSourceServiceHandler = (scope: ManagedSourceLocalScope, opera
 /** The target Host composes its existing Documents, WorkingState and native resource owners.
  * Network routes only supply authenticated principal and the closed request. */
 export interface ManagedSourceService {
+  terminal(principal:ManagedSourcePrincipal,input:import('@varin/application-client').ManagedTerminalRequest,signal?:AbortSignal):Promise<import('@varin/application-client').ManagedTerminalResult>;
+  terminalStream(principal:ManagedSourcePrincipal,input:{coordinatorHostId:string;sessionId:string},emit:(frame:Record<string,unknown>)=>void|Promise<void>,signal:AbortSignal):Promise<void>;
+
+  projectManagement(principal: ManagedSourcePrincipal, input: import('../projects/managed-project-management.js').ManagedProjectManagementRequest, signal?: AbortSignal): Promise<unknown>;
   workspace(principal: ManagedSourcePrincipal, input: import('../workspace/resource-files.js').ResourceWorkspaceRequest & { coordinatorHostId: string }, signal?: AbortSignal): Promise<import('@varin/application-client').ResourceFileResult>;
+  workspaceAsset(principal: ManagedSourcePrincipal, input: import('../workspace/resource-files.js').ResourceWorkspaceAsset & { coordinatorHostId: string }, signal?:AbortSignal):Promise<Response>;
   workspaceUpload(principal: ManagedSourcePrincipal, input: import('../workspace/resource-files.js').ResourceWorkspaceUpload & { coordinatorHostId: string }, body: AsyncIterable<Uint8Array>, signal?: AbortSignal): Promise<{ kind: 'done' }>;
   attachmentBegin(principal: ManagedSourcePrincipal, input: import('./managed-attachment-import.js').ManagedAttachmentRequest, signal?: AbortSignal): Promise<{ retained: true; complete: boolean }>;
   attachmentPut(principal: ManagedSourcePrincipal, input: import('./managed-attachment-import.js').ManagedAttachmentObjectRequest, body: AsyncIterable<Uint8Array>, signal?: AbortSignal): Promise<import('../kernel/protocol.generated.js').KernelPutBlobResult>;
   attachmentPath(principal: ManagedSourcePrincipal, input: import('./managed-attachment-import.js').ManagedAttachmentRequest, signal?: AbortSignal): Promise<import('../kernel/protocol.generated.js').KernelObjectView>;
   recovery(principal: ManagedSourcePrincipal, input: import('./managed-recovery-contract.js').ManagedRecoveryRequest, signal?: AbortSignal): Promise<import('./managed-recovery-contract.js').ManagedRecoveryReply>;
+  externalCapture(principal:ManagedSourcePrincipal,input:import('../external-agents/managed-capture.js').ManagedExternalCaptureRequest,signal?:AbortSignal):Promise<unknown>;
+  externalChildSource(principal:ManagedSourcePrincipal,input:ManagedExternalChildSourceRequest,signal?:AbortSignal):Promise<ManagedExternalChildSourceResult>;
+  externalProjectSource(principal:ManagedSourcePrincipal,input:ManagedExternalProjectSourceRequest,signal?:AbortSignal):Promise<ManagedExternalProjectSourceResult>;
+  externalSettings(principal:ManagedSourcePrincipal,input:{coordinatorHostId:string},signal?:AbortSignal):Promise<import('@varin/application-client').ExternalAgentSettings>;
+  externalPrepare(principal: ManagedSourcePrincipal, input: {coordinatorHostId:string;conversationId:string;resourceOwner:ManagedHostSourceOwner;path:string;expectedWorkspaceId?:string}, signal?:AbortSignal): Promise<LaunchSource>;
+  externalBinding(principal: ManagedSourcePrincipal, input: ManagedExternalLaunchRequest, signal?: AbortSignal): Promise<ManagedExternalLaunchBinding>;
+  externalSpawn(principal: ManagedSourcePrincipal, input: ManagedExternalSpawnRequest, signal?: AbortSignal): Promise<import('../kernel/protocol.generated.js').KernelProcessSnapshot>;
+  externalControl(principal: ManagedSourcePrincipal, input: ManagedExternalControlRequest, signal?: AbortSignal): Promise<ManagedExternalControlReceipt>;
   scriptControl(principal: ManagedSourcePrincipal, input: ManagedScriptControlRequest, signal?: AbortSignal): Promise<ManagedScriptControlReceipt>;
   scriptBinding(principal: ManagedSourcePrincipal, input: ManagedScriptBindingRequest, signal?: AbortSignal): Promise<import('../kernel/protocol.generated.js').NodeBinding>;
   scriptSpawn(principal: ManagedSourcePrincipal, input: ManagedScriptSpawnRequest, signal?: AbortSignal): Promise<import('../kernel/protocol.generated.js').KernelProcessSnapshot>;
@@ -223,6 +249,7 @@ export interface SourceServiceResults {
   attachment_discard: void;
   code_capture: import('./working-state/types.js').WorkingResult;
   code_apply: import('./working-state/integration-coordinator.js').IntegrationOperationReceipt;
+  external_code_apply: import('./working-state/integration-coordinator.js').IntegrationOperationReceipt;
   code_release: { released: boolean };
   user_integration: import('../kernel/thread-integrations.js').UserIntegrationResult;
   schedule: import('../kernel/tool-bridge.js').ToolExecutionReceipt;

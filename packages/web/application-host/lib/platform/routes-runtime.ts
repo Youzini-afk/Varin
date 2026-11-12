@@ -48,6 +48,8 @@ type SmartSearchDependencies = Parameters<typeof registerSmartSearchRoutes>[1];
 type SmartSearchSpawn = NonNullable<SmartSearchDependencies['spawn']>;
 
 export interface PlatformRouteDependencies {
+  onProjectGitDispatcher?(dispatch: import('../git/project-dispatch.js').ProjectGitDispatcher): void;
+  onGitHubProjectReader?(reader: import('../github/project-read.js').GitHubProjectReader): void;
   isDraining?: () => boolean;
   modelText: ModelTextService;
   __dirname: string;
@@ -254,8 +256,10 @@ export const createPlatformRoutesRuntime = ({
       ...(resolveAuthContext ? { resolveAuthContext } : {}),
     });
     registerModelTextRoutes(app, { service: dependencies.modelText });
-    registerGitHubRoutes(app);
-    registerGitRoutes(app, { ...(documents ? { documents } : {}), ...(onGitStatus ? { onStatus: onGitStatus } : {}) });
+    const projectGitHubReader = registerGitHubRoutes(app);
+    dependencies.onGitHubProjectReader?.(projectGitHubReader);
+    const projectGitDispatcher = registerGitRoutes(app, { readDefaultGitIdentity: async () => { const settings = await readSettingsFromDisk(); return typeof settings.defaultGitIdentityId === 'string' ? settings.defaultGitIdentityId : null; }, ...(documents ? { documents } : {}), ...(onGitStatus ? { onStatus: onGitStatus } : {}) });
+    dependencies.onProjectGitDispatcher?.(projectGitDispatcher);
     registerWorkspaceRoutes(app, {
       fsPromises,
       pathModule: path,

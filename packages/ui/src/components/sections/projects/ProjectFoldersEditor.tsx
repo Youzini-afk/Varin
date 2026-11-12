@@ -1,13 +1,18 @@
 import React from 'react';
 import { RiFolderLine, RiAddLine, RiCloseLine, RiStarLine, RiStarFill } from '@remixicon/react';
-import { projectFolders, projectPathKey, type ProjectEntry } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, projectFolders, projectPathKey, type ProjectEntry } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { DirectoryPickerDialog } from '@/components/session/DirectoryPickerDialog';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { Input } from '@/components/ui/input';
+import type { SourceResourceOwner } from '@varin/protocol';
+import { ProjectSourceEditor } from './ProjectSourceEditor';
+import { resolveProjectFolders } from '@/lib/projectSource';
 import { useI18n } from '@/lib/i18n';
 
-export function ProjectFoldersEditor({ folders, onChange, initialPath, disabled = false }: {
+export function ProjectFoldersEditor({ folders, onChange, initialPath, disabled = false, remote = false }: {
+  remote?: boolean;
   folders: string[];
   onChange: (folders: string[]) => void;
   initialPath?: string | null;
@@ -15,6 +20,7 @@ export function ProjectFoldersEditor({ folders, onChange, initialPath, disabled 
 }) {
   const { t } = useI18n();
   const [picking, setPicking] = React.useState(false);
+  const [remotePath, setRemotePath] = React.useState('');
   return <div className="space-y-3">
     {folders.length > 0 ? <div className="divide-y divide-border/50 rounded-lg border border-border/60">
       {folders.map((folder, index) => <div key={projectPathKey(folder)} className="flex min-w-0 items-center gap-2 px-3 py-2">
@@ -33,7 +39,8 @@ export function ProjectFoldersEditor({ folders, onChange, initialPath, disabled 
           onClick={() => onChange(folders.filter((_, i) => i !== index))}><RiCloseLine className="size-4" /></Button>
       </div>)}
     </div> : null}
-    <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => setPicking(true)}>
+    {remote && <Input aria-label="Folder on source Host" placeholder="Folder on source Host" value={remotePath} disabled={disabled} onChange={event => setRemotePath(event.target.value)} />}
+    <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => { if (remote) { if (remotePath.trim() && !folders.includes(remotePath.trim())) onChange([...folders, remotePath.trim()]); setRemotePath(''); } else setPicking(true); }}>
       <RiAddLine className="mr-1 size-4" />{t('projects.folders.add')}
     </Button>
     <DirectoryPickerDialog open={picking} onOpenChange={setPicking} mode="add-project"
@@ -47,6 +54,9 @@ export function ProjectFoldersEditor({ folders, onChange, initialPath, disabled 
 export function ProjectFoldersSettings({ project }: { project: ProjectEntry }) {
   const { t } = useI18n();
   const update = useProjectsStore((state) => state.updateProjectFolders);
+  const [sourceOwner, setSourceOwner] = React.useState<SourceResourceOwner>(project.source?.resourceOwner ?? { kind: 'local' });
+  React.useEffect(() => setSourceOwner(project.source?.resourceOwner ?? { kind: 'local' }), [project.id, project.source]);
+  const sourceChanged = JSON.stringify(sourceOwner) !== JSON.stringify(project.source?.resourceOwner ?? { kind: 'local' });
   const saved = JSON.stringify(projectFolders(project));
   const [folders, setFolders] = React.useState<string[]>(() => projectFolders(project));
   const [busy, setBusy] = React.useState(false);
@@ -61,14 +71,22 @@ export function ProjectFoldersSettings({ project }: { project: ProjectEntry }) {
     previousSaved.current = { id: project.id, value: saved };
   }, [project.id, saved, busy]);
   const save = async () => {
+    const host = getRuntimeEndpointGeneration();
     setBusy(true); setError(null);
-    try { await update(project.id, folders); }
+    try {
+      if (sourceOwner.kind === 'managed_host' || project.source) {
+        const resolved = await resolveProjectFolders(sourceOwner, folders);
+        if (host !== getRuntimeEndpointGeneration()) throw new Error('Project Host changed');
+        await update(project.id, resolved.folders, resolved.source);
+      } else await update(project.id, folders);
+    }
     catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
     finally { setBusy(false); }
   };
   return <SettingsSection title={t('projects.folders.title')} description={t('projects.folders.hint')}>
-    <ProjectFoldersEditor folders={folders} onChange={setFolders} disabled={busy} />
-    {JSON.stringify(folders) !== saved ? <Button size="sm" disabled={busy || folders.length === 0} onClick={() => void save()}>
+    <ProjectSourceEditor value={sourceOwner} onChange={setSourceOwner} disabled={busy} />
+    <ProjectFoldersEditor remote={sourceOwner.kind === 'managed_host'} folders={folders} onChange={setFolders} disabled={busy} />
+    {(sourceChanged || JSON.stringify(folders) !== saved) ? <Button size="sm" disabled={busy || folders.length === 0} onClick={() => void save()}>
       {t('settings.common.actions.saveChanges')}
     </Button> : null}
     {error ? <p role="alert" className="typography-meta text-destructive">{error}</p> : null}

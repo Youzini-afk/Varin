@@ -64,7 +64,7 @@ const toBootstrapStateKey = (directory: unknown): string => {
   if (!normalized) {
     return '';
   }
-  return path.resolve(normalized);
+  return normalizePathIdentity(normalized);
 };
 
 const createWorktreeBootstrapState = (
@@ -3922,9 +3922,10 @@ export async function resetToCommit(
   }
 }
 
-export async function getWorktrees(directory: string) {
+export async function getWorktrees(directory: string, options: { strict?: boolean } = {}) {
   const directoryPath = normalizeDirectoryPath(directory);
   if (!directoryPath || !fs.existsSync(directoryPath)) {
+    if (options.strict) throw new Error('Worktree repository is unavailable');
     return [];
   }
   try {
@@ -3942,6 +3943,7 @@ export async function getWorktrees(directory: string) {
       path: entry.worktree,
     }));
   } catch (error) {
+    if (options.strict) throw error;
     if (!isNotGitRepositoryError(error)) {
       console.warn('Failed to list worktrees, returning empty list:', parseGitErrorText(error));
     }
@@ -4289,6 +4291,8 @@ export async function createWorktree(
 ) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
+  await runtimeOptions.authorizeDirectory?.(context.primaryWorktree);
+  await runtimeOptions.authorizeDirectory?.(context.worktreeRoot);
   const writerLease = await acquireWorktreeWriterLease(
     runtimeOptions.documents,
     [directory, context.primaryWorktree],
@@ -4314,6 +4318,7 @@ export async function createWorktree(
       context.primaryWorktree
     );
 
+    await runtimeOptions.authorizeDirectory?.(candidate.directory);
     if (input?.returnAfterDirectoryCreated === true) {
       await fsp.mkdir(candidate.directory, { recursive: false });
 

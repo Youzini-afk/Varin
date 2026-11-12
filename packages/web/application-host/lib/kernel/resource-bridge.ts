@@ -6,7 +6,8 @@ const record = (value: unknown): value is Record<string, unknown> => value !== n
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 const keys = (value: Record<string, unknown>, allowed: string[]) => Object.keys(value).every(key => allowed.includes(key));
 const validRequest = (value: unknown): value is ResourceQuery['request'] => record(value) && (
-  value.kind === 'attachment_report' && Array.isArray(value.refs) && value.refs.every(text) && (value.sourceThreadId === undefined && value.sourceBranchId === undefined || text(value.sourceThreadId) && text(value.sourceBranchId)) && keys(value, ['kind', 'refs', 'sourceThreadId', 'sourceBranchId'])
+  value.kind === 'organization' && text(value.operationId) && ['create_bot_conversation', 'external_metadata', 'labels', 'create_conversation', 'ensure_initialized'].includes(String(value.action)) && record(value.input) && keys(value, ['kind', 'operationId', 'action', 'input'])
+  || value.kind === 'attachment_report' && Array.isArray(value.refs) && value.refs.every(text) && (value.sourceThreadId === undefined && value.sourceBranchId === undefined || text(value.sourceThreadId) && text(value.sourceBranchId)) && keys(value, ['kind', 'refs', 'sourceThreadId', 'sourceBranchId'])
   || value.kind === 'attachment_prepare' && text(value.operationId) && text(value.targetThreadId) && (value.targetBranchId === undefined || typeof value.targetBranchId === 'string') && Array.isArray(value.attachments) && keys(value, ['kind', 'operationId', 'targetThreadId', 'targetBranchId', 'attachments'])
   || value.kind === 'attachment_release' && text(value.operationId) && text(value.targetThreadId) && (value.targetBranchId === undefined || typeof value.targetBranchId === 'string') && keys(value, ['kind', 'operationId', 'targetThreadId', 'targetBranchId'])
   || value.kind === 'attachment' && text(value.ref) && (value.view === undefined || ['path', 'bytes', 'content'].includes(String(value.view))) && ['offset', 'limit'].every(key => value[key] === undefined || Number.isSafeInteger(value[key]) && Number(value[key]) >= (key === 'offset' ? 0 : 1)) && keys(value, ['kind', 'ref', 'view', 'offset', 'limit'])
@@ -22,7 +23,8 @@ const validRequest = (value: unknown): value is ResourceQuery['request'] => reco
     && ['startLine', 'endLine', 'offset', 'limit'].every(key => value[key] === undefined || Number.isSafeInteger(value[key]) && Number(value[key]) >= (key === 'offset' ? 0 : 1))
     && keys(value, ['kind', 'ref', 'view', 'file', 'startLine', 'endLine', 'offset', 'limit']));
 const validQuery = (value: unknown): value is ResourceQuery => record(value) && text(value.runId) && validToolOrigin(value.origin)
-  && text(value.callId) && text(value.resourceCheckpointId) && validRequest(value.request)
+  && text(value.callId) && validRequest(value.request)
+  && (value.request.kind === 'organization' ? value.resourceCheckpointId == null || text(value.resourceCheckpointId) : text(value.resourceCheckpointId))
   && keys(value, ['runId', 'origin', 'callId', 'resourceCheckpointId', 'request']);
 
 /** The private kernel channel owns call/epoch identity. A model never selects source or snapshot. */

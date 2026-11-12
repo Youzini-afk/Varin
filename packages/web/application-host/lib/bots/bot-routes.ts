@@ -1,3 +1,7 @@
+import { projectPublicBotProfile } from './bot-public-profile.js';
+import type { BotSummary } from '@varin/application-client';
+import { currentRequestPrincipal } from '../kernel/request-principal.js';
+import { parseConversationOrganizationPlacement } from '@varin/application-client';
 import type { Express, Request, RequestHandler, Response } from "express";
 import { HarnessServiceError } from "../harness/service-error.js";
 import { BotProfileConflictError, BotProfileMutationError, parseBotModelSelection, type BotModelSelection, type BotService } from "./bot-service.js";
@@ -46,7 +50,7 @@ const sendError = (response: Response, error: unknown, fallback: string): void =
     return;
   }
   if (error instanceof BotProfileMutationError) {
-    response.status(503).json({ code: 'propagation-failed', error: error.message, saved: true, bot: error.bot, stage: error.stage });
+    response.status(503).json({ code: 'propagation-failed', error: error.message, saved: true, bot: projectPublicBotProfile(error.bot), stage: error.stage });
     return;
   }
   if (error instanceof KnowledgeMutationError) {
@@ -65,6 +69,12 @@ const sendError = (response: Response, error: unknown, fallback: string): void =
 
 export function registerBotRoutes(app: Express, { bots, computers, memory, organizer, work, requireAuth = noAuth }: BotRoutesOptions): void {
   registerBotAppearanceRoutes(app, bots, requireAuth);
+  const publicBot = async (bot: BotSummary | null): Promise<BotSummary | null> => {
+    if (!bot) return null;
+    const scope = bot.activity?.work.length && work ? await work.botScope(bot.id, undefined, false, currentRequestPrincipal() ?? null).catch(() => undefined) : undefined;
+    return projectPublicBotProfile(bot, scope);
+  };
+
   app.get('/api/harness/bots/organization', requireAuth, async (_request, response) => {
     response.setHeader('Cache-Control', 'no-store');
     try { response.json(await bots.organization.read()); }
@@ -76,13 +86,13 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
   });
   app.post('/api/harness/bots/primary', requireAuth, async (_request: Request, response: Response) => {
     response.setHeader('Cache-Control', 'no-store');
-    try { response.json({ bot: await bots.primary() }); }
+    try { response.json({ bot: await publicBot(await bots.primary()) }); }
     catch (error) { sendError(response, error, 'Unable to open the assistant'); }
   });
   app.get("/api/harness/bots", requireAuth, async (_request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     try {
-      response.json({ bots: await bots.list() });
+      response.json({ bots: await Promise.all((await bots.list()).map(publicBot)) });
     } catch (error) {
       sendError(response, error, "Unable to list bots");
     }
@@ -91,7 +101,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
     response.setHeader('Cache-Control', 'no-store');
     try {
       if (!work || !await bots.get(botIdOf(request))) throw new HarnessServiceError('not-found', 'Bot work is unavailable');
-      response.json({ matters: await work.botMatters(botIdOf(request)) });
+      response.json({ matters: await work.botMatters(botIdOf(request), undefined, currentRequestPrincipal() ?? null) });
     } catch (error) { sendError(response, error, 'Unable to read followed work'); }
   });
   const runtimeOf = async (request: Request) => {
@@ -113,7 +123,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
       };
       const before = count('before'); const limit = count('limit');
       const { bot, work: runtime } = await runtimeOf(request);
-      response.json(await runtime.botActivity({ botId: bot.id, ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) }));
+      response.json(await runtime.botActivity({ botId: bot.id, principalId: currentRequestPrincipal() ?? null, ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) }));
     } catch (error) { sendError(response, error, 'Unable to read Bot activity'); }
   });
   /** Who waits for the user, which work runs and which conversation replies. Pushed as `varin:bot-presence`. */
@@ -121,7 +131,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
     response.setHeader('Cache-Control', 'no-store');
     try {
       const { bot, work: runtime } = await runtimeOf(request);
-      response.json({ presence: projectBotPresence(bot, await runtime.botScope(bot.id)) });
+      response.json({ presence: projectBotPresence(bot, await runtime.botScope(bot.id, undefined, false, currentRequestPrincipal() ?? null)) });
     } catch (error) { sendError(response, error, 'Unable to read Bot presence'); }
   });
   app.post('/api/harness/bots/:botId/matters', requireAuth, async (request: Request, response: Response) => {
@@ -129,7 +139,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
     try {
       if (!work || !await bots.get(botIdOf(request))) throw new HarnessServiceError('not-found', 'Bot work is unavailable');
       if (request.body?.botId !== botIdOf(request)) throw new HarnessServiceError('invalid-params', 'Bot work owner differs from the selected assistant');
-      response.json({ matter: await work.updateBotMatter(request.body) });
+      response.json({ matter: await work.updateBotMatter(request.body, undefined, currentRequestPrincipal() ?? null) });
     } catch (error) { sendError(response, error, 'Unable to update followed work'); }
   });
 
@@ -146,11 +156,11 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
         throw new HarnessServiceError("invalid-params", "instructions must be a string");
       }
       const model = parseModel(request.body?.model);
-      response.status(201).json({ bot: await bots.create({
+      response.status(201).json({ bot: await publicBot(await bots.create({
         ...(typeof name === "string" ? { name } : {}),
         ...(typeof instructions === "string" ? { instructions } : {}),
         ...(model !== undefined && model !== null ? { model } : {}),
-      }) });
+      })) });
     } catch (error) {
       sendError(response, error, "Unable to create bot");
     }
@@ -161,7 +171,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
     try {
       const bot = await bots.get(botIdOf(request));
       if (!bot) throw new HarnessServiceError("not-found", "Unknown bot");
-      response.json({ bot });
+      response.json({ bot: await publicBot(bot) });
     } catch (error) {
       sendError(response, error, "Unable to read bot");
     }
@@ -186,7 +196,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
         ...(body.appearance === undefined ? {} : { appearance: body.appearance }),
       });
       if (!bot) throw new HarnessServiceError("not-found", "Unknown or archived bot");
-      response.json({ bot });
+      response.json({ bot: await publicBot(bot) });
     } catch (error) {
       sendError(response, error, "Unable to update bot");
     }
@@ -197,7 +207,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
     try {
       const bot = await bots.archive(botIdOf(request));
       if (!bot) throw new HarnessServiceError("not-found", "Unknown bot");
-      response.json({ bot });
+      response.json({ bot: await publicBot(bot) });
     } catch (error) {
       sendError(response, error, "Unable to archive bot");
     }
@@ -207,7 +217,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
     response.setHeader('Cache-Control', 'no-store');
     try {
       const bot = await bots.remove(botIdOf(request));
-      response.status(bot ? 202 : 200).json({ bot });
+      response.status(bot ? 202 : 200).json({ bot: await publicBot(bot) });
     } catch (error) { sendError(response, error, 'Unable to delete Bot'); }
   });
 
@@ -217,7 +227,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
       try {
         const bot = await bots[action](botIdOf(request));
         if (!bot) throw new HarnessServiceError("not-found", "Unknown Bot");
-        response.json({ bot });
+        response.json({ bot: await publicBot(bot) });
       } catch (error) { sendError(response, error, `Unable to ${action} Bot`); }
     });
   }
@@ -329,7 +339,8 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
   app.post("/api/harness/bots/:botId/entry", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     try {
-      response.json(await bots.ensureEntry(botIdOf(request)));
+      const result = await bots.ensureEntry(botIdOf(request));
+      response.json({ ...result, bot: await publicBot(result.bot) });
     } catch (error) {
       sendError(response, error, "Unable to open bot entry");
     }
@@ -349,7 +360,14 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
   app.post("/api/harness/bots/:botId/sessions", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     try {
-      response.json({ session: await bots.createSession(botIdOf(request)) });
+      const body = request.body ?? {};
+      if (typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['key', 'organization'].includes(key))) throw new HarnessServiceError('invalid-params', 'Unexpected Bot session creation field');
+      if (body.key !== undefined && (typeof body.key !== 'string' || !body.key.trim())) throw new HarnessServiceError('invalid-params', 'A non-empty creation key is required');
+      const options = body.key === undefined && body.organization === undefined ? undefined : {
+        ...(body.key === undefined ? {} : { key: body.key }),
+        ...(body.organization === undefined ? {} : { organization: parseConversationOrganizationPlacement(body.organization) }),
+      };
+      response.json({ session: await (options ? bots.createSession(botIdOf(request), options) : bots.createSession(botIdOf(request))) });
     } catch (error) {
       sendError(response, error, "Unable to start a Bot conversation");
     }

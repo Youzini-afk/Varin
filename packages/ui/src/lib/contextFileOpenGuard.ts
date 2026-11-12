@@ -15,6 +15,7 @@ export type ContextFileOpenValidationResult =
 
 export type ContextFileOpenOptions = {
   directory: string;
+  resource?: import('@/lib/documents/types').DocumentIdentity;
 };
 
 const classifyReadError = (error: unknown): ContextFileOpenFailureReason => {
@@ -53,7 +54,9 @@ export const validateContextFileOpen = async (
   }
 
   try {
-    const content = await readWorkspaceTextFile(documents, options.directory, path);
+    const read = options.resource ? await documents.read(options.resource) : undefined;
+    if (read && read.status !== 'ready') return { ok: false, reason: read.status === 'missing' ? 'missing' : 'binary' };
+    const content = read?.status === 'ready' ? read.content : await readWorkspaceTextFile(documents, options.directory, path);
     if (content === null) {
       return { ok: false, reason: 'missing' };
     }

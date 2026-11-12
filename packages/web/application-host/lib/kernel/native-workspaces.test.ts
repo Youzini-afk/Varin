@@ -7,6 +7,7 @@ import { createThreadSourcePreparer } from './thread-sources.js';
 import type { KernelClient } from './kernel-client.js';
 import type { ProjectEntry } from '@varin/application-client';
 import { nativeGitRoots } from './native-git-roots.js';
+import { KernelClientError } from './kernel-error.js';
 
 it('reuses project authority for internal Git data and admits linked external administration', async () => {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'varin-git-roots-')));
@@ -158,4 +159,151 @@ it('overlays actual selected draft codecs on the checkpoint policy rather than s
   expect(f.actor.forkBranch).toHaveBeenCalledWith(expect.objectContaining({ textEncoding: {
     ...f.checkpointPolicy, files: { 'a.c': 'gbk' } } }), undefined);
   expect(f.textEncodingPolicy).not.toHaveBeenCalled();
+});
+
+
+it('shares the original filesystem grant across project adoption, frozen preparation and document/terminal consumers', async () => {
+  const ref = { workspaceId: 'original', executionWorkspaceId: 'execution', branchId: 'native', adoptionOperationId: 'adopt', state: 'preparing' as const };
+  let project = { id: 'managed', path: '/original', versionedWorkspace: ref } as ProjectEntry;
+  const view = { binding: { generation: 1 }, mount: { state: 'ready', path: '/mounted' }, rootId: 'mounted-root' };
+  let activeGrant: string | undefined;
+  const opened: string[] = [], closed: string[] = [];
+  const kernel = {
+    handshake: { kernelEpoch: 'epoch', hostId: 'host' },
+    issueGrant: async (input: { grantId: string }) => input,
+    revokeGrant: vi.fn(async () => undefined),
+    onWorkspaceIdle: () => () => {}, subscribeExit: () => () => {},
+    scoped: (grant: { grantId: string }) => ({
+      inspectWorkspaceBackend: async () => ({ dependenciesReady: true }),
+      getOperation: async () => ({ kind: 'workspace.adopt', state: 'committed', result: { branchId: ref.branchId, workspaceId: ref.workspaceId, adoption: { sourceRootId: 'physical' } } }),
+      fileRootRegister: async () => ({ rootId: 'physical' }),
+      openWorkspace: async () => {
+        if (activeGrant && activeGrant !== grant.grantId) throw new Error('workspace_owner_required');
+        activeGrant = grant.grantId; opened.push(activeGrant); return view;
+      },
+      mountWorkspace: async () => view, bindWorkspace: async () => view, inspectWorkspace: async () => view,
+      closeWorkspace: async () => { expect(grant.grantId).toBe(activeGrant); closed.push(grant.grantId); activeGrant = undefined; },
+    }),
+  };
+  const original = createNativeWorkspaceOwner({ kernel: kernel as never, documents: { admitWorkspaceRegistration: async () => ({ canonicalPath: '/original' }) } as never,
+    projects: async () => [], update: async () => { throw new Error('Do not copy a remote project into target Settings'); } });
+  const managed = original.projectLifecycle(async () => [project], async (_id, workspace) => { project = { ...project, versionedWorkspace: workspace }; });
+  await managed.enable(project.id);
+  const selection = { ...ref, mode: 'native_workspace' as const };
+  const [prepared, document] = await Promise.all([original.prepareSelection(selection, 'thread'), original.resolveId(ref.executionWorkspaceId)]);
+  expect(prepared.path).toBe('/mounted'); expect(document?.root).toBe('/mounted');
+  expect((await managed.inspectProject(project.id)).view).toEqual(view);
+  expect(opened).toHaveLength(1);
+  // A second coordinator adapter with its own configuration rejoins the same
+  // filesystem owner rather than opening another session with another grant.
+  const reconnected = original.projectLifecycle(async () => [project], async (_id, workspace) => { project = { ...project, versionedWorkspace: workspace }; });
+  await reconnected.enable(project.id);
+  expect(opened).toHaveLength(1);
+  await reconnected.disable(project.id);
+  expect(closed).toEqual(opened);
+  await managed.enable(project.id);
+  await original.prepareSelection(selection, 'next-thread');
+  expect(opened).toHaveLength(2);
+  expect(opened[1]).not.toBe(opened[0]);
+});
+
+function closingFixture() {
+  const source={workspace_id:'original',execution_workspace_id:'execution',branch_id:'native'};
+  const ref={workspaceId:'original',executionWorkspaceId:'execution',branchId:'native',adoptionOperationId:'adopt',state:'ready' as const};
+  let project={id:'managed',path:'/original',versionedWorkspace:ref} as ProjectEntry;
+  let idle=false;
+  const listeners=new Set<()=>void>(), exits=new Set<(error:Error)=>void>();
+  const emitIdle=()=>{for(const listener of [...listeners])listener();};
+  const view={binding:{generation:'original-generation'},mount:{state:'ready',path:'/mounted'},rootId:'original-root'};
+  const actor={openWorkspace:vi.fn(async()=>view),mountWorkspace:vi.fn(async()=>view),inspectWorkspace:vi.fn(async()=>view),
+    closeWorkspace:vi.fn(async(_address:unknown)=>{if(!idle)throw new KernelClientError({code:'workspace_native_handles_active',message:'Original Close is still pending'});}),
+    deleteBranch:vi.fn(async()=>({}))};
+  const kernel={handshake:{kernelEpoch:'original-epoch',hostId:'target'},issueGrant:vi.fn(async(input:object)=>input),
+    revokeGrant:vi.fn(async()=>{}),scoped:()=>actor,
+    onWorkspaceIdle:(listener:()=>void)=>{listeners.add(listener);return()=>{listeners.delete(listener);};},
+    subscribeExit:(listener:(error:Error)=>void)=>{exits.add(listener);return()=>{exits.delete(listener);};},
+    agentRuntimeRequest:vi.fn(async()=>({claimed:true}))};
+  const documents={admitWorkspaceRegistration:async()=>({canonicalPath:'/original'}),canReleaseNativeSource:async()=>true,forgetNativeSource:vi.fn(async()=>{})};
+  const owner=createNativeWorkspaceOwner({kernel:kernel as never,documents:documents as never,projects:async()=>[],update:async()=>{throw new Error('Original source does not own project settings');}});
+  const update=vi.fn(async(_id:string,value:import('@varin/application-client').VersionedProjectWorkspace)=>{project={...project,versionedWorkspace:value};});
+  const managed=owner.projectLifecycle(async()=>[project],update);
+  return {source,owner,managed,actor,kernel,documents,update,listeners,exits,emitIdle,
+    finish:()=>{idle=true;emitIdle();},exit:(error:Error)=>{for(const listener of [...exits])listener(error);}};
+}
+
+it.each(['release','disable'] as const)('keeps the original grant until actual native Close completes explicit %s',async method=>{
+  const f=closingFixture();
+  const original=await f.owner.open(f.source);
+  const closing=method==='release'?Promise.all([f.owner.releaseSource(f.source),f.owner.releaseSource(f.source)]):f.managed.disable('managed');
+  try {
+    await vi.waitFor(()=>expect(f.actor.closeWorkspace).toHaveBeenCalledTimes(1));
+    expect(f.kernel.revokeGrant).not.toHaveBeenCalled();expect(f.update).not.toHaveBeenCalled();
+    // A real idle event can belong to another source. It only rechecks the
+    // same original generation; it cannot manufacture a detach receipt.
+    f.emitIdle();
+    await vi.waitFor(()=>expect(f.actor.closeWorkspace).toHaveBeenCalledTimes(2));
+    await Promise.resolve();await Promise.resolve();
+    expect(f.actor.closeWorkspace).toHaveBeenCalledTimes(2);
+    expect(f.kernel.revokeGrant).not.toHaveBeenCalled();
+  } finally {f.finish();await closing;}
+  expect(f.actor.closeWorkspace).toHaveBeenCalledTimes(3);
+  expect(f.actor.closeWorkspace.mock.calls.every(([address])=>JSON.stringify(address)===JSON.stringify({branchId:'native',generation:'original-generation'}))).toBe(true);
+  expect(f.kernel.revokeGrant).toHaveBeenCalledExactlyOnceWith(original.grant.grantId);
+  if(method==='disable')expect(f.update).toHaveBeenCalledWith('managed',expect.objectContaining({state:'disabled'}));
+  expect(f.listeners.size).toBe(0);expect(f.exits.size).toBe(0);
+});
+
+it('does not lose native Close delivered before its pending RPC response',async()=>{
+  const f=closingFixture();await f.owner.open(f.source);
+  f.actor.closeWorkspace.mockImplementationOnce(async()=>{
+    f.finish();throw new KernelClientError({code:'workspace_native_handles_active',message:'Close raced the pending response'});
+  });
+  await f.owner.releaseSource(f.source);
+  expect(f.actor.closeWorkspace).toHaveBeenCalledTimes(2);expect(f.kernel.revokeGrant).toHaveBeenCalledOnce();
+  expect(f.listeners.size).toBe(0);expect(f.exits.size).toBe(0);
+});
+
+it('stops awaiting a dead original kernel without revoking or replacing its pending source',async()=>{
+  const f=closingFixture();await f.owner.open(f.source);
+  const exited=new Error('Original kernel exited');
+  const closing=f.owner.releaseSource(f.source).then(()=>({error:undefined}),error=>({error}));
+  await vi.waitFor(()=>expect(f.actor.closeWorkspace).toHaveBeenCalledOnce());
+  f.exit(exited);
+  expect(await closing).toEqual({error:exited});expect(f.kernel.revokeGrant).not.toHaveBeenCalled();
+  expect(f.actor.openWorkspace).toHaveBeenCalledOnce();expect(f.listeners.size).toBe(0);expect(f.exits.size).toBe(0);
+});
+
+it('does not reinterpret active execution leases as native Close progress',async()=>{
+  const f=closingFixture();await f.owner.open(f.source);
+  const busy=new KernelClientError({code:'workspace_in_use',message:'Original process is still running'});
+  f.actor.closeWorkspace.mockRejectedValue(busy);
+  await expect(f.managed.disable('managed')).rejects.toBe(busy);
+  expect(f.actor.closeWorkspace).toHaveBeenCalledOnce();expect(f.kernel.revokeGrant).not.toHaveBeenCalled();expect(f.update).not.toHaveBeenCalled();
+  expect(f.listeners.size).toBe(0);expect(f.exits.size).toBe(0);
+});
+
+it('defers source retirement without blocking maintenance and resumes only after original Close',async()=>{
+  const f=closingFixture();await f.owner.open(f.source);
+  expect(await f.owner.retireSource(f.source,'cleanup')).toBe(false);
+  expect(f.actor.closeWorkspace).toHaveBeenCalledOnce();expect(f.kernel.revokeGrant).not.toHaveBeenCalled();
+  expect(f.kernel.agentRuntimeRequest).toHaveBeenLastCalledWith('runtime.source.retirement',{cleanupId:'cleanup',defer:true});
+  expect(f.listeners.size).toBe(0);expect(f.documents.forgetNativeSource).not.toHaveBeenCalled();
+  f.finish();
+  expect(await f.owner.retireSource(f.source,'cleanup')).toBe(true);
+  expect(f.actor.deleteBranch).toHaveBeenCalledWith({operationId:'source-cleanup:cleanup',branchId:'native'},undefined);
+  expect(f.documents.forgetNativeSource).toHaveBeenCalledWith(f.source);
+});
+
+it('does not reuse a sealed generation while its original close is awaiting native idle',async()=>{
+  const f=closingFixture(),original=await f.owner.open(f.source);
+  const closing=f.owner.releaseSource(f.source);
+  await vi.waitFor(()=>expect(f.actor.closeWorkspace).toHaveBeenCalledOnce());
+  const reopening=f.owner.open(f.source);
+  try {
+    await Promise.resolve();await Promise.resolve();
+    expect(f.actor.openWorkspace).toHaveBeenCalledOnce();expect(f.kernel.revokeGrant).not.toHaveBeenCalled();
+  } finally {f.finish();await closing;}
+  const reopened=await reopening;
+  expect(reopened.grant.grantId).not.toBe(original.grant.grantId);
+  expect(f.actor.openWorkspace).toHaveBeenCalledTimes(2);
 });

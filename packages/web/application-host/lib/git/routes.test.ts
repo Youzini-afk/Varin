@@ -100,6 +100,18 @@ describe('git routes index mutations', () => {
     }
   });
 
+  it('typed project dispatch uses the same original handler and Documents writer', async () => {
+    const writer = { markMutated: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined) };
+    const documents = { registerWriterForScope: vi.fn().mockResolvedValue(writer) };
+    const dispatch = registerGitRoutes(express(), { documents });
+    await dispatch({ operation: 'stageGitFiles', args: ['/target/repo', ['a.ts', 'b.ts']], selection: { mode: 'live_root' } });
+    expect(gitLibraries.stageFiles).toHaveBeenLastCalledWith('/target/repo', ['a.ts', 'b.ts']);
+    expect(documents.registerWriterForScope).toHaveBeenCalledWith('/target/repo', expect.objectContaining({ kind: 'git-route' }), { mode: 'process', purpose: 'git-stage' });
+    expect(writer.markMutated).toHaveBeenCalledOnce();
+    expect(writer.close).toHaveBeenCalledOnce();
+    await expect(dispatch({ operation: '/api/git/stage', args: [], selection: { mode: 'live_root' } } as never)).rejects.toThrow('Invalid project Git operation');
+  });
+
   it('rejects remote-ext clone URLs before reaching Git', async () => {
     const app = createGitApp();
 

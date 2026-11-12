@@ -38,7 +38,7 @@ export type TerminalProcessReference = {
   processId: string;
   endpointGeneration: number;
 };
-export type TerminalSource = { cwd: string; resourceOwner: SourceResourceOwner; process?: TerminalProcessReference };
+export type TerminalSource = { selection?: import('@varin/application-client').ProjectSourceSelection; cwd: string; resourceOwner: SourceResourceOwner; process?: TerminalProcessReference };
 
 export type TerminalTab = {
   id: string;
@@ -80,7 +80,7 @@ interface TerminalStore {
   getActiveTab: (directory: string) => TerminalTab | undefined;
   getBuffer: (directory: string, tabId: string) => TerminalBuffer;
 
-  createTab: (directory: string) => string;
+  createTab: (directory: string, source?: TerminalSource) => string;
   attachExistingSession: (directory: string, sessionId: string, label?: string, source?: TerminalSource) => string;
   setActiveTab: (directory: string, tabId: string) => void;
   setTabLabel: (directory: string, tabId: string, label: string) => void;
@@ -308,7 +308,7 @@ export const useTerminalStore = create<TerminalStore>()(
         getBuffer: (directory: string, tabId: string) =>
           get().buffers.get(bufferKey(normalizeDirectory(directory), tabId)) ?? EMPTY_TERMINAL_BUFFER,
 
-        createTab: (directory: string) => {
+        createTab: (directory: string, source?: TerminalSource) => {
           const key = normalizeDirectory(directory);
           if (!key) {
             return 'tab-invalid';
@@ -322,7 +322,7 @@ export const useTerminalStore = create<TerminalStore>()(
 
             const nextTabId = state.nextTabId + 1;
             const label = nextDefaultTabLabel(existing?.tabs ?? []);
-            const tab = createEmptyTab(tabId, label);
+            const tab = { ...createEmptyTab(tabId, label), source: source ?? null };
 
             if (!existing) {
               newSessions.set(key, createEmptyDirectoryState(tab));

@@ -47,7 +47,8 @@ function fixture() {
         return facts.list;
       case 'runtime.status': return { eventCursor: 5 };
       case 'runtime.history.page': return { head: null, previous: null, items: [] };
-      case 'runtime.context.inspect': case 'runtime.launch.inspect': case 'runtime.child.for_thread': return null;
+      case 'runtime.context.inspect': case 'runtime.launch.inspect': case 'runtime.child.for_thread':
+      case 'runtime.input.inheritedReceipt': return null;
       case 'runtime.model.inspect': return { desired: null, active: null };
       case 'runtime.family.list': return { rootThreadId: identity.threadId, members: [], nextCursor: null };
       case 'runtime.input.submit': case 'runtime.input.enqueue': return {

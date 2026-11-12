@@ -182,3 +182,27 @@ fn new_round_refreshes_registered_schemas_without_rewriting_history_or_adding_to
     assert_eq!(db.launch_intent(&next.run_id).unwrap().unwrap().selection,saved);
     drop(db);std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn receipt_lookup_reuses_frozen_fallback_without_skipping_original_input_validation() {
+    let root = std::env::temp_dir().join(format!("varin-fallback-receipt-{}", uuid::Uuid::new_v4()));
+    let mut db = Catalog::open(&root).unwrap(); db.create_thread("thread", "main").unwrap();
+    let original = command(&db, "original", "main");
+    let frozen = selection("model-a", Some("frozen-project"));
+    assert!(db.prepare_submission(original.clone(), None, None).unwrap().existing_receipt_inheriting_source(&Some(selection("model-a", None)), true).unwrap().is_none());
+    let receipt = db.submit_with_inherited_source(&original, frozen.clone()).unwrap();
+    complete(&mut db, &receipt);
+    db.submit_with_launch(&command(&db, "later-source", "main"), Some(selection("model-a", Some("other-project")))).unwrap();
+    let read = db.prepare_submission(original.clone(), None, None).unwrap();
+    assert!(read.existing_receipt(&Some(selection("model-a", None)), true).is_err());
+    assert_eq!(read.existing_receipt_inheriting_source(&Some(selection("model-a", None)), true).unwrap(), Some(receipt.clone()));
+    let mut changed_derived = selection("model-a", None); changed_derived.tool_schema_generation += 1; changed_derived.tools.clear();
+    assert_eq!(read.existing_receipt_inheriting_source(&Some(changed_derived), true).unwrap(), Some(receipt.clone()));
+    assert!(read.existing_receipt_inheriting_source(&Some(selection("model-b", None)), true).is_err());
+    assert!(read.existing_receipt_inheriting_source(&Some(selection("model-a", None)), false).is_err());
+    let mut changed = original.clone(); changed.input = json!({"text":"changed user input"});
+    assert!(db.prepare_submission(changed, None, None).unwrap().existing_receipt_inheriting_source(&Some(selection("model-a", None)), true).is_err());
+    drop(db); let db = Catalog::open(&root).unwrap();
+    assert_eq!(db.prepare_submission(original, None, None).unwrap().existing_receipt_inheriting_source(&Some(selection("model-a", None)), true).unwrap(), Some(receipt));
+    drop(db); std::fs::remove_dir_all(root).unwrap();
+}

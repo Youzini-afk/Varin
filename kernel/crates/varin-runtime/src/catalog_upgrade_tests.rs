@@ -89,6 +89,7 @@ impl Fixture {
         let mut raw = fixture.raw();
         let tx = raw.transaction().unwrap();
         usage_ledger::initialize(&tx).unwrap();
+        if 80 < 95 { crate::catalog::organization::remove_for_legacy_fixture(&tx); }
         tx.pragma_update(None, "user_version", 80).unwrap();
         tx.commit().unwrap();
         fixture
@@ -98,6 +99,7 @@ impl Fixture {
         let mut raw = fixture.raw();
         let tx = raw.transaction().unwrap();
         context_observations::initialize(&tx).unwrap();
+        if 81 < 95 { crate::catalog::organization::remove_for_legacy_fixture(&tx); }
         tx.pragma_update(None, "user_version", 81).unwrap();
         tx.commit().unwrap();
         fixture
@@ -111,6 +113,7 @@ impl Fixture {
         let indexes = prepare_history_indexes(&raw, &content).unwrap();
         let tx = raw.transaction().unwrap();
         install_history_indexes(&tx, &indexes).unwrap();
+        if 82 < 95 { crate::catalog::organization::remove_for_legacy_fixture(&tx); }
         tx.pragma_update(None, "user_version", 82).unwrap();
         tx.commit().unwrap();
         fixture
@@ -122,6 +125,7 @@ impl Fixture {
         let indexes = prepare_history_indexes(&raw, &content).unwrap();
         let tx = raw.transaction().unwrap();
         install_history_indexes(&tx, &indexes).unwrap();
+        if 83 < 95 { crate::catalog::organization::remove_for_legacy_fixture(&tx); }
         tx.pragma_update(None, "user_version", 83).unwrap();
         tx.commit().unwrap();
         fixture
@@ -499,6 +503,7 @@ fn delegation_generation_upgrade_indexes_v80_without_reading_media_or_copying_bo
             )
             .unwrap();
         }
+        if 80 < 95 { crate::catalog::organization::remove_for_legacy_fixture(&tx); }
         tx.pragma_update(None, "user_version", 80).unwrap();
         tx.commit().unwrap();
     }
@@ -563,6 +568,7 @@ fn unreadable_original_history_leaves_catalog_generation_and_references_unchange
         let mut raw = fixture.raw();
         let tx = raw.transaction().unwrap();
         usage_ledger::initialize(&tx).unwrap();
+        if 80 < 95 { crate::catalog::organization::remove_for_legacy_fixture(&tx); }
         tx.pragma_update(None, "user_version", 80).unwrap();
         tx.execute(
             "UPDATE history SET body=json_set(body,'$.content.content_object','missing-original')",
@@ -727,6 +733,7 @@ fn assert_preserves_original_launch(from: i64, admission: Option<launches::Exten
         let step = UPGRADES.iter().find(|step| step.from == version).unwrap();
         (step.convert)(&tx, &[]).unwrap();
         version = step.to;
+        if version < 95 { crate::catalog::organization::remove_for_legacy_fixture(&tx); }
         tx.pragma_update(None, "user_version", version).unwrap();
     }
     let selection: launches::LaunchSelection = serde_json::from_value(json!({

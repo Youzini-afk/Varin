@@ -441,3 +441,28 @@ it.each(['agent', 'bot'] as const)('discovers a new HOME skill for fresh %s inpu
   expect(JSON.stringify(saved)).toBe(original);
   expect(previouslyPrepared).toMatchObject({ status: 'ready', skill: { body: 'ORIGINAL SKILL BODY' } });
 });
+
+it('source-free organization requests use exact invocation authority without granting file resources',async()=>{
+  const original=request('unused');
+  const run: Run={id:original.runId,thread_id:identity.threadId,branch_id:identity.branchId,state:'runnable',revision:1,epoch:1,
+    waiting_on:null,configuration:{},cancel_requested:false};
+  const organizationInvocation=vi.fn(async()=>run),resourceSnapshot=vi.fn(async()=>{throw new Error('No filesystem snapshot exists');});
+  const organization=vi.fn(async()=>({result:{bots:[],projects:[]}}));
+  const owner=createResourceOwner({runtime:{run:async()=>run,resourceSnapshot,organizationInvocation},resources:{} as never,organization});
+  const query:ResourceQuery={...original,resourceCheckpointId:null,request:{kind:'organization',operationId:'original-operation',action:'labels',input:{botIds:[],projectIds:[]}}};
+  expect(await owner(query,new AbortController().signal)).toMatchObject({status:'ready'});
+  expect(organizationInvocation).toHaveBeenCalledWith({runId:query.runId,origin:query.origin,callId:query.callId,operationId:'original-operation'},expect.any(AbortSignal));
+  expect(resourceSnapshot).not.toHaveBeenCalled();expect(organization).toHaveBeenCalledOnce();
+  expect(await owner({...query,request:{kind:'skill',resourceId:'private-file'}},new AbortController().signal)).toMatchObject({status:'denied'});
+  organizationInvocation.mockRejectedValueOnce(new Error('Original invocation changed'));
+  expect(await owner(query,new AbortController().signal)).toMatchObject({status:'denied'});
+  expect(organization).toHaveBeenCalledOnce();
+  const replies:PrivateResourceResponse[]=[];
+  const bridge=new ResourceBridge(()=>'epoch',async value=>{replies.push(value);},()=>{});
+  bridge.setOwner(owner);
+  bridge.consume({v:1,kind:'resource-request',id:'source-free-organization',kernelEpoch:'epoch',query});
+  await vi.waitFor(()=>expect(replies).toHaveLength(1));expect(replies[0]!.result.status).toBe('ready');
+  bridge.consume({v:1,kind:'resource-request',id:'source-free-file',kernelEpoch:'epoch',query:{...query,request:{kind:'skill',resourceId:'private-file'}}});
+  await vi.waitFor(()=>expect(replies).toHaveLength(2));expect(replies[1]!.result.status).toBe('invalid');
+  bridge.close();
+});

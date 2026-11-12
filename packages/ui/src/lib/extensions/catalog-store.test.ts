@@ -1,4 +1,6 @@
-import { beforeEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { parseHTML } from 'linkedom';
+afterEach(() => vi.unstubAllGlobals());
 
 vi.doMock('@/hooks/useProviderLogo', () => ({
   preloadProviderLogos: () => undefined,
@@ -475,6 +477,8 @@ test('an install confirmation for the previous Host cannot run against a new end
 
 
 test('applying a profile requires its exact external-code review and sends both owner revisions', async () => {
+  // Workbench application loads the real editor lifecycle, including document events.
+  vi.stubGlobal('document', parseHTML('<html><body></body></html>').document);
   const current = snapshot();
   current.workbench.document.profiles[0]!.extensionIds = ['dev.example.removable'];
   const applied: unknown[] = [];

@@ -41,6 +41,36 @@ fn contains(parent: &Path, child: &Path) -> bool {
     }
 }
 impl Storage {
+    /// Shared original process-output retirement. The identity and terminal
+    /// process receipt remain durable; only spool bytes and subscription state go.
+    pub(super) fn release_process_output(&mut self, id: &str, record: Value) -> Result<Value, KernelError> {
+            if record["writerActive"].as_bool() != Some(false) {
+                return Err(KernelError::Operation(
+                    "process is in use or exit is unconfirmed".into(),
+                ));
+            }
+            let output_path = process::output_path(&self.root, id);
+            let marker_path = process::output_marker_path(&self.root, id);
+            self.processes.release(id, || {
+                for path in [
+                    output_path,
+                    marker_path.clone(),
+                    marker_path.with_extension("complete.tmp"),
+                ] {
+                    match fs::remove_file(path) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error.into()),
+                    }
+                }
+                Ok(())
+            })?;
+            let mut record = record;
+            record["status"] = json!("released");
+            record["outputAvailable"] = json!(false);
+            self.persist_process_record(id, &record)?;
+            Ok(record)
+    }
     /// The durable intent precedes guardian dispatch. An absent intent or an
     /// explicit failed admission proves that this command never started.
     pub(crate) fn process_spawn_not_dispatched(&self, id: &str) -> Result<bool, KernelError> {
@@ -853,32 +883,7 @@ impl Storage {
             );
         }
         if method == "process.release" {
-            if record["writerActive"].as_bool() != Some(false) {
-                return Err(KernelError::Operation(
-                    "process is in use or exit is unconfirmed".into(),
-                ));
-            }
-            let output_path = process::output_path(&self.root, id);
-            let marker_path = process::output_marker_path(&self.root, id);
-            self.processes.release(id, || {
-                for path in [
-                    output_path,
-                    marker_path.clone(),
-                    marker_path.with_extension("complete.tmp"),
-                ] {
-                    match fs::remove_file(path) {
-                        Ok(()) => {}
-                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                        Err(error) => return Err(error.into()),
-                    }
-                }
-                Ok(())
-            })?;
-            let mut record = record;
-            record["status"] = json!("released");
-            record["outputAvailable"] = json!(false);
-            self.persist_process_record(id, &record)?;
-            return Ok(record);
+            return self.release_process_output(id, record);
         }
         if record["kernelEpoch"].as_str() != Some(grant.kernel_epoch.as_str())
             && method != "process.read"

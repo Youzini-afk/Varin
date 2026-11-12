@@ -52,6 +52,8 @@ pub struct ChildCapabilityDescriptor {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DispatchInput {
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub organization: Option<super::organization::Placement>,
     #[serde(default, skip_serializing_if="Vec::is_empty")]
     pub attachments: Vec<super::attachments::AttachmentSelection>,
     #[serde(default, skip_serializing_if="Option::is_none")]
@@ -111,7 +113,7 @@ impl DispatchInput {
             task.push_str("\n\nSearch scope (relative to the admitted source): ");
             task.push_str(&serde_json::to_string(&paths)?);
         }
-        Ok(Self { attachments: Vec::new(), model: None, thinking: None, input_types: Vec::new(), project_id:None, background:Vec::new(), task, inherit_context: false, source_agent: None, source_path: None, name: None, preset: Some("code_retrieval".into()), work_focus: None, work_mode: Some(ChildWorkMode::Shared), tools: None })
+        Ok(Self { organization: None, attachments: Vec::new(), model: None, thinking: None, input_types: Vec::new(), project_id:None, background:Vec::new(), task, inherit_context: false, source_agent: None, source_path: None, name: None, preset: Some("code_retrieval".into()), work_focus: None, work_mode: Some(ChildWorkMode::Shared), tools: None })
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -254,11 +256,11 @@ pub struct ChildDispatchCatalog {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct ChildProjectSource { pub id:String, pub name:String, pub path:String, pub resource_owner:launches::SourceResourceOwner }
+pub struct ChildProjectSource { #[serde(default,skip_serializing_if="Option::is_none")] pub selection:Option<super::organization::ProjectSourceSelection>, pub id:String, pub name:String, pub path:String, pub resource_owner:launches::SourceResourceOwner }
 impl ChildDispatchCatalog {
     pub fn validate(&self) -> Result<()> {
         validate_names(&self.projects.iter().map(|project|project.id.clone()).collect::<Vec<_>>())?;
-        if self.projects.iter().any(|project|project.path.trim().is_empty()||project.path.contains('\0')) {
+        if self.projects.iter().any(|project|project.path.trim().is_empty()||project.path.contains('\0')||project.selection.as_ref().is_some_and(|selection| !selection.valid(None))) {
             return Err(RuntimeError::Invalid("Registered project source is malformed".into()));
         }
         if self.identity.trim().is_empty() {
@@ -411,6 +413,7 @@ pub struct ChildDispatchRead {
     _publication: crate::content::ContentPublication,
 }
 pub struct ChildDispatchSelection {
+    pub(crate) organization_project_id: Option<String>,
     pub(crate) history: Option<crate::execution::ConversationHistory>,
     pub reference: Value,
     pub frozen: FrozenChildDispatch,
@@ -684,7 +687,7 @@ impl ChildDispatchSelection {
     /// Resolve only an already authenticated configuration snapshot. Executable declarations
     /// are still assembled and checked by their owning tool directory in the kernel.
     pub fn project(&self,input:&DispatchInput)->Result<Option<ChildProjectSource>> {
-        input.project_id.as_ref().map(|id|self.catalog.projects.iter().find(|p|&p.id==id).cloned().ok_or_else(||RuntimeError::Invalid(format!("Registered project {id} is not in this request; use matters projects to discover available project IDs")))).transpose()
+        input.project_id.as_ref().or_else(||if input.source_agent.is_none(){self.organization_project_id.as_ref()}else{None}).map(|id|self.catalog.projects.iter().find(|p|&p.id==id).cloned().ok_or_else(||RuntimeError::Invalid(format!("Registered project {id} is not in this request; use matters projects to discover available project IDs")))).transpose()
     }
     pub fn work_focus<'a>(&'a self, input: &'a DispatchInput) -> &'a str {
         input.work_focus.as_deref().or(self.frozen.work_focus.as_deref()).unwrap_or("general")
@@ -738,7 +741,7 @@ impl ChildDispatchSelection {
                 ));
             }
             (
-                if input.project_id.is_some() { preset.tools.clone() } else { self.preset_tools(preset) },
+                if self.project(input)?.is_some() { preset.tools.clone() } else { self.preset_tools(preset) },
                 // Placement is chosen by this dispatch, independently of the role.
                 input.work_mode.unwrap_or(ChildWorkMode::Shared),
                 preset.instructions.clone(),
@@ -797,7 +800,7 @@ impl ChildDispatchSelection {
                 tools.push(gateway.name);
             }
         }
-        if self.frozen.source.is_none() && input.project_id.is_none() {
+        if self.frozen.source.is_none() && self.project(input)?.is_none() {
             let unavailable = self.unavailable_source_tools(&tools);
             if !unavailable.is_empty() {
                 return Err(RuntimeError::Invalid(format!(
@@ -806,8 +809,8 @@ impl ChildDispatchSelection {
                 )));
             }
         }
-        let project_mcp=if input.project_id.is_some(){self.mcp_binding.as_ref().and_then(|binding|binding.global_delegation())}else{self.mcp_binding.clone()};
-        if input.project_id.is_some() {
+        let project_mcp=if self.project(input)?.is_some(){self.mcp_binding.as_ref().and_then(|binding|binding.global_delegation())}else{self.mcp_binding.clone()};
+        if self.project(input)?.is_some() {
             let foreign=tools.iter().filter(|name|self.mcp_binding.as_ref().is_some_and(|original|original.tools.iter().any(|tool|&tool.name==*name))
                 && !project_mcp.as_ref().is_some_and(|selected|selected.tools.iter().any(|tool|&tool.name==*name))).cloned().collect::<Vec<_>>();
             if input.tools.as_ref().is_some_and(|selected|selected.iter().any(|name|foreign.contains(name))){return Err(RuntimeError::Invalid("Selected workspace MCP tools belong to the original project's configuration; choose source-independent tools or the original source".into()));}
@@ -922,6 +925,7 @@ impl ChildDispatchRead {
             }
         }
         Ok(ChildDispatchSelection {
+            organization_project_id: None,
             history: None,
             reference: self.reference,
             frozen,
@@ -934,6 +938,7 @@ impl ChildDispatchRead {
 }
 
 pub struct ChildInvocationRead {
+    organization_project_id: Option<String>,
     body: Value,
     context: crate::execution::ToolExecutionContext,
     content: crate::content::ContentStore,
@@ -998,6 +1003,7 @@ impl ChildInvocationRead {
         }
         .load()?;
         selection.history = history;
+        selection.organization_project_id = self.organization_project_id;
         Ok(selection)
     }
 }
@@ -1102,6 +1108,7 @@ impl Catalog {
         context: &crate::execution::ToolExecutionContext,
     ) -> Result<ChildInvocationRead> {
         use crate::execution::ToolOrigin;
+        let organization_project_id:Option<String>=self.db.query_row("SELECT json_extract(target,'$.projectId') FROM model_bound_targets WHERE operation_id=?1 AND purpose='organization-default-project'",[&context.operation_id],|r|r.get(0)).optional()?.flatten();
         let context = super::tool_content::root_tool_context(&self.db, context, false)?;
         let body = match &context.origin {
             ToolOrigin::Driver { invocation_id } => {
@@ -1132,6 +1139,7 @@ impl Catalog {
             ToolOrigin::NestedCall { .. } => unreachable!("resolved root invocation"),
         };
         Ok(ChildInvocationRead {
+            organization_project_id,
             body,
             context: context.clone(),
             content: self.content.clone(),
