@@ -159,6 +159,9 @@ Recent reads use `kind: 'conversations', sort: 'recent'` so the Catalog orders a
 pagination. Those pages never collect cached expanded category pages. Destination browsing uses
 `kind: 'containers'`, so conversation rows do not consume its page slots. Optional activity timestamps
 participate only in recent-page continuations; normal directory cursors remain independent of activity.
+Workbench and IDE queries set `excludeBotConversations` before pagination, including search, archive
+and expanded child scopes. This excludes direct Bot chats only; delegated work from any source remains
+visible. Bot conversation creation stays in the Bot navigator, without an additional all-conversations entry.
 
 Container identity, mixed order and effective placement come from the Catalog; container-first display,
 pin segments, local collapse, focus and project sorting do not rewrite them. Reorder drop lines respect

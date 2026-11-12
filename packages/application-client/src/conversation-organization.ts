@@ -28,6 +28,7 @@ export interface ConversationOrganizationQuery {
   /** Page the mixed ordered node sequence; omitted/false retains the complete container metadata index. */
   pageNodes?: boolean;
   kind?: 'containers' | 'conversations'; sort?: 'manual' | 'recent';
+  excludeBotConversations?: boolean;
   containerId?: string | null; rootOnly?: boolean; recursive?: boolean; query?: string;
   botId?: string; archived?: 'exclude' | 'include' | 'only'; limit?: number; cursor?: string;
 }
@@ -93,9 +94,9 @@ export function parseConversationOrganizationQuery(value: unknown): Conversation
   const invalid = (): never => { throw new ConversationOrganizationError('invalid_request', 'Invalid conversation directory query'); };
   if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid();
   const query = value as Record<string, unknown>;
-  const allowed = ['containerId', 'rootOnly', 'recursive', 'query', 'botId', 'archived', 'limit', 'cursor', 'pageNodes', 'kind', 'sort'];
+  const allowed = ['containerId', 'rootOnly', 'recursive', 'query', 'botId', 'archived', 'limit', 'cursor', 'pageNodes', 'kind', 'sort', 'excludeBotConversations'];
   if (Object.keys(query).some(key => !allowed.includes(key))) invalid();
-  for (const field of ['pageNodes', 'rootOnly', 'recursive']) if (query[field] !== undefined && typeof query[field] !== 'boolean') invalid();
+  for (const field of ['pageNodes', 'rootOnly', 'recursive', 'excludeBotConversations']) if (query[field] !== undefined && typeof query[field] !== 'boolean') invalid();
   if (query.containerId !== undefined && query.containerId !== null && (typeof query.containerId !== 'string' || !query.containerId.trim())) invalid();
   for (const field of ['botId', 'cursor']) if (query[field] !== undefined && (typeof query[field] !== 'string' || !(query[field] as string).trim())) invalid();
   if (query.query !== undefined && typeof query.query !== 'string') invalid();

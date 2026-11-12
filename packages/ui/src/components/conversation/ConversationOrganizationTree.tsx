@@ -70,6 +70,7 @@ export interface ConversationOrganizationTreeProps {
 }
 export const ConversationOrganizationTree = React.forwardRef<OrganizationNavigationHandle, ConversationOrganizationTreeProps>(function ConversationOrganizationTree({ query = '', archived = false, botId, defaultBotId, flat = false, viewKey = 'workbench', showRoot = true, stickyHeaders = false, sortOrder = 'manual', expansion, selectionMode = false, onExitSelection, onNavigate, onSearchReset, onFocusChange }, ref) {
   const { t } = useI18n();
+  const excludeBotConversations = viewKey !== 'bot';
   useExternalAgents();
   const state = useConversationOrganization();
   const botWorkspace = useBotWorkspaceNavigation();
@@ -81,7 +82,7 @@ export const ConversationOrganizationTree = React.forwardRef<OrganizationNavigat
   const externalChildren = useExternalAgentStore(s => s.children);
   const external = useExternalAgentStore(s => s.conversations);
   const externalSelected = useExternalAgentStore(s => s.selectedId);
-  const sidebar = useSidebarCatalog();
+  const sidebar = useSidebarCatalog(viewKey === 'bot');
   const snapshot = state.host === getRuntimeEndpointGeneration() ? state.snapshot : null;
   const [preference, setPreference] = useOrganizationNavigation(viewKey);
   const knownKeys = new Set([...(snapshot?.containers ?? []).map(c => organizationObjectKey({ kind: 'container', id: c.id })), ...(snapshot?.conversations ?? []).map(e => organizationObjectKey(e.conversation))]);
@@ -121,16 +122,16 @@ export const ConversationOrganizationTree = React.forwardRef<OrganizationNavigat
   }, [botId, setPreference]);
   const namedSnapshot = React.useMemo(() => snapshot ? { ...snapshot, containers: snapshot.containers.map(c => c.kind === 'project' ? { ...c, name: projects.find(p => p.id === c.projectId)?.label || projects.find(p => p.id === c.projectId)?.path.split(/[\\/]/).filter(Boolean).at(-1) || t('organization.projectUnavailable') } : c) } : null, [snapshot, projects, t]);
   React.useEffect(() => { onFocusChange?.(namedSnapshot?.containers.find(container => container.id === preference.focus)?.name ?? null); }, [preference.focus, namedSnapshot, onFocusChange]);
-  const scopeQuery = React.useMemo<ConversationOrganizationQuery>(() => ({ pageNodes: true, archived: archived ? 'only' : 'exclude', ...(botId ? { botId } : {}), ...(recent ? { kind: 'conversations', sort: 'recent', recursive: true } : {}), ...(query.trim() ? { query: query.trim(), recursive: true } : !recent ? { rootOnly: true } : {}) }), [archived, botId, query, recent]);
-  const containerQuery = React.useCallback((containerId: string): ConversationOrganizationQuery => ({ pageNodes: true, containerId, archived: archived ? 'only' : 'exclude', ...(botId ? { botId } : {}) }), [archived, botId]);
+  const scopeQuery = React.useMemo<ConversationOrganizationQuery>(() => ({ pageNodes: true, archived: archived ? 'only' : 'exclude', ...(excludeBotConversations ? { excludeBotConversations: true } : {}), ...(botId ? { botId } : {}), ...(recent ? { kind: 'conversations', sort: 'recent', recursive: true } : {}), ...(query.trim() ? { query: query.trim(), recursive: true } : !recent ? { rootOnly: true } : {}) }), [archived, botId, query, recent, excludeBotConversations]);
+  const containerQuery = React.useCallback((containerId: string): ConversationOrganizationQuery => ({ pageNodes: true, containerId, archived: archived ? 'only' : 'exclude', ...(excludeBotConversations ? { excludeBotConversations: true } : {}), ...(botId ? { botId } : {}) }), [archived, botId, excludeBotConversations]);
   const viewQuery = React.useMemo(() => preference.focus && !query.trim() ? containerQuery(preference.focus) : scopeQuery, [preference.focus, query, containerQuery, scopeQuery]);
   React.useEffect(() => { void loadOrganizationPage(viewQuery); }, [viewQuery, state.host]);
   const visibleSnapshot = React.useMemo(() => organizationViewSnapshot(state.pages, viewQuery, id => preference.expanded[organizationObjectKey({ kind: 'container', id })] === true), [state.pages, viewQuery, preference.expanded]);
   const namedVisibleSnapshot = React.useMemo(() => visibleSnapshot ? { ...visibleSnapshot, containers: visibleSnapshot.containers.map(c => namedSnapshot?.containers.find(named => named.id === c.id) ?? c) } : null, [visibleSnapshot, namedSnapshot]);
   const roots = React.useMemo<OrganizationNode[]>(() => {
     if (!namedVisibleSnapshot) return [];
-    if (recent) return namedVisibleSnapshot.conversations.map(conversation => ({ key: organizationObjectKey(conversation.conversation), object: conversation.conversation, parentId: conversation.position.containerId, order: conversation.position.order, conversation, children: [] }));
-    const projected = projectOrganization(namedVisibleSnapshot, { query, archived, botId, flat });
+    if (recent) return namedVisibleSnapshot.conversations.filter(entry => !excludeBotConversations || !entry.origin.directBotId).map(conversation => ({ key: organizationObjectKey(conversation.conversation), object: conversation.conversation, parentId: conversation.position.containerId, order: conversation.position.order, conversation, children: [] }));
+    const projected = projectOrganization(namedVisibleSnapshot, { query, archived, botId, flat, excludeBotConversations });
     const projectOrder = new Map(sortConversationSessionWorkspaceProjects(projects, sortOrder).map((project, index) => [project.id, index]));
     const sort = (items: OrganizationNode[]): OrganizationNode[] => {
       const containers = items.filter(node => node.container);
@@ -142,7 +143,7 @@ export const ConversationOrganizationTree = React.forwardRef<OrganizationNavigat
       return [...orderedContainers, ...conversations].map(node => ({ ...node, children: sort(node.children) }));
     };
     return sort(projected.filter(node => showRoot || query.trim() || node.container));
-  }, [namedVisibleSnapshot, recent, query, archived, botId, flat, projects, sortOrder, showRoot]);
+  }, [namedVisibleSnapshot, recent, query, archived, botId, flat, projects, sortOrder, showRoot, excludeBotConversations]);
   const expandedRevision = React.useRef(0);
   React.useEffect(() => {
     if (!snapshot || !expansion || expansion.revision === expandedRevision.current) return;
@@ -274,7 +275,7 @@ export const ConversationOrganizationTree = React.forwardRef<OrganizationNavigat
     await submitOrganizationMetadata(items.flatMap(n => n.conversation ? [{ conversation: n.conversation.conversation, expectedRevision: n.conversation.revision, patch }] : []));
   };
   const archiveContainer = async (containerId: string, recursive: boolean) => {
-    const scope = await readOrganizationActionScope({ containerId, recursive, archived: archived ? 'only' : 'exclude' });
+    const scope = await readOrganizationActionScope({ containerId, recursive, archived: archived ? 'only' : 'exclude', ...(excludeBotConversations ? { excludeBotConversations: true } : {}) });
     await metadata(scope.conversations.map(conversation => ({ key: organizationObjectKey(conversation.conversation), object: conversation.conversation, parentId: conversation.position.containerId, order: conversation.position.order, conversation, children: [] })), { archived: !archived });
   };
   const name = (node: OrganizationNode) => node.container?.name ?? node.conversation?.title ?? t('organization.untitled');
@@ -341,7 +342,7 @@ export const ConversationOrganizationTree = React.forwardRef<OrganizationNavigat
       return <>
         {container && <>
           <Item onClick={() => newConversation(container.id, null)}><Icon name="chat-new" className="size-3.5" />{t('organization.newConversation')}</Item>
-          {!!state.bots?.length && <Sub><SubTrigger><Icon name="robot" className="size-3.5" />{t('organization.newWithBot')}</SubTrigger><SubContent>{state.bots.map(bot => <Item key={bot.id} disabled={bot.archived || !!bot.deletion || bot.activity?.state === 'asleep'} onClick={() => newConversation(container.id, bot.id)}>{t('organization.newWithName', { name: bot.name })}</Item>)}</SubContent></Sub>}
+          {viewKey === 'bot' && !!state.bots?.length && <Sub><SubTrigger><Icon name="robot" className="size-3.5" />{t('organization.newWithBot')}</SubTrigger><SubContent>{state.bots.map(bot => <Item key={bot.id} disabled={bot.archived || !!bot.deletion || bot.activity?.state === 'asleep'} onClick={() => newConversation(container.id, bot.id)}>{t('organization.newWithName', { name: bot.name })}</Item>)}</SubContent></Sub>}
           <Item onClick={() => create(container.id)}><Icon name="folder-add" className="size-3.5" />{t('organization.newGroupMenu')}</Item>
           <Item onClick={() => setProjectCreate({ parentId: container.id })}><Icon name="code-box" className="size-3.5" />{t('organization.addProject')}</Item>
           <Separator />

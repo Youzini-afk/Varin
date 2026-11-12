@@ -481,6 +481,7 @@ impl Tools {
         let mut query = OrganizationQuery {
             kind: None,
             sort: None,
+            exclude_bot_conversations: None,
             container_id: input
                 .container
                 .as_deref()

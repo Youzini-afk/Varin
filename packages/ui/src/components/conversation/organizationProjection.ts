@@ -7,12 +7,13 @@ export type OrganizationNode = {
   children: OrganizationNode[];
 };
 /** Navigation inheritance does not modify execution ancestry. Explicit children become independent rows. */
-export function projectOrganization(snapshot: ConversationOrganizationSnapshot, options: { query?: string; botId?: string; archived?: boolean; flat?: boolean } = {}): OrganizationNode[] {
+export function projectOrganization(snapshot: ConversationOrganizationSnapshot, options: { query?: string; botId?: string; archived?: boolean; flat?: boolean; excludeBotConversations?: boolean } = {}): OrganizationNode[] {
   const containers = new Map<string, OrganizationNode>();
   const conversations = new Map<string, OrganizationNode>();
   const roots: OrganizationNode[] = [];
   for (const container of snapshot.containers) containers.set(container.id, { key: organizationObjectKey({ kind: 'container', id: container.id }), object: { kind: 'container', id: container.id }, parentId: container.parentId, order: container.order, container, children: [] });
   for (const entry of snapshot.conversations) {
+    if (options.excludeBotConversations && entry.origin.directBotId) continue;
     if (entry.archived !== Boolean(options.archived) || options.botId && entry.origin.botId !== options.botId && entry.origin.directBotId !== options.botId) continue;
     conversations.set(organizationObjectKey(entry.conversation), { key: organizationObjectKey(entry.conversation), object: entry.conversation, parentId: entry.position.containerId, order: entry.position.order, conversation: entry, children: [] });
   }

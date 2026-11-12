@@ -20,7 +20,7 @@ interface OrganizationState {
   bots: BotSummary[] | null; botsError: string | null;
 }
 export const organizationQueryKey = (query: ConversationOrganizationQuery): string => JSON.stringify(Object.entries({ ...query, pageNodes: true }).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b)));
-const rootQuery: ConversationOrganizationQuery = { pageNodes: true, rootOnly: true, archived: 'exclude' };
+const rootQuery: ConversationOrganizationQuery = { pageNodes: true, rootOnly: true, archived: 'exclude', excludeBotConversations: true };
 export const useConversationOrganizationStore = create<OrganizationState>(() => ({ host: -1, snapshot: null, loading: false, error: null, pages: {}, pending: {}, failed: {}, metadata: {}, bots: null, botsError: null }));
 let binding: { host: number; api: ConversationOrganizationAPI; controller: AbortController; refresh(): Promise<void>; load(query: ConversationOrganizationQuery, more?: boolean): Promise<void>; users: number; stop(): void } | null = null;
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -56,7 +56,7 @@ export function organizationViewSnapshot(pages: Record<string, OrganizationPage>
     if (query.query || query.kind === 'conversations') return;
     const memberIds = snapshot.items ? new Set(snapshot.items.filter(item => item.kind === 'container').map(item => item.id)) : null;
     for (const container of snapshot.containers) if ((!memberIds || memberIds.has(container.id)) && expanded(container.id)) {
-      collect({ pageNodes: true, containerId: container.id, archived: query.archived, ...(query.botId ? { botId: query.botId } : {}) });
+      collect({ pageNodes: true, containerId: container.id, archived: query.archived, ...(query.botId ? { botId: query.botId } : {}), ...(query.excludeBotConversations ? { excludeBotConversations: true } : {}) });
     }
   };
   collect(query);

@@ -85,6 +85,8 @@ pub struct OrganizationQuery {
     pub kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclude_bot_conversations: Option<bool>,
     pub container_id: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub page_nodes: bool,
@@ -1604,6 +1606,9 @@ fn snapshot(
             continue;
         }
         let mut entry = directory.entry(r, title, archived, pinned, revision)?;
+        if query.exclude_bot_conversations.unwrap_or(false) && entry.origin.direct_bot_id.is_some() {
+            continue;
+        }
         // Activity changes invalidate activity ordering, never a manual directory cursor.
         if recent {
             entry.updated_at_ms = Some(updated_at_ms);

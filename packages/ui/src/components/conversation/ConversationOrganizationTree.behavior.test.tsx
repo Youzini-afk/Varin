@@ -96,6 +96,23 @@ it('opens original identity and locks the nearest project and explicit container
   await act(async () => [...row('Project').querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '新建会话')!.click());
   expect(transport.create).toHaveBeenCalledWith({ directory: '/project', projectId: 'project', organization: { containerId: 'project-node' } });
 });
+
+it('keeps direct Bot chats out of workbench and IDE views while retaining every dispatched task', async () => {
+  const direct = { ...snapshot.conversations[0], conversation: { kind: 'native' as const, id: 'Bot main' }, title: 'Bot main', position: { ...snapshot.conversations[0].position, conversation: { kind: 'native' as const, id: 'Bot main' } }, origin: { botId: null, directBotId: 'bot', conversation: null } };
+  snapshot.conversations.push(direct);
+  snapshot.conversations[0].origin = { botId: 'bot', directBotId: null, conversation: direct.conversation };
+  for (const viewKey of ['workbench', 'ide']) {
+    await act(async () => root.render(<ConversationOrganizationTree viewKey={viewKey} />));
+    expect(row('Bot main')).toBeUndefined(); expect(row('Task')).toBeTruthy(); expect(row('Child')).toBeTruthy();
+    await click('最近');
+    expect(row('Bot main')).toBeUndefined(); expect(row('Task')).toBeTruthy();
+    await act(async () => root.render(<ConversationOrganizationTree viewKey={viewKey} query="Bot main" />));
+    expect(row('Bot main')).toBeUndefined();
+  }
+  expect(transport.read.mock.calls.every(([query]) => query.excludeBotConversations)).toBe(true);
+  await act(async () => root.render(<ConversationOrganizationTree viewKey="bot" />));
+  expect(row('Bot main')).toBeTruthy();
+});
 it('search exposes only matching ancestry and restores collapsed state when cleared', async () => {
   await render(); await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="展开 Work"]')!.click()); const toggle = container.querySelector<HTMLButtonElement>('button[aria-label="收起 Work"]')!;
   await act(async () => toggle.click()); expect(row('Work').getAttribute('aria-expanded')).toBe('false');
@@ -220,7 +237,7 @@ it('loads only a root page and explicitly opened scopes, with continuation contr
   });
   await render();
   expect(transport.read.mock.calls).toHaveLength(1);
-  expect(transport.read.mock.calls[0][0]).toEqual({ pageNodes: true, rootOnly: true, archived: 'exclude' });
+  expect(transport.read.mock.calls[0][0]).toEqual({ pageNodes: true, rootOnly: true, archived: 'exclude', excludeBotConversations: true });
   await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="展开 Work"]')!.click());
   expect(transport.read.mock.calls.some(([query]) => query.containerId === 'work')).toBe(true);
   expect(transport.read.mock.calls.some(([query]) => query.containerId === 'project-node')).toBe(false);
@@ -402,7 +419,7 @@ it('aborts explicit scope reads without continuing pages and fences a pending pa
   expect(transport.read.mock.calls.some(([query]) => query.cursor === 'next')).toBe(false);
   transport.read.mockImplementationOnce((_query, signal: AbortSignal) => new Promise(resolve => { finish = resolve; signal.addEventListener('abort', () => expect(signal.aborted).toBe(true)); }));
   let page!: Promise<void>;
-  await act(async () => { page = loadOrganizationPage({ rootOnly: true, archived: 'exclude' }, true); });
+  await act(async () => { page = loadOrganizationPage({ rootOnly: true, archived: 'exclude', excludeBotConversations: true }, true); });
   transport.generation++; snapshot = { ...original(), containers: [], conversations: [], items: [] };
   mixedPages(); await render();
   await act(async () => { finish({ ...original(), items: [{ kind: 'container', id: 'stale' }], containers: [group('stale', 0)], conversations: [], nextCursor: null }); await page; });

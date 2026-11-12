@@ -35,7 +35,7 @@ export interface SidebarConversation {
 export interface ConversationSessionAttentionState { kind: 'complete' | 'error'; updatedAt: number }
 
 /** Catalog-derived display data; pinning, retention and navigation use ThreadsAPI. */
-export function useSidebarCatalog() {
+export function useSidebarCatalog(includeBotConversations = false) {
   useExternalAgents();
   const organization = useConversationOrganizationStore(state => state.snapshot);
   const external = useExternalAgentStore(state => state.conversations);
@@ -47,8 +47,7 @@ export function useSidebarCatalog() {
     const attentionBySession: Record<string, ConversationSessionAttentionState> = {};
     const byId = new Map(threads.map(thread => [thread.thread_id, thread]));
     const origins = new Map(organization?.conversations.map(entry => [JSON.stringify([entry.conversation.kind, entry.conversation.id]), entry.origin]));
-    // The shared directory includes real Bot conversations; a shell is not an identity boundary.
-    const summaries: SidebarConversation[] = threads.filter(thread => thread.deleted_at_ms === null).map(thread => {
+    const summaries: SidebarConversation[] = threads.filter(thread => thread.deleted_at_ms === null && (includeBotConversations || !thread.bot_id || thread.parent_thread_id)).map(thread => {
       const branch = thread.branches.find(branch => branch.branch_id === thread.main_branch_id);
       const projectIds = thread.observer_project_ids.filter((id): id is string => id !== null);
       const draft = drafts[threadComposerKey(host, { runtime: 'agent', threadId: thread.thread_id, branchId: thread.main_branch_id })];
@@ -68,5 +67,5 @@ export function useSidebarCatalog() {
       ...(c.archived ? { archivedAt: new Date(c.updatedAt).toISOString() } : {}), ...(c.parent ? { parentId: c.parent.threadId } : {}),
       pinned: c.pinned, busy: Boolean(c.activeTurn), unread: false, lead: !c.parent, projectIds: projects.filter(p => projectContainsPath(p, c.cwd)).map(p => p.id), branchId: '', branches: [] });
     return { summaries, activeSessions: summaries.filter(summary => !summary.archivedAt), attentionBySession };
-  }, [threads, host, projects, drafts, external, organization]);
+  }, [threads, host, projects, drafts, external, organization, includeBotConversations]);
 }

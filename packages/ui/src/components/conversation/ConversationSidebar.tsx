@@ -1,6 +1,5 @@
 import { ConversationOrigin } from './ConversationOrigin';
 import { ConversationOrganizationTree, type OrganizationNavigationHandle } from './ConversationOrganizationTree';
-import { OrganizationCreateMenu } from './OrganizationCreateMenu';
 import { VARIN_CONVERSATION_SLOTS } from '@varin/extension-contract';
 import React from 'react';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
@@ -1202,7 +1201,6 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
             <Icon name="chat-new" className="size-4 shrink-0" />
             <span className="truncate">{organizationFocus ? t('organization.newIn', { name: organizationFocus }) : t('sessions.sidebar.header.actions.newSession')}</span>
           </button>
-          {apis.conversationOrganization && <OrganizationCreateMenu onCreate={botId => organizationRef.current?.newConversation(botId)} />}
           <Tooltip>
             <TooltipTrigger asChild>
               <button

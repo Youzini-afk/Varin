@@ -279,15 +279,14 @@ it('saves a parent title on blur without changing its child', async () => {
   expect(titleButton('Child task')).toBeDefined();
 });
 
-it('lists both direct Bot conversations and delegated work in the shared directory', async () => {
+it('omits direct Bot conversations while keeping delegated work visible', async () => {
   await act(async () => {
     useThreadStore.setState(store => ({ threads: [...store.threads,
       { ...summary('bot-session', 'Bot conversation', null), bot_id: 'varin' },
       { ...summary('bot-work', 'Delegated draft', 'bot-session'), bot_id: 'varin' },
     ] }));
   });
-  expect(titleButton('Bot conversation')).toBeDefined();
-  await act(async () => { container.querySelector<HTMLButtonElement>('button[aria-label="sessions.sidebar.session.subsessions.expand"]')!.click(); });
+  expect(titleButton('Bot conversation')).toBeUndefined();
   const delegated = titleButton('Delegated draft');
   expect(delegated).toBeDefined();
   expect(delegated.querySelector('[aria-label="bot.sidebar.delegated"]')).not.toBeNull();

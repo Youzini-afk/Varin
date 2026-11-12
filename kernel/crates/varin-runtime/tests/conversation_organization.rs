@@ -2116,6 +2116,32 @@ fn mixed_bot_scope_exposes_only_matching_branches_and_exact_principal() {
 }
 
 #[test]
+fn work_directory_excludes_direct_bot_chats_before_pagination_and_retains_dispatched_tasks() {
+    let mut f = child_fixture::Fixture::new_in_bot("bot");
+    let child = f.accept();
+    f.db.create_thread("human-work", "human-main").unwrap();
+    let query = OrganizationQuery {
+        page_nodes: true,
+        kind: Some("conversations".into()),
+        sort: Some("recent".into()),
+        exclude_bot_conversations: Some(true),
+        limit: Some(1),
+        ..Default::default()
+    };
+    let first = f.db.organization_snapshot(None, query.clone()).unwrap();
+    assert_eq!(first.conversations.len(), 1);
+    assert!(first.next_cursor.is_some());
+    let second = f.db.organization_snapshot(None, OrganizationQuery { cursor: first.next_cursor, ..query }).unwrap();
+    let ids = first.conversations.iter().chain(second.conversations.iter()).map(|entry| entry.conversation.id()).collect::<BTreeSet<_>>();
+    assert_eq!(ids, BTreeSet::from(["human-work", child.child_thread_id.as_str()]));
+    assert!(first.conversations.iter().chain(&second.conversations).all(|entry| entry.origin.direct_bot_id.is_none()));
+    let delegated = f.db.organization_conversation(None, &native(&child.child_thread_id)).unwrap();
+    assert_eq!(delegated.origin.bot_id.as_deref(), Some("bot"));
+    assert!(second.next_cursor.is_none());
+    assert_eq!(f.db.organization_snapshot(None, OrganizationQuery::default()).unwrap().conversations.len(), 3);
+}
+
+#[test]
 fn mixed_project_search_uses_ephemeral_owner_names_and_binds_name_generation() {
     let f=Fixture::new();let mut c=f.open();
     c.initialize_organization(Some("alice"),OrganizationInitialization{key:"project-index".into(),projects:vec![InitialProject{id:"project-a".into()},InitialProject{id:"project-b".into()}],positions:vec![]}).unwrap();
