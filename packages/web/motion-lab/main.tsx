@@ -20,6 +20,7 @@ import { SettingsLab } from './settings';
 import { WorkbenchLab } from './workbench';
 import { StartupLab } from './startup';
 import { MobileLab } from './mobile';
+import { OrganizationDesignLab } from './organization/DesignLab';
 import type {
   ChatAssistantContent,
   ChatAssistantMessage,
@@ -499,7 +500,7 @@ createRoot(document.getElementById('root')!).render(
         <MotionProvider>
           <ThemeControl />
           <TooltipProvider>
-            {scene === 'send' ? <SendLab /> : scene === 'sidebar' ? <SidebarLab /> : scene === 'rail' ? <RailLab /> : scene === 'switch' ? <SwitchLab /> : scene === 'settings' ? <SettingsLab /> : scene === 'workbench' ? <WorkbenchLab /> : scene === 'startup' ? <StartupLab /> : scene === 'mobile' ? <MobileLab /> : <Lab />}
+            {scene === 'organization' ? <OrganizationDesignLab /> : scene === 'send' ? <SendLab /> : scene === 'sidebar' ? <SidebarLab /> : scene === 'rail' ? <RailLab /> : scene === 'switch' ? <SwitchLab /> : scene === 'settings' ? <SettingsLab /> : scene === 'workbench' ? <WorkbenchLab /> : scene === 'startup' ? <StartupLab /> : scene === 'mobile' ? <MobileLab /> : <Lab />}
           </TooltipProvider>
         </MotionProvider>
       </ThemeProvider>
