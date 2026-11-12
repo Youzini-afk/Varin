@@ -46,3 +46,11 @@ export function organizationContainerPath(snapshot: ConversationOrganizationSnap
 export function nearestOrganizationProject(snapshot: ConversationOrganizationSnapshot, id: string | null): string | null {
   return organizationContainerPath(snapshot, id).reverse().find(container => container.kind === 'project')?.projectId ?? null;
 }
+
+/** A navigation drop cannot target its own selection or place a container below itself. */
+export function organizationDropAllowed(snapshot: ConversationOrganizationSnapshot, items: readonly OrganizationNode[], target: { parentId: string | null; before: ConversationOrganizationObject | null }): boolean {
+  const selected = new Set(items.map(item => item.key));
+  if (target.before && selected.has(organizationObjectKey(target.before))) return false;
+  const ancestors = new Set(organizationContainerPath(snapshot, target.parentId).map(container => container.id));
+  return items.every(item => !item.container || !ancestors.has(item.container.id));
+}

@@ -163,6 +163,8 @@ participate only in recent-page continuations; normal directory cursors remain i
 Container identity, mixed order and effective placement come from the Catalog; container-first display,
 pin segments, local collapse, focus and project sorting do not rewrite them. Reorder drop lines respect
 the visible type/pin segments, while moving into a location remains independent of display sorting.
+The current selection and its descendant locations are excluded from drop targets; release-time
+validation also ignores self/descendant drops and an unchanged location before reading or committing.
 `useOrganizationNavigation` stores view/focus/expansion in the existing persisted display preferences,
 scoped by stable Host identity and shell view. Inherited tasks remain under their real parent; an explicit
 move gives them one independent navigation row. Typed native/external keys prevent ID collisions.

@@ -580,7 +580,7 @@ fn format_94_upgrade_keeps_original_assets_and_unknown_or_partial_layout_stays_u
         raw(&f)
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        96
+        97
     );
     assert!(snap(&c).containers.is_empty());
     drop(c);
@@ -597,7 +597,7 @@ fn format_94_upgrade_keeps_original_assets_and_unknown_or_partial_layout_stays_u
         std::fs::read(f.0.join("conversation.sqlite")).unwrap(),
         bytes
     );
-    assert_eq!(version, 96);
+    assert_eq!(version, 97);
 }
 #[test]
 fn dissolved_container_identity_is_retired_and_cannot_retarget_a_stable_reference() {
@@ -806,11 +806,12 @@ fn explicit_legacy_claim_transfers_navigation_once_without_first_read_claiming_p
     let f = Fixture::new();
     let mut c = f.open();
     c.create_thread("public", "main").unwrap();
-    assert!(c
+    assert_eq!(c
         .organization_snapshot(Some("alice"), OrganizationQuery::default())
         .unwrap()
         .conversations
-        .is_empty());
+        .len(), 1);
+    assert_eq!(c.thread_principal("public").unwrap(), None);
     c.initialize_principals("alice", true).unwrap();
     assert_eq!(snap(&c).conversations.len(), 1);
     assert!(c
@@ -820,8 +821,46 @@ fn explicit_legacy_claim_transfers_navigation_once_without_first_read_claiming_p
         .is_empty());
     c.create_thread("later-public", "later-main").unwrap();
     c.initialize_principals("alice", true).unwrap();
-    assert_eq!(snap(&c).conversations.len(), 1);
+    assert_eq!(snap(&c).conversations.len(), 2);
     assert_eq!(c.thread_principal("later-public").unwrap(), None);
+}
+
+#[test]
+fn format_96_restores_readable_legacy_project_membership_without_reassigning_users_or_overwriting_moves() {
+    let f = Fixture::new();
+    let mut c = f.open();
+    c.initialize_principals("alice", false).unwrap();
+    c.create_thread("public", "public-main").unwrap();
+    c.create_thread_with_principal("own", "own-main", Some("alice")).unwrap();
+    c.create_thread_with_principal("foreign", "foreign-main", Some("bob")).unwrap();
+    c.initialize_organization(Some("alice"), OrganizationInitialization {
+        key: "initial-project-generation".into(), projects: vec![InitialProject { id: "project".into() }],
+        positions: vec![InitialPosition { conversation: native("own"), project_id: Some("project".into()) }],
+    }).unwrap();
+    let moved = move_command(&c, "keep-user-move", vec![OrganizationObject::Native { id: "own".into() }], None);
+    let receipt = c.organization_command(Some("alice"), moved.clone()).unwrap();
+    let original = c.inspect_thread("public").unwrap();
+    raw(&f).pragma_update(None, "user_version", 96).unwrap();
+    drop(c);
+    let mut c = f.open();
+    assert!(!c.organization_initialized(Some("alice")).unwrap());
+    assert_eq!(c.inspect_thread("public").unwrap(), original);
+    c.initialize_organization(Some("alice"), OrganizationInitialization {
+        key: "visible-project-generation".into(), projects: vec![InitialProject { id: "project".into() }],
+        positions: vec![InitialPosition { conversation: native("public"), project_id: Some("project".into()) }, InitialPosition { conversation: native("own"), project_id: Some("project".into()) }],
+    }).unwrap();
+    let restored = c.organization_conversation(Some("alice"), &native("public")).unwrap();
+    assert!(restored.position.container_id.is_some());
+    assert_eq!(c.organization_conversation(Some("alice"), &native("own")).unwrap().position.container_id, None);
+    assert_eq!(c.organization_receipt(Some("alice"), &moved).unwrap().unwrap().cursor, receipt.cursor);
+    assert_eq!(c.thread_principal("public").unwrap(), None);
+    assert!(c.organization_conversation(Some("alice"), &native("foreign")).is_err());
+    assert_eq!(c.organization_snapshot(Some("bob"), OrganizationQuery::default()).unwrap().conversations.len(), 2);
+    assert_eq!(c.organization_conversation(Some("bob"), &native("public")).unwrap().position.container_id, None);
+    drop(c);
+    let c = f.open();
+    assert!(c.organization_initialized(Some("alice")).unwrap());
+    assert_eq!(c.organization_conversation(Some("alice"), &native("public")).unwrap().position.container_id, restored.position.container_id);
 }
 
 #[path = "fixtures/child_dispatch.rs"]
@@ -1659,7 +1698,7 @@ fn published_foundation_95_upgrades_positions_without_rewriting_creation_receipt
         raw(&f)
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        96
+        97
     );
 }
 #[test]

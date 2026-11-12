@@ -44,7 +44,7 @@ export class ConversationOrganizationService {
       this.deps.runtime.threadCatalog({ archived: 'include', principalId }, signal), this.deps.external.list(signal),
     ]);
     const known = new Set(projects.map(project => project.id));
-    const positions = threads.filter(thread => thread.principal_id === principalId).map(thread => {
+    const positions = threads.filter(thread => (thread.principal_id ?? null) === null || thread.principal_id === principalId).map(thread => {
       const ids = [...new Set(thread.observer_project_ids.filter((id): id is string => id !== null && known.has(id)))];
       return { conversation: { kind: 'native' as const, id: thread.thread_id }, projectId: ids.length === 1 ? ids[0]! : null };
     });
@@ -67,7 +67,7 @@ export class ConversationOrganizationService {
       return { conversation: { kind: 'external' as const, id: value.id }, projectId: matches.length === 1 ? matches[0]!.id : null };
     });
     signal?.throwIfAborted();
-    await this.deps.runtime.organizationInitialize(principalId, { key: 'initial-project-generation', projects: projects.map(({ id }) => ({ id })), positions: [...positions, ...externalPositions] }, signal);
+    await this.deps.runtime.organizationInitialize(principalId, { key: 'visible-project-generation', projects: projects.map(({ id }) => ({ id })), positions: [...positions, ...externalPositions] }, signal);
     return this.deps.runtime.organizationRead(principalId, ownerQuery, signal);
   }
   async creationDefaults(principalId: string | null, threadId: string, placement: import('@varin/application-client').ConversationOrganizationPlacement): Promise<import('@varin/application-client').ConversationCreationDefaults | null> {
@@ -139,7 +139,10 @@ export class ConversationOrganizationService {
         const ref = item.conversation;
         const owner = ref.kind === 'native' ? (await this.deps.runtime.thread(ref.id, signal)).principal_id
           : (await this.deps.external.inspect(ref.id, signal)).principalId;
-        if ((owner ?? null) !== principalId) throw new ConversationOrganizationError('forbidden', 'Conversation belongs to another user', 403);
+        if ((owner ?? null) !== principalId) {
+          const publicNative = ref.kind === 'native' && owner === null;
+          if (!publicNative || !await this.deps.runtime.principalCanUseHostResources?.(principalId)) throw new ConversationOrganizationError('forbidden', 'Conversation changes require its original user or the Host owner for public work', 403);
+        }
         const receiptKey = `organization:${createHash('sha256').update(JSON.stringify([key, ref.kind, ref.id])).digest('hex')}`;
         const { deleted: _deleted, ...metadataPatch } = item.patch;
         const result = ref.kind === 'external'

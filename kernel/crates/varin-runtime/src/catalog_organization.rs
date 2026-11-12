@@ -425,7 +425,7 @@ fn require_conversation(
     reference: &ConversationRef,
 ) -> Result<()> {
     let available=match reference {
-        ConversationRef::Native{id}=>db.query_row("SELECT EXISTS(SELECT 1 FROM threads t LEFT JOIN thread_creations c ON c.thread_id=t.id WHERE t.id=?1 AND t.principal_id IS ?2 AND t.deleted_at_ms IS NULL AND (c.domain IS NULL OR c.domain NOT IN('summary','memory')) AND NOT EXISTS(SELECT 1 FROM context_jobs j JOIN runs r ON r.id=j.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id) AND NOT EXISTS(SELECT 1 FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') AND NOT EXISTS(SELECT 1 FROM child_tasks ch JOIN operations o ON o.id=ch.id WHERE ch.child_thread_id=t.id AND json_extract(o.body,'$.executor')='code_retrieval'))",params![id,principal],|r|r.get::<_,bool>(0))?,
+        ConversationRef::Native{id}=>db.query_row("SELECT EXISTS(SELECT 1 FROM threads t LEFT JOIN thread_creations c ON c.thread_id=t.id WHERE t.id=?1 AND (t.principal_id IS NULL OR t.principal_id IS ?2) AND t.deleted_at_ms IS NULL AND (c.domain IS NULL OR c.domain NOT IN('summary','memory')) AND NOT EXISTS(SELECT 1 FROM context_jobs j JOIN runs r ON r.id=j.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id) AND NOT EXISTS(SELECT 1 FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') AND NOT EXISTS(SELECT 1 FROM child_tasks ch JOIN operations o ON o.id=ch.id WHERE ch.child_thread_id=t.id AND json_extract(o.body,'$.executor')='code_retrieval'))",params![id,principal],|r|r.get::<_,bool>(0))?,
         ConversationRef::External{id}=>db.query_row("SELECT EXISTS(SELECT 1 FROM external_conversations WHERE id=?1 AND json_extract(body,'$.principalId') IS ?2 AND coalesce(json_extract(body,'$.deleted'),0)=0)",params![id,principal],|r|r.get(0))?,
     };
     if !available {
@@ -477,7 +477,7 @@ fn position(db: &Connection, scope: &str, r: &ConversationRef) -> Result<Positio
             ConversationRef::Native { id } => principals::thread(db, id)?,
             ConversationRef::External { .. } => None,
         };
-        if owner != principal {
+        if owner.is_some() && owner != principal {
             break;
         }
         if let Some(p) = explicit_position(db, scope, &parent)? {
@@ -921,7 +921,7 @@ impl Catalog {
                                     ConversationRef::Native { id } => principals::thread(&tx, id)?,
                                     ConversationRef::External { .. } => None,
                                 };
-                                if owner.as_deref() != principal
+                                if owner.is_some() && owner.as_deref() != principal
                                     || direct_bot(&tx, &original)?.is_some()
                                 {
                                     return Err(RuntimeError::Invalid(
@@ -1266,7 +1266,8 @@ fn origin(db: &Connection, principal: Option<&str>, r: &ConversationRef) -> Resu
             return Err(RuntimeError::Invalid("origin ancestry cycle".into()));
         }
         if let ConversationRef::Native { id } = &parent {
-            if principals::thread(db, id)?.as_deref() != principal {
+            let owner = principals::thread(db, id)?;
+            if owner.is_some() && owner.as_deref() != principal {
                 break;
             }
         }
@@ -1344,10 +1345,10 @@ impl DirectoryMetadata {
         containers: &[Container],
     ) -> Result<Self> {
         let owners = db
-            .prepare("SELECT id FROM threads WHERE principal_id IS ?1")?
+            .prepare("SELECT id FROM threads WHERE principal_id IS NULL OR principal_id IS ?1")?
             .query_map([principal], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<BTreeSet<_>, _>>()?;
-        let native = db.prepare("SELECT c.child_thread_id,json_extract(c.body,'$.parent_thread_id') FROM child_tasks c JOIN threads t ON t.id=c.child_thread_id WHERE t.principal_id IS ?1 ORDER BY c.rowid")?.query_map([principal], |r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        let native = db.prepare("SELECT c.child_thread_id,json_extract(c.body,'$.parent_thread_id') FROM child_tasks c JOIN threads t ON t.id=c.child_thread_id WHERE (t.principal_id IS NULL OR t.principal_id IS ?1) ORDER BY c.rowid")?.query_map([principal], |r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
         let external = db.prepare("SELECT e.id,json_extract(c.body,'$.parent_thread_id') FROM external_children c JOIN external_conversations e ON e.id=json_extract(c.body,'$.conversation_id') WHERE json_extract(e.body,'$.principalId') IS ?1 AND json_extract(c.body,'$.dispatch_operation_id') IS NULL AND json_extract(c.body,'$.message_kind') IS NULL ORDER BY c.rowid")?.query_map([principal], |r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
         let mut parents = BTreeMap::new();
         // Preserve the original first relation, including a null first parent.
@@ -1367,7 +1368,7 @@ impl DirectoryMetadata {
                 }
             }
         }
-        let bots=db.prepare("SELECT b.thread_id,b.bot_id FROM bot_thread_bindings b JOIN threads t ON t.id=b.thread_id WHERE t.principal_id IS ?1")?.query_map([principal],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<std::result::Result<BTreeMap<_,_>,_>>()?;
+        let bots=db.prepare("SELECT b.thread_id,b.bot_id FROM bot_thread_bindings b JOIN threads t ON t.id=b.thread_id WHERE (t.principal_id IS NULL OR t.principal_id IS ?1)")?.query_map([principal],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<std::result::Result<BTreeMap<_,_>,_>>()?;
         let rows=db.prepare("SELECT kind,id,container_id,sort_order,revision,is_explicit FROM organization_positions WHERE scope=?1")?.query_map([scope],|r|{
             let kind:String=r.get(0)?;let id:String=r.get(1)?;
             let conversation=if kind=="native" {ConversationRef::Native{id}} else {ConversationRef::External{id}};
@@ -1557,7 +1558,7 @@ fn snapshot(
                 .map_err(|_| RuntimeError::Invalid("invalid organization continuation".into()))
         })
         .transpose()?;
-    let mut metadata = db.prepare("SELECT t.id,t.title,t.archived,t.pinned,t.revision,t.updated_at_ms FROM threads t LEFT JOIN thread_creations c ON c.thread_id=t.id WHERE t.principal_id IS ?1 AND t.deleted_at_ms IS NULL AND (c.domain IS NULL OR c.domain NOT IN('summary','memory')) AND NOT EXISTS(SELECT 1 FROM context_jobs j JOIN runs r ON r.id=j.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id) AND NOT EXISTS(SELECT 1 FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') AND NOT EXISTS(SELECT 1 FROM child_tasks ch JOIN operations o ON o.id=ch.id WHERE ch.child_thread_id=t.id AND json_extract(o.body,'$.executor')='code_retrieval') ORDER BY t.id")?.query_map([principal],|r|Ok((ConversationRef::Native{id:r.get(0)?},r.get::<_,String>(1)?,r.get::<_,bool>(2)?,r.get::<_,bool>(3)?,read_number(r,4)?,read_number(r,5)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
+    let mut metadata = db.prepare("SELECT t.id,t.title,t.archived,t.pinned,t.revision,t.updated_at_ms FROM threads t LEFT JOIN thread_creations c ON c.thread_id=t.id WHERE (t.principal_id IS NULL OR t.principal_id IS ?1) AND t.deleted_at_ms IS NULL AND (c.domain IS NULL OR c.domain NOT IN('summary','memory')) AND NOT EXISTS(SELECT 1 FROM context_jobs j JOIN runs r ON r.id=j.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id) AND NOT EXISTS(SELECT 1 FROM operations o JOIN runs r ON r.id=o.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') AND NOT EXISTS(SELECT 1 FROM child_tasks ch JOIN operations o ON o.id=ch.id WHERE ch.child_thread_id=t.id AND json_extract(o.body,'$.executor')='code_retrieval') ORDER BY t.id")?.query_map([principal],|r|Ok((ConversationRef::Native{id:r.get(0)?},r.get::<_,String>(1)?,r.get::<_,bool>(2)?,r.get::<_,bool>(3)?,read_number(r,4)?,read_number(r,5)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
     metadata.extend(db.prepare("SELECT id,coalesce(json_extract(body,'$.title'),''),coalesce(json_extract(body,'$.archived'),0),coalesce(json_extract(body,'$.pinned'),0),coalesce(json_extract(body,'$.revision'),1),coalesce(json_extract(body,'$.updatedAt'),0) FROM external_conversations WHERE json_extract(body,'$.principalId') IS ?1 AND coalesce(json_extract(body,'$.deleted'),0)=0 ORDER BY id")?.query_map([principal],|r|Ok((ConversationRef::External{id:r.get(0)?},r.get::<_,String>(1)?,r.get::<_,bool>(2)?,r.get::<_,bool>(3)?,read_number(r,4)?,read_number(r,5)?)))?.collect::<std::result::Result<Vec<_>,_>>()?);
     let all_containers = containers(db, &scope)?;
     let mut directory = DirectoryMetadata::load(db, principal, &scope, &all_containers)?;

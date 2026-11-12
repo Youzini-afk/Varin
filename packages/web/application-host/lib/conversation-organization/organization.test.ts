@@ -32,7 +32,7 @@ function fixture() {
     return Response.json(output ?? {}, { status });
   };
   vi.stubGlobal('fetch', (url: string, init: RequestInit) => request(new URL(url, 'http://fixture.invalid').pathname, JSON.parse(String(init.body))));
-  return { requests, service, request, api: createConversationOrganizationHttpAPI(), readSettings, threads, external };
+  return { requests, runtime, service, request, api: createConversationOrganizationHttpAPI(), readSettings, threads, external };
 }
 afterEach(() => vi.unstubAllGlobals());
 it('runs the real HTTP client through authenticated routes and private Catalog boundary', async () => {
@@ -193,6 +193,41 @@ it('initializes the full saved project generation before first dispatch without 
   f.readSettings.mockRejectedValue(new Error('Settings changed after initialization'));
   await f.service.read('alice',{limit:1});
   expect(f.readSettings).toHaveBeenCalledTimes(1);
+});
+
+it('restores unowned native conversations using their original observed project while excluding another user', async () => {
+  const f = fixture(); let initialized = false;
+  f.readSettings.mockResolvedValue({ projects: [{ id: 'project', path: '/work' }] });
+  f.requests.mockImplementation(async method => {
+    if (method === 'runtime.organization.read') return { ...snapshot, initialized };
+    if (method === 'runtime.thread.catalog.list') return [
+      { thread_id: 'legacy', principal_id: null, observer_project_ids: ['project'] },
+      { thread_id: 'own', principal_id: 'alice', observer_project_ids: ['project'] },
+      { thread_id: 'foreign', principal_id: 'bob', observer_project_ids: ['project'] },
+    ];
+    if (method === 'runtime.organization.initialize') { initialized = true; return {}; }
+    throw new Error(`Unexpected call ${method}`);
+  });
+  await f.service.read('alice');
+  const init = f.requests.mock.calls.find(([method]) => method === 'runtime.organization.initialize')![1];
+  expect(init).toMatchObject({ principalId: 'alice', initial: { key: 'visible-project-generation', positions: [
+    { conversation: { kind: 'native', id: 'legacy' }, projectId: 'project' },
+    { conversation: { kind: 'native', id: 'own' }, projectId: 'project' },
+  ] } });
+});
+
+it('keeps public native metadata changes with the Host owner instead of granting them to every reader', async () => {
+  const f = fixture();
+  f.requests.mockResolvedValue({ principal_id: null });
+  f.threads.update.mockResolvedValue({ revision: 2 });
+  const allowed = vi.fn(async () => false);
+  f.runtime.principalCanUseHostResources = allowed;
+  const input = { key: 'public-edit', items: [{ conversation: { kind: 'native' as const, id: 'legacy' }, expectedRevision: 1, patch: { pinned: true } }] };
+  expect((await f.api.metadata(input)).items[0]?.status).toBe('failed');
+  expect(f.threads.update).not.toHaveBeenCalled();
+  allowed.mockResolvedValue(true);
+  expect((await f.api.metadata(input)).items[0]?.status).toBe('succeeded');
+  expect(allowed).toHaveBeenCalledWith('alice');
 });
 
 it('migrates external positions by exact source owner and logical workspace before legacy local paths', async () => {

@@ -936,7 +936,8 @@ impl Tools {
                             unreachable!()
                         };
                         // Resolve current principal/public scope before invoking the original metadata owner.
-                        if db.thread_principal(&id).map_err(error)?.as_deref() != principal {
+                        let owner = db.thread_principal(&id).map_err(error)?;
+                        if owner.as_deref() != principal && !(owner.is_none() && db.thread_has_host_authority(&run.thread_id).map_err(error)?) {
                             return Err(error("Conversation belongs to another principal"));
                         }
                         let result = if action == "delete" {

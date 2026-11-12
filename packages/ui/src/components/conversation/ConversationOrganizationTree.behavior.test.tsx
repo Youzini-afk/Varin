@@ -6,8 +6,17 @@ import type { ConversationOrganizationSnapshot, ConversationOrganizationCommand,
 import { ConversationOrganizationTree } from './ConversationOrganizationTree';
 import { useConversationOrganizationStore, readOrganizationActionScope, loadOrganizationPage, refreshConversationOrganization, submitOrganization } from '@/stores/useConversationOrganizationStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import type { DragEndEvent } from '@dnd-kit/core';
+import { projectOrganization } from './organizationProjection';
 
-const transport = vi.hoisted(() => ({ read: vi.fn(), command: vi.fn(), metadata: vi.fn(), observe: vi.fn(), listeners: new Set<(event: ConversationOrganizationEvent) => void>(), open: vi.fn(), create: vi.fn(), generation: 1, undo: undefined as (() => void) | undefined }));
+const transport = vi.hoisted(() => ({ read: vi.fn(), command: vi.fn(), metadata: vi.fn(), observe: vi.fn(), listeners: new Set<(event: ConversationOrganizationEvent) => void>(), open: vi.fn(), create: vi.fn(), generation: 1, undo: undefined as (() => void) | undefined, drop: undefined as ((event: DragEndEvent) => void) | undefined }));
+vi.mock('@dnd-kit/core', async load => {
+  const original = await load<typeof import('@dnd-kit/core')>();
+  return { ...original, DndContext: (props: React.ComponentProps<typeof original.DndContext>) => {
+    transport.drop = props.onDragEnd;
+    return React.createElement(original.DndContext, props);
+  } };
+});
 vi.mock('./sidebarHighlights', () => ({ useHoverPill: () => {}, useSelectionGlide: () => {} }));
 vi.mock('@/lib/desktop', () => ({ canUseElectronDesktopIPC: () => false, invokeDesktop: vi.fn() }));
 vi.mock('@/workbenches/bot/botWorkspaceViews', () => ({ useBotWorkspaceNavigation: () => null }));
@@ -138,6 +147,25 @@ it('moves through the keyboard-accessible menu with source and destination CAS, 
   expect(container.querySelectorAll('button[title="Task"]')).toHaveLength(1);
   expect(row('Task').closest('[aria-busy="true"]')).toBeTruthy();
   await act(async () => finish());
+});
+
+it('ignores self, descendant and original-location drops while accepting a real project move', async () => {
+  await render();
+  const work = projectOrganization(snapshot)[0], project = work.children.find(node => node.container)!;
+  const drop = async (node: typeof work, parentId: string | null, before: typeof work.object | null = null) => act(async () => transport.drop!({
+    active: { id: node.key, data: { current: node }, rect: { current: { initial: null, translated: null } } },
+    over: { id: parentId ?? 'root', disabled: false, rect: { top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0 }, data: { current: { parentId, before, label: '' } } },
+    activatorEvent: new Event('pointerdown'), collisions: [], delta: { x: 20, y: 0 },
+  }));
+  await drop(work, work.container!.id);
+  await drop(work, project.container!.id);
+  await drop(project, project.parentId, project.object);
+  await drop(project, project.parentId);
+  expect(transport.command).not.toHaveBeenCalled();
+  transport.command.mockResolvedValueOnce({ containers: [{ ...project.container, parentId: null, revision: 2 }], positions: [], removed: [] });
+  await drop(project, null);
+  expect(transport.command).toHaveBeenCalledOnce();
+  expect(transport.command.mock.calls[0][0].operation).toMatchObject({ action: 'move', parentId: null, items: [{ object: project.object, expectedParentId: 'work' }] });
 });
 
 it('retains partial metadata outcomes and retries only the unresolved original items', async () => {
