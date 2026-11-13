@@ -23,6 +23,7 @@ const summary = (id: string, botId: string | null): ThreadSummary => ({ thread_i
 const bot: BotSummary = { revision: 1, id: 'bot-owner', name: 'Bot', entry: { runtime: 'agent', threadId: 'root', branchId: 'root:main' }, archived: false, homeDir: '/bots/owner', coordinatorHostId: 'host', instructions: null, model: null, createdAt: '', updatedAt: '' };
 let unbind: (() => void) | undefined;
 const get = vi.fn();
+const inspectMany = vi.fn<ThreadsAPI['inspectMany']>();
 beforeEach(async () => {
   useUIStore.getState().closeMainSurfaces();
   state.host = 1; state.document = defaultVarinWorkbenchProfileDocument();
@@ -30,7 +31,9 @@ beforeEach(async () => {
   state.select.mockReset().mockImplementation(async (profile: string) => { state.document!.activeProfileId = profile; });
   state.directory.mockReset(); get.mockReset().mockResolvedValue(bot);
   useBotNavigation.setState({ botId: null, entry: null, model: null, archived: undefined });
-  const threads = { list: async () => [summary('ordinary', null), summary('child', bot.id)], observe: async (_cursor: number, _listener: unknown, { signal }: { signal: AbortSignal }) => new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true })) } as unknown as ThreadsAPI;
+  const catalog = [summary('ordinary', null), summary('child', bot.id)];
+  inspectMany.mockReset().mockImplementation(async ids => catalog.filter(thread => ids.includes(thread.thread_id)));
+  const threads = { list: async () => catalog, inspectMany, observe: async (_cursor: number, _listener: unknown, { signal }: { signal: AbortSignal }) => new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true })) } as unknown as ThreadsAPI;
   registerRuntimeAPIs({ bots: { get } } as unknown as RuntimeAPIs);
   unbind = bindThreadStore(threads); await useThreadStore.getState().loadCatalog();
   await new Promise(resolve => setTimeout(resolve, 0));
@@ -69,7 +72,10 @@ it('leaves the Bot shell before selecting an ordinary deep link, without remaini
 it('keeps readable history when its Bot profile is missing and still rejects a foreign branch', async () => {
   get.mockResolvedValue(null);
   await expect(openThreadFromNavigation({ threadId: 'child', branchId: 'child:review' })).resolves.toMatchObject({ threadId: 'child', branchId: 'child:review' });
+  expect(inspectMany).not.toHaveBeenCalled();
   await expect(openThreadFromNavigation({ threadId: 'child', branchId: 'foreign' })).rejects.toThrow('branch is unavailable');
+  expect(inspectMany).toHaveBeenCalledExactlyOnceWith(['child']);
+  expect(useThreadStore.getState().selectedIdentity).toMatchObject({ threadId: 'child', branchId: 'child:review' });
   expect(state.select).not.toHaveBeenCalled(); expect(useBotNavigation.getState().entry).toBeNull();
 });
 it('fences a delayed Bot lookup after a Host switch or newer ordinary navigation', async () => {

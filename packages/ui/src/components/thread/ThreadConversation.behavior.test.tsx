@@ -1071,6 +1071,7 @@ it('observes first-send streaming and queues a follow-up while the sidebar catal
   const flushFrames = historyFrames();
   const f = fixture(); runtimeState.api = f.api;
   const list = vi.fn(f.api.list); f.api.list = list;
+  const inspectMany = vi.fn(f.api.inspectMany); f.api.inspectMany = inspectMany;
   const snapshot = vi.fn(f.api.snapshot); f.api.snapshot = snapshot;
   let finishCatalog!: (threads: Awaited<ReturnType<ThreadsAPI['list']>>) => void;
   const catalog = new Promise<Awaited<ReturnType<ThreadsAPI['list']>>>(resolve => { finishCatalog = resolve; });
@@ -1083,6 +1084,11 @@ it('observes first-send streaming and queues a follow-up while the sidebar catal
     await edit('[aria-label="Message thread"]', 'Start without waiting for the sidebar');
     const draftKey = useThreadStore.getState().selectedDraftKey!;
     list.mockImplementationOnce(() => catalog);
+    // Sidebar refresh is independent of creation, which now refreshes only its Thread.
+    let catalogReady!: Promise<void>;
+    await act(async () => { catalogReady = useThreadStore.getState().loadCatalog(); });
+    const listReads = list.mock.calls.length;
+    expect(useThreadStore.getState().catalogLoading).toBe(true);
     await submitForm(composerForm());
     expect(useThreadStore.getState().catalogLoading).toBe(true);
     expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
@@ -1110,6 +1116,17 @@ it('observes first-send streaming and queues a follow-up while the sidebar catal
     expect(f.submit).toHaveBeenCalledOnce();
     expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ ...identity, text: 'Follow up on the active run', mode: 'next_run' }));
     expect(useThreadStore.getState().catalogLoading).toBe(true);
+    expect(list).toHaveBeenCalledTimes(listReads);
+    expect(inspectMany).not.toHaveBeenCalled();
+    // The older complete read may omit the just-created Thread. Its completion
+    // must not undo selection, and the queued targeted refresh restores membership.
+    await act(async () => { finishCatalog([]); await catalogReady; });
+    expect(useThreadStore.getState().catalogLoading).toBe(false);
+    expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
+    expect(useThreadStore.getState().threads).toContainEqual(f.view.thread);
+    expect(inspectMany).toHaveBeenCalledWith([identity.threadId]);
+    expect(list).toHaveBeenCalledTimes(listReads);
+    expect(container.querySelector('[aria-label="Thread conversation"]')).not.toBeNull();
   } finally {
     await act(async () => { unbind?.(); finishCatalog([f.view.thread]); });
   }

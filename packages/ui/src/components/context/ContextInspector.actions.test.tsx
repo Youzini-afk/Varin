@@ -102,7 +102,7 @@ it('binds reconciliation to the original projection owner after navigation', asy
   expect(read).toHaveBeenCalledTimes(count);
   await act(async () => callbacks.get(next.branchId)!());
   expect(read).toHaveBeenCalledTimes(count + 1);
-  expect(read).toHaveBeenLastCalledWith(next, expect.any(AbortSignal));
+  expect(read).toHaveBeenLastCalledWith(next, expect.any(AbortSignal), undefined);
   expect(read.mock.calls.at(-1)![1]?.aborted).toBe(false);
 });
 
