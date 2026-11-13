@@ -552,7 +552,7 @@ fn managed_source_two_hosts_original_storage_and_direct_router() {
             assert!(body.get("objectHash").is_none());
         }
     }
-    b.rpc("authority.grant.issue",json!({"grantId":"delivery-gc","hostGeneration":b.generation,"storageIdentity":b.root,"sessionId":null,"owningWorkspace":"workspace","executionWorkspace":"workspace","capabilities":["storage.admin"],"pathScopes":[""]}),None).unwrap();
+    b.rpc("authority.grant.issue",json!({"grantId":"delivery-gc","hostGeneration":b.generation,"storageIdentity":b.root,"sessionId":null,"owningWorkspace":"workspace","executionWorkspace":"workspace","capabilities":["storage.admin"],"pathScopes":[""],"threadId":null,"runId":null}),None).unwrap();
     b.rpc(
         "storage.gc",
         json!({"operationId":"delivered-read-gc"}),
@@ -955,7 +955,7 @@ fn managed_extension_package_uses_original_capture_and_releases_after_reader_dra
                             let grant = format!("package-gc:{}", uuid::Uuid::new_v4());
                             target.rpc("authority.grant.issue", json!({"grantId":grant,"hostGeneration":target.generation,
                                 "storageIdentity":target.root,"sessionId":null,"owningWorkspace":"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
-                                "executionWorkspace":"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa","capabilities":["storage.admin"],"pathScopes":[""]}), None)?;
+                                "executionWorkspace":"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa","capabilities":["storage.admin"],"pathScopes":[""],"threadId":null,"runId":null}), None)?;
                             target.rpc("storage.gc", json!({"operationId":format!("package-gc:{}",uuid::Uuid::new_v4())}), Some(&grant))?;
                             return Ok(
                                 json!({"present":params["hashes"].as_array().unwrap().iter().map(|hash|
@@ -1522,7 +1522,7 @@ fn managed_read_receipt_survives_lost_reply_revoke_gc_and_reopen_until_original_
             json!({"path":"large.txt","length":1})
         )
         .is_err());
-    owner.rpc("authority.grant.issue",json!({"grantId":"gc-owner","hostGeneration":owner.generation,"storageIdentity":owner.root,"sessionId":null,"owningWorkspace":"workspace","executionWorkspace":"workspace","capabilities":["storage.admin","storage.read","storage.write"],"pathScopes":[""]}),None).unwrap();
+    owner.rpc("authority.grant.issue",json!({"grantId":"gc-owner","hostGeneration":owner.generation,"storageIdentity":owner.root,"sessionId":null,"owningWorkspace":"workspace","executionWorkspace":"workspace","capabilities":["storage.admin","storage.read","storage.write"],"pathScopes":[""],"threadId":null,"runId":null}),None).unwrap();
     for (id, run_worker) in [("cancelled-read", true), ("interrupted-read", false)] {
         let mut input = address.clone();
         input["call"] = json!({"runId":"run","operationId":format!("request:tool:{id}"),"origin":{"kind":"model_step","request_id":"request"},"callId":id,"name":"file_read","schemaVersion":"1","arguments":{"path":"large.txt"}});
@@ -1670,7 +1670,7 @@ fn managed_read_receipt_survives_lost_reply_revoke_gc_and_reopen_until_original_
     assert_eq!(unknown["accepted"], true);
     assert_eq!(unknown["executorStopped"], false);
     assert_eq!(unknown["result"]["completion"]["outcome"], "indeterminate");
-    reopened.rpc("authority.grant.issue",json!({"grantId":"gc-reopen","hostGeneration":reopened.generation,"storageIdentity":reopened.root,"sessionId":null,"owningWorkspace":"workspace","executionWorkspace":"workspace","capabilities":["storage.admin","storage.read","storage.write"],"pathScopes":[""]}),None).unwrap();
+    reopened.rpc("authority.grant.issue",json!({"grantId":"gc-reopen","hostGeneration":reopened.generation,"storageIdentity":reopened.root,"sessionId":null,"owningWorkspace":"workspace","executionWorkspace":"workspace","capabilities":["storage.admin","storage.read","storage.write"],"pathScopes":[""],"threadId":null,"runId":null}),None).unwrap();
     let retained = source_resources::prepare_request(
         &mut reopened.storage.lock().unwrap(),
         "source.resource.observe",
