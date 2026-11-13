@@ -15,7 +15,7 @@ vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string, params?: object) => key + (params ? JSON.stringify(params) : '') }) }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 const entry = { runtime: 'agent' as const, threadId: 'bot-entry', branchId: 'main' };
-const item = { id: 'watch-replies', name: 'Watch customer replies', trigger: { kind: 'plugin_event', source: { extensionId: 'mail', sourceId: 'incoming', connectionId: 'work', accountId: 'account' } }, state: 'active', repeat: 'each', timing: { kind: 'passive' }, pending_events: 3, pending_occurrences: 0, next_delivery_at_ms: null, source_status: null } as Followup;
+const item = { id: 'watch-replies', thread_id: entry.threadId, branch_id: entry.branchId, name: 'Watch customer replies', trigger: { kind: 'plugin_event', source: { extensionId: 'mail', sourceId: 'incoming', connectionId: 'work', accountId: 'account' } }, state: 'active', repeat: 'each', timing: { kind: 'passive' }, pending_events: 3, pending_occurrences: 0, next_delivery_at_ms: null, source_status: null } as Followup;
 let root: Root;
 let container: HTMLElement;
 beforeEach(() => {
@@ -41,6 +41,8 @@ it('reads and opens management through the resolved session instead of the delet
   expect(container.textContent).toContain('arrangements.unknownHealth');
   await act(async () => container.querySelector('button')!.click());
   expect(state.open).toHaveBeenCalledWith(entry, item.id);
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'arrangements.manage')!.click());
+  expect(state.open).toHaveBeenLastCalledWith(entry, undefined);
   arrangements.mockRejectedValueOnce(new Error('List unavailable'));
   await act(async () => root.render(<Harness api={api} revision={1} />));
   expect(container.textContent).toContain('List unavailable');
