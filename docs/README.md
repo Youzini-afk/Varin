@@ -54,6 +54,7 @@
 - [Varin 总助手：持续交流、工作概览与设备空间](design/varin-conversation-and-workspaces.md)：独立发送默认、工作详情、电脑与文件空间、设备连接和手机状态胶囊已接入；当前合同见 [Bot](bot.md)、[资源](resources.md)和[工作台](workbench.md)。[交互稿](design/varin-conversation-preview/index.html)保留视觉与布局参考。
 - [外部 Agent 输入框后续演进](design/external-agent-composer.md)：自动准备、空闲回收、能力缓存、默认值、统一工具栏与协议上下文已接入；当前合同见[外部 Agent](external-agents.md)。失败分类和配置变化提示留待后续。
 - [Computer Use 原生辅助程序与构建交付](design/native-computer-helper.md)：Windows 已改为随包原生 `VarinComputer.exe` 并接通构建、签名配置和 Host 生命周期；正式证书签名与平台实机验收仍待完成。
+- [Computer Use：语义查询、局部观察与条件等待](design/computer-semantic-interaction.md)：设计提案；在原 ComputerService 和平台驱动上增加定向查询、状态动作与条件等待，复用模型短引用、跨设备控制和现有过程视图。
 - [聊天正文、交互内容与原生能力联动](design/conversation-content-and-interaction.md)：核心链路已实施；记录正文交互、作品修订、草稿联动、状态继承与回收的设计及验收边界。当前合同见[交互内容](interactive-content.md)。
 - [联网检索后续验证与扩展](design/web-retrieval.md)：核心合同已接入，见[检索](retrieval.md#web学术与文档材料)；保留真实任务比较、平台验收和新增渠道的选择空间。
 - [增量上下文管理](design/incremental-context-management.md)：待讨论；摘要块、原文回读等为候选思路，需重新判断理解连续性、总成本与实现必要性，尚未确定实施方向。
