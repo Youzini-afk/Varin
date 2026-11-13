@@ -1,5 +1,6 @@
 import { openThreadFromNavigation, openExternalConversationFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 import React from 'react';
+import { WorkFollowupEditor } from './WorkFollowupEditor';
 const ExternalConversationView = React.lazy(() => import('./ExternalConversation').then(module => ({ default: module.ExternalConversationView })));
 import { ThreadEventArrangements } from './ThreadEventArrangements';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
@@ -418,6 +419,10 @@ export function ThreadFollowups({ api, botId, family, mediaRead, research, ident
   const live = React.useRef(false); const host = React.useRef(getRuntimeEndpointGeneration());
   React.useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
   const current = () => live.current && host.current === getRuntimeEndpointGeneration();
+  const [editingFollowup, setEditingFollowup] = React.useState<string>();
+  const focusedRow = React.useRef<HTMLDivElement>(null);
+  const focusedPresent = followups.some(item => item.id === focusId);
+  React.useEffect(() => { focusedRow.current?.scrollIntoView({ block: 'nearest' }); }, [focusId, focusToken, focusedPresent]);
   const independent = followups.filter(item => independentFollowup(item) && item.trigger.kind !== 'plugin_event');
   const hasContent = Boolean(botId || followups.some(item => item.trigger.kind === 'plugin_event') || independent.length || registrations.length || registrationError || editing);
   React.useEffect(() => { onContentChange?.(hasContent); }, [hasContent, onContentChange]);
@@ -520,13 +525,13 @@ export function ThreadFollowups({ api, botId, family, mediaRead, research, ident
       const logFailed = item.sources.some(source => source.log?.failure_code);
       const metricFailed = item.sources.some(source => source.metric?.failure_code && source.metric.failure_code !== 'sample_pending');
       const originalSources = item.trigger.kind === 'any' || item.trigger.kind === 'all' ? item.trigger.sources : [item.trigger];
-      return <div key={item.id} className="min-w-0 space-y-2 border-t border-border/50 py-3 [overflow-wrap:anywhere]" aria-label={ended ? 'Past follow-up' : 'Pending follow-up'}>
+      return <div key={item.id} id={`followup-${item.id}`} ref={focusId === item.id ? focusedRow : undefined} className="min-w-0 space-y-2 border-t border-border/50 py-3 [overflow-wrap:anywhere]" aria-label={ended ? 'Past follow-up' : 'Pending follow-up'}>
         <div className="flex items-start gap-2"><Icon name="timer" className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" /><p className="min-w-0 flex-1 font-medium leading-relaxed">{followupTrigger(item, t)}</p></div>
         <p className="text-muted-foreground">{followupStatus(item, t)} · {t(item.repeat === 'each' ? 'followups.each' : 'followups.once')}{item.pending_occurrences > 0 && ` · ${t(item.pending_occurrences === 1 ? 'followups.pendingOccurrence' : 'followups.pendingOccurrences', { count: item.pending_occurrences })}`}</p>
         {item.exhausted && !ended && <p className="text-muted-foreground">{t('followups.observationEnded')}</p>}
         <FollowupInstruction api={api} identity={identity} item={item} preview />
         <details className="space-y-2 text-muted-foreground"><summary className="cursor-pointer py-1">{t('followups.records')}</summary>
-        {item.occurrence ? <div aria-label="Latest follow-up occurrence"><p className="text-xs text-muted-foreground">Latest occurrence</p><OccurrenceView key={item.occurrence.id} occurrence={item.occurrence} identity={identity} family={family} mediaRead={mediaRead} api={api} followupId={item.id} /></div> : <p>{item.exhausted ? 'Log ended without satisfying the condition' : 'Waiting for the original trigger'}</p>}
+        {item.occurrence ? <div aria-label="Latest follow-up occurrence"><p className="text-xs text-muted-foreground">{t('followups.records')}</p><OccurrenceView key={item.occurrence.id} occurrence={item.occurrence} identity={identity} family={family} mediaRead={mediaRead} api={api} followupId={item.id} /></div> : <p>{t(item.exhausted ? 'followups.ended' : 'followups.waiting')}</p>}
         <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">{t('followups.details')}</summary>
         <p>{triggerLabel(item)}</p>
         {(item.trigger.kind === 'any' || item.trigger.kind === 'all') && <ul className="space-y-1 text-xs text-muted-foreground">
@@ -561,6 +566,7 @@ export function ThreadFollowups({ api, botId, family, mediaRead, research, ident
         </div>}
         </details>
         {!ended && <>
+          {editingFollowup === item.id ? <WorkFollowupEditor api={api} identity={identity} item={item} saved={async () => { await act(async () => undefined); }} close={() => setEditingFollowup(undefined)} /> : <Button variant="ghost" size="sm" disabled={pending} onClick={() => setEditingFollowup(item.id)}>{t('arrangements.edit')}</Button>}
           {item.repeat === 'each' && <p className="text-xs text-muted-foreground">{t('followups.cancelHint')}</p>}
           {item.state === 'active' && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'pause')}>{t('followups.pause')}</Button>}
           {item.state === 'paused' ? <Button variant="ghost" size="sm" disabled={pending} onClick={() => void control(item, 'resume')}>{t('followups.resume')}</Button>

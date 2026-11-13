@@ -37,7 +37,7 @@ export function useBotWorkspaces(model: BotPanelModel | null, enabled: boolean, 
   }) : undefined, [enabled]);
   const revealRef = React.useRef(reveal); revealRef.current = reveal;
   const open = React.useCallback((view: BotWorkspaceView) => {
-    setSpaces(current => { const previous = current[botId]?.views ?? []; return { ...current, [botId]: { views: previous.some(item => item.key === view.key) ? previous : [...previous, view], activeKey: view.key } }; });
+    setSpaces(current => { const previous = current[botId]?.views ?? []; return { ...current, [botId]: { views: previous.some(item => item.key === view.key) ? previous.map(item => item.key === view.key && view.kind === 'work' ? view : item) : [...previous, view], activeKey: view.key } }; });
     focus();
     revealRef.current();
   }, [botId]);

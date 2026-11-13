@@ -1364,6 +1364,128 @@ pub struct FollowupRead {
     content: crate::content::ContentStore,
     _publication: crate::content::ContentPublication,
 }
+pub struct WorkFollowupEdit {
+    id: String,
+    revision: u64,
+    instruction: String,
+    content: crate::content::ContentStore,
+    _publication: crate::content::ContentPublication,
+}
+pub struct PreparedWorkFollowupEdit {
+    id: String,
+    revision: u64,
+    instruction: Value,
+    _publication: crate::content::ContentPublication,
+}
+impl WorkFollowupEdit {
+    pub fn load(self) -> Result<PreparedWorkFollowupEdit> {
+        if self.instruction.trim().is_empty() {
+            return Err(RuntimeError::Invalid(
+                "Follow-up instruction is required".into(),
+            ));
+        }
+        Ok(PreparedWorkFollowupEdit {
+            id: self.id,
+            revision: self.revision,
+            instruction: self.content.save(&json!(self.instruction))?,
+            _publication: self._publication,
+        })
+    }
+}
+impl Catalog {
+    pub fn prepare_work_followup_edit(
+        &self,
+        id: &str,
+        revision: u64,
+        instruction: String,
+    ) -> Result<WorkFollowupEdit> {
+        let d: Definition = record(&self.db, "followups", id)?;
+        if d.owner != FollowupOwner::Work || d.autonomous() {
+            return Err(RuntimeError::Invalid(
+                "Use the original arrangement or Goal editor".into(),
+            ));
+        }
+        Ok(WorkFollowupEdit {
+            id: id.into(),
+            revision,
+            instruction,
+            content: self.content.clone(),
+            _publication: self.content.begin_publication(),
+        })
+    }
+    pub fn edit_work_followup(
+        &mut self,
+        prepared: PreparedWorkFollowupEdit,
+        at: Option<u64>,
+        condition: Option<files::FileCondition>,
+    ) -> Result<Followup> {
+        let tx = self.db.transaction()?;
+        let mut d: Definition = record(&tx, "followups", &prepared.id)?;
+        if d.revision != prepared.revision {
+            return Err(RuntimeError::Conflict(
+                "Follow-up changed; reload before saving".into(),
+            ));
+        }
+        if d.state == FollowupState::Cancelled || d.wait.state == NextRunWaitState::Consumed {
+            return Err(RuntimeError::Conflict("Follow-up has ended".into()));
+        }
+        let mut trigger = d.trigger.clone();
+        if let Some(at_ms) = at {
+            match &mut trigger {
+                FollowupTrigger::At { at_ms: value } => *value = at_ms,
+                _ => {
+                    return Err(RuntimeError::Invalid(
+                        "This follow-up does not wait for a time".into(),
+                    ))
+                }
+            }
+        }
+        if let Some(value) = condition {
+            match &mut trigger {
+                FollowupTrigger::File { condition, .. } => *condition = value,
+                _ => {
+                    return Err(RuntimeError::Invalid(
+                        "This follow-up does not wait for a file".into(),
+                    ))
+                }
+            }
+            if d.repeat == FollowupRepeat::Each && value != files::FileCondition::Changed {
+                return Err(RuntimeError::Invalid(
+                    "Repeating file follow-ups require changes".into(),
+                ));
+            }
+        }
+        if d.trigger != trigger {
+            d.trigger = trigger;
+            d.generation += 1;
+            d.wait.state = NextRunWaitState::Waiting;
+            d.wait.trigger_cursor = None;
+            d.wait.after_cursor =
+                tx.query_row("SELECT coalesce(max(cursor),0) FROM events", [], |row| {
+                    read_number(row, 0)
+                })?;
+            for source in &mut d.sources {
+                source.observed = None;
+                source.consumed_cursor = 0;
+            }
+        }
+        d.instruction_ref = Some(prepared.instruction);
+        d.revision += 1;
+        put(&tx, "followups", &d.id, &d)?;
+        event(
+            &tx,
+            &d.id,
+            d.revision,
+            "followup.updated",
+            json!({"thread_id":d.thread_id}),
+        )?;
+        observe(&tx, &mut d, observations::wall_time_ms()?)?;
+        let result = project(&tx, d)?;
+        tx.commit()?;
+        Ok(result)
+    }
+}
+
 impl FollowupRead {
     pub fn load(self) -> Result<FollowupView> {
         Ok(FollowupView {

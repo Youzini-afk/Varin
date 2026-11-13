@@ -136,6 +136,7 @@ export type DesktopSettings = {
   autoCreateWorktree?: boolean;
   followUpBehavior?: 'steer' | 'queue';
   botFollowUpBehavior?: 'steer' | 'queue';
+  botTaskInactivityMinutes?: number;
   gitmojiEnabled?: boolean;
   defaultFileViewerPreview?: boolean;
   zenModel?: string;

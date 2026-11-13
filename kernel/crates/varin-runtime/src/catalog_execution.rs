@@ -2213,7 +2213,7 @@ impl Catalog {
             let failure = safe_run_failure(failure);
             event(&tx, run_id, run.revision, "run.failed", serde_json::to_value(&failure)?)?;
         }
-        let mut committed = json!({"kind":match record {
+        let mut committed = json!({"atMs":observations::wall_time_ms()?,"kind":match record {
                 ExecutionRecord::StateChanged { .. } => "state_changed",
                 ExecutionRecord::ContextPreparationFailed { .. } => "context_preparation_failed",
                 ExecutionRecord::ExecutionFailed { .. } => "execution_failed",
@@ -2632,6 +2632,7 @@ impl Catalog {
             "execution.interrupted",
             json!({"code":code,"message":message,"waiting_on":run.waiting_on}),
         )?;
+        super::bot_work_events::attention(&tx,&run,"interrupted",Some(code),None,observations::wall_time_ms()?)?;
         tx.commit()?;
         Ok(())
     }

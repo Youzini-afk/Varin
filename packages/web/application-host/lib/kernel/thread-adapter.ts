@@ -197,9 +197,11 @@ export class ThreadAdapter {
   private readonly coldBotPreparations = new Set<string>();
   bindBotWorkProfile(resolve: NonNullable<ThreadAdapter['botWorkProfile']>): void { this.botWorkProfile = resolve; }
   /** Model/source preparation only; the original ingress retains scheduling and admission. */
+  private botInactivityMinutes: () => Promise<number> = async () => 20;
+  bindBotInactivityMinutes(read: () => Promise<number>): void { this.botInactivityMinutes = read; }
   async recoverBotWork(signal: AbortSignal): Promise<void> {
     if (!this.botWorkProfile || !this.prepareContext) return;
-    for (const work of await this.runtime.pendingBotWork(signal)) {
+    for (const work of await this.runtime.pendingBotWork(signal, await this.botInactivityMinutes())) {
       if (this.coldBotPreparations.has(work.inputId)) continue;
       this.coldBotPreparations.add(work.inputId);
       void this.launchAdmitted(`cold:${work.inputId}`, async () => {

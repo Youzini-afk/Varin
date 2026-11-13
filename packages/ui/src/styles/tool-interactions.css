@@ -331,3 +331,6 @@ a.tool-source-link:hover { text-decoration: underline; text-underline-offset: 3p
   .tool-source-results > li, .tool-material-reader { animation: none; }
   .tool-inline-actions button, .tool-file-link, .tool-member-line, .tool-resource-summary, .tool-work-heading, .tool-source-link { transition: none; }
 }
+
+.tool-setting-fields[data-single="true"] > div { grid-template-columns: minmax(0, 1fr); }
+.tool-setting-fields[data-single="true"] dt { display: none; }

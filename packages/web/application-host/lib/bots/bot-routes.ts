@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import type { MemoryService } from "../memory/memory-service.js";
 import { KnowledgeMutationError, type Knowledge } from "../knowledge/store.js";
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
-import { projectBotPresence } from './bot-presence.js';
+import { projectBotPresence, populateNeedPreviews } from './bot-presence.js';
 import type { MemoryOrganizer } from '../memory/memory-organizer.js';
 import { BotOrganizationConflict } from './bot-organization.js';
 import { registerBotAppearanceRoutes } from './bot-appearance-routes.js';
@@ -26,7 +26,7 @@ export interface BotRoutesOptions {
   computers?: Pick<ComputerService, "workDesktops" | "listArtifacts">;
   memory?: MemoryService;
   organizer?: Pick<MemoryOrganizer, 'maintain' | 'maintenanceStatus' | 'cancelMaintenance'>;
-  work?: Pick<AgentRuntimeClient, 'botMatters' | 'updateBotMatter' | 'botScope' | 'botActivity'>;
+  work?: Pick<AgentRuntimeClient, 'botMatters' | 'updateBotMatter' | 'botScope' | 'botActivity' | 'activeOperations'>;
   requireAuth?: RequestHandler;
 }
 
@@ -131,7 +131,7 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
     response.setHeader('Cache-Control', 'no-store');
     try {
       const { bot, work: runtime } = await runtimeOf(request);
-      response.json({ presence: projectBotPresence(bot, await runtime.botScope(bot.id, undefined, false, currentRequestPrincipal() ?? null)) });
+      response.json({ presence: await populateNeedPreviews(projectBotPresence(bot, await runtime.botScope(bot.id, undefined, false, currentRequestPrincipal() ?? null)), (thread, branch) => runtime.activeOperations(thread, branch)) });
     } catch (error) { sendError(response, error, 'Unable to read Bot presence'); }
   });
   app.post('/api/harness/bots/:botId/matters', requireAuth, async (request: Request, response: Response) => {

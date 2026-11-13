@@ -1253,6 +1253,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       for (const field of item.fields ?? []) {
         if (field.status !== 'applied' || !write) continue;
         const saved = getPath(outcome.document, field.path);
+        field.previous = getPath(current, field.path) ?? null;
         field.saved = saved;
         field.isSet = saved !== undefined;
         const spec = entryFields(write.entry).find(spec => spec.path === field.path);
@@ -1509,6 +1510,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       item.mutation = item.status === 'applied' || item.status === 'partial' ? 'applied' : 'none';
       for (const result of item.fields ?? []) {
         if (result.status !== 'applied') continue;
+        result.previous = getPath(layer, result.path) ?? null;
         result.saved = getPath(scope === 'project' ? snapshot.project : snapshot.global, result.path);
         result.isSet = result.saved !== undefined;
         const field = write && entryFields(write.entry).find(field => field.path === result.path);

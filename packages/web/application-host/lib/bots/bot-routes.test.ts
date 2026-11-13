@@ -25,7 +25,7 @@ function fixture() {
   const router = Router();
   const directRouter = router as unknown as { handle(request: Request, response: Response, next: NextFunction): void };
   registerBotRoutes(router as unknown as Express, { bots: { organization, create, update, ensureEntry, get: async () => bot, listWork, listSessions, createSession } as unknown as BotService,
-    work: { botActivity, botScope } as unknown as NonNullable<Parameters<typeof registerBotRoutes>[1]['work']> });
+    work: { botActivity, botScope, activeOperations: async () => [] } as unknown as NonNullable<Parameters<typeof registerBotRoutes>[1]['work']> });
   const call = (method: string, url: string, body?: unknown) => new Promise<{ status: number; body: unknown }>((resolve, reject) => {
     let status = 200;
     const response = { setHeader() {}, status(value: number) { status = value; return this; }, json(value: unknown) { resolve({ status, body: value }); return this; } };

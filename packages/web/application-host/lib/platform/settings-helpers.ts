@@ -492,6 +492,7 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (candidate.followUpBehavior === 'steer' || candidate.followUpBehavior === 'queue') {
       result.followUpBehavior = candidate.followUpBehavior;
     }
+    if (typeof candidate.botTaskInactivityMinutes === 'number' && Number.isSafeInteger(candidate.botTaskInactivityMinutes) && candidate.botTaskInactivityMinutes >= 0) result.botTaskInactivityMinutes = candidate.botTaskInactivityMinutes;
     if (candidate.botFollowUpBehavior === 'steer' || candidate.botFollowUpBehavior === 'queue') {
       result.botFollowUpBehavior = candidate.botFollowUpBehavior;
     }

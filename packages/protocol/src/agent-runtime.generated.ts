@@ -2876,6 +2876,14 @@ export interface FollowupRegisterParams {
   instruction: string;
 }
 
+export interface FollowupUpdateParams {
+  followupId: string;
+  expectedRevision: number;
+  instruction: string;
+  atMs?: number;
+  fileCondition?: FileCondition;
+}
+
 export interface FollowupControlParams {
   followupId: string;
   expectedRevision: number;

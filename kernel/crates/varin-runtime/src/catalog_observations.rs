@@ -165,7 +165,7 @@ impl Catalog {
         Ok(rows)
     }
     pub fn nearest_wait_deadline(&self) -> Result<Option<u64>> {
-        let mut deadline = None;
+        let mut deadline = self.nearest_bot_inactivity_deadline()?;
         for op in operations(&self.db, None)? {
             let run = self.run(&op.run_id)?;
             if run.state.terminal() || run.cancel_requested {

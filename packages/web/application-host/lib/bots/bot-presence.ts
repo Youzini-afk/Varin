@@ -1,5 +1,5 @@
 import type { BotPresence, BotPresenceNeed, BotPresenceWork, BotSummary } from '@varin/application-client';
-import type { Run } from '@varin/protocol';
+import { readUserQuestions, type Run, type Operation } from '@varin/protocol';
 import type { BotScopeView } from '../kernel/protocol.generated.js';
 
 const ACTIVE: ReadonlySet<Run['state']> = new Set(['accepted', 'preparing', 'runnable', 'generating', 'executing', 'waiting']);
@@ -50,6 +50,22 @@ export function projectBotPresence(bot: Pick<BotSummary, 'id' | 'name'>, scope: 
   return { botId: bot.id, needs, working, replying };
 }
 
+export async function populateNeedPreviews(presence: BotPresence, operations: (thread: string, branch: string) => Promise<Operation[]>): Promise<BotPresence> {
+  return { ...presence, needs: await Promise.all(presence.needs.map(async need => {
+    const pending = await operations(need.identity.threadId, need.identity.branchId);
+    const operation = pending.find(item => item.phase === 'waiting' && (need.kind === 'question' ? item.executor === 'ask_user' : item.result?.kind === 'control' && Boolean((item.result.value as { permission?: unknown })?.permission)));
+    if (!operation) return need;
+    if (need.kind === 'question') {
+      const intent = operation.intent as { call?: { arguments?: unknown } };
+      const questions = readUserQuestions(intent.call?.arguments);
+      return { ...need, operationId: operation.id, preview: questions.length > 1 ? `${questions[0]!.question} · +${questions.length-1}` : questions[0]?.question ?? '' };
+    }
+    const permission = (operation.result?.kind === 'control' ? operation.result.value : {}) as { permission?: { call?: { name?: string; arguments?: { path?: string; url?: string; command?: string } } } };
+    const call = permission.permission?.call, args = call?.arguments;
+    return { ...need, operationId: operation.id, preview: [call?.name, args?.path ?? args?.url ?? args?.command].filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).join(' · ') };
+  })) };
+}
+
 export interface BotPresencePublisher {
   /** Recompute soon; repeated calls inside the delay collapse into one pass. */
   schedule(): void;
@@ -63,6 +79,7 @@ export interface BotPresencePublisher {
 export function createBotPresencePublisher(options: {
   bots(): Promise<BotSummary[]>;
   scope(botId: string): Promise<BotScopeView>;
+  operations?(thread: string, branch: string): Promise<Operation[]>;
   publish(presence: BotPresence): void;
   onError(error: unknown): void;
   delayMs?: number;
@@ -80,7 +97,8 @@ export function createBotPresencePublisher(options: {
     for (const bot of bots) {
       if (disposed) return;
       try {
-        const presence = projectBotPresence(bot, await options.scope(bot.id));
+        const base = projectBotPresence(bot, await options.scope(bot.id));
+        const presence = options.operations ? await populateNeedPreviews(base, options.operations) : base;
         const key = JSON.stringify(presence);
         if (disposed || published.get(bot.id) === key) continue;
         published.set(bot.id, key);

@@ -701,7 +701,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const spaces = useBotWorkspaces(panelModel, committed && !settingsOpen, () => { closeConversationPanel(); if (floating) setNarrowPanelOpen(true); else setPanelOpen(true); });
   const openSpace = spaces.open;
   const shownPanel = React.useMemo<BotPanelModel | null>(() => panelModel && ({ ...panelModel,
-    openNeed: need => openSpace({ kind: 'work', key: workKey(need.identity), identity: need.identity, title: need.name }),
+    openNeed: need => openSpace({ kind: 'work', key: workKey(need.identity), identity: need.identity, title: need.name, operationId: need.operationId }),
   }), [panelModel, openSpace]);
   React.useEffect(() => { if (!spaces.activeKey) setSpaceExpanded(false); }, [spaces.activeKey]);
 

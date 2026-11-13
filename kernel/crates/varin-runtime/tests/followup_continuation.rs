@@ -1314,3 +1314,16 @@ fn stopped_process_projects_each_business_part_once_and_keeps_original_receipt()
     assert!(f.db.admit_input_delivery(prepared).unwrap().unwrap().items.is_empty());
     f.cleanup();
 }
+
+
+#[test]
+fn work_followup_edit_preserves_identity_and_rejects_stale_edits() {
+    let mut f=Fixture::new(); let before=f.register();
+    let prepared=f.db.prepare_work_followup_edit(&before.id,before.revision,"Read the result and notify me".into()).unwrap().load().unwrap();
+    let stale=f.db.prepare_work_followup_edit(&before.id,before.revision,"An older edit".into()).unwrap().load().unwrap();
+    let after=f.db.edit_work_followup(prepared,None,None).unwrap();
+    assert_eq!(after.id,before.id); assert_eq!(after.trigger,before.trigger); assert!(after.revision>before.revision);
+    assert!(f.db.edit_work_followup(stale,None,None).is_err());
+    assert_eq!(f.db.capture_followup(&before.id).unwrap().load().unwrap().instruction.as_deref(),Some("Read the result and notify me"));
+    f.cleanup();
+}

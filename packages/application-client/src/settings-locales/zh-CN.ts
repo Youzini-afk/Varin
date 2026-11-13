@@ -1,5 +1,9 @@
 import { botWorkspaceZh } from './bot-workspaces.js';
 export const settingsDict = {
+  'settings.chat.botInactivity': '任务无活动提醒',
+  'settings.chat.botInactivityHint': '执行中的任务长时间没有新的模型请求或工具调用时，提醒负责它的 Bot。每段无活动提醒一次，可调整时间或关闭。',
+  'settings.chat.botInactivityMinutes': '分钟',
+  'settings.chat.botInactivityError': '提醒设置读取或保存失败。',
   "settings.plugins.previewChanged": "Application Host 或安装目录已变化。请重新预览后再安装。",
   "settings.plugins.emptyDirectory": "此目录尚未收录插件。",
   "settings.plugins.directoryFailed": "目录暂不可用。请重试，或从链接直接安装。",

@@ -5,7 +5,7 @@ import type { ComputerCatalog } from '@/lib/computers';
 
 export type BotWorkspaceView =
   | { kind: 'external'; key: string; id: string; title: string }
-  | { kind: 'work'; key: string; identity: ThreadIdentity; title: string }
+  | { kind: 'work'; key: string; identity: ThreadIdentity; title: string; operationId?: string }
   | { kind: 'computer'; key: string; desktop: ComputerDesktop; title: string }
   | { kind: 'files'; key: string; owner: SourceResourceOwner; title: string; task?: ThreadIdentity; path?: string };
 export interface BotWorkspaceNavigation {

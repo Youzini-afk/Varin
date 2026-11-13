@@ -16,6 +16,8 @@ pub(super) fn execute(
         return Err(KernelError::Cancelled);
     }
     if method == "runtime.bot.work.pending" {
+        let p: BotWorkPendingParams = serde_json::from_value(params)?;
+        if let Some(minutes) = p.inactivity_minutes { lock()?.configure_bot_inactivity(minutes).map_err(domain)?; }
         return Ok(serde_json::to_value(
             lock()?.pending_cold_bot_work().map_err(domain)?,
         )?);

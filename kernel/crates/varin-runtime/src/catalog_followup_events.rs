@@ -1156,12 +1156,17 @@ pub(crate) fn collect_payloads(db: &Connection) -> Result<()> {
 }
 impl Catalog {
     pub fn bot_arrangements(&self, bot_id: &str, principal: Option<&str>) -> Result<Vec<Followup>> {
-        let mut q=self.db.prepare("SELECT f.body FROM followups f WHERE json_extract(f.body,'$.owner.kind')='bot' AND json_extract(f.body,'$.owner.bot_id')=?1 AND json_extract(f.body,'$.principal_id') IS ?2 ORDER BY f.rowid")?;
-        let result = q
-            .query_map(params![bot_id, principal], |r| r.get::<_, String>(0))?
-            .map(|r| project(&self.db, serde_json::from_str(&r?)?))
-            .collect();
-        result
+        let mut q=self.db.prepare("SELECT body FROM followups WHERE json_extract(body,'$.principal_id') IS ?1 ORDER BY rowid")?;
+        let values = q.query_map([principal], |r| r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        let mut result = Vec::new();
+        for raw in values {
+            let d: Definition = serde_json::from_str(&raw)?;
+            let owned = d.owner == (FollowupOwner::Bot { bot_id: bot_id.to_owned() })
+                || super::bot::thread_owner(&self.db,&d.thread_id)?.is_some_and(|owner|owner.bot_id == bot_id)
+                || super::bot_work::followers(&self.db,&d.thread_id,&d.branch_id)?.contains(&bot_id.to_owned());
+            if owned { result.push(project(&self.db,d)?); }
+        }
+        Ok(result)
     }
 }
 

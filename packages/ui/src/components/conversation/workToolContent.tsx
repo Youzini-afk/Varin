@@ -1,4 +1,7 @@
 import React from 'react';
+import { getSettingsCatalogEntry } from '@varin/application-client';
+import { useUIStore } from '@/stores/useUIStore';
+import type { I18nKey } from '@/lib/i18n';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { JsonSummaryView } from '@/components/chat/message/parts/JsonSummaryView';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
@@ -89,24 +92,32 @@ export function workToolContent(call: ChatToolCall, data: Record<string, unknown
     })}</div>;
   }
   if (call.name.startsWith('settings_')) {
+    const settingValueText = (value: unknown) => { const selection = toolRecord(value); return typeof selection.modelId === 'string' ? [selection.providerId, selection.modelId].filter(value => typeof value === 'string').join(' / ') : valueText(value); };
     const items = records(data.items), fields = records(data.fields), effective = toolRecord(data.effective);
     if (call.name === 'settings_search' && Array.isArray(data.items)) return <dl className="tool-setting-fields">{items.map((item, index) =>
       <div key={toolText(item.id) || index}><dt className="font-mono">{toolText(item.id)}</dt><dd>{toolText(item.note) || toolText(item.category)}
         {item.summary !== undefined && <JsonSummaryView data={item.summary} />}</dd></div>)}</dl>;
     if (!fields.length && !items.length && !data.appliedAt && !data.operation && !Object.keys(effective).length) return null;
-    const fieldList = (entries: Record<string, unknown>[], values: Record<string, unknown> = {}) => <dl className="tool-setting-fields">{entries.map((field, index) => {
+    const fieldList = (entries: Record<string, unknown>[], values: Record<string, unknown> = {}) => <dl className="tool-setting-fields" data-single={entries.length === 1}>{entries.map((field, index) => {
       const path = toolText(field.path), resolved = toolRecord(field.effective), returned = Object.hasOwn(values, path) ? values[path] : Object.hasOwn(resolved, 'value') ? resolved.value : field.saved;
-      return <div key={path || index}><dt className="font-mono">{path}</dt><dd>
-        {returned !== undefined && <pre>{valueText(returned)}</pre>}
+      return <div key={path || index}><dt title={path}>{entries.length > 1 ? path.split('.').at(-1) : null}</dt><dd>
+        {Object.hasOwn(field, 'previous') && <span className="text-muted-foreground">{field.previous === null ? t('chat.tools.notSet') : settingValueText(field.previous)} → </span>}{returned !== undefined && <span className="whitespace-pre-wrap break-words">{settingValueText(returned)}</span>}
         {typeof field.status === 'string' && <span className={field.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'}>{toolValueLabel(field.status, t)}</span>}
         {field.isSet === false && <span className="text-muted-foreground">{t('chat.tools.notSet')}</span>}
         {typeof field.error === 'string' && <p className="text-destructive">{field.error}</p>}
       </dd></div>;
     })}</dl>;
     const action = toolRecord(data.operation);
+    const settingsTitle = (id: string, status: unknown) => {
+      const entry = getSettingsCatalogEntry(id), page = entry?.ui?.page;
+      return <p className="typography-meta">{entry?.ui?.titleKey ? t(entry.ui.titleKey as I18nKey) : id} · {toolValueLabel(status, t)}
+        {page && <button type="button" className="ml-2 text-muted-foreground hover:underline" onClick={() => { useUIStore.getState().setSettingsPage(page); useUIStore.getState().setSettingsDialogOpen(true); }}>{t('mobile.nav.settings')}</button>}
+      </p>;
+    };
+    const rootId = toolText(data.id) || toolText(toolRecord(call.arguments).id);
     return <div className="tool-settings-changes">
-      {fields.length > 0 && fieldList(fields, effective)}
-      {items.map((item, index) => <div key={toolText(item.id) || index}><p className="typography-meta">{toolText(item.id)} · {toolText(item.status)}</p>
+      {fields.length > 0 && <div>{rootId && settingsTitle(rootId, data.status)}{fieldList(fields, effective)}</div>}
+      {items.map((item, index) => <div key={toolText(item.id) || index}>{settingsTitle(toolText(item.id), item.status)}
         {fieldList(records(item.fields), toolRecord(item.effective))}
         {Boolean(item.scope || item.appliedAt) && <p className="typography-micro text-muted-foreground">{toolText(item.scope)} · {toolText(item.appliedAt)}</p>}
         {typeof item.error === 'string' && <p className="text-destructive">{item.error}</p>}</div>)}

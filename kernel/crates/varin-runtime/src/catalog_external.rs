@@ -1309,6 +1309,9 @@ impl Catalog {
                 if old == "preparing" && status == "running" {
                     if let Some(reason)=followups::external::dispatch_hold(&tx,&t)? { return Err(RuntimeError::Conflict(reason)); }
                 }
+                if old == "preparing" && status == "running" {
+                    event(&tx,&turn_id,0,"external.execution_activity",json!({"atMs":now(),"kind":"turn_started"}))?;
+                }
                 t["status"] = json!(status);
                 t["updatedAt"] = json!(now());
                 if let Some(n) = native_id {
@@ -1357,6 +1360,10 @@ impl Catalog {
                     return Err(RuntimeError::Conflict(
                         "external item belongs to a settled or stale turn".into(),
                     ));
+                }
+                if content["kind"] == "tool" {
+                    let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM external_items WHERE turn_id=?1 AND native_id=?2)",params![turn_id,item_id],|row|row.get(0))?;
+                    if !exists { event(&tx,&turn_id,0,"external.execution_activity",json!({"atMs":now(),"kind":"tool_invoked"}))?; }
                 }
                 tx.execute("INSERT INTO external_items(id,conversation_id,turn_id,native_id,body,kind,tool_status) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(turn_id,native_id) DO UPDATE SET body=excluded.body,kind=excluded.kind,tool_status=excluded.tool_status",params![format!("{turn_id}:{item_id}"),id,turn_id,item_id,encode(&p.body.unwrap())?,content["kind"].as_str(),content["tool"]["status"].as_str()])?;
                 touch(&tx, &mut v)?;

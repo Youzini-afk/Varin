@@ -6,7 +6,7 @@ use crate::execution::{Content, ConversationItem, Provenance};
 /// receives it. Work in a Bot's own family returns to the session that owns that family;
 /// followed ordinary conversations report to the Bot's primary session. A session never
 /// receives a copy of its own activity.
-fn targets(tx: &Transaction<'_>, thread_id: &str, branch_id: &str) -> Result<Vec<(String, String)>> {
+pub(super) fn targets(tx: &Connection, thread_id: &str, branch_id: &str) -> Result<Vec<(String, String)>> {
     let mut targets = std::collections::BTreeMap::new();
     for bot in super::bot_work::followers(tx, thread_id, branch_id)? {
         let entry = super::bot_work::entry(tx, &bot)?;
@@ -79,6 +79,17 @@ pub(super) fn external_report(
     }
     Ok(())
 }
+pub(super) fn attention(tx: &Transaction<'_>, run: &Run, reason: &str, code: Option<&str>, activity_cursor: Option<u64>, at: u64) -> Result<()> {
+    for (bot, target) in targets(tx, &run.thread_id, &run.branch_id)? {
+        event(tx,"bot-work-pending",run.revision,"bot.work_pending",json!({
+            "kind":"execution_attention","botId":bot,"targetThreadId":target,
+            "targetBranchId":super::threads::branch(tx,&target)?,"sourceThreadId":run.thread_id,
+            "sourceBranchId":run.branch_id,"sourceRunId":run.id,"reason":reason,"code":code,
+            "state":run.state,"activityCursor":activity_cursor,"atMs":at
+        }))?;
+    }
+    Ok(())
+}
 pub(super) fn completed(tx: &Transaction<'_>, run: &Run) -> Result<()> {
     super::bot_reports::publish_run_pending(tx, run)?;
     let owner = super::bot::thread_bot(tx, &run.thread_id)?;
@@ -109,12 +120,36 @@ fn suppressed(db: &Connection, cursor: u64, reason: &str) -> Result<()> {
     Ok(())
 }
 fn readable(db: &Connection, data: &Value) -> Result<bool> {
-    if !matches!(data["kind"].as_str(), Some("user_input" | "run_report" | "workspace_change" | "history_changed")) {
+    if data["reason"] == "inactivity" || data["kind"] == "external_attention" {
+        let disabled: bool=db.query_row("SELECT coalesce((SELECT json_extract(data,'$.minutes')=0 FROM events WHERE subject='bot-inactivity' AND kind='bot.inactivity_configured' ORDER BY cursor DESC LIMIT 1),0)",[],|row|row.get(0))?;
+        if disabled {return Ok(false);}
+    }
+    if data["kind"] == "external_attention" {
+        let child: super::external_children::ExternalChild = record(db,"external_children",data["operationId"].as_str().unwrap_or_default())?;
+        if child.report.is_some() || child.cancel_requested { return Ok(false); }
+        let parent: Run=record(db,"runs",&child.parent_run_id)?;
+        if parent.cancel_requested || parent.state==RunState::Cancelled { return Ok(false); }
+        let turn: Value=record(db,"external_turns",child.turn_id.as_deref().unwrap_or_default())?;
+        if turn["status"]!="running" {return Ok(false);}
+        let latest:u64=db.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='external.execution_activity'",[child.turn_id.as_deref().unwrap_or_default()],|row|read_number(row,0))?;
+        return Ok(data["activityCursor"].as_u64()==Some(latest));
+    }
+    if !matches!(data["kind"].as_str(), Some("user_input" | "run_report" | "workspace_change" | "history_changed" | "execution_attention")) {
         return Ok(true);
     }
     let source = data["sourceThreadId"].as_str().unwrap_or_default();
     let branch = data["sourceBranchId"].as_str().unwrap_or_default();
     let target = data["targetThreadId"].as_str().unwrap_or_default();
+    if data["kind"] == "execution_attention" {
+        let run: Run = record(db,"runs",data["sourceRunId"].as_str().unwrap_or_default())?;
+        if run.state.terminal() || run.cancel_requested { return Ok(false); }
+        if data["reason"] == "interrupted" && run.state != RunState::Waiting { return Ok(false); }
+        if data["reason"] == "inactivity" {
+            if !matches!(run.state,RunState::Generating|RunState::Executing) { return Ok(false); }
+            let latest: u64 = db.query_row("SELECT coalesce(max(cursor),0) FROM events WHERE subject=?1 AND kind='execution.committed' AND json_extract(data,'$.kind') IN ('model_dispatched','tool_dispatched')",[&run.id],|row|read_number(row,0))?;
+            if data["activityCursor"].as_u64() != Some(latest) { return Ok(false); }
+        }
+    }
     let available: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM threads t JOIN branches b ON b.thread_id=t.id WHERE t.id=?1 AND t.deleted_at_ms IS NULL AND b.id=?2)", params![source,branch], |row| row.get(0))?;
     Ok(available
         && (super::scheduling::thread_family(db, source)?
@@ -177,6 +212,24 @@ pub fn deliver(owner: &std::sync::Mutex<Catalog>) -> Result<()> {
                 // Protect captured source bodies through preparation and queue publication.
                 let publication = content.begin_publication();
                 match data["kind"].as_str() {
+                    Some("external_attention") => {
+                        let child = db.external_child(data["operationId"].as_str().unwrap_or_default())?.ok_or_else(||RuntimeError::NotFound("External work missing".into()))?;
+                        let reference=db.execution_reference(&child.operation_id)?;
+                        let at:u64=db.db.query_row("SELECT json_extract(data,'$.atMs') FROM events WHERE cursor=?1",[sql_number(data["activityCursor"].as_u64().unwrap_or_default())?],|row|read_number(row,0))?;
+                        let seconds=data["atMs"].as_u64().unwrap_or(at).saturating_sub(at)/1000;
+                        (content,publication,epoch,Either::Attention(format!("Work {} [{}], execution {} has had no new observed turn start or tool invocation for {seconds} seconds. The external Harness still records this turn as running. Inspect its original execution and decide how to proceed.",child.name,reference.agent_id,reference.reference)),false)
+                    }
+                    Some("execution_attention") => {
+                        let run = db.run(data["sourceRunId"].as_str().unwrap_or_default())?;
+                        let reference = db.execution_reference(&run.id)?;
+                        let name: String = db.db.query_row("SELECT title FROM threads WHERE id=?1",[&run.thread_id],|row|row.get(0))?;
+                        let reason = if data["reason"] == "inactivity" {
+                            let at: u64 = db.db.query_row("SELECT json_extract(data,'$.atMs') FROM events WHERE cursor=?1",[sql_number(data["activityCursor"].as_u64().unwrap_or_default())?],|row|read_number(row,0))?;
+                            format!("No new model request or tool invocation for {} seconds.",data["atMs"].as_u64().unwrap_or(at).saturating_sub(at)/1000)
+                        } else { format!("Execution was interrupted and needs recovery. Cause: {}.",data["code"].as_str().unwrap_or("host_restart")) };
+                        let text = format!("Work {name} [{}], execution {} needs your attention. {reason} Recorded execution state: {}. Inspect its original execution and decide how to proceed.",reference.agent_id,reference.reference,data["state"]);
+                        (content,publication,epoch,Either::Attention(text),false)
+                    }
                     Some("history_changed") => (content, publication, epoch, Either::Navigation(data["navigation"].clone()), false),
                     Some("workspace_change") => {
                         let id = data["observationId"].as_str().unwrap_or_default();
@@ -278,6 +331,7 @@ pub fn deliver(owner: &std::sync::Mutex<Catalog>) -> Result<()> {
             let mut report_attachments=Vec::new();
             let mut report_dependencies=Vec::new();
             let text=match body {
+            Either::Attention(text) => { model_data=Some(json!({"kind":"work_attention"})); text },
             Either::Navigation(receipt) => format!("The user changed the original task's active history through recovery/navigation. Previous reports describe their original work; read the current source before continuing. Original navigation receipt: {}", serde_json::to_string(&receipt)?),
             Either::Observation(reference) => {
                 let (value, _) = content.load_history_payload(&reference)?;
@@ -463,6 +517,7 @@ pub fn deliver(owner: &std::sync::Mutex<Catalog>) -> Result<()> {
     failure.map_or(Ok(()), Err)
 }
 enum Either {
+    Attention(String),
     Navigation(Value),
     Observation(Value),
     User(HistoryItem),

@@ -736,6 +736,7 @@ export interface SettingsPayload {
   recoveryPreference?: 'conversation' | 'both' | 'ask';
   followUpBehavior?: 'steer' | 'queue';
   botFollowUpBehavior?: 'steer' | 'queue';
+  botTaskInactivityMinutes?: number;
   gitmojiEnabled?: boolean;
   inputSpellcheckEnabled?: boolean;
   showToolFileIcons?: boolean;

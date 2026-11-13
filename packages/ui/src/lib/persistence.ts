@@ -1080,6 +1080,7 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (isFollowUpBehavior(candidate.followUpBehavior)) {
     result.followUpBehavior = candidate.followUpBehavior;
   }
+  if (typeof candidate.botTaskInactivityMinutes === "number") result.botTaskInactivityMinutes = candidate.botTaskInactivityMinutes;
   if (isFollowUpBehavior(candidate.botFollowUpBehavior)) {
     result.botFollowUpBehavior = candidate.botFollowUpBehavior;
   }
@@ -1400,7 +1401,7 @@ const ensureSettingsRuntimeLifecycle = (): void => {
   });
 };
 
-const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Promise<DesktopSettings | null> => {
+export const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Promise<DesktopSettings | null> => {
   ensureSettingsRuntimeLifecycle();
   const epoch = _settingsCacheEpoch;
   const isCurrentFetch = () => epoch === _settingsCacheEpoch && isSettingsRuntimeContextCurrent(context);

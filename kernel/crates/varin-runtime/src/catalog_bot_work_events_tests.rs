@@ -96,3 +96,37 @@ fn followed_native_report_is_bounded_stable_and_reads_its_original_answer() {
     deliver(&owner).unwrap();
     assert_eq!(report_output(&owner.lock().unwrap()).1, output);
 }
+
+
+#[test]
+fn bot_attention_inactivity_is_configurable_deduplicated_and_rearmed_by_real_activity() {
+    let fixture=Fixture::new(); let mut db=fixture.open(); follow(&mut db);
+    let _bot=start(&mut db,"bot","bot-main"); let work=start(&mut db,"work","work-main");
+    db.configure_bot_inactivity(20).unwrap();
+    for state in [RunState::Runnable,RunState::Generating] { db.commit_execution(&work.run_id,db.epoch(),&crate::execution::ExecutionRecord::StateChanged{state,waiting_on:None}).unwrap(); }
+    let activity=|db:&mut Catalog| {let tx=db.db.transaction().unwrap(); event(&tx,&work.run_id,1,"execution.committed",json!({"kind":"model_dispatched","atMs":observations::wall_time_ms().unwrap()})).unwrap();tx.commit().unwrap();};
+    activity(&mut db);
+    let due=db.nearest_bot_inactivity_deadline().unwrap().unwrap();
+    db.reconcile_bot_inactivity_at(due-1).unwrap();
+    let count=|db:&Catalog| db.db.query_row("SELECT count(*) FROM events WHERE kind='bot.work_pending' AND json_extract(data,'$.kind')='execution_attention'",[],|row|row.get::<_,i64>(0)).unwrap();
+    assert_eq!(count(&db),0);
+    db.reconcile_bot_inactivity_at(due).unwrap(); db.reconcile_bot_inactivity_at(due+1).unwrap();
+    assert_eq!(count(&db),1); assert_eq!(db.nearest_bot_inactivity_deadline().unwrap(),None);
+    let owner=std::sync::Mutex::new(db); deliver(&owner).unwrap(); deliver(&owner).unwrap();
+    let mut db=owner.into_inner().unwrap();
+    let delivered:i64=db.db.query_row("SELECT count(*) FROM input_queue q JOIN events e ON q.id='bot-work-event:'||e.cursor WHERE json_extract(e.data,'$.kind')='execution_attention'",[],|row|row.get(0)).unwrap(); assert_eq!(delivered,1);
+    activity(&mut db); assert!(db.nearest_bot_inactivity_deadline().unwrap().is_some());
+    db.configure_bot_inactivity(0).unwrap(); assert_eq!(db.nearest_bot_inactivity_deadline().unwrap(),None);
+}
+
+#[test]
+fn bot_attention_restart_reports_interruption_without_completing_the_original_work() {
+    let fixture=Fixture::new(); let mut db=fixture.open(); follow(&mut db);
+    let _bot=start(&mut db,"bot","bot-main"); let work=start(&mut db,"work","work-main");
+    for state in [RunState::Runnable,RunState::Generating] { db.commit_execution(&work.run_id,db.epoch(),&crate::execution::ExecutionRecord::StateChanged{state,waiting_on:None}).unwrap(); }
+    drop(db); let db=fixture.open();
+    assert_eq!(db.run(&work.run_id).unwrap().state,RunState::Waiting);
+    let owner=std::sync::Mutex::new(db); deliver(&owner).unwrap(); deliver(&owner).unwrap();
+    let db=owner.into_inner().unwrap();
+    let count:i64=db.db.query_row("SELECT count(*) FROM input_queue q JOIN events e ON q.id='bot-work-event:'||e.cursor WHERE json_extract(e.data,'$.reason')='interrupted'",[],|row|row.get(0)).unwrap(); assert_eq!(count,1);
+}

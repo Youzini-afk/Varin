@@ -17,7 +17,7 @@ function NeedRow({ need }: { need: BotNeed }) {
   const focused = model.focus?.tab === 'overview' && model.focus.id === need.key;
   const flash = useFlash(focused, model.focus?.token), ref = React.useRef<HTMLButtonElement>(null);
   useScrollIntoFocus(ref, focused, model.focus?.token);
-  return <button ref={ref} type="button" className={`bot-need ${flash ?? ''}`} onClick={() => model.openNeed(need)}><Icon name="question" className="size-4 shrink-0" /><span className="min-w-0 flex-1"><b>{need.name}</b><span className="block typography-meta">{t(need.kind === 'permission' ? 'bot.overview.needPermission' : 'bot.overview.needQuestion')}</span></span><Icon name="arrow-right-s" className="size-4" /></button>;
+  return <button ref={ref} type="button" className={`bot-need ${flash ?? ''}`} onClick={() => model.openNeed(need)}><Icon name="question" className="size-4 shrink-0" /><span className="min-w-0 flex-1"><b>{need.name}</b><span className="block typography-meta line-clamp-2" title={need.preview}>{need.preview || t(need.kind === 'permission' ? 'bot.overview.needPermission' : 'bot.overview.needQuestion')}</span></span><Icon name="arrow-right-s" className="size-4" /></button>;
 }
 
 function FollowingRow({ item, showSession }: { item: BotWorkView; showSession: boolean }) {

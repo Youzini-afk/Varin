@@ -912,6 +912,12 @@ const CATALOG_ENTRIES: readonly SettingsCatalogEntry[] = [
       keywords: ['follow up', 'queue', 'steer', 'send immediately'] },
   },
   {
+    id: 'chat.bot-task-inactivity', category: 'chat', owner: 'app',
+    field: { path: 'botTaskInactivityMinutes', kind: 'number', min: 0, integer: true, default: 20, unit: 'min' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.chat.botInactivity', descriptionKey: 'settings.chat.botInactivityHint', keywords: ['bot', 'task', 'inactivity', 'watchdog'] },
+  },
+  {
     id: 'chat.bot-follow-up-behavior', category: 'chat', owner: 'app',
     field: { path: 'botFollowUpBehavior', kind: 'enum', options: [{ value: 'steer' }, { value: 'queue' }] },
     apply: 'immediate',

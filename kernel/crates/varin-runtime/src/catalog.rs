@@ -229,6 +229,9 @@ fn initialize_metadata(
     tx.execute_batch("CREATE INDEX IF NOT EXISTS bot_matter_revisions ON events(subject,json_extract(data,'$.id'),cursor DESC) WHERE kind='bot.matter.updated'")?;
     tx.execute_batch("CREATE INDEX IF NOT EXISTS deleted_conversation_branches ON events(subject) WHERE kind='branch.deleted'")?;
     tx.execute_batch("CREATE INDEX IF NOT EXISTS bot_work_changes ON events(json_extract(data,'$.changeId'),json_extract(data,'$.targetThreadId')) WHERE kind='bot.work_pending'")?;
+    tx.execute_batch("CREATE INDEX IF NOT EXISTS bot_inactivity_runs ON runs(json_extract(body,'$.state')) WHERE json_extract(body,'$.cancel_requested')=0;
+        CREATE INDEX IF NOT EXISTS bot_attention_activity ON events(coalesce(json_extract(data,'$.sourceRunId'),json_extract(data,'$.operationId')),json_extract(data,'$.activityCursor')) WHERE kind='bot.work_pending';
+        CREATE INDEX IF NOT EXISTS bot_request_activity ON events(subject,cursor) WHERE kind='execution.committed' AND json_extract(data,'$.kind') IN ('model_dispatched','tool_dispatched');")?;
     // Derived lookups for the attention read: only unsettled Runs and operations are indexed, so
     // the read does not scan retained history. Their predicates match attention::OPEN_*.
     tx.execute_batch("CREATE INDEX IF NOT EXISTS attention_open_runs ON runs(branch_id) WHERE json_extract(body,'$.state') NOT IN ('completed','failed','cancelled');
@@ -1539,6 +1542,7 @@ impl Catalog {
                         params![key, run.id, encode(&wait)?],
                     )?;
                     run.waiting_on = Some(key);
+                    bot_work_events::attention(&tx,&run,"interrupted",Some("host_restart"),None,observations::wall_time_ms()?)?;
                 }
                 put(&tx, "runs", &run.id, &run)?;
                 event(
@@ -1966,6 +1970,8 @@ mod bot_reports;
 pub mod bot_work;
 #[path = "catalog_bot_work_events.rs"]
 mod bot_work_events;
+#[path = "catalog_bot_watchdog.rs"]
+mod bot_watchdog;
 #[path = "catalog_bot_activity.rs"]
 pub mod bot_activity;
 #[path = "catalog_background.rs"]

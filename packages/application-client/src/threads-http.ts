@@ -180,6 +180,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
       get: (identity, followupId, signal) => post('followup/get', { ...identity, followupId }, signal),
       occurrences: (identity, followupId, after, signal) => post('followup/occurrences', { ...identity, followupId, ...(after === undefined ? {} : { after }) }, signal),
       occurrence: (identity, followupId, occurrenceId, signal) => post('followup/occurrence', { ...identity, followupId, occurrenceId }, signal),
+      update: input => post('followup/update', input),
       control: input => post('followup/control', input),
     },
     goals: {

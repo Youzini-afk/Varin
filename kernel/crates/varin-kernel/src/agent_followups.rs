@@ -12,6 +12,13 @@ pub(super) fn execute(
         return Err(KernelError::Cancelled);
     }
     match method {
+        "runtime.followup.update" => {
+            let p: FollowupUpdateParams = serde_json::from_value(params)?;
+            let capture = runtime.catalog().lock().map_err(|_|KernelError::Storage("Catalog unavailable".into()))?.prepare_work_followup_edit(&p.followup_id, p.expected_revision.try_into().map_err(|_|KernelError::Protocol("Invalid revision".into()))?,p.instruction).map_err(domain)?;
+            let prepared = capture.load().map_err(domain)?;
+            let result = runtime.catalog().lock().map_err(|_|KernelError::Storage("Catalog unavailable".into()))?.edit_work_followup(prepared, p.at_ms.map(u64::try_from).transpose().map_err(|_|KernelError::Protocol("Invalid time".into()))?,p.file_condition).map_err(domain)?;
+            Ok(serde_json::to_value(result)?)
+        },
         "runtime.followup.eventAttachment.read" => {
             let input = serde_json::from_value(params)?;
             let prepared = runtime

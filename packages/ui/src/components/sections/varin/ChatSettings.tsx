@@ -1,4 +1,5 @@
 import React from 'react';
+import { BotInactivitySettings } from './BotInactivitySettings';
 import { useShallow } from 'zustand/react/shallow';
 import { useUIStore } from '@/stores/useUIStore';
 import { usePreferencesStore } from '@/stores/usePreferencesStore';
@@ -117,6 +118,7 @@ export const ChatSettings: React.FC = () => {
     </div>
     <div data-preview-scene="input">
     <SettingsDisclosure title={t('settings.chat.input')} settingsItem="chat.composer">
+      <BotInactivitySettings />
       <SettingsFieldRow settingsItem="chat.bot-follow-up-behavior" label={t('settings.varin.visual.section.botFollowUpBehavior')}
         info={t('settings.varin.visual.field.botFollowUpBehaviorDescription')}>
         <SettingsChipGroup aria-label={t('settings.varin.visual.section.botFollowUpBehavior')} value={botFollowUpBehavior} onChange={setBotFollowUpBehavior}

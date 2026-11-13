@@ -432,6 +432,7 @@ export interface ThreadResourcesAPI {
 }
 /** Explicit follow-up authorization; occurrences are delivered through the original Run owner. */
 export interface ThreadFollowupsAPI {
+  update(input: ThreadIdentity & import('@varin/protocol').FollowupUpdateParams): Promise<Followup>;
   /** Accepted family Jobs; sourceRunId is target attribution, never the registration source. */
   jobSources(identity: ThreadIdentity, runId: string, signal?: AbortSignal): Promise<HostJobSource[]>;
   register(input: ThreadIdentity & FollowupRegisterParams): Promise<Followup>;

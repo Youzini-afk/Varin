@@ -69,6 +69,11 @@ export async function getThreadFollowupOccurrence(owner: FollowupOwner,
   return owner.runtime.followupOccurrence(followupId, occurrenceId, signal);
 }
 
+export async function updateThreadFollowup(owner: FollowupOwner, input: Parameters<ThreadFollowupsAPI['update']>[0], signal?: AbortSignal) {
+  await getThreadFollowup(owner,input,input.followupId,signal);
+  return owner.runtime.updateFollowup({ followupId:input.followupId,expectedRevision:input.expectedRevision,instruction:input.instruction,...(input.atMs === undefined ? {} : {atMs:input.atMs}),...(input.fileCondition ? {fileCondition:input.fileCondition} : {}) },signal);
+}
+
 export async function controlThreadFollowup(owner: FollowupOwner,
   input: Parameters<ThreadFollowupsAPI['control']>[0], signal?: AbortSignal) {
   const followups = await manageableFollowups(owner, input, signal);

@@ -225,6 +225,7 @@ export interface SettingsItemResult {
 }
 
 export interface SettingsFieldResult {
+  previous?: unknown;
   path: string;
   status: "applied" | "failed";
   error?: string;

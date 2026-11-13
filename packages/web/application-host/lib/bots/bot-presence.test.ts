@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BotSummary } from '@varin/application-client';
 import type { BotScopeView } from '../kernel/protocol.generated.js';
-import { createBotPresencePublisher, projectBotPresence } from './bot-presence.js';
+import { createBotPresencePublisher, populateNeedPreviews, projectBotPresence } from './bot-presence.js';
 
 const bot = { id: 'bot', name: 'Muse', archived: false } as BotSummary;
 const thread = (id: string, parent: string | null, run: Record<string, unknown> | null, extra: Record<string, unknown> = {}) => ({
@@ -56,4 +56,12 @@ describe('Bot presence', () => {
     expect(publish.mock.calls[1]?.[0]).toMatchObject({ botId: 'bot', needs: [{ kind: 'question', session: true, name: 'Muse' }] });
     publisher.dispose();
   });
+});
+
+
+it('projects the original pending question text and operation identity', async () => {
+  const presence=projectBotPresence(bot,scope([thread('asks','session',run('a','waiting','question:q'))]));
+  const operation={id:'q',phase:'waiting',executor:'ask_user',intent:{call:{arguments:{questions:[{id:'branch',question:'Which branch should I use?',options:[]}]}}}} as unknown as import('@varin/protocol').Operation;
+  const result=await populateNeedPreviews(presence,async () => [operation]);
+  expect(result.needs[0]).toMatchObject({operationId:'q',preview:'Which branch should I use?'});
 });

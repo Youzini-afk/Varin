@@ -948,6 +948,9 @@ export class AgentRuntimeClient {
   receivePluginEvents(input: CalendarProtocol.FollowupEventReceiveParams, signal?: AbortSignal): Promise<CalendarProtocol.FollowupEventReceiveReceipt> {
     return this.kernel.agentRuntimeRequest('runtime.followup.events.receive', input, signal);
   }
+  updateFollowup(input: import('@varin/protocol').FollowupUpdateParams, signal?: AbortSignal): Promise<Followup> {
+    return this.kernel.agentRuntimeRequest('runtime.followup.update',input,signal);
+  }
   registerFollowup(input: FollowupRegisterParams, signal?: AbortSignal): Promise<Followup> {
     return registerUserFollowup(this.kernel, this, input, this.resolveLiveSource, signal);
   }
@@ -1053,8 +1056,8 @@ export class AgentRuntimeClient {
   botMatters(botId: string, signal?: AbortSignal, principalId?: string | null): Promise<import('./protocol.generated.js').BotMatter[]> {
     return this.kernel.agentRuntimeRequest('runtime.bot.matters.list', { botId, ...(principalId === undefined ? {} : { principalId }) }, signal);
   }
-  pendingBotWork(signal?: AbortSignal): Promise<import('./protocol.generated.js').ColdBotWork[]> {
-    return this.kernel.agentRuntimeRequest('runtime.bot.work.pending', {}, signal);
+  pendingBotWork(signal?: AbortSignal, inactivityMinutes?: number): Promise<import('./protocol.generated.js').ColdBotWork[]> {
+    return this.kernel.agentRuntimeRequest('runtime.bot.work.pending', inactivityMinutes === undefined ? {} : { inactivityMinutes }, signal);
   }
   admitBotWork(input: import('./protocol.generated.js').BotWorkAdmitParams, signal?: AbortSignal): Promise<InputSubmitReceipt> {
     return this.kernel.agentRuntimeRequest('runtime.bot.work.admit', input, signal);

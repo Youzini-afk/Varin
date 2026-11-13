@@ -77,7 +77,7 @@ pub(crate) fn drive(
         // cannot leave an elapsed deadline armed and spin this native wake source.
         let time_facts = runtime.catalog().lock().map_err(|_| ()).and_then(|mut c| {
             varin_runtime::catalog::observations::wall_time_ms()
-                .and_then(|now| c.reconcile_followup_facts_at(now))
+                .and_then(|now| { c.reconcile_bot_inactivity_at(now)?; c.reconcile_followup_facts_at(now) })
                 .map_err(|_| ())
         });
         let calendar_facts = runtime.catalog().lock().map_err(|_| ()).and_then(|mut c| {

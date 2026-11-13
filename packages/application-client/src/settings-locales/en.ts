@@ -1,5 +1,9 @@
 import { botWorkspaceEn } from './bot-workspaces.js';
 export const settingsDict = {
+  'settings.chat.botInactivity': 'Task inactivity reminder',
+  'settings.chat.botInactivityHint': 'Remind the responsible Bot when an executing task makes no new model request or tool invocation. Each inactive period sends one reminder. Set the time below or turn it off.',
+  'settings.chat.botInactivityMinutes': 'minutes',
+  'settings.chat.botInactivityError': 'Could not read or save the reminder setting.',
   "settings.plugins.previewChanged": "Application Host or installed catalog changed. Prepare a new preview before installing.",
   "settings.plugins.emptyDirectory": "This catalog has no plugins yet.",
   "settings.plugins.directoryFailed": "Catalog unavailable. Retry or use direct installation.",

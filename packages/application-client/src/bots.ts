@@ -114,6 +114,8 @@ export interface BotSession {
 
 /** Something in a Bot's execution scope that waits for the user. */
 export interface BotPresenceNeed {
+  operationId?: string;
+  preview?: string;
   identity: ThreadIdentity;
   /** The Bot's name for its own conversations; the executor's title for delegated work. */
   name: string;

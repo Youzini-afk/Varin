@@ -143,6 +143,8 @@ export function sessionViews(sessions: readonly BotSession[], threads: readonly 
 }
 
 export interface BotNeed {
+  operationId?: string;
+  preview?: string;
   key: string;
   identity: ThreadIdentity;
   name: string;

@@ -24,7 +24,7 @@ import { BotWorkStatusLabel } from './BotActivityPane';
 import { runStatus, workKey } from './botPresentation';
 
 /** A focused observation of the original work, including its original questions and permissions. */
-export function BotWorkDetail({ identity, active }: { identity: ThreadIdentity; active: boolean }) {
+export function BotWorkDetail({ identity, active, operationId, focusRevision }: { identity: ThreadIdentity; active: boolean; operationId?: string; focusRevision?: number }) {
   const { t } = useI18n();
   const model = useBotPanel(), navigation = useBotWorkspaceNavigation();
   const api = model.threads;
@@ -37,6 +37,9 @@ export function BotWorkDetail({ identity, active }: { identity: ThreadIdentity; 
   const item = model.workItems?.find(item => workKey(item.identity) === workKey(identity));
   const view = model.work.find(item => workKey(item.identity) === workKey(identity));
   const projection = React.useRef<ThreadProjection | undefined>(undefined);
+  const focusedPermission = React.useRef<HTMLDivElement>(null);
+  const requestPresent = snapshot?.operations.some(operation => operation.id === operationId) ?? false;
+  React.useEffect(() => { if (active) focusedPermission.current?.scrollIntoView({ block: 'nearest' }); }, [active, operationId, focusRevision, requestPresent]);
   React.useEffect(() => {
     if (!active || !api) return;
     const owner = new ThreadProjection(api, identity, value => { setSnapshot(value); setError(undefined); }, cause => setError(String(cause)));
@@ -82,10 +85,10 @@ export function BotWorkDetail({ identity, active }: { identity: ThreadIdentity; 
       {error && <p role="alert" className="text-destructive">{error}</p>}
       {!snapshot && !error && <p role="status">{t('common.loading')}</p>}
       {api && snapshot && <section className="bot-detail-requests">
-        {snapshot.operations.map(operation => <ThreadPermission key={operation.id} operation={operation}
+        {snapshot.operations.map(operation => <div key={operation.id} ref={operation.id === operationId ? focusedPermission : undefined}><ThreadPermission operation={operation}
           enabled={active && !busy && operation.run_id === run?.id && !run?.cancel_requested}
-          onDecide={async (permissionId, decision) => { const result = await api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }); void projection.current?.refresh(); return result; }} />)}
-        <ThreadQuestions scopeKey={draftKey} operations={snapshot.operations} enabled={operation => active && canRespondToQuestion(operation, { run, launch: snapshot.launch })}
+          onDecide={async (permissionId, decision) => { const result = await api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }); void projection.current?.refresh(); return result; }} /></div>)}
+        <ThreadQuestions revealKey={active ? (focusRevision ?? 0) + 1 : 0} revealOperationId={operationId} scopeKey={draftKey} operations={snapshot.operations} enabled={operation => active && canRespondToQuestion(operation, { run, launch: snapshot.launch })}
           onRead={operation => api.operation(operation.id)} onCancel={operation => api.cancelOperation(operation.id)}
           onAnswer={async (operation, answers) => { const result = await api.answerQuestion({ ...identity, operationId: operation.id, answers }); void projection.current?.refresh(); return result; }} />
       </section>}

@@ -100,6 +100,7 @@ pub(crate) const KERNEL_READ_METHODS: &[&str] = &[
     "runtime.child.inspect",
 ];
 pub(crate) const KERNEL_BODY_METHODS: &[&str] = &[
+    "runtime.followup.update",
     "runtime.thread.create",
     "runtime.input.submit",
     "runtime.input.receipt",
@@ -816,7 +817,9 @@ pub(crate) struct BotScopeSuspension {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct BotWorkPendingParams {}
+pub(crate) struct BotWorkPendingParams {
+    pub(crate) inactivity_minutes: Option<i64>,
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1589,6 +1592,16 @@ pub(crate) struct FollowupOccurrencesParams {
 pub(crate) struct FollowupOccurrenceGetParams {
     pub(crate) followup_id: String,
     pub(crate) occurrence_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FollowupUpdateParams {
+    pub(crate) followup_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) instruction: String,
+    pub(crate) at_ms: Option<i64>,
+    pub(crate) file_condition: Option<varin_runtime::catalog::followups::FileCondition>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -5479,6 +5492,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.followup.update" => serde_json::from_value::<FollowupUpdateParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.followup.control" => {
             serde_json::from_value::<FollowupControlParams>(params.clone())
                 .map(|_| ())

@@ -1493,6 +1493,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const botPresence = createBotPresencePublisher({
     bots: () => botService.list(),
     scope: botId => agentRuntime.botScope(botId),
+    operations: (thread, branch) => agentRuntime.activeOperations(thread, branch),
     publish: presence => broadcastGlobalUiEvent?.({ type: 'varin:bot-presence', properties: { botId: presence.botId } }),
     onError: () => console.error('[Bots] Bot presence projection is unavailable'),
   });
@@ -2477,6 +2478,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   registerResourceFileRoutes(app, { local: resourceFiles, remote: owner => managedRemoteTargets!.source(owner), runtime: agentRuntime, attachments: threadAttachments, requireAuth: uiAuthController.requireAuth });
   threads.bindMaterials(webRuntimeOwner.current.inputMaterials);
   threads.bindAttachments(threadAttachments);
+  let botInactivityMinutes = Number((await readSettingsFromDisk()).botTaskInactivityMinutes ?? 20);
+  threads.bindBotInactivityMinutes(async () => botInactivityMinutes);
+  settingsRuntime.subscribe(settings => {
+    const minutes = Number(settings.botTaskInactivityMinutes ?? 20);
+    if (minutes === botInactivityMinutes) return;
+    botInactivityMinutes = minutes;
+    void agentRuntime.pendingBotWork(undefined, minutes).catch(error => console.error('[Bots] Inactivity configuration failed', error));
+  });
   threads.bindMessageTime(async () => {
     const settings = await modelsService.readGlobalInferenceSettings();
     return resolveMessageTimeSettings((settings.harness as { context?: { messageTime?: unknown } } | undefined)?.context?.messageTime);

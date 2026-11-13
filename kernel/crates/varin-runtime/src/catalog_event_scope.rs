@@ -26,6 +26,8 @@ pub const GLOBAL_KINDS: &[&str] = &[
     "bot.execution_gate_published",
     "bot.matter.updated",
     "bot.work_pending",
+    "bot.inactivity_configured",
+    "external.execution_activity",
     "followup.event_received",
     "followup.source_route_created",
     "followup.source_route_changed",
