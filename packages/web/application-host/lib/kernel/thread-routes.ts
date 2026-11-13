@@ -1,3 +1,4 @@
+import { ThreadEventStream } from './thread-event-stream.js';
 import { parseConversationOrganizationPlacement } from '@varin/application-client';
 import { currentRequestPrincipal, assertRequestAccess } from './request-principal.js';
 import { parseAttachmentSelections, THINKING_LEVELS, isWorkFocusId } from '@varin/protocol';
@@ -774,12 +775,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     if (response.destroyed) return;
     response.status(200).set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     response.flushHeaders();
-    const close = adapter.observe(cursor, event => {
-      const writable = response.write(`data: ${JSON.stringify(event)}\n\n`);
-      // A slow consumer reconnects from its durable cursor instead of retaining unbounded buffers.
-      if (!writable) response.end();
-      return writable;
-    }, () => response.end(), { ...(threadIds === undefined ? {} : { threadIds }), ...(observationId === undefined ? {} : { observationId }) });
-    response.once('close', close);
+    const stream = new ThreadEventStream(response, cursor);
+    const close = adapter.observe(cursor, stream.send, () => stream.end(), { ...(threadIds === undefined ? {} : { threadIds }), ...(observationId === undefined ? {} : { observationId }) });
+    if (response.destroyed || response.writableEnded) close();
+    else response.once('close', close);
   });
 }

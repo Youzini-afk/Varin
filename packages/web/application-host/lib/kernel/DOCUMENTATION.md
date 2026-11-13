@@ -150,6 +150,10 @@ which caches immutable ancestry/composition while refreshing mutable request usa
 
 [event-hub.ts](event-hub.ts) shares the native durable reader. Subscribers have independent cursor,
 principal filtering and progress interests; lagging readers fall back to durable pagination, not dropped events.
+The HTTP event writer treats a socket high-water mark as backpressure, retaining subsequent frames in a
+per-observer bounded FIFO until `drain`. The already accepted frame is never replayed. An observer that
+exceeds its buffer budget receives an explicit `slow-consumer` resync from its last accepted durable
+cursor before closing; disconnects release the queue without affecting other observers.
 An observation ID is scoped to its principal, so mutable interests cannot alter another client's subscription.
 The [client bus](../../../../application-client/src/thread-observation.ts) owns reconnect and local filtering.
 
