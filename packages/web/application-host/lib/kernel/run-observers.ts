@@ -339,7 +339,8 @@ export class RunObservers {
         const pin = subscription.binding.pin();
         try {
           const delivery = parseVarinRunActivityDelivery({ subscriptionId: subscription.id, threadId: subscription.threadId,
-            deliveryId: randomUUID(), fact });
+            deliveryId: randomUUID(), fact: { cursor: fact.cursor, subject: fact.subject,
+              revision: fact.revision, kind: fact.kind, data: fact.data } });
           await this.runtime.observerDelivery(subscription.id, subscription.threadId, fact.cursor, 'selected', signal);
           await this.runtime.observerDelivery(subscription.id, subscription.threadId, fact.cursor, 'sent', signal);
           const acknowledgement = parseVarinRunActivityAcknowledgement(await pin.invoke('observe', [delivery as unknown as JsonValue], signal));

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'vitest';
+import { test, vi } from 'vitest';
 import {
   HostServiceRegistry, type ApplicationExtensionRuntime, type HostServiceBinding, type HostServiceHandler,
   type HostServiceOwnerIdentity, type HostServicePreparationOptions,
@@ -147,7 +147,7 @@ test('a cancelled budget decision releases its consumer leases while the origina
   await f.services.retireOwner(f.current.owner);
 });
 
-function observerRuntime() {
+function observerRuntime(data: Record<string, unknown> = { state: 'accepted' }) {
   const phases: string[] = [];
   let supplied = false;
   const runtime = {
@@ -156,7 +156,8 @@ function observerRuntime() {
     observerEvents: async () => {
       if (supplied) return [];
       supplied = true;
-      return [{ cursor: 1, subject: 'run', revision: 1, kind: 'run.accepted', data: { state: 'accepted' } }];
+      return [{ cursor: 1, subject: 'run', revision: 1, kind: 'run.accepted',
+        thread_id: 'thread', branch_id: 'branch', data }];
     },
     observerDelivery: async (_id: string, _thread: string, _cursor: number, phase: string) => { phases.push(phase); },
   } as unknown as AgentRuntimeClient;
@@ -213,6 +214,37 @@ test('observer stop releases a binding that completes after its selection was ab
   assert.equal(signal?.aborted, true);
   finish.resolve();
   await released.promise;
+  assert.equal(f.held.size, 0);
+  assert.equal(f.services.ownerInUse(f.current.owner), false);
+});
+
+
+test.each([false, true])('observer projects runtime scope without weakening payload validation (unknown field: %s)', async unknownField => {
+  const f = fixture({ id: 'varin.run.activity', version: 1 });
+  const deliveries: VarinRunActivityDelivery[] = [];
+  await f.publish('observer', async (_method, args) => {
+    const delivery = args[0] as unknown as VarinRunActivityDelivery;
+    deliveries.push(delivery);
+    return { subscriptionId: delivery.subscriptionId, deliveryId: delivery.deliveryId, cursor: delivery.fact.cursor };
+  }).finalized;
+  const source = observerRuntime(unknownField ? { state: 'accepted', transcript: 'must not be disclosed' } : { state: 'accepted' });
+  const errors: unknown[] = [];
+  const observers = new RunObservers(source.runtime, f.runtime, (_thread, error) => errors.push(error));
+  try {
+    if (unknownField) {
+      await vi.waitFor(() => assert.equal(errors.length, 1));
+      assert.match(String(errors[0]), /Unknown Run activity field/);
+      assert.deepEqual(deliveries, []);
+      assert.deepEqual(source.phases, [], 'invalid payload is rejected before delivery or cursor acknowledgement');
+    } else {
+      await vi.waitFor(() => assert.deepEqual(source.phases, ['selected', 'sent', 'committed']));
+      assert.equal(deliveries.length, 1);
+      assert.equal(deliveries[0]!.threadId, 'thread');
+      assert.deepEqual(deliveries[0]!.fact, { cursor: 1, subject: 'run', revision: 1,
+        kind: 'run.accepted', data: { state: 'accepted' } });
+      assert.deepEqual(errors, []);
+    }
+  } finally { observers.stop(); }
   assert.equal(f.held.size, 0);
   assert.equal(f.services.ownerInUse(f.current.owner), false);
 });
