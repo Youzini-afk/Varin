@@ -54,7 +54,7 @@ export class BrowserResources {
           const [id, instanceId, pageId] = JSON.parse(key) as string[];
           if (id !== owner.browserId || pageId !== page.pageId || (page.instanceId && page.instanceId !== instanceId)) continue;
           if (Boolean(lane.ownerPaused) === page.agentPaused) continue;
-          lane.ownerPaused = page.agentPaused;
+          lane.ownerPaused = Boolean(page.agentPaused);
           lane.observationNeeded = true;
           lane.observedBy.clear();
           lane.epoch++;

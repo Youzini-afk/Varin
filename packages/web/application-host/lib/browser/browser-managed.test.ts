@@ -141,6 +141,7 @@ it('rejects unsupported file transfer and invalid methods or scope injection bef
   await expect(f.resources.use(f.binding, {}, owner => owner.readDownload('tab', 'file'))).rejects.toMatchObject({ effect: 'none' });
   expect(f.owner.readDownload).not.toHaveBeenCalled();
   for (const input of [ { ...call, method: '__proto__' }, { ...call, runId: 'local-run' },
+    { ...call, method: 'controlPage', args: ['tab', ['takeover']] },
     { ...call, method: 'act', args: ['tab', { action: 'evaluate', script: '1', unexpected: true }] },
     { ...call, method: 'open', args: [{ url: 'https://example.org', instanceId: 'forged' }] },
     { ...call, browserId: 'recursive-import' } ]) {

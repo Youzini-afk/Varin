@@ -17,6 +17,7 @@ const relative = '/browser';
 const hash = (parts: string[]) => createHash('sha256').update(JSON.stringify(parts)).digest('base64url');
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && !value.includes('\0');
+const oneOf = (value: unknown, choices: readonly string[]): value is string => typeof value === 'string' && choices.includes(value);
 const invalid = (message: string) => new BrowserExecutionError(message, 'none');
 const capabilities: BrowserResourceCapability[] = ['tabs', 'open', 'read', 'screenshot', 'act', 'upload', 'download', 'activate'];
 const methods = ['list', 'open', 'read', 'act', 'activate', 'controlPage', 'usage', 'downloads', 'readDownload', 'releaseDownload', 'upload', 'releaseThread'] as const;
@@ -48,7 +49,7 @@ function parseCall(value: unknown): Call {
     case 'act': valid = args.length === 2 && text(first) && object(second) && !('pageId' in second)
       && !('browserId' in second) && !('instanceId' in second) && !!inputValidators.get('act')?.({ ...second, pageId: first }); break;
     case 'activate': case 'usage': case 'downloads': valid = args.length === 1 && text(first); break;
-    case 'controlPage': valid = args.length === 2 && text(first) && ['takeover', 'resume', 'activate'].includes(String(second)); break;
+    case 'controlPage': valid = args.length === 2 && text(first) && oneOf(second, ['takeover', 'resume', 'activate']); break;
     case 'readDownload': case 'releaseDownload': valid = args.length === 2 && text(first) && text(second); break;
     case 'upload': valid = args.length === 3 && text(first) && text(second) && Array.isArray(third) && third.length > 0
       && third.every(file => object(file) && exact(file, ['name', 'bytesBase64']) && text(file.name) && bytes(file.bytesBase64)); break;
@@ -85,12 +86,13 @@ function supported(resource: BrowserResource, method: Method, args: unknown[]) {
 }
 function validateReceipt(value: unknown, call: Call) {
   const page = (item: unknown) => object(item) && item.browserId === call.browserId && text(item.pageId)
+    && (item.instanceId === undefined || item.instanceId === call.instanceId)
     && typeof item.title === 'string' && typeof item.url === 'string'
     && ['loading', 'canGoBack', 'canGoForward', 'retained'].every(key => typeof item[key] === 'boolean')
     && (!pageIdOf(call) || item.pageId === pageIdOf(call));
   const download = (item: unknown) => object(item) && text(item.downloadId) && item.pageId === pageIdOf(call)
     && typeof item.name === 'string' && typeof item.url === 'string' && typeof item.receivedBytes === 'number'
-    && ['progressing', 'completed', 'cancelled', 'interrupted'].includes(String(item.state));
+    && oneOf(item.state, ['progressing', 'completed', 'cancelled', 'interrupted']);
   switch (call.method) {
     case 'list': return Array.isArray(value) && value.every(page);
     case 'open': return page(value);
@@ -99,7 +101,7 @@ function validateReceipt(value: unknown, call: Call) {
       && (value.downloads === undefined || Array.isArray(value.downloads) && value.downloads.every(download));
     case 'read': return object(value) && page(value.page) && text(value.observationId) && object(value.viewport)
       && ['width', 'height', 'scale'].every(key => typeof (value.viewport as Record<string, unknown>)[key] === 'number') && Array.isArray(value.frames);
-    case 'usage': case 'controlPage': return object(value) && ['human', 'agent'].includes(String(value.controller))
+    case 'usage': case 'controlPage': return object(value) && oneOf(value.controller, ['human', 'agent'])
       && Array.isArray(value.waitingThreadIds) && value.waitingThreadIds.every(text)
       && (value.activeThreadId === undefined || text(value.activeThreadId));
     case 'downloads': return Array.isArray(value) && value.every(download);
@@ -198,7 +200,7 @@ function catalog(value: unknown): BrowserResource[] {
   const seen = new Set<string>();
   for (const item of value.resources) {
     if (!object(item) || !text(item.browserId) || seen.has(item.browserId) || !text(item.label) || !text(item.deviceName)
-      || !['disconnected', 'connecting', 'online', 'interrupted', 'ended'].includes(String(item.state))
+      || !oneOf(item.state, ['disconnected', 'connecting', 'online', 'interrupted', 'ended'])
       || item.instanceId !== undefined && !text(item.instanceId)
       || item.state === 'online' && !text(item.instanceId)
       || !Array.isArray(item.capabilities) || item.capabilities.some(capability => !capabilities.includes(capability))
