@@ -527,6 +527,8 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.browser) {
     return <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
       <BrowserResourceView key={tab.viewId} initialUrl={tab.viewState.browserUrl ?? ''} directory={workspaceRoot}
+        browserBinding={tab.viewState.browserBinding}
+        onBindingChange={browserBinding => patchEditorViewState(workspaceId, tab.viewId, { browserBinding }, { notify: true })}
         initialPosition={tab.viewState.browserPosition}
         tabID={tab.viewState.browserTabId ?? tab.viewId} onNavigate={browserUrl => patchEditorViewState(workspaceId, tab.viewId, { browserUrl }, { notify: true })} />
     </HostFrame>;

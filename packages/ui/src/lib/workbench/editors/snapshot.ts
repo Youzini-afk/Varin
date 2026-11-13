@@ -1,3 +1,4 @@
+import { restoreBrowserResourceBinding } from '@/lib/browser-resource-binding';
 import type { JsonValue } from '@varin/extension-contract';
 
 import { listEditorGroups } from './groups';
@@ -77,6 +78,8 @@ const normalizeViewState = (value: unknown, snapshotVersion: number): EditorView
   const viewState: EditorViewState = {};
   const previewScrollTop = nonNegativeNumber(value.previewScrollTop);
   if (previewScrollTop !== undefined) viewState.previewScrollTop = previewScrollTop;
+  const browserBinding = restoreBrowserResourceBinding(value.browserBinding);
+  if (browserBinding) viewState.browserBinding = browserBinding;
   if (typeof value.browserTabId === 'string') viewState.browserTabId = value.browserTabId;
   if (typeof value.browserPageId === 'string') viewState.browserPageId = value.browserPageId;
   if (typeof value.browserUrl === 'string') viewState.browserUrl = value.browserUrl;

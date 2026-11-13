@@ -136,6 +136,20 @@ describe('editor groups', () => {
   });
 });
 
+describe('browser resource snapshots', () => {
+  test('restores the original browser, instance and tab independently of the saved URL', () => {
+    const browserBinding = { browserId: 'office', instanceId: 'session-one', pageId: 'tab-one' };
+    let state = openEditor(createEmptyEditorWorkbench('ws-1', ids), {
+      resourceId: 'browser:resource', providerId: BUILTIN_EDITOR_PROVIDER_IDS.browser,
+    }, ids);
+    const opened = listEditorGroups(state.tree)[0]!.tabs[0]!;
+    state = updateEditorViewState(state, opened.viewId, { browserBinding, browserUrl: 'https://last-observed.test' });
+    const restored = restoreEditorWorkbenchSnapshot(serializeEditorWorkbenchSnapshot(state), 'ws-1');
+    if (restored.status !== 'ready') throw new Error('expected a ready snapshot');
+    expect(listEditorGroups(restored.state.tree)[0]?.tabs[0]?.viewState.browserBinding).toEqual(browserBinding);
+  });
+});
+
 describe('editor snapshot restore', () => {
   test('distinguishes missing, empty, malformed, and ready snapshots', () => {
     expect(restoreEditorWorkbenchSnapshot(null, 'ws-1').status).toBe('missing');

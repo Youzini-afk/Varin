@@ -2901,7 +2901,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   const browserImpl: ComputerService["browser"] = async (params) => {
     if (!["status", "launch", "tabs", "snapshot", "act"].includes(params.op)) throw new HarnessServiceError("invalid-params", "computer.browser requires a valid op");
     const writes = params.op === "launch" || (params.op === "act" && params.act?.kind !== "screenshot");
-    const fields = { ...(params.binary !== undefined ? { binary: params.binary } : {}),
+    const fields = { ...(params.expectedInstanceId !== undefined ? { expectedInstanceId: params.expectedInstanceId } : {}),
+      ...(params.expectedDocumentId !== undefined ? { expectedDocumentId: params.expectedDocumentId } : {}),
+      ...(params.structured !== undefined ? { structured: params.structured } : {}),
+      ...(params.screenshot !== undefined ? { screenshot: params.screenshot } : {}),
+      ...(params.binary !== undefined ? { binary: params.binary } : {}),
       ...(params.profile !== undefined ? { profile: params.profile } : {}),
       ...(params.act !== undefined ? { act: structuredClone(params.act) } : {}),
       ...(params.limit !== undefined ? { limit: params.limit } : {}) };

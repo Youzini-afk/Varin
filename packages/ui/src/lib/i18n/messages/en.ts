@@ -1,3 +1,4 @@
+import { browserResourcesEn } from './browser-resources';
 import { conversationOrganizationEn } from './conversation-organization';
 import { companionAttentionEn } from './companion-attention';
 import { browserMessages } from './browser';
@@ -15,6 +16,7 @@ import { companionLibraryMessages } from './companion-library';
 import { usageMessages } from './usage';
 import { imageAnnotationsEn } from './imageAnnotations';
 export const dict = {
+  ...browserResourcesEn,
   'files.search.incomplete': 'Some results could not be enumerated. The results below are incomplete.',
   ...conversationOrganizationEn,
   'filesView.encoding.search': 'Search encodings…',

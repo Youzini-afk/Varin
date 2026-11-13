@@ -59,6 +59,30 @@ describe('typed Host model references', () => {
     const observation = await seed('observation','host.browser',{pageId:'original-page',observationId:'original-image'});
     await expect(resolveHostToolArguments(refs,call('browser_act',{pageId:'other-page',observationId:observation,action:'click',point:{x:1,y:2}}),declaration('browser'))).rejects.toThrow('different pageId');
   });
+  it('pins resource, instance and page through observations without leaking raw binding IDs', async () => {
+    const {refs} = port();
+    const binding = {browserId:'remote:office:chrome',instanceId:'original-instance',pageId:'target-1'};
+    const raw = {binding,page:{...binding,title:'Signed-in page',url:'https://example.test/'},observationId:'native-observation'};
+    const projected = await projectHostToolData(refs,call('browser_read',{}),declaration('browser'),raw) as typeof raw;
+    expect(projected.binding).toBeUndefined(); expect(projected.page.browserId).toBeUndefined(); expect(projected.page.instanceId).toBeUndefined();
+    expect(raw.binding).toEqual(binding);
+    expect(await resolveHostToolArguments(refs,call('browser_act',{pageId:projected.observationId,action:'click',point:{x:1,y:2}}),declaration('browser')))
+      .toEqual({...binding,observationId:'native-observation',action:'click',point:{x:1,y:2}});
+    expect(await resolveHostToolArguments(refs,call('browser_read',{pageId:projected.page.pageId},'next-read'),declaration('browser'))).toEqual(binding);
+    for (const conflicting of [{browserId:'other-resource'}, {instanceId:'replacement-instance'}]) {
+      await expect(resolveHostToolArguments(refs,call('browser_act',{pageId:projected.page.pageId,...conflicting,action:'reload'},JSON.stringify(conflicting)),declaration('browser')))
+        .rejects.toThrow(`different ${Object.keys(conflicting)[0]}`);
+    }
+  });
+  it('keeps tab and download references on the resource returned by the route, not the owner-local ID', async () => {
+    const {refs} = port();
+    const binding = {browserId:'remote-browser',instanceId:'remote-instance'};
+    const raw = {binding,browserId:'owner-local',pages:[{browserId:'owner-local',pageId:'target-1'}],downloads:[{downloadId:'download',pageId:'target-1'}]};
+    const projected = await projectHostToolData(refs,call('browser_tabs',{}),declaration('browser'),raw) as typeof raw;
+    expect(projected.pages[0]!.pageId).toEqual(projected.downloads[0]!.pageId);
+    expect(await resolveHostToolArguments(refs,call('browser_files',{pageId:projected.downloads[0]!.pageId,action:'downloads'}),declaration('browser')))
+      .toEqual({...binding,pageId:'target-1',action:'downloads'});
+  });
   it('binds Computer input to the observed app/window and control epoch', async () => {
     const {refs} = port();
     const raw = {observation:{id:'native-observation',desktopId:'original-desktop',machineId:'machine',automationEpoch:'original-epoch',app:{pid:12,name:'Editor'},windowHandle:21,nativeTarget:'private-target',treeLines:['1 Button'],elements:[]}};

@@ -1,3 +1,5 @@
+import type { BrowserResourceBinding } from '@varin/protocol';
+import { ConnectedBrowserSurface } from './ConnectedBrowserPane';
 import React from 'react';
 import { DesktopBrowserPane } from './DesktopBrowserPane';
 import { isDesktopLocalOriginActive } from '@/lib/desktop';
@@ -7,7 +9,7 @@ import { VarinLogo } from '@/components/ui/VarinLogo';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
-import { useUIStore } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { registerBrowserMaterialCapture } from '@/lib/agent-editor/material-navigation';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { addThreadDraftImage } from '@/lib/agent-runtime/draftAttachments';
@@ -18,6 +20,8 @@ import { DESKTOP_BROWSER_INSPECT_SCRIPT, DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT, 
 
 type DesktopBrowserPaneProps = {
   initialUrl: string;
+  browserBinding?: BrowserResourceBinding;
+  onBindingChange?(binding?: BrowserResourceBinding): void;
   directory: string;
   tabID: string;
   onNavigate?(url: string): void;
@@ -525,5 +529,16 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
 };
 
 export function BrowserResourceView(props: DesktopBrowserPaneProps) {
-  return isElectronBrowserRuntime() ? <DesktopBrowserPane {...props} /> : <IframeBrowserPane {...props} />;
+  const storedBinding = useUIStore(state => state.contextPanelByDirectory[normalizeContextPanelDirectoryKey(props.directory)]?.tabs.find(tab => tab.id === props.tabID)?.browserBinding);
+  const binding = props.onBindingChange ? props.browserBinding : storedBinding;
+  const changeBinding = (next?: BrowserResourceBinding) => {
+    useUIStore.getState().setContextBrowserBinding(props.directory, props.tabID, next);
+    props.onBindingChange?.(next);
+  };
+  return <ConnectedBrowserSurface binding={binding} onBindingChange={changeBinding} onObservedPage={page => {
+    if (!page.url || page.url === 'about:blank') return;
+    useUIStore.getState().setContextPanelTabTargetPath(props.directory, props.tabID, page.url);
+    props.onNavigate?.(page.url);
+  }}
+    preview={isElectronBrowserRuntime() ? <DesktopBrowserPane {...props} /> : <IframeBrowserPane {...props} />} />;
 }

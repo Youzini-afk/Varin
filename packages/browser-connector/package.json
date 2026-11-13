@@ -1,0 +1,14 @@
+{
+  "name": "@varin/browser-connector",
+  "version": "0.9.46",
+  "private": true,
+  "type": "module",
+  "description": "Opt-in Chrome/Edge tab connector through the paired Application Host",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "build": "node scripts/package.mjs",
+    "type-check": "node scripts/check.mjs",
+    "lint": "node scripts/check.mjs",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
+  }
+}

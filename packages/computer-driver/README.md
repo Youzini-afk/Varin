@@ -245,6 +245,17 @@ profiles are retained. `components.json` is the recipe used by both preparation
 and additional software installation. The general guest also requests dev/docs;
 failed optional groups remain visible in the persisted software status.
 
+The browser resource adapter reuses this same driver route and desktop control
+assignment, queue, cancellation lifetime and evidence journal. It hashes the
+actual CDP browser endpoint for instance identity and uses real target IDs;
+coordinate input rechecks the observed frame/loader/URL at the provider before
+sending input. Structured reads expose AX text and PNG screenshots, but do not
+invent actionable element references. This bridge declares only its implemented
+new-tab, navigation, evaluation, coordinate click and focused typing operations;
+file transfers, element-ref actions and independent per-tab execution are not
+provided by this Linux adapter. Existing desktop application tools remain
+available while these capabilities differ.
+
 Software installation results are separate from desktop and bridge readiness.
 The Host imports bootstrap results and reports the packages for each component.
 Concurrent install requests serialize and retain their own requested groups.

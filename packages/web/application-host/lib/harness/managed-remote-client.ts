@@ -351,6 +351,22 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     };
   };
 
+  /** Browser discovery uses the same configured peer authority, without
+   * requiring a file Source or registering an Experiment machine. */
+  const browserTargets = async (signal?: AbortSignal) => {
+    signal?.throwIfAborted();
+    const connections = configuredHosts(await options.readSettings());
+    const results = await Promise.allSettled(connections.map(async connection => {
+      const target = await probe(connection, signal);
+      return { resourceOwner: { kind: 'managed_host' as const, hostId: target.hostId,
+        connectionId: connection.id, endpointIdentity: managedEndpointIdentity(connection) }, label: connection.label };
+    }));
+    signal?.throwIfAborted();
+    return { targets: results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []),
+      unavailable: results.flatMap((result, index) => result.status === 'rejected'
+        ? [{ connectionId: connections[index]!.id, label: connections[index]!.label }] : []) };
+  };
+
   const forwardTarget = async (owner: ManagedHostSourceOwner, signal?: AbortSignal): Promise<ManagedTarget> => {
     signal?.throwIfAborted();
     const connection = configuredHosts(await options.readSettings()).find(entry => entry.id === owner.connectionId);
@@ -906,7 +922,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     };
   };
 
-  return { refresh, resolveBackend, externalAuthority, targetFor, sourceTargets, sourceTarget, forwardTarget, selectForwardTarget, storageTargets, storage, source, shellExec, shellRead, shellWrite, shellKill, setScopeSleeping, releaseScope, ownersForMachine };
+  return { refresh, resolveBackend, externalAuthority, targetFor, sourceTargets, browserTargets, sourceTarget, forwardTarget, selectForwardTarget, storageTargets, storage, source, shellExec, shellRead, shellWrite, shellKill, setScopeSleeping, releaseScope, ownersForMachine };
 }
 
 export type ManagedRemoteTargetRegistry = ReturnType<typeof createManagedRemoteTargetRegistry>;

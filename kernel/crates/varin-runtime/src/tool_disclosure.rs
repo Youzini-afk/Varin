@@ -23,7 +23,7 @@ pub const GROUPS: &[(&str, &str)] = &[
         "desktop",
         "Desktop observation, input and control assignments",
     ),
-    ("browser", "Built-in pages and the explicitly assigned Computer browser; observation, input and file transfer"),
+    ("browser", "Browser resources, devices and connected pages; observation, input and file transfer"),
     ("office", "DOCX/XLSX/PPTX files, rendering and conversion; connected Office applications"),
     (
         "environment",
@@ -202,8 +202,8 @@ pub fn direct_tools(tools: &[ToolSchema], focus: &str) -> Option<Vec<String>> {
 pub fn related(name: &str) -> &'static [&'static str] {
     match name {
         "code_retrieval" | "retrieval_control" => &["code_retrieval", "retrieval_control"],
-        "browser_tabs" | "browser_open" | "browser_read" | "browser_act" | "browser_files" =>
-            &["browser_tabs", "browser_open", "browser_read", "browser_act", "browser_files", "document_read", "office_read"],
+        "browser_resources" | "browser_tabs" | "browser_open" | "browser_read" | "browser_act" | "browser_files" =>
+            &["browser_resources", "browser_tabs", "browser_open", "browser_read", "browser_act", "browser_files", "document_read", "office_read"],
         "office_read" | "office_write" | "office_render" | "office_export" | "office_environment" =>
             &["office_read", "office_write", "office_render", "office_export", "office_environment", "document_read", "file_restore"],
         "computer_browser" | "computer_browser_read" | "computer_office" | "computer_office_read" =>
