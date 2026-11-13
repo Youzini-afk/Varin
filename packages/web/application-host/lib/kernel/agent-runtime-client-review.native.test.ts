@@ -96,6 +96,13 @@ it('framed IPC rejects malformed parameters and stale or grant-scoped authority'
     { method: 'runtime.content.collect', epoch: 'stale', params: {} },
     { method: 'runtime.content.collect', grantId: 'tool-grant', params: {} },
     { method: 'runtime.content.collect', params: { path: '/different-owner' } },
+    ...[
+      'runtime.followup.eventTransport.sources', 'runtime.followup.eventTransport.imports',
+      'runtime.followup.eventSources.list', 'runtime.mcp.interaction.pending',
+      'runtime.managed_process.pending', 'runtime.host_job.code_exchange.pending',
+      'runtime.host_job.pending', 'runtime.observations.reconcile',
+      'runtime.source.cleanup', 'runtime.mcp.resource.pending',
+    ].map(method => ({ method, params: { unexpected: true } })),
     { method: 'runtime.thread.create', params: { threadId: '', branchId: 'branch' } },
     { method: 'runtime.events.read', params: { cursor: -1, limit: 1 } },
     { method: 'runtime.events.read', params: { cursor: 0, limit: 1.5 } },

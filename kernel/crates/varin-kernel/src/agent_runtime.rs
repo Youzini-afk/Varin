@@ -3415,3 +3415,51 @@ mod managed_source_review;
 #[cfg(test)]
 #[path = "context_compaction_review.rs"]
 mod context_compaction_review;
+
+#[cfg(test)]
+mod empty_command_tests {
+    use super::*;
+
+    #[test]
+    fn empty_management_commands_decode_before_entering_their_owner() {
+        let root = std::env::temp_dir().join(format!("empty-commands-{}", uuid::Uuid::new_v4()));
+        let runtime = Arc::new(RunSupervisor::new(Catalog::open(&root).unwrap()));
+        let resources = crate::tools::KernelResourceClient::new(
+            |_| Err(KernelError::Operation("unexpected resource request".into())),
+            |_| Ok(()), Default::default());
+        let (send, _receive) = mpsc::sync_channel(8);
+        let credentials = crate::credential_bridge::CredentialBridge::new(send.clone());
+        let bridge = crate::host_tools::ToolBridge::new(send.into());
+        let commands = control_commands::ControlCommands { runtime: runtime.clone(), resources: resources.clone(),
+            models: crate::run_models::RunModels::new(runtime.catalog(), credentials.clone()),
+            tools: crate::run_tools::RunTools::new(runtime.catalog(), bridge) };
+        let cancelled = AtomicBool::new(false);
+        let invoke = |method: &str, params: Value| match method {
+            "runtime.followup.eventTransport.sources" | "runtime.followup.eventTransport.imports" | "runtime.followup.eventSources.list" =>
+                followup_commands::execute(runtime.clone(), resources.clone(), method, params, &cancelled, None),
+            "runtime.host_job.code_exchange.pending" | "runtime.host_job.pending" =>
+                host_job_commands::execute(runtime.clone(), method, params, &cancelled),
+            "runtime.managed_process.pending" =>
+                managed_process_commands::execute(runtime.clone(), resources.clone(), method, params, &cancelled),
+            "runtime.mcp.interaction.pending" =>
+                mcp_interaction_commands::execute(runtime.clone(), &credentials, method, params, &cancelled),
+            "runtime.mcp.resource.pending" =>
+                mcp_resource_commands::execute(runtime.clone(), method, params, &cancelled),
+            _ => commands.execute(method, params, &cancelled),
+        };
+        for method in ["runtime.followup.eventTransport.sources", "runtime.followup.eventTransport.imports",
+            "runtime.followup.eventSources.list", "runtime.host_job.code_exchange.pending", "runtime.host_job.pending",
+            "runtime.managed_process.pending", "runtime.mcp.interaction.pending", "runtime.mcp.resource.pending",
+            "runtime.source.cleanup", "runtime.observations.reconcile"] {
+            let before = runtime.catalog().lock().unwrap().event_cursor().unwrap();
+            let failure = invoke(method, json!({"unexpected":true})).expect_err(method);
+            assert!(failure.to_string().contains("unknown field"), "{method}: {failure}");
+            assert_eq!(runtime.catalog().lock().unwrap().event_cursor().unwrap(), before, "{method}");
+            assert!(invoke(method, json!({})).is_ok(), "valid empty command: {method}");
+        }
+        drop(commands);
+        runtime.shutdown().unwrap();
+        drop(runtime);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}

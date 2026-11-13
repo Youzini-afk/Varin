@@ -211,6 +211,7 @@ pub(super) fn execute(
             )?)
         }
         "runtime.mcp.interaction.pending" => {
+            let _: KernelEmptyParams = serde_json::from_value(params)?;
             let mut db=db!();
             let records=db.pending_mcp_interactions().map_err(domain)?;
             let values=records.iter().map(|r|db.inspect_mcp_interaction(&r.binding.operation_id,&r.id)).collect::<Result<Vec<_>,varin_runtime::RuntimeError>>();

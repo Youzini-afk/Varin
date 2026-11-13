@@ -32,6 +32,7 @@ pub(super) fn execute(
     }
     match method {
         "runtime.managed_process.pending" => {
+            let _: KernelEmptyParams = serde_json::from_value(params)?;
             let reads = {
                 let db = lock()?;
                 db.pending_managed_processes()
