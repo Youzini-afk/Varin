@@ -61,7 +61,6 @@ const LOCK_RETRY_MS = 25;
 interface CachedDocument {
   raw?: string | null;
   generation: number;
-  watcher?: fs.FSWatcher;
   signature?: string;
   loading?: Promise<string | null>;
 }
@@ -125,30 +124,6 @@ export const createSettingsFileStore = ({
   const cached = documents.get(resolvedPath) ?? { generation: 0 };
   documents.set(resolvedPath, cached);
   const invalidate = (): void => { cached.generation++; delete cached.raw; delete cached.signature; delete cached.loading; };
-  const watch = (): void => {
-    if (cached.watcher || !fsModule.watch) return;
-    try {
-      const watcher = fsModule.watch(directory, { persistent: false }, (event, filename) => {
-        if (event === 'rename' && String(filename) === pathDefault.basename(directory)) {
-          cached.watcher?.close(); delete cached.watcher; invalidate(); return;
-        }
-        if (filename === null || String(filename) === pathDefault.basename(resolvedPath)
-          || String(filename) === pathDefault.basename(previousPath)
-          || String(filename) === pathDefault.basename(directory)) invalidate();
-      });
-      // A watch attached after a fallback period has no history of that gap.
-      invalidate();
-      cached.watcher = watcher;
-      const unavailable = () => {
-        if (cached.watcher !== watcher) return;
-        delete cached.watcher;
-        invalidate();
-        watcher.close();
-      };
-      watcher.on('error', unavailable);
-      watcher.on('close', unavailable);
-    } catch { /* Missing directories and unsupported watches use stat below. */ }
-  };
   const signature = async (): Promise<string> => (await Promise.all([resolvedPath, previousPath].map(async target => {
     try { return statSignature(await fsPromises.stat(target)); }
     catch (error) { if (errorCode(error) === 'ENOENT') return 'missing'; throw error; }
@@ -170,11 +145,10 @@ export const createSettingsFileStore = ({
   };
   const decode = (raw: string | null): VarinSettingsDocument => raw === null ? readDefault() : parseSettings(raw);
   const read = async (): Promise<VarinSettingsDocument> => {
-    watch();
-    if (!cached.watcher) {
-      const next = await signature();
-      if (next !== cached.signature) { invalidate(); cached.signature = next; }
-    }
+    // Watch notifications can lag behind completed writes (notably on macOS).
+    // Verify identity on every read; only unchanged document text is reused.
+    const next = await signature();
+    if (next !== cached.signature) { invalidate(); cached.signature = next; }
     if (cached.raw !== undefined) return decode(cached.raw);
     if (!cached.loading) {
       const generation = cached.generation;
@@ -187,11 +161,8 @@ export const createSettingsFileStore = ({
     return decode(await cached.loading);
   };
   const readSync = (): VarinSettingsDocument => {
-    watch();
-    if (!cached.watcher) {
-      const next = signatureSync();
-      if (next === undefined || next !== cached.signature) { invalidate(); if (next !== undefined) cached.signature = next; }
-    }
+    const next = signatureSync();
+    if (next === undefined || next !== cached.signature) { invalidate(); if (next !== undefined) cached.signature = next; }
     if (cached.raw === undefined) {
       try { cached.raw = fsModule.readFileSync(resolvedPath, 'utf8'); }
       catch (error) {
@@ -310,7 +281,6 @@ export const createSettingsFileStore = ({
       if (preserveMode) await fsPromises.chmod(temporaryPath, mode);
       await replaceFile(temporaryPath);
       invalidate();
-      watch();
       cached.raw = raw;
     } finally {
       await fsPromises.rm(temporaryPath, { force: true });

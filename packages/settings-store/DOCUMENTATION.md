@@ -3,14 +3,15 @@
 [The store](src/index.ts) is the single settings-document reader/writer shared by
 Electron and the Application Host. Instances for the same resolved path share
 cached JSON text, never a mutable parsed object. `read()` and `readSync()` parse a
-fresh object without file I/O after loading. Each caller retains its own default
-when neither the document nor the recovery copy exists.
+fresh object from cached text after checking file signatures. Each caller retains
+its own default when neither the document nor the recovery copy exists.
 
-A directory watch invalidates external replacements, writes and removals,
-including atomic rename. Missing directories or unavailable watches fall back
-to file identity, modification time and size checks. Watch errors and directory
-replacement return to that fallback until a new watch can attach. File corruption
-is an error, not permission to overwrite it with defaults.
+Each read checks the identity, modification/change time and size of the document
+and recovery copy. Directory watches are not a freshness barrier: notifications
+can arrive after a completed external write, so no watcher or background timer is
+retained. Unchanged signatures avoid rereading the document text; replacements,
+writes, removals and newly created directories invalidate it. File corruption is
+an error, not permission to overwrite it with defaults.
 
 Mutations serialize in-process and acquire a cross-process lock. They always read
 the current file under that lock instead of using the read cache. Successful
@@ -21,4 +22,5 @@ live processes and is not recovery data. Windows replacement retains the previou
 complete document until the replacement succeeds.
 
 [Behavior tests](src/index.test.ts) cover independent instances, external writes,
-watch fallback, immutable results, no-I/O warm reads, permissions and recovery.
+same-turn external writes, immutable results, cached-text warm reads, process exit,
+permissions and recovery.

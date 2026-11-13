@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import os from 'node:os';
@@ -117,42 +119,36 @@ describe('settings file store', () => {
 });
 
 describe('shared settings read cache', () => {
-  it('serves independent parsed objects across sync/async instances without file I/O', async () => {
+  it('reuses document text across sync/async instances while verifying file signatures', async () => {
     const { filePath, store } = await createStore();
     await store.replace({ nested: { value: 1 } });
-    await new Promise(resolve => setTimeout(resolve, 10)); // Drain the atomic rename watch event.
     let reads = 0, stats = 0;
     const options = { filePath,
-      fsModule: { ...fs, readFileSync: ((...args: Parameters<typeof fs.readFileSync>) => { reads++; return fs.readFileSync(...args); }) as typeof fs.readFileSync },
+      fsModule: { ...fs, readFileSync: ((...args: Parameters<typeof fs.readFileSync>) => { reads++; return fs.readFileSync(...args); }) as typeof fs.readFileSync,
+        statSync: ((...args: Parameters<typeof fs.statSync>) => { stats++; return fs.statSync(...args); }) as typeof fs.statSync },
       fsPromises: { ...fsPromises, readFile: ((...args: Parameters<typeof fsPromises.readFile>) => { reads++; return fsPromises.readFile(...args); }) as typeof fsPromises.readFile,
         stat: ((...args: Parameters<typeof fsPromises.stat>) => { stats++; return fsPromises.stat(...args); }) as typeof fsPromises.stat } };
     const first = createSettingsFileStore(options), second = createSettingsFileStore(options);
-    await first.read(); reads = 0;
+    await first.read(); reads = 0; stats = 0;
     for (let index = 0; index < 30; index++) {
       const value = await first.read(); (value.nested as { value: number }).value = 99;
       assert.deepEqual(second.readSync(), { nested: { value: 1 } });
     }
-    assert.equal(reads, 0); assert.equal(stats, 0);
+    assert.equal(reads, 0); assert.equal(stats, 120);
   });
 
   it('invalidates on another writer atomic replacement and reads fresh under a mutation lock', async () => {
     const { filePath, store } = await createStore();
     await store.replace({ before: true }); await store.read();
-    const changed = new Promise<void>(resolve => {
-      const watcher = fs.watch(path.dirname(filePath), (_event, filename) => {
-        if (String(filename) === path.basename(filePath)) { watcher.close(); resolve(); }
-      });
-    });
     await fsPromises.writeFile(`${filePath}.external`, '{"external":1}');
     await fsPromises.rename(`${filePath}.external`, filePath);
-    await changed;
     assert.deepEqual(await store.read(), { external: 1 });
     fs.writeFileSync(filePath, '{"external":2}');
     await store.update(document => ({ ...document, local: 3 }));
     assert.deepEqual(await store.read(), { external: 2, local: 3 });
   });
 
-  it('falls back to file signatures when directory watching is unavailable', async () => {
+  it('observes external writes without directory watching', async () => {
     const { filePath } = await createStore();
     await fsPromises.writeFile(filePath, '{"v":1}');
     const store = createSettingsFileStore({ filePath, fsModule: { readFileSync: fs.readFileSync, statSync: fs.statSync,
@@ -166,7 +162,7 @@ describe('shared settings read cache', () => {
 });
 
 
-it('does not reuse a missing-file cache when a directory first becomes watchable', async () => {
+it('does not reuse a missing-file cache when its directory is created', async () => {
   const { filePath } = await createStore();
   const nested = path.join(path.dirname(filePath), 'new-directory', 'settings.json');
   const store = createSettingsFileStore({ filePath: nested });
@@ -174,4 +170,47 @@ it('does not reuse a missing-file cache when a directory first becomes watchable
   await fsPromises.mkdir(path.dirname(nested));
   await fsPromises.writeFile(nested, '{"created":true}');
   assert.deepEqual(await store.read(), { created: true });
+});
+
+
+it('detects same-turn writes, corruption, replacement and removal without watch delivery', async () => {
+  const { filePath } = await createStore();
+  let watches = 0;
+  const store = createSettingsFileStore({ filePath, fsModule: { ...fs,
+    watch: (() => { watches++; throw new Error('Watch notifications unavailable'); }) as typeof fs.watch,
+  } });
+  assert.deepEqual(store.readSync(), {});
+  fs.writeFileSync(filePath, '{"value":1}');
+  assert.deepEqual(store.readSync(), { value: 1 });
+  fs.writeFileSync(filePath, '{broken');
+  assert.throws(() => store.readSync(), SyntaxError);
+  await assert.rejects(store.read(), SyntaxError);
+  fs.writeFileSync(`${filePath}.external`, '{"value":2}');
+  fs.renameSync(`${filePath}.external`, filePath);
+  assert.deepEqual(await store.read(), { value: 2 });
+  fs.unlinkSync(filePath);
+  fs.writeFileSync(`${filePath}.previous`, '{"recovered":true}');
+  assert.deepEqual(store.readSync(), { recovered: true });
+  fs.unlinkSync(`${filePath}.previous`);
+  assert.deepEqual(await store.read(), {});
+  assert.equal(watches, 0, 'signature validation must not retain redundant filesystem watchers');
+});
+
+it('releases all process resources after reads and directory removal', async () => {
+  const { filePath } = await createStore();
+  const source = new URL('./index.ts', import.meta.url).href;
+  const script = `
+    import fs from 'node:fs/promises';
+    import { createSettingsFileStore } from ${JSON.stringify(source)};
+    const filePath = ${JSON.stringify(filePath)};
+    const store = createSettingsFileStore({ filePath });
+    await store.read();
+    await store.replace({ saved: true });
+    store.readSync();
+    await fs.rm(${JSON.stringify(path.dirname(filePath))}, { recursive: true, force: true });
+    console.log('finished');
+  `;
+  const { stdout } = await promisify(execFile)(process.execPath,
+    ['--import', 'tsx', '--input-type=module', '--eval', script], { timeout: 10_000 });
+  assert.equal(stdout.trim(), 'finished');
 });
