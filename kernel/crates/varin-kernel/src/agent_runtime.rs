@@ -852,6 +852,7 @@ pub(crate) fn spawn(
                             return Ok(Value::Null);
                         }
                         if method == "runtime.content.collect" {
+                            let _: KernelEmptyParams = serde_json::from_value(params.clone())?;
                             // This admission is metadata-only. Maintenance never enters Storage or
                             // the ordinary history/receipt content queue, and does not own a Run.
                             let collection = {

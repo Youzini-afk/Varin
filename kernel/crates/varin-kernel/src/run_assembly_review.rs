@@ -395,3 +395,42 @@ fn calendar_and_failed_queued_rounds_use_current_builtins_without_rewriting_prio
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[test]
+fn context_assembly_accepts_an_empty_host_directory_but_rejects_added_capabilities() {
+    use varin_runtime::{Catalog, SubmitInput};
+    use varin_runtime::context_job::{ContextJobRequest, ContextSummaryRecipe};
+    let root = std::env::temp_dir().join(format!("context-assembly-{}", uuid::Uuid::new_v4()));
+    let mut db = Catalog::open(&root).unwrap();
+    db.create_thread("thread", "main").unwrap();
+    let source = db.submit(&SubmitInput { key: "input".into(), thread_id: "thread".into(), branch_id: "main".into(),
+        expected_head: None, input: json!({"text":"Original evidence"}), configuration: json!({}) }).unwrap();
+    let configuration = json!({"providerId":"fixture", "providerFamily":"openai-responses", "model":"fixture-model",
+        "endpoint":"http://127.0.0.1:1/responses", "allowAnonymous":true, "configurationGeneration":1});
+    let start = model_session::bind(serde_json::from_value(configuration.clone()).unwrap()).unwrap();
+    let launch = varin_runtime::catalog::launches::LaunchSelection::from_binding(
+        &start.binding, varin_runtime::context_job::policy_identity(), None);
+    drop(start);
+    let job = db.create_context_job(ContextJobRequest { compaction:None, summary_recipe:ContextSummaryRecipe::manual(),
+        owner_run_id:None, personalization:None, key:"summary".into(), branch_id:"main".into(), through_id:source.input_id,
+        expected_revision:0,effective_system_prompt:"Summarize".into(),instruction_sources:vec![],memory_checkpoint:None },
+        launch, configuration).unwrap();
+    let run = db.run(&job.receipt.run_id).unwrap();
+    let runtime = Arc::new(RunSupervisor::new(db));
+    let (assembly, _frames) = assembly(runtime.clone());
+    let mut extension = fixture::Fixture::new_host_child(false, None, vec!["helper".into()]);
+    let _ = extension.accept();
+    let binding = json!({"ownerId":"foreign-owner","generation":1,"binding":extension.launch.extension_bindings[0]});
+    let rejected = json!({"runId":run.id,"extensionBindings":[binding]});
+    let error = assembly.prepare(RunPreparation::new(serde_json::from_value(rejected).unwrap(), &run).unwrap(), None, || false)
+        .err().expect("summary must reject an extension capability");
+    assert!(error.to_string().contains("fixed tool-free launch"), "{error}");
+    for params in [json!({"runId":run.id}), json!({"runId":run.id,"extensionBindings":[]})] {
+        let prepared = assembly.prepare(RunPreparation::new(serde_json::from_value(params).unwrap(), &run).unwrap(), None, || false).unwrap();
+        let PreparedLaunch::Start(start) = prepared else { panic!("summary start required") };
+        assert_eq!(start.binding.tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>(), vec!["summary_read"]);
+    }
+    drop(assembly);
+    drop(runtime);
+    std::fs::remove_dir_all(root).unwrap();
+}

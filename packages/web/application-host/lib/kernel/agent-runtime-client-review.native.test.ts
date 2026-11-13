@@ -100,7 +100,7 @@ it('framed IPC rejects malformed parameters and stale or grant-scoped authority'
     { method: 'runtime.events.read', params: { cursor: -1, limit: 1 } },
     { method: 'runtime.events.read', params: { cursor: 0, limit: 1.5 } },
     { method: 'runtime.input.submit', params: { key: 'key', threadId: 't', branchId: 'b', input: {}, configuration: {} } },
-  ]) expect((await f.raw(request)).ok).toBe(false);
+  ]) expect((await f.raw(request)).ok, JSON.stringify(request)).toBe(false);
   expect((await f.runtimeClient.status()).epoch).toBeGreaterThan(0);
   await expect(f.runtimeClient.run('missing')).rejects.toThrow();
   await expect(f.runtimeClient.operation('missing')).rejects.toThrow();
