@@ -208,6 +208,15 @@ export class BrowserResources {
     });
     return remote ?? this.usage(binding);
   }
+  async releaseLocalResourceThread(binding: BrowserResourceBinding, threadId: string) {
+    const provider = this.providers.get(binding.browserId);
+    if (!provider || provider.remote) throw missing('The original local browser resource is unavailable');
+    const current = await this.describe(provider);
+    if (current.state !== 'online') throw missing('The original local browser resource is offline');
+    // A replacement browser cannot hold pages from the previous instance.
+    if (current.instanceId === binding.instanceId) await provider.owner.releaseThread(threadId);
+    if (this.bindings.get(threadId)?.browserId === binding.browserId) this.bindings.delete(threadId);
+  }
   async releaseThread(threadId: string) {
     this.bindings.delete(threadId);
     const remote = this.retainedByThread.get(threadId);

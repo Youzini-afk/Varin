@@ -218,3 +218,13 @@ it('does not accept another browser page as the receipt of a dispatched mutation
     .rejects.toMatchObject({ effect: 'unknown', executorStopped: false });
   expect(f.owner.act).toHaveBeenCalledTimes(1);
 });
+
+it('releases the original local browser binding without re-registering it or recursively releasing peers', async () => {
+  const f = fixture(); await f.resources.list();
+  const threadId = managedBrowserThread('paired-coordinator', 'coordinator', 'work');
+  await f.resources.use(f.binding, { threadId: 'work' }, owner => owner.read({ pageId: 'tab' }), { observes: true });
+  expect(await f.original.use({}, { threadId }, (_owner, binding) => binding.browserId)).toBe('local-browser');
+  await f.resources.releaseThread('work');
+  expect(f.owner.releaseThread).toHaveBeenCalledExactlyOnceWith(threadId);
+  await expect(f.original.use({}, { threadId }, async () => null)).rejects.toThrow('Choose a browser');
+});

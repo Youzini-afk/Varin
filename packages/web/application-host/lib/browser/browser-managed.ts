@@ -156,7 +156,8 @@ export function registerManagedBrowserRoutes(app: Express, options: {
     let dispatched = false;
     try {
       let value: unknown;
-      if (call.method === 'controlPage') { dispatched = true; value = await options.resources.control(binding, call.args[1] as 'takeover' | 'resume' | 'activate'); }
+      if (call.method === 'releaseThread') { dispatched = true; await options.resources.releaseLocalResourceThread(binding, threadId!); value = null; }
+      else if (call.method === 'controlPage') { dispatched = true; value = await options.resources.control(binding, call.args[1] as 'takeover' | 'resume' | 'activate'); }
       else if (call.method === 'usage') value = await options.resources.currentUsage(binding);
       else value = await options.resources.use(binding, { ...(threadId ? { threadId } : {}), signal: controller.signal }, async owner => {
         // A disconnected observer must not release an already-dispatched writer.
@@ -177,7 +178,6 @@ export function registerManagedBrowserRoutes(app: Express, options: {
           case 'releaseDownload': await owner.releaseDownload(pageId!, call.args[1] as string); return null;
           case 'upload': return owner.upload(pageId!, call.args[1] as string,
             (call.args[2] as { name: string; bytesBase64: string }[]).map(file => ({ name: file.name, bytes: Buffer.from(file.bytesBase64, 'base64') })));
-          case 'releaseThread': await owner.releaseThread(threadId!); return null;
         }
       }, { writes: mutates, observes: call.method === 'read' });
       if (!res.destroyed) res.json({ value });
