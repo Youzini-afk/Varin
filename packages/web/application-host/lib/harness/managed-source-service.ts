@@ -1,3 +1,4 @@
+import { matchesSourcePreparation } from '../kernel/source-preparation-binding.js';
 import { encodeProjectCommandResult } from '@varin/application-client';
 import {managedExternalCapture,cleanupManagedExternalCaptures} from '../external-agents/managed-capture.js';
 import { resolveSourceTextPolicy } from '../kernel/source-provenance.js';
@@ -516,8 +517,15 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       }
       const selected = await capabilities(principal, { coordinatorHostId: input.coordinatorHostId, mode: selection.mode }, signal);
       const key = createHash('sha256').update(JSON.stringify([principal.principalId, input.coordinatorHostId, selection.key])).digest('hex');
-      const prepared = await options.prepareSource({ ...selection, resourceOwner: { kind: 'local' }, key }, signal);
-      return { ...prepared, source: { ...prepared.source, resourceOwner: selection.resourceOwner,
+      const localSelection = { ...selection, resourceOwner: { kind: 'local' as const }, key };
+      const prepared = await options.prepareSource(localSelection, signal);
+      const binding = prepared.sourcePreparation;
+      if (binding && !matchesSourcePreparation(localSelection, prepared)) throw new SourceAdmissionError('source_changed');
+      return { ...prepared, ...(binding ? { sourcePreparation: { ...binding, key: selection.key,
+        resourceOwner: selection.resourceOwner,
+        nativeSource: { ...binding.nativeSource, resource_owner: selection.resourceOwner },
+        preparedSource: { ...binding.preparedSource, resource_owner: selection.resourceOwner },
+      } } : {}), source: { ...prepared.source, resourceOwner: selection.resourceOwner,
         tools: selected.tools.map(tool => tool.name) } };
     },
     async bind(principal, input, signal) {

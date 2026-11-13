@@ -145,3 +145,40 @@ it('retains active work from deleted definitions and validates occurrence owners
     expect(client.controlCalendarOccurrence).toHaveBeenCalledExactlyOnceWith({ occurrenceId: occurrence.id, expectedRevision: occurrence.revision, action: 'cancel' });
   } finally { owner.stop(); }
 });
+
+it.each(['project', 'source_preparation'] as const)('persists safe %s diagnostics on the original occurrence and notifies its error owner', async stage => {
+  const { CalendarPreparationError } = await import('./preparation-error.js');
+  const original = new Error('Do not publish this path, prompt or credential');
+  const error = stage === 'project' ? original : new CalendarPreparationError(stage, original);
+  const work: CalendarPreparation = { occurrence, definition, instruction: 'Original body', owner_epoch: 9 };
+  const client = { onExit: () => () => {}, onReady: () => () => {}, onEvent: () => () => {},
+    calendarPending: async () => ({ calculations: [], preparations: [occurrence] }), prepareCalendar: async () => work,
+    failCalendarPreparation: vi.fn(async () => occurrence) };
+  const errors: unknown[] = [];
+  const owner = new CalendarOwner({ runtime: client as unknown as AgentRuntimeClient,
+    projects: async () => { if (stage === 'project') throw error; return [{ id: 'project', path: '/fixture' }]; },
+    prepare: async () => { throw error; }, onChanged() {}, onError: error => errors.push(error) });
+  try {
+    await owner.recover();
+    await vi.waitFor(() => expect(client.failCalendarPreparation).toHaveBeenCalledOnce());
+    expect(client.failCalendarPreparation).toHaveBeenCalledWith({ occurrenceId: occurrence.id,
+      expectedRevision: occurrence.revision, ownerEpoch: 9, failureCode: `calendar_preparation:${stage}:unavailable` }, expect.any(AbortSignal));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ cause: original, code: `calendar_preparation:${stage}:unavailable` });
+    expect(JSON.stringify(client.failCalendarPreparation.mock.calls)).not.toContain(original.message);
+  } finally { owner.stop(); }
+});
+
+it('logs only safe owner codes even when an exception contains provider secrets or a forged code', async () => {
+  const { calendarPreparationError, calendarErrorCode } = await import('./preparation-error.js');
+  const { ModelConfigurationError } = await import('../models/configuration.js');
+  const secret = 'Bearer private-provider-response';
+  const model = calendarPreparationError(new ModelConfigurationError('model-disabled', secret), 'model');
+  expect(model.code).toBe('calendar_preparation:model:model-disabled');
+  expect(calendarErrorCode(model)).toBe(model.code);
+  const unknown = calendarPreparationError(new KernelClientError({ code: secret, message: secret, details: { token: secret } }), 'admission');
+  expect(calendarErrorCode(unknown)).toBe('calendar_preparation:admission:unavailable');
+  const forged = calendarPreparationError(Object.assign(new Error(secret), { code: 'model-disabled' }), 'context');
+  expect(calendarErrorCode(forged)).toBe('calendar_preparation:context:unavailable');
+  expect(calendarErrorCode(new Error(secret))).toBe('calendar_owner_unavailable');
+});

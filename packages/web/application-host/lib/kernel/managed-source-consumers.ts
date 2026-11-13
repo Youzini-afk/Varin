@@ -1,3 +1,4 @@
+import { matchesSourcePreparation } from './source-preparation-binding.js';
 import type { ThreadSourceFilesOwner } from './thread-source-files.js';
 import { skillLocatorId } from './thread-skill-selection.js';
 /** Coordinator adapters retain the selected endpoint and borrow only its original resource authority. */
@@ -76,8 +77,14 @@ export function createManagedSourceConsumers(options: ManagedSourceConsumerOptio
       if (input.resourceOwner.kind !== 'managed_host') throw new Error('Managed source requires its exact target owner');
       const client = await options.registry.source(input.resourceOwner, signal);
       const prepared = await client.prepare({ coordinatorHostId: options.coordinatorHostId(), input }, signal);
-      if (!isDeepStrictEqual(prepared.source.resourceOwner, input.resourceOwner) || prepared.source.workspaceId !== input.workspaceId
-        || prepared.source.mode !== input.mode) throw new Error('Managed source preparation changed the original selection');
+      const registrationMatches = prepared.sourcePreparation
+        ? matchesSourcePreparation(input, prepared) : prepared.source.workspaceId === input.workspaceId;
+      if (!isDeepStrictEqual(prepared.source.resourceOwner, input.resourceOwner)
+        || !registrationMatches
+        || prepared.source.mode !== input.mode && !(prepared.source.mode === 'native_workspace'
+          && (input.mode === 'materialized' || input.mode === 'live_root' && input.selection?.mode !== 'live_root'))) {
+        throw new Error('Managed source preparation changed the original selection');
+      }
       return prepared;
     },
     async admit(source, identity, _runId, signal) {

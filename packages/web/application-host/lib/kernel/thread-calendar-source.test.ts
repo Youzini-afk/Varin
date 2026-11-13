@@ -70,7 +70,7 @@ it('an unavailable managed owner never falls back to the local project or admits
   const f = fixture({ kind: 'workspace', resourceOwner: owner, workspaceId: 'workspace:B' });
   const error = new Error('Original B is unavailable');
   f.prepare.mockRejectedValue(error);
-  await expect(f.adapter.prepareCalendarWork(f.work, '/A/project', new AbortController().signal)).rejects.toBe(error);
+  await expect(f.adapter.prepareCalendarWork(f.work, '/A/project', new AbortController().signal)).rejects.toMatchObject({ code: 'calendar_preparation:source_preparation:unavailable', cause: error });
   expect(f.prepare).toHaveBeenCalledTimes(1);
   expect(f.resolve).not.toHaveBeenCalled();
   expect(f.context).not.toHaveBeenCalled();
@@ -118,4 +118,97 @@ it('the shared directory and source preparer reach the selected B port without a
   expect(local).not.toHaveBeenCalled();
   hostId = 'host:replacement';
   await expect(directory.resolve({ resourceOwner: owner, path: '/B/project' }, signal)).rejects.toThrow('changed Host');
+});
+
+it('cold materialized calendar uses the production native source backend and reports its unavailable stage', async () => {
+  const f = fixture({ kind: 'project' });
+  const { createHash } = await import('node:crypto');
+  const { normalizeThreadSourcePreparation } = await import('./thread-sources.js');
+  const { KernelClientError } = await import('./kernel-error.js');
+  const original = { ...identity, key: f.work.occurrence.id, resourceOwner: { kind: 'local' as const },
+    workspaceId: 'workspace:A', mode: 'materialized' as const, content: { mode: 'saved-files' as const }, captureScopes: [] };
+  const normalized = normalizeThreadSourcePreparation(original);
+  const captureIdentity = createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+  const key = createHash('sha256').update(JSON.stringify([identity.threadId, identity.branchId, original.key])).digest('hex');
+  const branchId = `source:${key}`;
+  const store = {
+    readOriginalSource: async () => ({ root: 'original-root', provenance: { consistency: 'fixed-root', selection: { captureIdentity } } }),
+    pinBranch: async () => ({ workspaceId: original.workspaceId, branchId, revision: 0, root: 'original-root', release: async () => {} }),
+  };
+  const native = { retainPrepared: vi.fn(async () => {}), open: vi.fn(async () => ({ grant: 'original-grant' })),
+    acquire: vi.fn(async () => ({ path: '/native/calendar' })) };
+  const prepare = createThreadSourcePreparer({
+    documents: { admitWorkspaceRegistration: async () => ({ canonicalPath: '/A/project' }) } as never,
+    workingStates: { withBranchStore: async (_id: string, _reason: string, work: (value: typeof store) => unknown) => work(store) } as never,
+    nativeWorkspaces: native as never, inspectInventory: async () => { throw new Error('Original source must not be recaptured'); },
+    sourceTools: async () => ['file.read'],
+  });
+  f.prepare.mockImplementation(prepare);
+  await f.adapter.prepareCalendarWork(f.work, '/A/project', new AbortController().signal);
+  expect(native.open).toHaveBeenCalledOnce();
+  expect(native.acquire).toHaveBeenCalledWith(expect.objectContaining({ workspace_id: original.workspaceId, branch_id: branchId }),
+    'original-grant', expect.any(AbortSignal));
+  expect(f.runtime.admitCalendar).toHaveBeenCalledWith(expect.objectContaining({ launch: expect.objectContaining({
+    source: expect.objectContaining({ mode: 'native_workspace', workspaceId: original.workspaceId, branchId }),
+  }) }), expect.any(AbortSignal));
+  f.runtime.admitCalendar.mockClear();
+  native.open.mockRejectedValueOnce(new KernelClientError({ code: 'workspace_backend_unavailable', message: 'Private backend diagnostics' }));
+  await expect(f.adapter.prepareCalendarWork(f.work, '/A/project', new AbortController().signal)).rejects.toMatchObject({
+    code: 'calendar_preparation:source_preparation:workspace_backend_unavailable',
+  });
+  expect(f.runtime.admitCalendar).not.toHaveBeenCalled();
+});
+
+it.each(['identity', 'source_resolution', 'source_admission', 'model', 'context', 'admission'] as const)(
+  'retains the failing %s preparation stage without exposing exception contents', async stage => {
+    const f = fixture({ kind: 'project' });
+    const failure = new Error('Private prompt, path and provider token');
+    const operation = { identity: f.runtime.thread, source_resolution: f.resolve, source_admission: f.admit,
+      model: f.models.resolveModel, context: vi.mocked(f.context), admission: f.runtime.admitCalendar }[stage];
+    operation.mockRejectedValueOnce(failure);
+    await expect(f.adapter.prepareCalendarWork(f.work, '/A/project', new AbortController().signal)).rejects.toMatchObject({
+      code: `calendar_preparation:${stage}:unavailable`, message: `calendar_preparation:${stage}:unavailable`, cause: failure,
+    });
+  });
+
+it('managed preparation accepts the original native backend but cannot upgrade frozen live selection or replace workspace', async () => {
+  const remotePrepare = vi.fn(async (request: { input: ThreadPrepareSource }) => ({ path: '/B/native', source: {
+    resourceOwner: owner, workspaceId: request.input.workspaceId, executionWorkspaceId: 'native-execution',
+    mode: 'native_workspace' as const, branchId: 'native-branch', tools: [],
+  } }));
+  const consumers = createManagedSourceConsumers({ coordinatorHostId: () => 'host:A',
+    registry: { source: async () => ({ prepare: remotePrepare }) } as never,
+    withRunAuthority: async () => { throw new Error('Preparation must not start a Run'); } });
+  const input: ThreadPrepareSource = { ...identity, resourceOwner: owner, workspaceId: 'workspace:B', key: 'calendar-native',
+    mode: 'materialized', content: { mode: 'saved-files' }, captureScopes: [] };
+  expect((await consumers.threads.prepare(input)).source.mode).toBe('native_workspace');
+  expect((await consumers.threads.prepare({ ...input, mode: 'live_root' })).source.mode).toBe('native_workspace');
+  await expect(consumers.threads.prepare({ ...input, mode: 'fixed_branch' })).rejects.toThrow('changed the original selection');
+  await expect(consumers.threads.prepare({ ...input, mode: 'live_root', selection: { mode: 'live_root' } })).rejects.toThrow('changed the original selection');
+  remotePrepare.mockResolvedValueOnce({ path: '/B/other', source: { resourceOwner: owner, workspaceId: 'foreign',
+    executionWorkspaceId: 'native-execution', mode: 'native_workspace', branchId: 'native-branch', tools: [] } });
+  await expect(consumers.threads.prepare(input)).rejects.toThrow('changed the original selection');
+});
+
+it('calendar admission forwards only the binding returned by its original registered source owner', async () => {
+  const f = fixture({ kind: 'workspace', resourceOwner: { kind: 'local' }, workspaceId: 'registered-subtree' });
+  if (f.work.definition.target.kind !== 'new_work') throw new Error('Expected new work');
+  f.work.definition.target.sourceMode = 'live_root';
+  const reference = { workspace_id: 'owning-workspace', execution_workspace_id: 'original-execution', branch_id: 'original-branch', native_scope: 'selected/subtree' };
+  const nativeSource: ThreadSource = { resourceOwner: { kind: 'local' }, workspaceId: reference.workspace_id,
+    executionWorkspaceId: reference.execution_workspace_id, branchId: reference.branch_id, nativeScope: reference.native_scope,
+    mode: 'native_workspace', tools: [] };
+  const prepare = createThreadSourcePreparer({
+    documents: { admitWorkspaceRegistration: async () => ({ canonicalPath: '/original', nativeSource: reference }) } as never,
+    nativeWorkspaces: { prepare: async () => ({ path: '/native/selected/subtree', source: nativeSource }) } as never,
+    workingStates: {} as never, inspectInventory: async () => { throw new Error('Live view is not a capture'); }, sourceTools: async () => [],
+  });
+  f.prepare.mockImplementation(prepare);
+  await f.adapter.prepareCalendarWork(f.work, '/project', new AbortController().signal);
+  expect(f.runtime.admitCalendar).toHaveBeenCalledWith(expect.objectContaining({ occurrenceId: f.work.occurrence.id,
+    sourcePreparation: expect.objectContaining({ threadId: identity.threadId, branchId: identity.branchId, key: f.work.occurrence.id,
+      workspaceId: 'registered-subtree', nativeSource: expect.objectContaining(reference),
+      preparedSource: expect.objectContaining({ native_scope: 'selected/subtree', workspace_id: 'owning-workspace' }) }),
+    launch: expect.objectContaining({ source: expect.objectContaining({ workspaceId: 'owning-workspace', nativeScope: 'selected/subtree' }) }),
+  }), expect.any(AbortSignal));
 });

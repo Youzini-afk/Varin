@@ -29,6 +29,10 @@ A definition supports once/daily/weekly/cron, an explicit IANA timezone and the 
 New work selects a registered `providerId`/`modelId`, optional thinking/temperature, a source mode
 (`fixed_branch`, `materialized`, `live_root`) and an explicit nullable Goal budget. Existing work
 selects only its exact `threadId`/`branchId`, inheriting that work's actual model/source/Goal.
+The selected catalog model ID can differ from the provider's upstream request model ID. The
+source owner may resolve materialized or live access to `native_workspace`; this does not change
+the selected resource owner or relax fixed-snapshot semantics. Admission freezes the actual
+prepared source and model binding, and retries retain the original occurrence identity.
 The only execution field is `prompt`; model and source selections live in `target`.
 
 `source: { kind: "project" }` uses the definition's local project. A workspace source stores the
@@ -36,7 +40,17 @@ registered `workspaceId` and exact `resourceOwner` returned by the shared source
 managed Host, connection and endpoint identities. It never stores credentials or substitutes a path
 for a missing registration. Source discovery and path resolution are authenticated and project-scoped,
 do not create a Thread, and reuse the ordinary Thread source directory. An unavailable managed Host
-keeps its saved selection; there is no local fallback.
+keeps its saved selection; there is no local fallback. Managed preparation accepts the same native
+backend resolution as local preparation, but a frozen live selection is not upgraded.
+
+A registered native document/execution ID remains separate from its owning workspace. The source
+preparer admits its original registration and returns an occurrence-bound binding containing the
+selected identity, original native branch/execution/scope and exact prepared source. Managed preparation
+retains this binding through the authenticated target owner. Catalog checks it against the accepted
+occurrence and freezes the actual prepared source; it does not guess alias equivalence or maintain a
+second registration store. Live access retains the original scope. Capturing a scoped view makes that
+subtree the new branch root, so the prepared source no longer carries the original scope. Missing or
+inconsistent bindings cannot relax the old exact-workspace check.
 
 Catalog's deadline worker accepts an occurrence durably. `catalog_ingress` and `catalog_activation`
 deliver its Environment input through the original Run or child-execution owner. New-work occurrences
@@ -76,6 +90,13 @@ Listeners are installed before pending-work discovery. A held preparation cannot
 recurrence calculation. Epoch loss, occurrence removal and shutdown abort preparation observation;
 they do not manufacture execution success/failure or release an original native owner. Original
 Thread, process, tool, source and effect receipts retain their own stopping and cleanup responsibilities.
+
+Preparation failures retain their owner stage and a known safe reason in the occurrence's
+`failure_code` (`calendar_preparation:<stage>:<reason>`). The same code reaches Host logs; raw
+exception messages, credentials, paths and instruction bodies do not. The UI explains the stage
+and recovery action with a technical-code disclosure. Older generic failures remain readable
+without inventing a cause; retrying preparation can produce a current diagnostic. Cancellation
+and native activation holds are not rewritten as preparation failures.
 
 ## Focused checks
 

@@ -1,3 +1,4 @@
+import { calendarPreparationError } from './preparation-error.js';
 import { createHash } from 'node:crypto';
 import type { ScheduledTask } from '@varin/application-client';
 import type { CalendarDefinitionInput, CalendarOccurrence, CalendarPreparation, CalendarRule } from '@varin/protocol';
@@ -159,8 +160,10 @@ export class CalendarOwner {
             } catch (error) {
               if (signal.aborted) throw error;
               if (error instanceof KernelClientError && error.code === 'activation-held') return;
+              const failure = calendarPreparationError(error, 'project');
+              this.owners.onError(failure);
               await this.owners.runtime.failCalendarPreparation({ occurrenceId: work.occurrence.id, expectedRevision: work.occurrence.revision,
-                ownerEpoch: work.owner_epoch, failureCode: 'calendar_preparation_unavailable' }, signal);
+                ownerEpoch: work.owner_epoch, failureCode: failure.code }, signal);
             }
           });
         }

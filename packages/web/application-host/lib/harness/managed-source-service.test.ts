@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ThreadPrepareSource, ThreadSource } from '@varin/application-client';
+import type { ThreadPrepareSource, ThreadPreparedSource, ThreadSource } from '@varin/application-client';
 import type { KernelClient, KernelGrantHandle, KernelGrantIssueInput } from '../kernel/kernel-client.js';
 import type { LaunchSource, SourceAuthorityOpenParams, SourceAuthorityBindParams, SourceAuthorityResult, SourceHandoffClaimParams } from '../kernel/protocol.generated.js';
 import { createManagedSourceService } from './managed-source-service.js';
+import { createManagedSourceConsumers } from '../kernel/managed-source-consumers.js';
+import { resourceSource } from '../kernel/thread-context.js';
 import { ManagedSourceDrainedError } from './managed-source-drain.js';
 import { createSourceQueryService } from '../kernel/source-query-service.js';
 import type { ManagedSourceBindRequest, ManagedSourcePrincipal, ManagedSourceServiceHandler, ManagedSourceCleanupScope } from './managed-remote-types.js';
@@ -59,7 +61,7 @@ function fixture() {
       const grant = grants.get(authority.grantId); if (!grant) throw new Error('Original permit missing'); return grant;
     }, scoped: () => ({ readBranch, fileMaterialize, fileRootRegister, getOperation: async () => null, workingResultGet: async () => null }), retireGrant: vi.fn(async () => ({})),
   } as unknown as KernelClient;
-  const prepareSource = vi.fn(async (input: ThreadPrepareSource) => ({ path: '/target/project', source: { ...source, resourceOwner: input.resourceOwner } }));
+  const prepareSource = vi.fn(async (input: ThreadPrepareSource): Promise<ThreadPreparedSource> => ({ path: '/target/project', source: { ...source, resourceOwner: input.resourceOwner } }));
   const serviceOperation = vi.fn<ManagedSourceServiceHandler>(async () => { state.trusted = false; return { committed: true }; });
   const releaseSource = vi.fn<(scope: ManagedSourceCleanupScope) => Promise<void | { mcpExecutorStopped: boolean }>>(async () => { events.push('drain-views'); });
   const mcpInteractionContinuation = vi.fn(async () => ({ ok: true as const, value: null, executorStopped: true as const }));
@@ -631,4 +633,91 @@ it('metadata read scopes reopen only an existing materialized environment and ne
     expect(f.fileRootRegister).toHaveBeenCalledTimes(1);
     expect(f.fileMaterialize).not.toHaveBeenCalled();
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+describe('managed native preparation binding', () => {
+  const input = (mode: ThreadPrepareSource['mode']): ThreadPrepareSource => ({ runtime: 'agent', threadId: 'original-thread', branchId: 'history', key: 'original-occurrence',
+    resourceOwner: source.resourceOwner, workspaceId: 'registered-subtree', mode, content: { mode: 'saved-files' }, captureScopes: [] });
+  const preparedLocal = (selection: ThreadPrepareSource): ThreadPreparedSource => {
+    const native: ThreadSource = { resourceOwner: selection.resourceOwner, workspaceId: 'native-project', executionWorkspaceId: 'original-execution',
+      mode: 'native_workspace', branchId: 'original-native-branch', nativeScope: 'packages/subtree', tools: [] };
+    const captured = { resourceOwner: selection.resourceOwner, workspaceId: native.workspaceId, branchId: 'captured-subtree', tools: [] };
+    const prepared: ThreadSource = selection.mode === 'live_root' ? native : selection.mode === 'materialized'
+      ? { ...captured, executionWorkspaceId: 'captured-execution', mode: 'native_workspace' }
+      : { ...captured, executionWorkspaceId: native.workspaceId, mode: 'fixed_branch', revision: 0 };
+    return { path: '/target/project', source: prepared, sourcePreparation: { threadId: selection.threadId, branchId: selection.branchId,
+      key: selection.key, workspaceId: selection.workspaceId, mode: selection.mode, resourceOwner: selection.resourceOwner,
+      nativeSource: resourceSource(native)!, preparedSource: resourceSource(prepared)! } };
+  };
+  it.each(['fixed_branch', 'materialized', 'live_root'] as const)('carries the verified %s subtree binding from the real target service to its coordinator consumer', async mode => {
+    const f = fixture(); f.prepareSource.mockImplementation(async selection => preparedLocal(selection));
+    const selected = input(mode), signal = new AbortController().signal;
+    const client = { prepare: vi.fn((request: Parameters<typeof f.service.prepare>[1], signal?: AbortSignal) => f.service.prepare(principal, request, signal)) };
+    const consumer = createManagedSourceConsumers({ coordinatorHostId: () => 'coordinator',
+      registry: { source: vi.fn(async () => client) } as unknown as Parameters<typeof createManagedSourceConsumers>[0]['registry'],
+      withRunAuthority: async () => { throw new Error('Cold source preparation must not create a Run'); } });
+    const result = await consumer.threads.prepare(selected, signal);
+    const local = f.prepareSource.mock.calls[0]![0];
+    expect(local).toMatchObject({ ...selected, resourceOwner: { kind: 'local' }, key: expect.any(String) });
+    expect(local.key).not.toBe(selected.key);
+    expect(result.sourcePreparation).toEqual({ ...preparedLocal(local).sourcePreparation!, key: selected.key,
+      resourceOwner: selected.resourceOwner,
+      nativeSource: { ...preparedLocal(local).sourcePreparation!.nativeSource, resource_owner: selected.resourceOwner },
+      preparedSource: { ...preparedLocal(local).sourcePreparation!.preparedSource, resource_owner: selected.resourceOwner } });
+    expect(result.sourcePreparation!.nativeSource).toMatchObject({ workspace_id: 'native-project', execution_workspace_id: 'original-execution',
+      branch_id: 'original-native-branch', native_scope: 'packages/subtree' });
+    expect(result.sourcePreparation!.preparedSource).toEqual(resourceSource(result.source));
+    expect(result.source.workspaceId).toBe('native-project');
+    if (mode === 'live_root') expect(result.source).toMatchObject({ mode: 'native_workspace', nativeScope: 'packages/subtree' });
+    else { expect(result.source.branchId).toBe('captured-subtree'); expect(result.source).not.toHaveProperty('nativeScope'); }
+    await f.service.prepare({ ...principal, principalId: 'another-principal' }, { coordinatorHostId: 'coordinator', input: selected }, signal);
+    await f.service.prepare(principal, { coordinatorHostId: 'another-coordinator', input: selected }, signal);
+    expect(new Set(f.prepareSource.mock.calls.map(([value]) => value.key)).size).toBe(3);
+    expect(f.issueGrant).not.toHaveBeenCalled();
+    expect(f.sourceRequest.mock.calls.every(([method]) => method === 'source.capabilities')).toBe(true);
+  });
+
+  it.each(['key', 'workspace', 'owner', 'prepared_tuple', 'native_scope'] as const)('rejects an inconsistent local %s binding before returning it as remote evidence', async mismatch => {
+    const f = fixture();
+    f.prepareSource.mockImplementation(async selection => {
+      const prepared = preparedLocal(selection), binding = prepared.sourcePreparation!;
+      if (mismatch === 'key') binding.key = 'another-occurrence';
+      if (mismatch === 'workspace') binding.workspaceId = 'another-registration';
+      if (mismatch === 'owner') binding.nativeSource.resource_owner = source.resourceOwner;
+      if (mismatch === 'prepared_tuple') binding.preparedSource.branch_id = 'another-branch';
+      if (mismatch === 'native_scope') {
+        binding.preparedSource.native_scope = 'another-subtree';
+        if (prepared.source.mode !== 'native_workspace') throw new Error('Expected original live native fixture');
+        prepared.source.nativeScope = 'another-subtree';
+      }
+      return prepared;
+    });
+    await expect(f.service.prepare(principal, { coordinatorHostId: 'coordinator', input: input('live_root') })).rejects.toMatchObject({ code: 'source_changed' });
+  });
+
+  it('does not let a valid native binding bypass principal, registered-directory or current trust checks', async () => {
+    const f = fixture(); f.prepareSource.mockImplementation(async selection => preparedLocal(selection));
+    const request = { coordinatorHostId: 'coordinator', input: input('materialized') };
+    await expect(f.service.prepare({ ...principal, capabilities: [] }, request)).rejects.toMatchObject({ code: 'source_authority_denied' });
+    await expect(f.service.prepare({ ...principal, allowedDirectories: ['/elsewhere'] }, request)).rejects.toThrow('does not have access');
+    expect(f.prepareSource).not.toHaveBeenCalled();
+    await expect(f.service.prepare({ ...principal, allowedDirectories: ['/target'] }, request)).resolves.toMatchObject({ source: { workspaceId: 'native-project' } });
+    f.prepareSource.mockClear(); f.state.trusted = false;
+    await expect(f.service.prepare(principal, request)).rejects.toThrow('Trust withdrawn');
+    expect(f.prepareSource).not.toHaveBeenCalled();
+  });
+
+  it('rejects changed binding evidence at the coordinator after the target returned a valid original preparation', async () => {
+    const f = fixture(); f.prepareSource.mockImplementation(async selection => preparedLocal(selection));
+    const client = { prepare: async (request: Parameters<typeof f.service.prepare>[1], signal?: AbortSignal) => {
+      const result = await f.service.prepare(principal, request, signal);
+      return { ...result, sourcePreparation: { ...result.sourcePreparation!, key: 'different-occurrence' } };
+    } };
+    const consumer = createManagedSourceConsumers({ coordinatorHostId: () => 'coordinator',
+      registry: { source: async () => client } as unknown as Parameters<typeof createManagedSourceConsumers>[0]['registry'],
+      withRunAuthority: async () => { throw new Error('Cold preparation must not create a Run'); } });
+    await expect(consumer.threads.prepare(input('materialized'))).rejects.toThrow('changed the original selection');
+    expect(f.prepareSource).toHaveBeenCalledOnce();
+  });
 });

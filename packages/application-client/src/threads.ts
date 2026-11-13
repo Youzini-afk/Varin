@@ -170,6 +170,8 @@ export interface ThreadSourcesAPI {
   resolve(identity: ThreadIdentity, request: { resourceOwner: SourceResourceOwner; path: string }, signal?: AbortSignal): Promise<ThreadResolvedSource>;
 }
 export interface ThreadPreparedSource {
+  /** Original source-owner registration binding; never accepted from a renderer as authority. */
+  sourcePreparation?: import('@varin/protocol').SourcePreparationBinding;
   path: string;
   source: ThreadSource;
   provenance?: ChildSourceProvenance;

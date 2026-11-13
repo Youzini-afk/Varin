@@ -1986,7 +1986,52 @@ pub(super) fn original_input(value: &Value) -> Result<Option<Value>> {
     let body: CalendarHistory = serde_json::from_value(value.clone())?;
     Ok(Some(body.input))
 }
+/// Attestation from the trusted source-preparation owner, not renderer input or
+/// a second registration store. The owner admits the original Documents/native
+/// registration before preparing its exact result; Catalog binds that result to
+/// the accepted calendar selection and occurrence rather than guessing an alias.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SourcePreparationBinding {
+    pub thread_id: String,
+    pub branch_id: String,
+    pub key: String,
+    pub resource_owner: launches::SourceResourceOwner,
+    pub workspace_id: String,
+    pub mode: SourceMode,
+    pub native_source: launches::SourceSelection,
+    pub prepared_source: launches::SourceSelection,
+}
+impl SourcePreparationBinding {
+    fn matches(&self, occurrence: &Occurrence, source: &Source, mode: SourceMode,
+        candidate: &launches::SourceSelection) -> bool {
+        self.thread_id == occurrence.thread_id
+            && self.branch_id == occurrence.branch_id
+            && self.key == occurrence.id
+            && self.mode == mode
+            && self.native_source.mode == SourceMode::NativeWorkspace
+            && self.native_source.validate().is_ok()
+            && self.prepared_source.validate().is_ok()
+            && &self.prepared_source == candidate
+            && self.resource_owner == self.native_source.resource_owner
+            && self.resource_owner == candidate.resource_owner
+            && self.native_source.workspace_id == candidate.workspace_id
+            && !self.workspace_id.trim().is_empty()
+            && match source {
+                Source::Project => self.resource_owner.is_local(),
+                Source::Workspace { resource_owner, workspace_id } =>
+                    resource_owner == &self.resource_owner && workspace_id == &self.workspace_id,
+            }
+            && match mode {
+                SourceMode::LiveRoot | SourceMode::NativeWorkspace => &self.native_source == candidate,
+                // Captures have a new branch/execution identity and their own root;
+                // the original scoped view was consumed by the source owner.
+                SourceMode::FixedBranch | SourceMode::Materialized => candidate.native_scope.is_none(),
+            }
+    }
+}
 pub struct ColdPreparation {
+    source_preparation: Option<SourcePreparationBinding>,
     definition: Definition,
     occurrence: Occurrence,
     submission: submissions::SubmissionPreparation,
@@ -2062,6 +2107,7 @@ impl Catalog {
             .with_resources(resources)
             .with_input_preparation(input_preparation);
         Ok(ColdPreparation {
+            source_preparation: None,
             definition: d,
             occurrence: o,
             submission,
@@ -2152,6 +2198,10 @@ impl Catalog {
     }
 }
 impl ColdPreparation {
+    pub fn with_source_preparation(mut self, binding: Option<SourcePreparationBinding>) -> Self {
+        self.source_preparation = binding;
+        self
+    }
     pub fn load(mut self, launch: launches::LaunchSelection) -> Result<PreparedCold> {
         let Target::NewWork {
             model,
@@ -2164,7 +2214,7 @@ impl ColdPreparation {
         };
         let configuration: crate::ModelSessionConfiguration =
             serde_json::from_value(self.submission.command.configuration.clone())?;
-        if configuration.model != model.model_id
+        if configuration.catalog_model_id.as_deref().unwrap_or(&configuration.model) != model.model_id
             || configuration.provider_id.as_deref() != Some(model.provider_id.as_str())
             || model
                 .thinking_level
@@ -2179,7 +2229,17 @@ impl ColdPreparation {
                     != Some(requested)
             })
             || launch.source.as_ref().is_none_or(|candidate| {
-                candidate.mode != *source_mode || !source.matches(candidate)
+                // The source owner resolves physical access to the selected native backend.
+                // A captured/materialized source and a live mounted source both use
+                // NativeWorkspace; fixed snapshots must remain immutable.
+                let mode_matches = candidate.mode == *source_mode
+                    || candidate.mode == SourceMode::NativeWorkspace
+                        && matches!(source_mode, SourceMode::LiveRoot | SourceMode::Materialized);
+                let source_matches = match &self.source_preparation {
+                    Some(binding) => binding.matches(&self.occurrence, source, *source_mode, candidate),
+                    None => source.matches(candidate),
+                };
+                !mode_matches || !source_matches
             })
         {
             return Err(RuntimeError::Conflict(
