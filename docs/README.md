@@ -39,6 +39,7 @@
 以下保留产品取舍、视觉稿或尚待继续讨论的设计。实际行为以领域文档和代码为准；原型使用示例数据，不连接 Host。
 
 - [长期总助手、连续上下文与记忆](design/bot-assistant.md)：当前合同见[长期总助手](bot.md)。
+- [浏览器独立资源设计](design/browser-resources.md)：跨设备浏览器、用户现用浏览器连接、页面预览与接管的整体方案，尚未实施。
 - [设置体验](design/chat-settings-experience.md)、[设置设计稿](design/settings-redesign.html)：已接入生产设置页；[聊天与设置的早期设计稿](design/chat-settings-preview.html)中的设置部分已被取代。
 - [用量与价格](design/usage-dashboard.md)、[用量页面交互稿](design/usage-preview/index.html)：已接入设置页；当前统计口径见[运行时](runtime.md)和[工作台](workbench.md)。
 - [上下文准备与替换交互稿](design/context-compaction/index.html)：当前行为见[工作台](workbench.md#上下文准备与替换)和[运行时](runtime.md)。
