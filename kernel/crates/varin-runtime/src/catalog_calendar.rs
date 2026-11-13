@@ -2164,7 +2164,7 @@ impl ColdPreparation {
         };
         let configuration: crate::ModelSessionConfiguration =
             serde_json::from_value(self.submission.command.configuration.clone())?;
-        if configuration.model != model.model_id
+        if configuration.catalog_model_id.as_deref().unwrap_or(&configuration.model) != model.model_id
             || configuration.provider_id.as_deref() != Some(model.provider_id.as_str())
             || model
                 .thinking_level
@@ -2179,7 +2179,13 @@ impl ColdPreparation {
                     != Some(requested)
             })
             || launch.source.as_ref().is_none_or(|candidate| {
-                candidate.mode != *source_mode || !source.matches(candidate)
+                // The source owner resolves physical access to the selected native backend.
+                // A captured/materialized source and a live mounted source both use
+                // NativeWorkspace; fixed snapshots must remain immutable.
+                let mode_matches = candidate.mode == *source_mode
+                    || candidate.mode == SourceMode::NativeWorkspace
+                        && matches!(source_mode, SourceMode::LiveRoot | SourceMode::Materialized);
+                !mode_matches || !source.matches(candidate)
             })
         {
             return Err(RuntimeError::Conflict(

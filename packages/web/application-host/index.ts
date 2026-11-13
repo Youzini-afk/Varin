@@ -1,3 +1,4 @@
+import { calendarErrorCode } from './lib/scheduled-tasks/preparation-error.js';
 import { freezeProjectSourceSelection } from '@varin/application-client';
 import {createManagedTerminalOwner} from './lib/terminal/managed-owner.js';
 import {authorizeManagedTerminal,registerManagedTerminalRoutes} from './lib/terminal/managed-routes.js';
@@ -2650,7 +2651,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     projects: scheduledScopes,
     prepare: (work, projectPath, signal) => threads.prepareCalendarWork(work, projectPath, signal),
     onChanged: () => { for (const client of uiVarinEventClients) { try { writeSseEvent(client, { type: 'varin:scheduled-task-changed', properties: {} }); } catch { uiVarinEventClients.delete(client); } } },
-    onError: () => console.warn('[Calendar] preparation or asset synchronization requires attention'),
+    onError: error => console.warn('[Calendar] preparation or asset synchronization requires attention:', calendarErrorCode(error)),
   });
   scheduledTasksRuntime.setCalendarOwner(calendarOwner);
   scriptRuntimeOwner.current = createScriptRuntime({ kernel: kernelClient, runtime: agentRuntime, resolveLiveSource: liveSources.validate, onError: () => console.error('[Script] Original environment requires reconciliation') });

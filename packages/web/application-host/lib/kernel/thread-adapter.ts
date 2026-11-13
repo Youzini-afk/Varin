@@ -1,3 +1,4 @@
+import { calendarPreparationError, type CalendarPreparationStage } from '../scheduled-tasks/preparation-error.js';
 import { prepareQuoteSelections } from './thread-quotes.js';
 import { parseContentReferenceInput, type ContentReferenceInput } from '@varin/application-client';
 import { currentRequestPrincipal, assertPrincipalOwnership } from './request-principal.js';
@@ -35,7 +36,7 @@ import type { ContextPreparer } from './thread-context.js';
 import { parseThreadSkills, type ThreadSkillInputPreparer } from './thread-skill-input.js';
 import { resourceThreadSource } from './thread-context.js';
 import { parseExplicitSkillCommand } from '../agent-resources/activation.js';
-import { KernelRequestError } from './kernel-error.js';
+import { KernelClientError, KernelRequestError } from './kernel-error.js';
 import { ResourceScopeError } from './thread-resource-scope.js';
 import { HistoryRunUsageReader, historyModelRequestId } from './history-run-usage.js';
 import { HistoryRunNavigationReader } from './history-run-navigation.js';
@@ -999,47 +1000,61 @@ export class ThreadAdapter {
   /** Cold calendar work is prepared by the same source/model/context owners as User submission.
    * Catalog supplies the occurrence identity and original instruction; this cannot forge User input. */
   async prepareCalendarWork(preparation: import('./protocol.generated.js').CalendarPreparation, projectPath: string, signal: AbortSignal) {
-    const { occurrence, definition } = preparation;
-    if (definition.target.kind !== 'new_work') throw new Error('Calendar work is not a cold submission');
-    const identity: ThreadIdentity = { runtime: 'agent', threadId: occurrence.thread_id, branchId: occurrence.branch_id };
-    await this.requireIdentity(identity);
-    signal.throwIfAborted();
-    // Only an explicit project source resolves the coordinator's project path. A
-    // workspace selection retains its registered Host and namespace even offline.
-    const selected = definition.target.source;
-    const location = selected.kind === 'workspace' ? selected
-      : await this.resolveSource(identity, { resourceOwner: { kind: 'local' }, path: projectPath }, signal);
-    signal.throwIfAborted();
-    const { source } = await this.prepareSource({ ...identity, key: occurrence.id, resourceOwner: location.resourceOwner,
-      workspaceId: location.workspaceId, mode: definition.target.sourceMode, content: { mode: 'saved-files' }, captureScopes: [] }, signal);
-    signal.throwIfAborted();
-    await this.admitSource(source, identity, undefined, signal);
-    signal.throwIfAborted();
-    const model = await waitForModelBinding(this.models.resolveModel(definition.target.model as ThreadModel), model => model.credentialOwner.release(), signal);
+    let stage: CalendarPreparationStage = 'identity';
     try {
-      if (!this.prepareContext) throw new Error('Calendar context preparation is unavailable');
-      // The calendar definition is the admitted project scope, independently of
-      // where its files execute. The resource owner still prepares the actual view.
-      const initialContext = await this.prepareContext(identity, source, {
-        mode: 'agent', threadRole: 'main', projectId: definition.project_id,
-      }, signal);
-      const skill = await this.skillInput(identity, initialContext.resources, preparation.instruction, signal);
-      const childDispatch = this.prepareChildProfiles ? await this.prepareChildProfiles({ modelOwner: model.credentialOwner, parent: {
-        configuration: model.configuration, credential_scope: await model.credentialOwner.scope(),
-      } }, signal) : undefined;
+      const { occurrence, definition } = preparation;
+      if (definition.target.kind !== 'new_work') throw new Error('Calendar work is not a cold submission');
+      const identity: ThreadIdentity = { runtime: 'agent', threadId: occurrence.thread_id, branchId: occurrence.branch_id };
+      await this.requireIdentity(identity);
       signal.throwIfAborted();
-      const receipt = await this.runtime.admitCalendar({ occurrenceId: occurrence.id, expectedRevision: occurrence.revision,
-        ownerEpoch: preparation.owner_epoch, configuration: model.configuration, initialContext,
-        ...(skill ? { inputPreparation: { expectedContextCheckpoint: null, skill } } : {}),
-        launch: { inheritSource: false, source: { resourceOwner: source.resourceOwner, workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId,
-          ...(source.mode==='native_workspace'&&source.nativeScope?{nativeScope:source.nativeScope}:{}),branchId: source.branchId ?? null, revision: source.revision ?? null, mode: source.mode, liveRoot: source.liveRoot ?? null, ...(source.environmentRunId ? { environmentRunId: source.environmentRunId } : {}) },
-          enabledTools: source.tools, credentialScope: await model.credentialOwner.scope(), ...(childDispatch ? { childDispatch } : {}) },
-      }, signal);
-      // Admission transfers ownership to the Run. Retiring this preparation must not
-      // cancel its newly admitted launch; withRunPreparation owns actual Run/epoch stop.
-      if (receipt.run_id) void this.continueLaunch(receipt.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
-      return receipt;
-    } finally { model.credentialOwner.release(); }
+      // Only an explicit project source resolves the coordinator's project path. A
+      // workspace selection retains its registered Host and namespace even offline.
+      stage = 'source_resolution';
+      const selected = definition.target.source;
+      const location = selected.kind === 'workspace' ? selected
+        : await this.resolveSource(identity, { resourceOwner: { kind: 'local' }, path: projectPath }, signal);
+      signal.throwIfAborted();
+      stage = 'source_preparation';
+      const { source } = await this.prepareSource({ ...identity, key: occurrence.id, resourceOwner: location.resourceOwner,
+        workspaceId: location.workspaceId, mode: definition.target.sourceMode, content: { mode: 'saved-files' }, captureScopes: [] }, signal);
+      signal.throwIfAborted();
+      stage = 'source_admission';
+      await this.admitSource(source, identity, undefined, signal);
+      signal.throwIfAborted();
+      stage = 'model';
+      const model = await waitForModelBinding(this.models.resolveModel(definition.target.model as ThreadModel), model => model.credentialOwner.release(), signal);
+      try {
+        stage = 'context';
+        if (!this.prepareContext) throw new Error('Calendar context preparation is unavailable');
+        // The calendar definition is the admitted project scope, independently of
+        // where its files execute. The resource owner still prepares the actual view.
+        const initialContext = await this.prepareContext(identity, source, {
+          mode: 'agent', threadRole: 'main', projectId: definition.project_id,
+        }, signal);
+        stage = 'skills';
+        const skill = await this.skillInput(identity, initialContext.resources, preparation.instruction, signal);
+        stage = 'child_profiles';
+        const childDispatch = this.prepareChildProfiles ? await this.prepareChildProfiles({ modelOwner: model.credentialOwner, parent: {
+          configuration: model.configuration, credential_scope: await model.credentialOwner.scope(),
+        } }, signal) : undefined;
+        signal.throwIfAborted();
+        stage = 'admission';
+        const receipt = await this.runtime.admitCalendar({ occurrenceId: occurrence.id, expectedRevision: occurrence.revision,
+          ownerEpoch: preparation.owner_epoch, configuration: model.configuration, initialContext,
+          ...(skill ? { inputPreparation: { expectedContextCheckpoint: null, skill } } : {}),
+          launch: { inheritSource: false, source: { resourceOwner: source.resourceOwner, workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId,
+            ...(source.mode==='native_workspace'&&source.nativeScope?{nativeScope:source.nativeScope}:{}),branchId: source.branchId ?? null, revision: source.revision ?? null, mode: source.mode, liveRoot: source.liveRoot ?? null, ...(source.environmentRunId ? { environmentRunId: source.environmentRunId } : {}) },
+            enabledTools: source.tools, credentialScope: await model.credentialOwner.scope(), ...(childDispatch ? { childDispatch } : {}) },
+        }, signal);
+        // Admission transfers ownership to the Run. Retiring this preparation must not
+        // cancel its newly admitted launch; withRunPreparation owns actual Run/epoch stop.
+        if (receipt.run_id) void this.continueLaunch(receipt.run_id, { credentialOwner: model.credentialOwner }).catch(() => undefined);
+        return receipt;
+      } finally { model.credentialOwner.release(); }
+    } catch (error) {
+      if (signal.aborted || error instanceof KernelClientError && error.code === 'activation-held') throw error;
+      throw calendarPreparationError(error, stage);
+    }
   }
 
   async submit(input: ThreadSubmit) {

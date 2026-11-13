@@ -236,6 +236,75 @@ fn source_cold_admission_binds_exact_owner_workspace_and_mode() {
 }
 
 #[test]
+fn cold_source_resolves_native_backend_without_changing_selected_access() {
+    for requested in [SourceMode::LiveRoot, SourceMode::Materialized, SourceMode::FixedBranch] {
+        let mut f = Fixture::new();
+        let mut input = definition(false);
+        let Target::NewWork { source_mode, .. } = &mut input.target else { unreachable!() };
+        *source_mode = requested;
+        let mut selected = managed_launch();
+        let source = selected.source.as_mut().unwrap();
+        source.mode = SourceMode::NativeWorkspace;
+        source.live_root = None;
+        source.branch_id = Some("source:original-capture".into());
+        source.execution_workspace_id = launches::native_execution_workspace_id("source:original-capture");
+        select_workspace(&mut input, &selected);
+        let d = sync(&mut f.db, &input);
+        let occurrence = f.db.run_calendar_now(&d.id, d.revision, "native-backend").unwrap();
+        for wrong_identity in ["workspace", "owner"] {
+            let mut changed = selected.clone();
+            let source = changed.source.as_mut().unwrap();
+            if wrong_identity == "workspace" { source.workspace_id = "another-workspace".into(); }
+            else { source.resource_owner = launches::SourceResourceOwner::Local; }
+            assert!(matches!(prepare_with_launch(&f.db, &occurrence, changed), Err(RuntimeError::Conflict(_))));
+        }
+        let prepared = prepare_with_launch(&f.db, &occurrence, selected.clone());
+        if requested == SourceMode::FixedBranch {
+            assert!(matches!(prepared, Err(RuntimeError::Conflict(_))));
+            assert!(latest_run(&f.db.db, &occurrence.branch_id).unwrap().is_none());
+        } else {
+            let admitted = f.db.admit_calendar_submission(prepared.unwrap()).unwrap();
+            assert_eq!(f.db.launch_intent(admitted.run_id.as_ref().unwrap()).unwrap().unwrap().selection.source, selected.source);
+            assert_eq!(f.db.history(&occurrence.branch_id).unwrap().len(), 1);
+            drop(f.db);
+            f.db = Catalog::open(&f.path).unwrap();
+            assert_eq!(f.db.launch_intent(admitted.run_id.as_ref().unwrap()).unwrap().unwrap().selection.source, selected.source);
+        }
+        drop(f.db);
+        std::fs::remove_dir_all(f.path).unwrap();
+    }
+}
+
+#[test]
+fn cold_model_uses_catalog_identity_while_preserving_upstream_alias() {
+    let mut f = Fixture::new();
+    let d = sync(&mut f.db, &definition(false));
+    let occurrence = f.db.run_calendar_now(&d.id, d.revision, "aliased-model").unwrap();
+    let mut config = configuration();
+    config["model"] = json!("upstream-model");
+    config["catalogModelId"] = json!("fixture");
+    let mut selected = launch();
+    selected.model = "upstream-model".into();
+    // Matching the wire model alone cannot substitute another registered model.
+    for (field, value) in [("catalogModelId", "another-registered-model"), ("providerId", "another-provider"), ("model", "another-model")] {
+        let mut wrong = configuration();
+        wrong[field] = json!(value);
+        let (initial, basis) = context(&occurrence);
+        assert!(matches!(f.db.prepare_calendar_submission(&occurrence.id, occurrence.revision, f.db.epoch(),
+            wrong, initial, basis, None, None).unwrap().load(launch()), Err(RuntimeError::Conflict(_))));
+        assert!(latest_run(&f.db.db, &occurrence.branch_id).unwrap().is_none());
+    }
+    let (initial, basis) = context(&occurrence);
+    let prepared = f.db.prepare_calendar_submission(&occurrence.id, occurrence.revision, f.db.epoch(),
+        config, initial, basis, None, None).unwrap().load(selected).unwrap();
+    let admitted = f.db.admit_calendar_submission(prepared).unwrap();
+    assert_eq!(f.db.launch_intent(admitted.run_id.as_ref().unwrap()).unwrap().unwrap().selection.model, "upstream-model");
+    assert_eq!(f.db.history(&occurrence.branch_id).unwrap().len(), 1);
+    drop(f.db);
+    std::fs::remove_dir_all(f.path).unwrap();
+}
+
+#[test]
 fn source_occurrence_survives_reopen_and_replacement_without_rebinding_old_work() {
     let mut f = Fixture::new();
     let mut input = definition(false);
