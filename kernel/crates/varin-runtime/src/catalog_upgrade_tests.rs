@@ -302,6 +302,52 @@ fn catalog_upgrade_v78_preserves_history_queue_receipts_and_effect_fencing() {
 }
 
 #[test]
+fn catalog_upgrade_unknown_identity_recovers_without_authorizing_execution() {
+    for state in ["generating", "executing"] {
+        for deleted in [false, true] {
+            // This released fixture has no original thread.created evidence.
+            // Do not manufacture that evidence just to let recovery open it.
+            let fixture = Fixture::v78();
+            let raw = fixture.raw();
+            raw.execute("UPDATE runs SET body=json_set(body,'$.state',?1)", [state])
+                .unwrap();
+            if deleted {
+                raw.execute("UPDATE threads SET deleted_at_ms=1", []).unwrap();
+            }
+            drop(raw);
+            let bodies = fixture.bodies();
+
+            let mut catalog = Catalog::open(&fixture.0).unwrap();
+            assert_eq!(inspect_catalog_format(&catalog.db).unwrap(), FORMAT);
+            let run = catalog.run("run").unwrap();
+            assert_eq!(run.state, RunState::Waiting);
+            assert_eq!(run.epoch, catalog.epoch());
+            assert!(run.waiting_on.is_some());
+            assert_eq!(catalog.operation("effect").unwrap().effect, Effect::Unknown);
+            assert_eq!(catalog.inspect_thread("thread").unwrap()["creation_identity_known"], false);
+            assert!(matches!(
+                catalog.create_thread("thread", "main"),
+                Err(RuntimeError::IdentityUnavailable(_))
+            ));
+            assert!(matches!(
+                catalog.dispatch_operation("effect", catalog.epoch(), "replacement", true),
+                Err(RuntimeError::IdentityUnavailable(_))
+            ));
+            assert_eq!(catalog.db.query_row(
+                "SELECT count(*) FROM events WHERE kind IN ('thread.created','bot.work_pending')",
+                [], |row| row.get::<_, i64>(0)
+            ).unwrap(), 0);
+            assert_eq!(fixture.bodies(), bodies);
+            drop(catalog);
+
+            let catalog = Catalog::open(&fixture.0).unwrap();
+            assert_eq!(catalog.run("run").unwrap().state, RunState::Waiting);
+            assert_eq!(catalog.inspect_thread("thread").unwrap()["creation_identity_known"], false);
+        }
+    }
+}
+
+#[test]
 fn catalog_upgrade_sql_failure_rolls_back_and_reopen_retries() {
     let fixture = Fixture::v78();
     let bodies = fixture.bodies();
