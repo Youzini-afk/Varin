@@ -1,7 +1,7 @@
 # Host adapters for the Rust kernel and Agent runtime
 
 This directory binds product owners to the private Rust component. It does not contain a second
-Catalog, file store, execution scheduler or recovery journal. `application-host/index.ts` creates one
+Catalog, file store, execution scheduler or recovery journal. [application-host/index.ts](../../index.ts) creates one
 KernelClient and injects existing Documents, extension, model, knowledge, research and Computer owners.
 
 Read [architecture](../../../../../docs/architecture.md), [Agent runtime](../../../../../docs/runtime.md)
@@ -10,38 +10,35 @@ those responsibilities to Host entry points.
 
 ## Transport and authority
 
-`kernel-client.ts`, `kernel-launch.ts` and the wire helpers start the real executable, verify packaged
+[kernel-client.ts](kernel-client.ts), [kernel-launch.ts](kernel-launch.ts) and the wire helpers start the real executable, verify packaged
 manifest/build/protocol/architecture for installed artifacts, bootstrap the local authenticated epoch and carry separate control
-and content streams. `protocol.generated.ts` comes from `kernel/protocol/schema.json`; do not hand-edit it.
+and content streams. [protocol.generated.ts](protocol.generated.ts) comes from [kernel/protocol/schema.json](../../../../../kernel/protocol/schema.json); do not hand-edit it.
 Production requires the executable manifest. The explicit development path may use an unmanifested
 local binary or Cargo runner; that path is not installed-product verification. Wire compatibility,
 Agent Catalog upgrades and resource Storage format validation are separate owner checks.
 
-`../model-text/service.ts` runs auxiliary text work through native inference and its original receipts.
-Execution-owner equality compares fields, independent of JSON property order. Standalone text and
-knowledge jobs use their own native Run as request context, without a conversation branch/workspace.
-`../model-text/thread-titles.ts` coordinates initial and periodic title checks; Catalog owns the
-original naming generation, checked-turn count and frozen history cut. The default interval is five
-completed user turns; zero keeps initial naming only. `../model-text/thread-title-context.ts` builds the retained
-summary/recent-exchange input, and the model-text owner selects the auxiliary model. Startup and
-kernel-ready discovery reuse original results or resume unsent work, never replay an unknown dispatch.
-Manual naming ends automatic checks; late output must pass the original Catalog publication fence.
+[Auxiliary model work](../model-text/service.ts) uses its own native Run and original receipt, without
+inventing a conversation branch. [Thread naming](../model-text/thread-titles.ts) coordinates Catalog-owned
+naming generations and frozen history cuts; settings define frequency. Startup reuses recorded results
+or resumes unsent work, never an unknown dispatch. Manual naming and Catalog publication fences protect
+later user intent. Credential selection stays with the [model service](../models/DOCUMENTATION.md).
 
 Actor-scoped handles bind Host, epoch, Thread/Run, workspace and capability scope. Global management
 is limited to its management operations and cannot silently substitute for an actor grant. Storage resolves
 authority from the original branch/pin/record/operation/object owner. A supplied hash is not blob access.
 
-Large bodies use sequenced acknowledged streams. Control responses stay metadata-only where specified.
-Encoding/decoding and body work run outside the short control owner. `close()` drains admitted work and
-waits for native exit. The Application Host passes its single `ShutdownDeadline`; expiry rejects
-without detaching an undrained native workspace transport or adding another termination timeout.
-A late receipt cannot resume Host teardown. Standalone native-workspace clients without a supplied
-deadline still wait for the original physical drain. `beginDraining()` rejects new execution and
-queued execution admission, but leaves control requests and original effect receipts owned. Protocol mismatch, revoked grants, malformed replies and executable loss are explicit
-failures, with no old-backend fallback. Cancelling observation does not reverse a committed domain effect.
+Transport scheduling, inline frames and separate large-body credits are described by the
+[kernel transport owner](../../../../../kernel/README.md#transport-lifetime). The Host queue and
+codec helpers retain the same lifetime: `close()` drains admitted work and waits for native exit.
+The Application Host supplies one `ShutdownDeadline`; expiry rejects without detaching undrained
+work or starting another termination timeout. `beginDraining()` stops fresh execution admission,
+not control reads or original effect receipts. A late receipt cannot resume Host teardown.
+Protocol mismatch, revocation, malformed replies and executable loss remain explicit failures.
+Cancelling an observation never reverses a committed effect. Standalone clients without a supplied
+deadline continue waiting for their original physical drain.
 
-`context-service.ts` answers native execution-environment preparation from the actual Source Host.
-`source-launch.ts` carries the initial trusted program inventory; request preparation refreshes the
+[context-service.ts](context-service.ts) answers native execution-environment preparation from the actual Source Host.
+[source-launch.ts](source-launch.ts) carries the initial trusted program inventory; request preparation refreshes the
 selection and persists it in the frozen tool context. Managed tool dispatch forwards that same snapshot
 to its target owner. A changed default takes effect at the next model request, while accepted commands
 retain their interpreter and process identity. No coordinator program path is used as a remote fallback.
@@ -80,17 +77,17 @@ change time, attributes and directory changes without a second full body read/tr
 
 | Entry | Responsibility |
 | --- | --- |
-| `native-workspaces.ts` | Logical project/branch references, current mount generation and original execution/document leases; Rust owns bytes and mounts |
-| `storage-adapter.ts` | Scoped immutable branches, pins, objects and typed working records |
-| `file-resource-backend.ts` | Documents/Recovery physical leases and conditional file operations |
-| `kernel-recovery-store.ts` | Original checkpoint, mutation and recovery journal adapters |
-| `thread-sources.ts` | Explicit source owner/content/mode selection and original preparation receipts |
-| `source-launch.ts`, `live-source.ts` | Current physical source admission and exact materialized/live identity |
-| `thread-resource-scope.ts`, `thread-context.ts` | Frozen resource and personalization candidates |
-| `resource-owner.ts` | Original invocation/checkpoint-scoped instruction/skill reads |
-| `managed-source-bridge.ts`, `managed-source-consumers.ts` | Target Source authority and source-specific domain dispatch |
+| [native-workspaces.ts](native-workspaces.ts) | Logical project/branch references, current mount generation and original execution/document leases; Rust owns bytes and mounts |
+| [storage-adapter.ts](storage-adapter.ts) | Scoped immutable branches, pins, objects and typed working records |
+| [file-resource-backend.ts](file-resource-backend.ts) | Documents/Recovery physical leases and conditional file operations |
+| [kernel-recovery-store.ts](kernel-recovery-store.ts) | Original checkpoint, mutation and recovery journal adapters |
+| [thread-sources.ts](thread-sources.ts) | Explicit source owner/content/mode selection and original preparation receipts |
+| [source-launch.ts](source-launch.ts), [live-source.ts](live-source.ts) | Current physical source admission and exact materialized/live identity |
+| [thread-resource-scope.ts](thread-resource-scope.ts), [thread-context.ts](thread-context.ts) | Frozen resource and personalization candidates |
+| [resource-owner.ts](resource-owner.ts) | Original invocation/checkpoint-scoped instruction/skill reads |
+| [managed-source-bridge.ts](managed-source-bridge.ts), [managed-source-consumers.ts](managed-source-consumers.ts) | Target Source authority and source-specific domain dispatch |
 
-`thread-source-files.ts` projects composer file/directory metadata from the exact admitted Thread
+[thread-source-files.ts](thread-source-files.ts) projects composer file/directory metadata from the exact admitted Thread
 Source. Fixed sources stay on their original branch revision; live/native/materialized sources retain
 their original physical view. Pending drafts use Documents resolution and native metadata listing,
 without creating a Thread or opening file bodies. Managed queries execute at the selected target,
@@ -133,50 +130,51 @@ A read selecting old activation still checks its original ancestry and current t
 
 ## Native Thread admission and product views
 
-`history-run-navigation.ts` builds the chat rail's metadata-only Run index from native history references,
+[history-run-navigation.ts](history-run-navigation.ts) builds the chat rail's metadata-only Run index from native history references,
 validating the selected branch/cut even when its immutable prefix is cached. It excludes rewound history;
 body pagination and virtual rows never supply Run ordinals. Preview bodies are read only on demand.
 
-`agent-runtime-client.ts` is the typed Catalog client. `thread-adapter.ts`, `thread-routes.ts` and related
-Thread adapters validate authenticated product requests, prepare actual owners and project results. Rust
-owns admission and original command receipts, not an in-memory Host request queue.
+[agent-runtime-client.ts](agent-runtime-client.ts) is the typed Catalog client. [thread-routes.ts](thread-routes.ts)
+checks public inputs and authorizes actual read/write identifiers through [request-principal.ts](request-principal.ts)
+and [ownership-resolver.ts](ownership-resolver.ts). Positive immutable mappings are batched and cached;
+missing mappings fail closed. Opaque messages and quoted data are not recursively scanned for authority.
+Among authenticated clients, public writes require the Host owner; foreign private work remains
+inaccessible to it. Unauthenticated local mode retains its original public-work behavior.
 
-Thread snapshot reads retain the caller's AbortSignal through Catalog, history hydration, context policy,
-child metadata and recovery reads. Switching conversations or closing the HTTP observer cancels those
-reads and their queued continuations; it does not issue Run or child cancellation commands.
+[thread-adapter.ts](thread-adapter.ts) projects one native `thread.view` result and adds only Host-owned
+policy preparation, creation defaults and recovery. The native view includes its event cursor and may
+return a head-anchored history delta. The AbortSignal fences late reads and continuations, not Run execution.
+`inspectMany` reads affected visible summaries without rebuilding the catalog list. Context inspection
+uses [the Rust read owner](../../../../../kernel/crates/varin-runtime/src/catalog_context_inspection.rs),
+which caches immutable ancestry/composition while refreshing mutable request usage.
 
-- Submit/enqueue retries query their original receipt before preparing another source/model/resource.
-- Family reads bind the trusted caller and derive allowed ancestry in Catalog. Opening a view does not
-  send a message, create a wait or resume a child. Original content reads retain Run identity.
-- Messages distinguish inform/request/reply, accepted input, history delivery and activation. An unknown
-  send retains its exact body, target and key for retry. A passive message is not an implicit request.
-- `continueLaunch` consumes the existing durable readiness events and startup discovery. It does not
-  create a second launch ledger or resume policy Pause/question states because a UI was reopened.
-- `runtime.observations.reconcile` consumes original child/process/reply observations. Native realtime
-  deadlines and durable waits stay in Catalog; the Host adds no periodic model polling.
-- Agent content collection uses the original Catalog/ContentStore maintenance worker. Its partial,
-  deferred, cancelled and failed outcomes are distinct; it is not workspace Storage GC.
-  `content-maintenance.ts` coalesces Thread deletion requests, rediscovers tombstones at startup,
-  retries busy content readers, and follows durable events until original deleted work settles.
-  Catalog retires the deleted Thread's owned metadata while preserving surviving shared references;
-  the existing content collector releases the resulting unreachable bodies.
+[event-hub.ts](event-hub.ts) shares the native durable reader. Subscribers have independent cursor,
+principal filtering and progress interests; lagging readers fall back to durable pagination, not dropped events.
+The HTTP event writer treats a socket high-water mark as backpressure, retaining subsequent frames in a
+per-observer bounded FIFO until `drain`. The already accepted frame is never replayed. An observer that
+exceeds its buffer budget receives an explicit `slow-consumer` resync from its last accepted durable
+cursor before closing; disconnects release the queue without affecting other observers.
+An observation ID is scoped to its principal, so mutable interests cannot alter another client's subscription.
+The [client bus](../../../../application-client/src/thread-observation.ts) owns reconnect and local filtering.
 
-UI projections retain exact identities and revisions and discard stale asynchronous results. The same
-Host routes serve native product views; a renderer cannot supply prepared snapshots, trusted actors or
-operation owner records.
+Admission, stable-key retries, queue/history projection and explicit user controls are described in
+[THREADS.md](THREADS.md). Opening a view does not send messages, resume work or create waits.
+[content-maintenance.ts](content-maintenance.ts) follows actual deleted-work settlement and retries busy
+readers; original Catalog/ContentStore collection preserves surviving shared references. It is not Storage GC.
+UI projections discard stale asynchronous results without retiring tasks or supplying trusted owner records.
 
-`child-profiles.ts` composes the frozen implementation/verification/retrieval choices. `thread-adapter.ts`
+[child-profiles.ts](child-profiles.ts) composes the frozen implementation/verification/retrieval choices. [thread-adapter.ts](thread-adapter.ts)
 pages the native current/history directory before hydrating selected reports; UI state does not retire tasks.
-`child-source-store.ts` captures the selected concrete worktree and carries a reused Agent's changes over
+[child-source-store.ts](child-source-store.ts) captures the selected concrete worktree and carries a reused Agent's changes over
 that fixed stage. Managed preparation uses the same original target handoff and restricted preparation grant.
 
-`context-agent.ts` prepares the automatic context-organization profile from the existing trusted settings
+[context-agent.ts](context-agent.ts) prepares the automatic context-organization profile from the existing trusted settings
 snapshot. Both manual and automatic ContextJob admission use it; an unset model retains the conversation
 binding, and parameter overrides use the existing model owner. Native `runtime.context_job.definition`
 supplies the editor's actual prompt parts and tools. ContextJob freezes the selected instructions and model;
 recovery reads the admitted job before consulting current profile settings. Agent profile management exposes
 this automatic role alongside delegated profiles, while dispatch retains its own preset directory.
-`code-exchange.ts` and `managed-code-exchange.ts` compose selected snapshots with the existing Integration,
+[code-exchange.ts](code-exchange.ts) and [managed-code-exchange.ts](managed-code-exchange.ts) compose selected snapshots with the existing Integration,
 Documents and recovery owners. Native journal reconciliation publishes passive Agent notices under the original
 operation identity. See [collaboration](../../../../../docs/collaboration.md) for the product contract and prompts.
 
@@ -186,7 +184,7 @@ Model and credential selection uses the native [Host model service](../models/DO
 selected request contract; Host credentials are retained privately, not stored in snapshots. Purpose-
 specific retrieval and memory inference share actual Catalog admission/receipts. Provider details belong to [providers](../../../../../kernel/crates/varin-runtime/src/providers/README.md).
 
-`tool-invocation.ts`, `tool-bridge.ts`, `extension-tool-owner.ts`, `nested-tool-owner.ts` and the domain
+[tool-invocation.ts](tool-invocation.ts), [tool-bridge.ts](tool-bridge.ts), [extension-tool-owner.ts](extension-tool-owner.ts), [nested-tool-owner.ts](nested-tool-owner.ts) and the domain
 owners validate the original Run, ToolOrigin, operation/call, schema, binding and execution owner.
 Extension input schemas are checked once at authorization; execution reuses the parsed input after checking
 the original call identity, current permission and binding availability. Read-only callback/schema failures
@@ -211,17 +209,17 @@ HTTP cannot prove remote execution stopped.
 
 | Domain | Key adapters | Original authority |
 | --- | --- | --- |
-| Explicit notes and prompt edits | `memory-owner.ts`, `thread-context.ts` | Host personalization / Rust typed record |
-| Bot memory and background inference | `bot-memory-owner.ts`, `../memory/bot-history.ts`, `../memory/memory-inference.ts` | Bot binding, Catalog MemoryWork and KnowledgeStore receipts |
-| Plans | `plan-owner.ts`, `plan-service.ts` | KnowledgeStore version/CAS/receipt |
-| Source queries and language access | `source-query-service.ts`, `source-query.ts`, `language-owner.ts` | Admitted Source, native compute, language owner and original inference calls |
-| Web/documents/materials | `web-runtime.ts`, `document-sources.ts`, material owners | Existing Host material store and original reader grants |
-| Research | `research-runtime.ts`, `research-source.ts`, `managed-research-source.ts` | ExperimentService, source Storage and actual backend |
-| Computer | `computer-runtime.ts` | ComputerService assignments/input lane/target receipts |
-| Scripts | `script-runtime.ts` | Existing script process/session and retained ordinary-tool dispatch |
-| Calendar | `../scheduled-tasks/calendar-owner.ts` | Runtime Calendar occurrences and original launch/observation |
-| Project schedules | `schedule-tool-owner.ts`, `managed-schedule-service.ts` | Source Host scheduler and Source Storage mutation receipt |
-| Recovery/Integration | `managed-recovery-service.ts`, integration owners | Existing Recovery/Integration journals and conditional file authority |
+| Explicit notes and prompt edits | [memory-owner.ts](memory-owner.ts), [thread-context.ts](thread-context.ts) | Host personalization / Rust typed record |
+| Bot memory and background inference | [bot-memory-owner.ts](bot-memory-owner.ts), [../memory/bot-history.ts](../memory/bot-history.ts), [../memory/memory-inference.ts](../memory/memory-inference.ts) | Bot binding, Catalog MemoryWork and KnowledgeStore receipts |
+| Plans | [plan-owner.ts](plan-owner.ts), [plan-service.ts](plan-service.ts) | KnowledgeStore version/CAS/receipt |
+| Source queries and language access | [source-query-service.ts](source-query-service.ts), [source-query.ts](source-query.ts), [language-owner.ts](language-owner.ts) | Admitted Source, native compute, language owner and original inference calls |
+| Web/documents/materials | [web-runtime.ts](web-runtime.ts), [document-sources.ts](document-sources.ts), material owners | Existing Host material store and original reader grants |
+| Research | [research-runtime.ts](research-runtime.ts), [research-source.ts](research-source.ts), [managed-research-source.ts](managed-research-source.ts) | ExperimentService, source Storage and actual backend |
+| Computer | [computer-runtime.ts](computer-runtime.ts) | ComputerService assignments/input lane/target receipts |
+| Scripts | [script-runtime.ts](script-runtime.ts) | Existing script process/session and retained ordinary-tool dispatch |
+| Calendar | [../scheduled-tasks/calendar-owner.ts](../scheduled-tasks/calendar-owner.ts) | Runtime Calendar occurrences and original launch/observation |
+| Project schedules | [schedule-tool-owner.ts](schedule-tool-owner.ts), [managed-schedule-service.ts](managed-schedule-service.ts) | Source Host scheduler and Source Storage mutation receipt |
+| Recovery/Integration | [managed-recovery-service.ts](managed-recovery-service.ts), integration owners | Existing Recovery/Integration journals and conditional file authority |
 
 Agent `todo` updates accept a complete item list without a preliminary read. The plan owner selects the
 current visible version within the original branch; optional `expectedRef` preserves explicit version
@@ -256,8 +254,8 @@ receipts survive lost responses, source retirement and coordinator delivery clea
 uses that receipt; a started operation without one remains unknown, never automatic re-execution.
 Current whole-project permission is required because schedules include project assets/user overrides.
 
-Managed file recovery is coordinated by `recovery/managed-recovery-coordinator.ts` and each target's
-`managed-recovery-service.ts`. The coordinator persists frozen participant plans before RPCs; targets
+Managed file recovery is coordinated by [recovery/managed-recovery-coordinator.ts](../recovery/managed-recovery-coordinator.ts) and each target's
+[managed-recovery-service.ts](managed-recovery-service.ts). The coordinator persists frozen participant plans before RPCs; targets
 use their own existing journal, exact root/Source and current maintenance permission. There is no
 coordinator-owned copy of remote file bodies and no cross-Host atomicity claim. Cancellation intent is
 durable before slow observations, and original participant/command receipts decide subsequent phases.
@@ -288,7 +286,7 @@ name containing “review” does not prove a real network, desktop or paid-mode
 
 ## Composer workflows
 
-`thread-export.ts` walks the selected immutable history cut through the original Catalog history
+[thread-export.ts](thread-export.ts) walks the selected immutable history cut through the original Catalog history
 reader. It validates the inclusive range before starting the response, spools only reference pages to
 private temporary storage, and reads public message bodies in chronological order under stream
 backpressure. JSON and Markdown share a named public-semantic projection. Provider originals,
@@ -298,7 +296,7 @@ bytes come from their original authorized readers, with chunk identity and lengt
 closes the stream and removes its temporary metadata. The renderer writes to local disk-backed browser
 storage instead of collecting an entire history/attachment Blob in memory. No share link is created.
 
-`thread-remember.ts` resolves the actual Thread binding before exposing a save destination. Bot/user
+[thread-remember.ts](../memory/thread-remember.ts) resolves the actual Thread binding before exposing a save destination. Bot/user
 memories use `MemoryService` and the existing KnowledgeStore CAS and atomic mutation receipt;
 ordinary global/project/Thread notes use the original personalization typed record. The original save
 key, content and observed revision survive a lost response. A subsequent unrelated write does not
@@ -306,15 +304,11 @@ prevent reading that original receipt. This path has no implicit inference and n
 memory store. Model-assisted drafting is a separately confirmed normal User dispatch, whose original
 execution report is reviewed before applying its text.
 
-Focused export tests cover pinned pagination, inclusive range rejection, public/private boundaries,
-media streaming and abort. Remember tests use the real KnowledgeStore for CAS and receipt replay.
-UI workflow tests cover independently retained recipient drafts and unknown-send retries, explicit
-model invocation, report review and no-model direct saves. These tests do not establish native
-kernel dispatch, physical remote-source admission or installed mobile/browser download support;
-those remain with their original native and product smoke suites.
+Export/remember behavior tests cover pinned reads, private-content exclusion, abort, original CAS and
+unknown-write receipts. Native dispatch and installed browser/mobile download need their own evidence;
+see [verification](#verification).
 
-
-`thread-user-dispatch.ts` exposes the original current Run's frozen dispatch catalog and admits a
+[thread-user-dispatch.ts](thread-user-dispatch.ts) exposes the original current Run's frozen dispatch catalog and admits a
 User-authored child with explicit model/source choices, edited instructions, exact background cuts
 and attachment selectors. The raw command key owns receipt replay before dynamic preparation.
 Native acceptance uses the existing child/model/source owners, with no ToolOrigin or tool call ACK.
@@ -327,9 +321,9 @@ data through the original durable message ingress. Original tool dispatch/report
 
 ## Frozen quote admission
 
-`thread-quotes.ts` validates/copies original UTF-16 quote ranges and joins captured media/files to
+[thread-quotes.ts](thread-quotes.ts) validates/copies original UTF-16 quote ranges and joins captured media/files to
 existing input owners. `ThreadAdapter` parses skills and object selections on that original draft;
-Rust `input_quotes.rs` alone expands native quote content for model requests. Stored history keeps
+Rust [input_quotes.rs](../../../../../kernel/crates/varin-runtime/src/input_quotes.rs) alone expands native quote content for model requests. Stored history keeps
 compact text, frozen source metadata and occurrence ranges. Provider adapters never receive the
 navigation objects. User-directed messages preserve their separate recipient and `replyTo` contract.
 
@@ -341,83 +335,43 @@ text-only model can receive the original image file with an explicit non-visual 
 
 ## Conversation organization boundary
 
-`../conversation-organization/service.ts` initializes navigation only after a successful, validated
-Settings project read. Catalog owns the one-time generation, mixed tree, placement, CAS and admission
-receipts. The Host supplies the authenticated principal, never a client-selected user ID. Project
-registration/removal remains with Settings; navigation coordination returns its true partial result.
-Native and external metadata batches call their existing owners with per-object stable keys and retain
-busy, conflict, failure and unknown outcomes. No Host-side directory or receipt database is introduced.
+[Organization service](../conversation-organization/service.ts) initializes from a successfully validated
+Settings project read. The Host coalesces initialization once per principal; failed initialization remains
+retryable. Catalog owns the durable generation, tree, placement, local CAS and original command receipts.
+Settings still owns project registration/removal, so partial coordination returns its actual outcome.
+No Host directory writer, per-user project copy or separate receipt database is introduced.
 
-`resource-owner.ts` also carries the existing invocation-bound lifecycle bridge for organization tools:
-it validates the frozen resource checkpoint and original Run before reaching BotService or the external
-service. Bot creation keeps its gate, serialized session admission and principal; external mutations
-keep their turn cleanup and original Catalog receipt. Navigation events reuse Catalog durable observation.
-Organization command retries consult the original Catalog receipt before rechecking mutable project
-registration preconditions. External metadata authorization uses the original lightweight record,
-including tombstones; `update_receipt` resolves the retained key/intent before active-turn preflight.
-A confirmed deletion replay still asks the original external service to finish pending cleanup.
+The principal comes from authentication, never client JSON. Reads and retries preserve public/private
+scope, tombstones and original stable keys. Metadata batches use the existing native/external owners;
+a deletion replay can still finish pending external cleanup. Frozen creation/dispatch metadata retains the
+original project Source, even after navigation moves or Settings changes. See
+[organization contract](../../../../../docs/runtime.md#会话组织的原存储边界).
 
-Organization placement creation freezes the selected project's original source owner and path in
-its Catalog creation receipt. The Host resolves Settings metadata before admission, without
-starting a device or executing a tool. Subsequent folder moves or project-binding edits do not
-reinterpret that creation intent. An uncertain create retry reads the original receipt before
-consulting mutable Settings; legacy receipts are not retrofitted with a new intent.
+[resource-owner.ts](resource-owner.ts) validates original invocation/Run identity before organization tools
+reach Catalog, BotService or external services. Lifecycle operations retain their gates, principal, turn
+cleanup and original receipts. Read-only labels return only requested Bot/Settings identities with explicit
+missing/unavailable states; they do not create a new profile directory or file authority.
+Public Bot activity discloses only authorized work handles. External HTTP checks use retained ownership,
+including tombstones and pre-session parent Runs; global invalidations contain no private transcript or identities.
 
-`runtime.input.inheritedReceipt` is a read-only original-input comparison, not admission or a
-key-only receipt lookup. It reuses only the retained Host-derived source, selected tools and tool
-schema generation for an inherited-source retry, then compares the complete original normalized
-input intent. Explicit source selection, model, input and credential changes still conflict.
-This allows an accepted first send to be recovered after its project/device goes offline.
-An omitted public submit source inherits; explicit `source: null` selects chat only and clears
-source resources through the original context preparation owner.
-
-Organization labels are a batched read through the existing frozen resource invocation bridge.
-Only requested source IDs are returned, with original Bot/Settings names or explicit missing /
-unavailable states. The label projection is neither a profile directory nor a new authority.
-
-Public Bot sessions, work, activity, matters and historical source reads carry the authenticated
-request's principal, including explicit null for public work. An omitted private principal is
-reserved for the existing whole-Bot lifecycle owner. Generated nullable principal fields preserve
-this distinction with a presence-aware decoder. Global presence events contain only an
-invalidation; clients re-read their scoped projection. Shared Bot configuration and its original
-entry identity are not a per-user registry. Public lifecycle profiles retain state but disclose
-only authorized work handles, not unattributed operation IDs from the shared lifecycle record.
-
-External Agent HTTP routes enforce the same request ownership boundary before reads, mutations,
-attachments or single-conversation progress subscription. Tombstone metadata is used for this
-check, so an original authorized deletion receipt remains recoverable. Pending delegate visibility
-comes from its original parent Run, including before an external session exists. Host-shared
-program configuration and background lifecycle enumeration retain their original scope; global
-external observation carries invalidation only, not conversation identities or transcript data.
+[Inherited-input retry](thread-adapter.ts) compares the original normalized input and reuses only retained
+Host-derived Source/tool bindings. It is not a key-only admission path: changed source/model/input/credentials
+still conflict. Omitted submit Source inherits; explicit null selects chat-only through the existing context owner.
+Receipt lookup precedes mutable Settings/device checks, so temporary unavailability cannot erase accepted work.
 
 ### Mixed navigation pages
 
-The authenticated organization read route forwards the strict `pageNodes` boolean to the original
-Catalog query without imposing another page cap or sorting owner. In mixed mode, `items` alone
-identifies ordered page nodes; extra `containers` are ancestry/query context and not rendered page
-rows. Limits/cursors cover both container and conversation nodes. Omitted/false mode preserves
-the original complete container metadata index with conversation-only pagination. Neither mode
-accepts a caller-supplied principal; request authentication selects the Catalog scope.
+The authenticated route selects Catalog scope and forwards the original query without a second page cap
+or sorting owner. In mixed pages, `items` determines ordered rows; attached ancestor containers are context,
+not loaded children. Search project names come from one trusted Settings read and participate in cursor
+validation. An unreadable Settings document is not empty search results. Ordinary initialized reads do not
+load Settings or contact devices. Client loaded-window refresh and selectors belong to the
+[organization store](../../../../ui/src/stores/DOCUMENTATION.md).
 
-Non-empty navigation searches read one current Settings project-name index (`label || path`) before
-Catalog pagination. The index travels only over the trusted private query boundary and participates
-in continuation validation; public queries cannot supply `projectNames`. A changed name generation
-requires a fresh search cursor. Unreadable Settings produces `projects_unavailable`, not empty search
-results. Ordinary initialized directory reads do not load Settings or contact execution devices.
-
-Organization Host callbacks validate the original frozen tool invocation through
-`runtime.organization.invocation`, independently of file-source availability. The owner captures
-run/origin/call/operation identity, loads frozen content outside the Catalog lock, then revalidates
-the live epoch and invocation before returning the original Run. Read-only labels need no durable
-operation record. This does not relax `runtime.resources.snapshot` or file-resource checkpoint checks.
-
-Explicit-project dispatch without explicit organization placement uses the registered project's
-navigation node. Before first admission, the model dispatch checks its principal's initialization
-marker and asks the existing authenticated organization bridge to initialize the complete Settings
-generation only if needed. User handoff performs the same preparation after original receipt lookup.
-Receipt replay precedes this work, so later Settings/device unavailability cannot invalidate accepted
-work. Initialization reads registration metadata only; it does not mount or prepare every project.
-An initialized space with a missing project node remains a conflict, not an implicit recreation.
+Organization invocation validation captures frozen call identity, reads content outside the Catalog lock,
+then revalidates the live epoch. It does not relax file-resource checkpoint checks. Explicit-project dispatch
+initializes registration metadata before first admission, after original receipt lookup; no project is mounted
+merely to initialize navigation. A missing node in an initialized space is a conflict, not implicit recreation.
 
 Frozen project source selection is carried in original creation/child-dispatch metadata, not navigation
 nodes. `native_workspace` includes the original adoption operation and logical workspace/branch IDs;

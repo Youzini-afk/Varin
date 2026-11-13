@@ -1,6 +1,6 @@
-/** Transport credits, not a product request limit. Callers wait before encoding
- * an envelope; a credit returns only on native acknowledgement or disconnect. Long process
- * interactions acknowledge body admission separately from their final effect. */
+/** In-flight request admission, independent from the transport's large-body stream credits.
+ * Credits return on native response/disconnect or explicit deferred execution admission;
+ * the original request/effect and cancellation owner live until their actual final response. */
 export class KernelRequestWindow {
   private used = 0;
   private failure: Error | undefined;

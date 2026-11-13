@@ -219,7 +219,7 @@ function fixture(active = false) {
   });
   const listeners = new Set<Parameters<ThreadsAPI['observe']>[1]>();
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
-  const api: ThreadsAPI = { conversationTree: unused, treePreview: unused, attachments: { upload: vi.fn(async (_identity, request) => ({ ref: 'attachment:retained-original', filename: request.filename, mimeType: request.mimeType, byteLength: request.data.size })), read: vi.fn(async () => new Blob(['original'])) }, attention: unused, historyRuns: async (_identity, { headId }) => ({ head: headId, runs: [] }), historyRunPreview: async () => '', historyUsage: async () => [], contextHistory: unused, fileTarget: unused, usage: unused, update: unused, delete: unused, deleteBranch: unused, markRead: unused, materials: { upload: vi.fn(unused), readSource: vi.fn(unused), read: vi.fn(unused), readArtifact: vi.fn(unused) }, computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused), decide: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused, skills: unused, draftSkills: unused }, followups: { arrangements: async () => [], eventSources: async () => [], putArrangement: unused, backlog: unused, sourceRoutes: async () => [], putSourceRoute: unused, removeSourceRoute: unused, jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
+  const api: ThreadsAPI = { inspectMany: async ids => ids.includes(view.thread.thread_id) ? [view.thread] : [], conversationTree: unused, treePreview: unused, attachments: { upload: vi.fn(async (_identity, request) => ({ ref: 'attachment:retained-original', filename: request.filename, mimeType: request.mimeType, byteLength: request.data.size })), read: vi.fn(async () => new Blob(['original'])) }, attention: unused, historyRuns: async (_identity, { headId }) => ({ head: headId, runs: [] }), historyRunPreview: async () => '', historyUsage: async () => [], contextHistory: unused, fileTarget: unused, usage: unused, update: unused, delete: unused, deleteBranch: unused, markRead: unused, materials: { upload: vi.fn(unused), readSource: vi.fn(unused), read: vi.fn(unused), readArtifact: vi.fn(unused) }, computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused), decide: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused, skills: unused, draftSkills: unused }, followups: { arrangements: async () => [], eventSources: async () => [], putArrangement: unused, backlog: unused, sourceRoutes: async () => [], putSourceRoute: unused, removeSourceRoute: unused, jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     mediaRead: vi.fn(async input => ({ media: storedImage, partIndex: input.partIndex, chunkIndex: 0, chunkCount: 1, totalBytes: Buffer.from(imageData, 'base64').length, bytesBase64: imageData })),
     listMcpInteractions: vi.fn(async () => ({ items: [], nextCursor: null })), readMcpInteraction: unused, respondMcpInteraction: unused,
     reviewMcpSamplingRequest: unused, reviewMcpSamplingOutput: unused,
@@ -235,7 +235,7 @@ function fixture(active = false) {
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, toolCalls: async () => [], operation: unused, cancelOperation: unused, retrievalTrace: unused, retrievalFileTarget: unused, resume: unused, retryPreparation: unused, events: async () => [],
     observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { if (signal.aborted) { resolve(); return; } listeners.add(onEvent); signal.addEventListener('abort', () => { listeners.delete(onEvent); resolve(); }, { once: true }); }),
   };
-  return { api, view, submit, enqueue, editInput, cancelInput, cancelRun, emit: (event: Parameters<ThreadsAPI['observe']>[1] extends (value: infer T) => void ? T : never) => { for (const listener of listeners) listener(event); } };
+  return { api, view, submit, enqueue, editInput, cancelInput, cancelRun, emit: (event: import('@varin/protocol').AgentRuntimeStreamEvent | Omit<import('@varin/protocol').RuntimeEvent, 'thread_id' | 'branch_id'> & Partial<Pick<import('@varin/protocol').RuntimeEvent, 'thread_id' | 'branch_id'>>) => { for (const listener of listeners) listener('stream' in event ? event : { thread_id: identity.threadId, branch_id: identity.branchId, ...event }); } };
 }
 let root: Root;
 let container: HTMLDivElement;
@@ -265,6 +265,7 @@ beforeEach(() => {
   vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('HTMLElement', window.HTMLElement); vi.stubGlobal('Element', window.Element); vi.stubGlobal('Node', window.Node);
   vi.stubGlobal('MutationObserver', window.MutationObserver);
+  vi.stubGlobal('CSS', { escape: (value: string) => value.replace(/["\\]/g, '\\$&') });
   Object.assign(document, { getSelection: () => null, hasFocus: () => false });
   vi.stubGlobal('requestAnimationFrame', () => 0); vi.stubGlobal('cancelAnimationFrame', () => {});
   vi.stubGlobal('getComputedStyle', () => ({ lineHeight: '20px', fontSize: '14px' }));
@@ -346,13 +347,14 @@ const openOperation = async (id: string) => {
 };
 
 it('opens and closes the work overview during streaming without redrawing the conversation for disclosure', async () => {
+  const flushFrames = historyFrames();
   const f = fixture(true);
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
-  const stream = async (sequence: number) => act(async () => {
+  const stream = async (sequence: number) => { await act(async () => {
     f.emit({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'progress', streamId: 'stream',
       threadId: identity.threadId, branchId: identity.branchId, runId: 'ui-run', requestId: 'streaming-request', sequence,
       event: { kind: 'batch', events: [{ kind: 'provider', data: { kind: 'text_delta', item_id: 'answer', text: `chunk ${sequence} ` } }] } });
-  });
+  }); await flushFrames(); };
   const launcher = () => container.querySelector<HTMLButtonElement>('[data-harness-overview-controls] button')!;
   const view = () => launcher().closest('aside')!.getAttribute('data-view');
   await stream(1);
@@ -1066,8 +1068,10 @@ it('opens a local draft and creates its canonical Thread only when the first mes
 });
 
 it('observes first-send streaming and queues a follow-up while the sidebar catalog is still loading', async () => {
+  const flushFrames = historyFrames();
   const f = fixture(); runtimeState.api = f.api;
   const list = vi.fn(f.api.list); f.api.list = list;
+  const inspectMany = vi.fn(f.api.inspectMany); f.api.inspectMany = inspectMany;
   const snapshot = vi.fn(f.api.snapshot); f.api.snapshot = snapshot;
   let finishCatalog!: (threads: Awaited<ReturnType<ThreadsAPI['list']>>) => void;
   const catalog = new Promise<Awaited<ReturnType<ThreadsAPI['list']>>>(resolve => { finishCatalog = resolve; });
@@ -1080,6 +1084,11 @@ it('observes first-send streaming and queues a follow-up while the sidebar catal
     await edit('[aria-label="Message thread"]', 'Start without waiting for the sidebar');
     const draftKey = useThreadStore.getState().selectedDraftKey!;
     list.mockImplementationOnce(() => catalog);
+    // Sidebar refresh is independent of creation, which now refreshes only its Thread.
+    let catalogReady!: Promise<void>;
+    await act(async () => { catalogReady = useThreadStore.getState().loadCatalog(); });
+    const listReads = list.mock.calls.length;
+    expect(useThreadStore.getState().catalogLoading).toBe(true);
     await submitForm(composerForm());
     expect(useThreadStore.getState().catalogLoading).toBe(true);
     expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
@@ -1099,6 +1108,7 @@ it('observes first-send streaming and queues a follow-up while the sidebar catal
     await act(async () => f.emit({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'progress', streamId: 'stream',
       threadId: identity.threadId, branchId: identity.branchId, runId: 'ui-run', requestId: 'streaming-request', sequence: 1,
       event: { kind: 'batch', events: [{ kind: 'provider', data: { kind: 'text_delta', item_id: 'answer', text: 'Visible before the sidebar finishes' } }] } }));
+    await flushFrames();
     expect(container.textContent).toContain('Visible before the sidebar finishes');
     await edit('[aria-label="Message thread"]', 'Follow up on the active run');
     expect(button('Queue message').disabled).toBe(false);
@@ -1106,6 +1116,17 @@ it('observes first-send streaming and queues a follow-up while the sidebar catal
     expect(f.submit).toHaveBeenCalledOnce();
     expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ ...identity, text: 'Follow up on the active run', mode: 'next_run' }));
     expect(useThreadStore.getState().catalogLoading).toBe(true);
+    expect(list).toHaveBeenCalledTimes(listReads);
+    expect(inspectMany).not.toHaveBeenCalled();
+    // The older complete read may omit the just-created Thread. Its completion
+    // must not undo selection, and the queued targeted refresh restores membership.
+    await act(async () => { finishCatalog([]); await catalogReady; });
+    expect(useThreadStore.getState().catalogLoading).toBe(false);
+    expect(useThreadStore.getState().selectedIdentity).toEqual(identity);
+    expect(useThreadStore.getState().threads).toContainEqual(f.view.thread);
+    expect(inspectMany).toHaveBeenCalledWith([identity.threadId]);
+    expect(list).toHaveBeenCalledTimes(listReads);
+    expect(container.querySelector('[aria-label="Thread conversation"]')).not.toBeNull();
   } finally {
     await act(async () => { unbind?.(); finishCatalog([f.view.thread]); });
   }
@@ -4735,7 +4756,7 @@ function organizationDetailsFixture() {
   useProjectsStore.setState({ projects: [{ id: 'navigation-project', path: '/different/project', label: 'Navigation Project', addedAt: 1, lastOpenedAt: 1 }] });
   Object.assign(translations.dictionary, conversationOrganizationEn);
   registerRuntimeAPIs({ ...getRegisteredRuntimeAPIs(), conversationOrganization: api, bots: { list: async () => [] } } as unknown as RuntimeAPIs);
-  return { original, containers, entry, read, observe, api, page, change: () => { cursor++; for (const listener of listeners) listener({ cursor, revision: cursor, subject: '', kind: 'organization', data: null }); } };
+  return { original, containers, entry, read, observe, api, page, change: () => { cursor++; for (const listener of listeners) listener({ cursor, revision: cursor, subject: '', kind: 'organization.changed', thread_id: null, branch_id: null, data: null }); } };
 }
 
 it.each(['native', 'external', 'bot'] as const)('shows original provenance and separately labelled category/workspace in the real %s work details without draining navigation', async kind => {
@@ -4819,4 +4840,37 @@ it('identifies a fixed execution workspace separately from classification instea
   expect(container.textContent).toContain('Classification: Navigation Project / Release');
   expect(container.textContent).toContain('Execution workspace: bot.workspace.sourceFixed');
   expect(container.textContent).not.toContain('Execution workspace: harness.overview.chatOnly');
+});
+
+it('coalesces token frames and redraws only the streaming tail, not the composer or historical rows', async () => {
+  const frames = new Map<number, FrameRequestCallback>(); let frameId = 0;
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { const id = ++frameId; frames.set(id, callback); return id; });
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => { frames.delete(id); });
+  const frame = async () => act(async () => { const current = [...frames.values()]; frames.clear(); for (const callback of current) callback(performance.now()); });
+  const f = fixture(true);
+  f.view.history = Array.from({ length: 200 }, (_, i) => ({ id: `history-${i}`, parent: i ? `history-${i - 1}` : null,
+    thread_id: identity.threadId, run_id: `past-${Math.floor(i / 2)}`, source: i % 2 ? 'assistant' as const : 'user' as const, provider: null,
+    content: i % 2 ? { content: { kind: 'text', text: `answer ${i}` } } : { text: `question ${i}` } }));
+  f.view.historyPage = { head: 'history-199', previous: null };
+  f.view.thread.branches[0]!.head = 'history-199';
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />)); await frame();
+  const stream = (sequence: number) => f.emit({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'progress', streamId: 'stream',
+    threadId: identity.threadId, branchId: identity.branchId, runId: 'ui-run', requestId: 'new-request', sequence,
+    event: { kind: 'batch', events: [{ kind: 'provider', data: { kind: 'text_delta', item_id: 'answer', text: `token${sequence} ` } }] } });
+  await act(async () => stream(1)); await frame();
+  const counts: Record<string, number> = {};
+  vi.stubGlobal('__VARIN_UI_PERFORMANCE__', counts);
+  await act(async () => { for (let sequence = 2; sequence <= 101; sequence++) stream(sequence); });
+  expect(counts['stream.publish'] ?? 0).toBe(0);
+  await frame();
+  expect(counts['stream.publish']).toBe(1);
+  expect(counts['conversation.render'] ?? 0).toBe(0);
+  expect(counts['projection.refresh'] ?? 0).toBe(0);
+  expect(counts['timeline.row.render']).toBe(3); // Live chrome, body and footer; no historical rows.
+  expect(container.textContent).toContain('token101');
+  expect(container.textContent).toContain('question 0');
+  await edit('[aria-label="Message thread"]', 'Typing during output');
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')?.value).toBe('Typing during output');
+  await act(async () => button('Stop run').click());
+  expect(f.cancelRun).toHaveBeenCalledWith('ui-run');
 });

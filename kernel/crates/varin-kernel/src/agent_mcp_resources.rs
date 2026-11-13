@@ -166,6 +166,7 @@ pub(super) fn execute(
             Ok(json!({"cursor":cursor}))
         }
         "runtime.mcp.resource.pending" => {
+            let _: KernelEmptyParams = serde_json::from_value(params)?;
             let values: Vec<McpResourcePending> = owner
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?

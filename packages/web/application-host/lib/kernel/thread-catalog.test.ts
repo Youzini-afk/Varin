@@ -1,3 +1,4 @@
+import { nativeThreadView } from './thread-view.test-helper.js';
 import { EventEmitter } from 'node:events';
 import type { Express, Request, RequestHandler, Response as ExpressResponse } from 'express';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -44,7 +45,7 @@ function fixture() {
   return { api: createThreadsHttpAPI(), requests, request, adapter, failKernel: (error: Error) => { for (const listener of exits) listener(error); } };
 }
 afterEach(() => vi.unstubAllGlobals());
-const target = { runtime: 'agent' as const, threadId: 'original-thread' };
+const target = { runtime: 'agent' as const, threadId: 'thread:original' };
 
 it('propagates snapshot cancellation to the original native read without cancelling the Run', async () => {
   const f = fixture();
@@ -57,7 +58,14 @@ it('propagates snapshot cancellation to the original native read without cancell
   expect(f.requests.mock.calls[0]?.[2]).toBe(controller.signal);
   controller.abort();
   await rejected;
-  expect(f.requests.mock.calls.map(([method]) => method)).toEqual(['runtime.status']);
+  expect(f.requests.mock.calls.map(([method]) => method)).toEqual(['runtime.thread.view']);
+});
+
+it('rejects an implicit snapshot identity before any native read', async () => {
+  const f = fixture();
+  await expect(f.adapter.snapshot({ runtime: 'agent', threadId: 'original-thread', branchId: 'original-branch' }))
+    .rejects.toThrow('An explicit thread identity is required');
+  expect(f.requests).not.toHaveBeenCalled();
 });
 
 it('lets an authenticated draft discover source Hosts without creating or granting a Thread', async () => {
@@ -111,7 +119,7 @@ it('projects original Catalog CAS conflicts without changing the submitted comma
   expect(f.requests.mock.calls[0]![1]).toEqual(f.requests.mock.calls[1]![1]);
 });
 
-it('projects only the displayed failed Run\'s original failure and preserves an unavailable read', async () => {
+it('preserves the native displayed Run failure projection and an unavailable read', async () => {
   const f = fixture();
   const identity = { runtime: 'agent' as const, threadId: 'thread:failure', branchId: 'branch:failure' };
   const run = { id: 'run:failed', thread_id: identity.threadId, branch_id: identity.branchId,
@@ -119,31 +127,18 @@ it('projects only the displayed failed Run\'s original failure and preserves an 
   const failure = { runId: run.id, cursor: 42, code: 'context_candidate_capacity', message: 'The context summary does not fit. The original history remains unchanged.' };
   let unreadable = false;
   f.requests.mockImplementation(async (method, params) => {
-    switch (method) {
-      case 'runtime.thread.inspect': return { thread_id: identity.threadId, parent_thread_id: null, observer_project_ids: [], branches: [
-        { branch_id: identity.branchId, active_run_id: null, head: null, latest_run: run },
-      ] };
-      case 'runtime.status': return { eventCursor: 42 };
-      case 'runtime.history.page': return { head: null, previous: null, items: [] };
-      case 'runtime.context.inspect': case 'runtime.launch.inspect': case 'runtime.child.for_thread': return null;
-      case 'runtime.model.inspect': return { desired: null, active: null };
-      case 'runtime.family.list': return { rootThreadId: identity.threadId, members: [], nextCursor: null };
-      case 'runtime.run.failure':
-        expect(params).toEqual({ runId: run.id });
-        if (unreadable) throw new Error('Original failure unavailable');
-        return failure;
-      default: return [];
-    }
+    expect(method).toBe('runtime.thread.view');
+    expect(params).toEqual({ threadId: identity.threadId, branchId: identity.branchId, historyLimit: 20 });
+    if (unreadable) throw new Error('Original failure unavailable');
+    return nativeThreadView(identity, { runFailure: run.state === 'failed' ? failure : null });
   });
   expect((await f.api.snapshot(identity)).runFailure).toEqual(failure);
-  // One admitted identity serves this snapshot; nested readers must not inspect
-  // the entire Thread again for goals, follows or each page of child activity.
-  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.thread.inspect')).toHaveLength(1);
-  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.run.failure')).toHaveLength(1);
+  // The Host transports the Catalog projection without per-component reads.
+  expect(f.requests).toHaveBeenCalledOnce();
   expect(f.requests.mock.calls.some(([method]) => method === 'runtime.events.read')).toBe(false);
   run.state = 'cancelled';
   expect((await f.api.snapshot(identity)).runFailure).toBeNull();
-  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.run.failure')).toHaveLength(1);
+  expect(f.requests.mock.calls.every(([method]) => method === 'runtime.thread.view')).toBe(true);
   run.state = 'failed'; unreadable = true;
   await expect(f.api.snapshot(identity)).rejects.toMatchObject({ code: 'thread-request-failed' });
   expect(f.requests.mock.calls.some(([method]) => /cancel|resume|retry/.test(method))).toBe(false);

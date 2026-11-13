@@ -1,3 +1,6 @@
+import { shareSnapshot } from '@/lib/agent-runtime/structural-sharing';
+import type { ThreadStreamingStore } from '@/lib/agent-runtime/thread-streaming-store';
+import { countUiWork } from '@/lib/performance-observation';
 import React from 'react';
 import { InlineUiViews } from '@/components/interactive-ui/InlineUiViews';
 import { presentInvocation, invocationData } from './toolInvocation';
@@ -28,7 +31,7 @@ import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import type { StreamingToolCall, StreamingTextPart, ToolExecutionProgress } from '@/lib/agent-runtime/thread-projection';
 
-export function ConversationTimeline({ api, identity, snapshot, history, runUsage, historyReady, historyReset = 0, earlierHistory, navigation, progress, streamingTools = [], toolProgress = [], cwd, working, readOnly, onQuote, onFork, onRecover, onQuestion, onOpenSection, memory, header, footer, liveUser, liveUserStatus, viewId, onScrollContainerChange }: {
+function Timeline({ api, identity, snapshot, history, runUsage, historyReady, historyReset = 0, earlierHistory, navigation, progress, streamingTools = [], toolProgress = [], cwd, working, readOnly, onQuote, onFork, onRecover, onQuestion, onOpenSection, memory, header, footer, liveUser, liveUserStatus, viewId, onScrollContainerChange }: {
   api: ThreadsAPI; identity: ThreadIdentity; snapshot?: ThreadSnapshot; history: readonly HistoryItem[];
   runUsage?: readonly import('@varin/application-client').ThreadRunUsage[];
   historyReady?: boolean; historyReset?: number; earlierHistory?: ChatTimelineProps['earlierHistory'];
@@ -45,12 +48,18 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
   viewId?: string;
   onScrollContainerChange?: ChatTimelineProps['onScrollContainerChange'];
 }) {
+  if (import.meta.env.DEV) countUiWork('timeline.render');
   const { t } = useI18n();
   const openThreadContext = useOpenThreadContext();
   const key = threadComposerKey(threadHostKey(), identity);
   const timelineKey = viewId ? `${key}:${viewId}` : key;
   const projector = React.useMemo(() => new HistoryPresentation(key), [key]);
-  const view = React.useMemo(() => projector.project(history, snapshot, runUsage, toolProgress), [history, snapshot, runUsage, toolProgress, projector]);
+  const previousView = React.useRef<ReturnType<HistoryPresentation['project']> | undefined>(undefined);
+  const view = React.useMemo(() => {
+    const next = shareSnapshot(previousView.current, projector.project(history, snapshot, runUsage, toolProgress));
+    previousView.current = next;
+    return next;
+  }, [history, snapshot, runUsage, toolProgress, projector]);
   const entries = React.useMemo(() => contextTimelineEntries(view.entries, snapshot), [view.entries, snapshot]);
   const openContext = React.useCallback((runId?: string) => openThreadContext(identity, cwd, runId, readOnly), [identity, cwd, readOnly, openThreadContext]);
   const head = history.at(-1)?.id ?? null;
@@ -124,7 +133,12 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
       arguments: call.arguments ?? {}, gateway: call.gateway, rawArguments: call.rawArguments, sequence: call.sequence, interrupted: call.interrupted, order: call.order })),
   ].sort((left, right) => (left.order ?? 0) - (right.order ?? 0)), snapshot?.modelSelection.active?.configuration ?? snapshot?.activeRun?.configuration, working || progress.length > 0), runId: snapshot?.activeRun?.id } : undefined,
     [progress, streamingTools, working, snapshot?.modelSelection.active?.configuration, snapshot?.activeRun?.configuration, snapshot?.activeRun?.id, key]);
-  const uiPlacement = React.useMemo(() => projectUiEmbeds(view.entries, uiCards, liveAssistant), [view.entries, uiCards, liveAssistant]);
+  const previousPlacement = React.useRef<ReturnType<typeof projectUiEmbeds> | undefined>(undefined);
+  const uiPlacement = React.useMemo(() => {
+    const value = shareSnapshot(previousPlacement.current, projectUiEmbeds(view.entries, uiCards, liveAssistant));
+    previousPlacement.current = value;
+    return value;
+  }, [view.entries, uiCards, liveAssistant]);
   const previousTargets = React.useRef<Array<{ key: string; target: string }>>([]);
   React.useLayoutEffect(() => {
     for (const previous of previousTargets.current) {
@@ -191,14 +205,29 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
     } catch (error) { if (alive.current && host === getRuntimeEndpointGeneration() && !(error instanceof DOMException && error.name === 'AbortError'))
       toast.error(error instanceof Error ? error.message : String(error)); }
   }, [fileTarget, identity]);
+  const forkEntry = React.useCallback<NonNullable<ChatTimelineProps['onFork']>>(entry => onFork?.(entry.id), [onFork]);
+  const recoverEntry = React.useCallback<NonNullable<ChatTimelineProps['onRecover']>>(entry => onRecover?.(entry.id), [onRecover]);
   const context = React.useMemo(() => ({ api, identity, head, fileDirectory: cwd, readOnly, quote: onQuote, revealQuestion: onQuestion, openFile, fileTarget, openContext, memory, followups: snapshot?.followups, snapshot, openSection: onOpenSection, toolExecutions: view.toolExecutions, uiCards, uiInlineViews: true, uiEmbeds: uiPlacement.embeds, sourceEntry, renderExtras }),
     [api, identity, head, cwd, readOnly, onQuote, onQuestion, openFile, fileTarget, openContext, memory, view.toolExecutions, uiCards, uiPlacement, snapshot, onOpenSection, sourceEntry, renderExtras]);
   return <ConversationContext.Provider value={context}>{preparedEntry === entryKey && <ChatTimeline key={entryKey} sessionId={timelineKey} cwd={cwd} earlierHistory={earlierHistory} navigation={navigation}
     onScrollContainerChange={onScrollContainerChange}
     entries={entries} toolExecutions={view.toolExecutions} liveAssistant={liveAssistant} liveUser={liveUser} liveUserStatus={liveUserStatus} leafId={head}
     activeRunId={working ? snapshot?.activeRun?.id : undefined}
-    assistantWaiting={working && !snapshot?.activeRun?.waiting_on?.startsWith('context-wait:') ? { retry: progress.find(part => part.type === 'retry') } : undefined} onFork={onFork ? entry => onFork(entry.id) : undefined}
-    onRecover={onRecover ? entry => onRecover(entry.id) : undefined} header={header} footer={footer} />}
+    assistantWaiting={working && !snapshot?.activeRun?.waiting_on?.startsWith('context-wait:') ? { retry: progress.find(part => part.type === 'retry') } : undefined} onFork={onFork ? forkEntry : undefined}
+    onRecover={onRecover ? recoverEntry : undefined} header={header} footer={footer} />}
     <InlineUiViews prefix={`${key}:`} />
   </ConversationContext.Provider>;
+}
+
+
+type TimelineProps = React.ComponentProps<typeof Timeline>;
+/** Only the presentation subtree subscribes to token frames. The composer, permissions,
+ * overview and thread controller keep their durable snapshot cadence. */
+export function ConversationTimeline(props: Omit<TimelineProps, 'progress'> & { progress?: StreamingTextPart[]; streamingStore?: ThreadStreamingStore; streamingEnabled?: boolean }) {
+  if (props.streamingStore) return <StreamingTimeline {...props} store={props.streamingStore} />;
+  return <Timeline {...props} progress={props.progress ?? []} />;
+}
+function StreamingTimeline({ store, streamingEnabled = true, ...props }: Omit<TimelineProps, 'progress'> & { progress?: StreamingTextPart[]; store: ThreadStreamingStore; streamingEnabled?: boolean }) {
+  const state = React.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  return <Timeline {...props} progress={streamingEnabled ? state.progress : []} streamingTools={streamingEnabled ? state.streamingTools : []} toolProgress={state.toolProgress} />;
 }

@@ -36,6 +36,7 @@ fn delete(c: &mut Catalog, thread: &str) -> Value {
 }
 fn downgrade(c: &Catalog) {
     followups::events::restore_pre_arrangement_fixture(&c.db).unwrap();
+    crate::catalog::upgrades::remove_read_views_for_legacy_fixture(&c.db);
     c.db.execute_batch("DROP TABLE thread_creations; DROP TABLE calendar_invocations; DROP TABLE calendar_legacy_manual_boundaries; DROP TABLE IF EXISTS organization_retired_containers;DROP TABLE IF EXISTS organization_positions;DROP TABLE IF EXISTS organization_containers;DROP TABLE IF EXISTS organization_commands;DROP TABLE IF EXISTS organization_spaces;PRAGMA user_version=87;").unwrap();
 }
 #[test]

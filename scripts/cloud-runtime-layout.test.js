@@ -125,6 +125,39 @@ describe('Varin cloud runtime layout', () => {
     assert.throws(() => verifyCloudRuntimeLock(root), /depends on missing workspace @varin\/not-shipped/);
   });
 
+  it('rejects added, removed, or changed production root overrides even when workspace manifests match', () => {
+    const root = createFixture();
+    const manifestPath = path.join(root, 'package.json');
+    const manifest = readJson(manifestPath);
+    manifest.overrides = { hono: '4.13.16', '@hono/node-server': '2.1.6' };
+    writeJson(manifestPath, manifest);
+    const lockPath = path.join(root, 'scripts/cloud-runtime.bun.lock');
+    const lock = { overrides: { '@hono/node-server': '2.1.6', hono: '4.13.16' },
+      workspaces: Object.fromEntries(CLOUD_RUNTIME_PACKAGE_DIRS.map(directory => [
+        `packages/${directory}`, readJson(path.join(root, 'packages', directory, 'package.json')),
+      ])) };
+    writeJson(lockPath, lock);
+    assert.doesNotThrow(() => verifyCloudRuntimeLock(root), 'override insertion order is not part of the contract');
+    for (const overrides of [
+      { ...manifest.overrides, 'new-pin': '1.0.0' },
+      { hono: '4.13.16' },
+      { ...manifest.overrides, hono: '4.13.17' },
+      undefined,
+    ]) {
+      writeJson(manifestPath, { ...manifest, overrides });
+      assert.throws(() => verifyCloudRuntimeLock(root), /Cloud lock is stale for root overrides/);
+    }
+    writeJson(manifestPath, { ...manifest, devDependencies: { 'dev-only': '1.0.0' } });
+    assert.doesNotThrow(() => verifyCloudRuntimeLock(root), 'root devDependencies are not staged for production');
+    delete lock.overrides;
+    writeJson(lockPath, lock);
+    assert.throws(() => verifyCloudRuntimeLock(root), /Cloud lock is stale for root overrides/);
+    for (const overrides of [undefined, {}]) {
+      writeJson(manifestPath, { ...manifest, overrides });
+      assert.doesNotThrow(() => verifyCloudRuntimeLock(root), 'absent and empty overrides are equivalent');
+    }
+  });
+
   it('declares every workspace import in the shipped web server as a production dependency', () => {
     const fixture = createFixture();
     const serverDir = path.join(fixture, 'packages', 'web', 'server');

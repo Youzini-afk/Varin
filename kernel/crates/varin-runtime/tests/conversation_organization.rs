@@ -72,6 +72,7 @@ fn siblings(c: &Catalog) -> Vec<OrganizationObject> {
     objects.into_iter().map(|(_, o)| o).collect()
 }
 fn remove_for_legacy_fixture(db: &Connection) {
+    db.execute_batch(include_str!("fixtures/catalog-pre-read-views.sql")).unwrap();
     db.execute_batch("DROP TABLE organization_retired_containers;DROP TABLE organization_positions;DROP TABLE organization_containers;DROP TABLE organization_commands;DROP TABLE organization_spaces;").unwrap();
 }
 struct Fixture(std::path::PathBuf);
@@ -568,6 +569,7 @@ fn initialization_publishes_once_and_does_not_overwrite_user_organization() {
 fn format_94_upgrade_keeps_original_assets_and_unknown_or_partial_layout_stays_untouched() {
     let f = Fixture::new();
     let mut c = f.open();
+    let current_format: i64 = raw(&f).pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
     c.create_thread_with_principal("original", "main", Some("alice"))
         .unwrap();
     let original = c.inspect_thread("original").unwrap();
@@ -580,7 +582,7 @@ fn format_94_upgrade_keeps_original_assets_and_unknown_or_partial_layout_stays_u
         raw(&f)
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        97
+        current_format
     );
     assert!(snap(&c).containers.is_empty());
     drop(c);
@@ -597,7 +599,7 @@ fn format_94_upgrade_keeps_original_assets_and_unknown_or_partial_layout_stays_u
         std::fs::read(f.0.join("conversation.sqlite")).unwrap(),
         bytes
     );
-    assert_eq!(version, 97);
+    assert_eq!(version, current_format);
 }
 #[test]
 fn dissolved_container_identity_is_retired_and_cannot_retarget_a_stable_reference() {
@@ -840,6 +842,7 @@ fn format_96_restores_readable_legacy_project_membership_without_reassigning_use
     let moved = move_command(&c, "keep-user-move", vec![OrganizationObject::Native { id: "own".into() }], None);
     let receipt = c.organization_command(Some("alice"), moved.clone()).unwrap();
     let original = c.inspect_thread("public").unwrap();
+    raw(&f).execute_batch(include_str!("fixtures/catalog-pre-read-views.sql")).unwrap();
     raw(&f).pragma_update(None, "user_version", 96).unwrap();
     drop(c);
     let mut c = f.open();
@@ -1636,6 +1639,7 @@ fn deeply_nested_real_dispatch_reports_its_immediate_parent_not_the_placement_an
 fn published_foundation_95_upgrades_positions_without_rewriting_creation_receipts() {
     let f = Fixture::new();
     let mut c = f.open();
+    let current_format: i64 = raw(&f).pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
     group(&mut c, "group", None);
     c.create_thread_with_placement(
         "kept",
@@ -1665,6 +1669,7 @@ fn published_foundation_95_upgrades_positions_without_rewriting_creation_receipt
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
+    raw(&f).execute_batch(include_str!("fixtures/catalog-pre-read-views.sql")).unwrap();
     raw(&f)
         .execute_batch(
             "ALTER TABLE organization_positions DROP COLUMN is_explicit;PRAGMA user_version=95;",
@@ -1698,7 +1703,7 @@ fn published_foundation_95_upgrades_positions_without_rewriting_creation_receipt
         raw(&f)
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        97
+        current_format
     );
 }
 #[test]

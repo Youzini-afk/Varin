@@ -61,8 +61,8 @@ it('checks the durable completed user Run and ignores auxiliary Runs', async () 
   const f = fixture();
   let notify: (event: AgentRuntimeStreamEvent) => void = () => {};
   f.runtime.onEvent = vi.fn(listener => { notify = listener; return () => {}; });
-  const event: RuntimeEvent = { cursor: 1, subject: 'main-run', revision: 1, kind: 'run.changed', data: { state: 'completed', thread_id: f.thread.thread_id, branch_id: 'main' } };
-  f.runtime.events.mockImplementation(async () => [event, { ...event, cursor: 2, subject: 'auxiliary', data: { state: 'completed', thread_id: 'model-text:title', branch_id: null } }]);
+  const event: RuntimeEvent = { thread_id: f.thread.thread_id, branch_id: 'main', cursor: 1, subject: 'main-run', revision: 1, kind: 'run.changed', data: { state: 'completed', thread_id: f.thread.thread_id, branch_id: 'main' } };
+  f.runtime.events.mockImplementation(async () => [event, { ...event, thread_id: null, branch_id: null, cursor: 2, subject: 'auxiliary', data: { state: 'completed', thread_id: 'model-text:title', branch_id: null } }]);
   const owner = createThreadTitleService(f.options);
   await vi.waitFor(() => expect(f.runtime.threads).toHaveBeenCalled());
   notify({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'fixture', stream: 'durable', cursor: 2 });
@@ -94,7 +94,7 @@ it.each([
   f.runtime.status.mockImplementation(() => new Promise(resolve => { ready = resolve; }));
   let notify!: (event: AgentRuntimeStreamEvent) => void;
   f.runtime.onEvent.mockImplementation(listener => { notify = listener; return () => {}; });
-  const completed: RuntimeEvent = { cursor: first || 1, subject: 'main-run', revision: 1, kind: 'run.changed',
+  const completed: RuntimeEvent = { thread_id: f.thread.thread_id, branch_id: 'main', cursor: first || 1, subject: 'main-run', revision: 1, kind: 'run.changed',
     data: { state: 'completed', thread_id: f.thread.thread_id, branch_id: 'main' } };
   f.runtime.events.mockImplementation(async cursor => [completed,
     ...(status > completed.cursor ? [{ ...completed, cursor: status, kind: 'unrelated' }] : [])].filter(event => event.cursor > cursor));

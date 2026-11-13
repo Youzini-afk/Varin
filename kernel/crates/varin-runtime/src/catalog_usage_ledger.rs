@@ -401,8 +401,11 @@ pub(super) fn record(
 }
 /// Only for a refined receipt that proves the original request never entered its transport.
 pub(super) fn retract(db: &Transaction<'_>, id: &str) -> Result<()> {
-    if db.execute("DELETE FROM usage_records WHERE id=?1", [id])? > 0 {
+    let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM usage_records WHERE id=?1)", [id], |row| row.get(0))?;
+    if exists {
+        // Publish before deleting the ownership row, in the same transaction.
         event(db, id, 0, "usage.updated", json!({}))?;
+        db.execute("DELETE FROM usage_records WHERE id=?1", [id])?;
     }
     Ok(())
 }

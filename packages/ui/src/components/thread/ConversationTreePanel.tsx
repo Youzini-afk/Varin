@@ -1,6 +1,6 @@
 import { flushUiSessions } from '@/lib/interactive-ui/sessions';
 import React from 'react';
-import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, getThreadObservationBus, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import type { ThreadConversationTree, ThreadConversationTreeNode, ThreadIdentity, ThreadsAPI, ThreadTreePreview } from '@varin/application-client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useThreadStore, threadComposerKey, threadHostKey } from '@/stores/useThreadStore';
@@ -78,8 +78,10 @@ function ConversationTree({ api, identity, host }: { api: ThreadsAPI; identity: 
       finally { reading = false; if (!controller.signal.aborted) setLoading(false); }
     };
     void read();
-    void api.observe(null, event => {
-      if ('stream' in event) return;
+    const unsubscribe = getThreadObservationBus(api).subscribe({threadId: identityRef.current.threadId,
+      kinds: ['branch.*', 'history.appended', 'run.*', 'child.*', 'thread.created', 'thread.updated', 'thread.deleted'],
+    }, event => {
+      if ('stream' in event) { if (event.stream === 'resync') void read(); return; }
       const routes = treeRef.current?.routes;
       if (event.kind === 'branch.created' || event.kind === 'branch.navigated' || event.kind === 'branch.deleted'
           || event.kind === 'history.appended' && routes?.some(route => route.branchId === event.subject)
@@ -87,8 +89,8 @@ function ConversationTree({ api, identity, host }: { api: ThreadsAPI; identity: 
           || event.kind.startsWith('run.') && (routes?.some(route => route.activeRunId === event.subject)
             || treeRef.current?.nodes.some(node => node.runId === event.subject))
           || /^(child\.|thread\.)/.test(event.kind)) void read();
-    }, { signal: controller.signal }).catch(cause => { if (!controller.signal.aborted) setError(String(cause)); });
-    return () => controller.abort();
+    });
+    return () => { unsubscribe(); controller.abort(); };
   }, [api, host, version]);
   const readPreview = React.useCallback((node: ThreadConversationTreeNode) => {
     const id = previewKey(node);

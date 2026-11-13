@@ -223,15 +223,7 @@ const safeJsonParse = (raw: string): unknown => {
   }
 };
 
-const constantTimeEqual = (left: unknown, right: unknown, crypto: typeof cryptoModule): boolean => {
-  if (typeof left !== 'string' || typeof right !== 'string') return false;
-  const leftBuffer = Buffer.from(left, 'hex');
-  const rightBuffer = Buffer.from(right, 'hex');
-  if (leftBuffer.length !== rightBuffer.length) return false;
-  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
-};
-
-export const createRemoteClientAuthRuntime = ({
+const createRuntime = ({
   fsPromises,
   path,
   crypto,
@@ -292,17 +284,76 @@ export const createRemoteClientAuthRuntime = ({
     return { version: STORE_VERSION, clients };
   };
 
-  const readStore = async () => mutateStore(async store => ({ result: store }));
-
-  const mutateStore = <Result>(mutator: (store: RemoteClientStore) => Promise<ClientMutation<Result>>): Promise<Result> => clientStore.transact(async (persisted) => {
-    const store = normalizeStore(persisted, await principals.ownerId());
-    const transaction = await mutator(store);
-    return {
-      document: store,
-      result: transaction.result,
-      write: transaction.write !== false || asRecord(persisted)?.version !== STORE_VERSION,
-    };
-  });
+  let closed = false;
+  let snapshot: RemoteClientStore;
+  let byToken = new Map<string, RemoteClientRecord>();
+  const publish = (store: RemoteClientStore): void => {
+    snapshot = store;
+    byToken = new Map(store.clients.filter(client => !client.revokedAt).map(client => [client.tokenHash, client]));
+  };
+  // Constructing the Host must not open stores or create its identity before
+  // the offline-restore fence has been checked. The first actual consumer owns
+  // initialization; concurrent consumers share its result for this lifetime.
+  let initialization: Promise<void> | undefined;
+  const ready = (): Promise<void> => initialization ??= (async () => {
+    const raw = await clientStore.read();
+    const owner = await principals.ownerId();
+    if (raw.version === STORE_VERSION) publish(normalizeStore(raw, owner));
+    else publish(await clientStore.transact(persisted => {
+      const store = normalizeStore(persisted, owner);
+      return { document: store, result: store, write: persisted.version !== STORE_VERSION };
+    }));
+  })();
+  const readStore = async () => { await ready(); return snapshot; };
+  type Usage = { lastUsedAt: string; lastTransport: ClientTransport; usesRelay: boolean };
+  const pendingUsage = new Map<string, Usage>();
+  let mutation: Promise<unknown> = Promise.resolve();
+  let flushTimer: ReturnType<typeof setTimeout> | undefined;
+  const mutateStore = <Result>(mutator: (store: RemoteClientStore) => Promise<ClientMutation<Result>>): Promise<Result> => {
+    const next = mutation.catch(() => undefined).then(async () => {
+      await ready();
+      const usage = new Map(pendingUsage);
+      const committed = await clientStore.transact(async persisted => {
+        const store = normalizeStore(persisted, await principals.ownerId());
+        for (const client of store.clients) {
+          const update = usage.get(client.tokenHash);
+          if (update && !client.revokedAt) Object.assign(client, update, { usesRelay: client.usesRelay || update.usesRelay });
+        }
+        const transaction = await mutator(store);
+        return { document: store, result: { store, result: transaction.result },
+          write: transaction.write !== false || usage.size > 0 || persisted.version !== STORE_VERSION };
+      });
+      // No credential becomes visible before its durable commit succeeds.
+      publish(committed.store);
+      for (const [hash, update] of usage) if (pendingUsage.get(hash) === update) pendingUsage.delete(hash);
+      // Requests can record usage while the commit is in flight. Preserve it in
+      // memory and the next flush, without resurrecting revoked/rotated tokens.
+      for (const [hash, update] of pendingUsage) {
+        const client = byToken.get(hash);
+        if (client) Object.assign(client, update, { usesRelay: client.usesRelay || update.usesRelay });
+        else pendingUsage.delete(hash);
+      }
+      return committed.result;
+    });
+    mutation = next;
+    return next;
+  };
+  const flushUsage = async (): Promise<void> => {
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = undefined; }
+    if (pendingUsage.size) await mutateStore(async () => ({ result: undefined, write: false }));
+    else await mutation.catch(() => undefined);
+  };
+  const scheduleUsage = (delay = 0): void => {
+    if (closed || flushTimer) return;
+    flushTimer = setTimeout(() => {
+      flushTimer = undefined;
+      void flushUsage().catch(() => {
+        console.warn('[ClientAuth] Usage metadata could not be saved; it will be retried');
+        scheduleUsage(LAST_USED_WRITE_INTERVAL_MS);
+      });
+    }, delay);
+    flushTimer.unref?.();
+  };
 
   function publicClient(client: RemoteClientRecord): PublicRemoteClient {
     return {
@@ -315,8 +366,8 @@ export const createRemoteClientAuthRuntime = ({
     expiresAt: client.expiresAt,
     clientKind: client.clientKind,
     profile: client.profile,
-    capabilities: client.capabilities,
-    allowedDirectories: client.allowedDirectories,
+    capabilities: [...client.capabilities],
+    allowedDirectories: [...client.allowedDirectories],
     authMethod: client.authMethod,
     pairingId: client.pairingId,
     deviceName: client.deviceName,
@@ -435,40 +486,32 @@ export const createRemoteClientAuthRuntime = ({
   };
 
   const authenticateBearerToken = async (token: unknown, req?: RequestLike): Promise<AuthenticatedClient | null> => {
-    if (typeof token !== 'string' || !token.startsWith(TOKEN_PREFIX)) {
+    if (closed || typeof token !== 'string' || !token.startsWith(TOKEN_PREFIX)) {
       return null;
     }
     // Which transport carried this request: the relay tunnel proxy stamps every
     // forwarded request with x-varin-relay-connection; anything else is a
     // direct (local/LAN/tunnel-URL) request. This also drives relay demand.
     const transport = req?.headers?.['x-varin-relay-connection'] ? 'relay' : 'direct';
-    return mutateStore<AuthenticatedClient | null>(async (store) => {
-      const tokenHash = hashToken(token);
-      const client = store.clients.find((entry) => !entry.revokedAt && constantTimeEqual(entry.tokenHash, tokenHash, crypto));
-      if (!client || !await principals.resolve(client.principalId)) return { result: null, write: false };
-      if (client.expiresAt && Date.parse(client.expiresAt) <= Date.now()) return { result: null, write: false };
-      const now = Date.now();
-      const lastUsedAt = Date.parse(client.lastUsedAt || '');
-      // A relayed request proves this client depends on the relay even if it was
-      // created before usesRelay existed. Keep the signal sticky: a later LAN
-      // request does not make the remote path unnecessary.
-      const healUsesRelay = transport === 'relay' && client.usesRelay !== true;
-      if (healUsesRelay) client.usesRelay = true;
-      // Write on the throttle interval — or immediately when the transport
-      // changed, so a LAN⇄relay switch is visible right away, not a minute late.
-      const shouldWrite = healUsesRelay
-        || !Number.isFinite(lastUsedAt)
-        || now - lastUsedAt >= LAST_USED_WRITE_INTERVAL_MS
-        || client.lastTransport !== transport;
-      if (shouldWrite) {
-        client.lastUsedAt = new Date(now).toISOString();
-        client.lastTransport = transport;
-      }
-      return {
-        result: { ok: true, principalId: client.principalId, clientId: client.id, sessionToken: client.id, client: publicClient(client) },
-        write: shouldWrite,
-      };
-    });
+    await ready();
+    const tokenHash = hashToken(token);
+    let client = byToken.get(tokenHash);
+    if (!client || !await principals.resolve(client.principalId)) return null;
+    // A revocation may commit while principal initialization yields.
+    client = byToken.get(tokenHash);
+    if (!client || closed) return null;
+    if (client.expiresAt && Date.parse(client.expiresAt) <= Date.now()) return null;
+    const now = Date.now();
+    const lastUsedAt = Date.parse(client.lastUsedAt || '');
+    if (transport === 'relay' && !client.usesRelay || !Number.isFinite(lastUsedAt)
+      || now - lastUsedAt >= LAST_USED_WRITE_INTERVAL_MS || client.lastTransport !== transport) {
+      const usage: Usage = { lastUsedAt: new Date(now).toISOString(), lastTransport: transport,
+        usesRelay: client.usesRelay || transport === 'relay' };
+      Object.assign(client, usage);
+      pendingUsage.set(tokenHash, usage);
+      scheduleUsage();
+    }
+    return { ok: true, principalId: client.principalId, clientId: client.id, sessionToken: client.id, client: publicClient(client) };
   };
 
   const recordAuditEvent = async (event: Record<string, unknown> = {}) => {
@@ -523,6 +566,8 @@ export const createRemoteClientAuthRuntime = ({
 
   return {
     authenticateBearerToken,
+    flushUsage,
+    dispose: async () => { closed = true; await flushUsage(); },
     createClient,
     getCapabilitiesForProfile,
     listAuditEvents,
@@ -532,4 +577,21 @@ export const createRemoteClientAuthRuntime = ({
     recordAuditEvent,
     revokeClient,
   };
+};
+
+// All consumers in the embedded Electron/Host process share one credential index.
+// A stopped Host can reopen the path, loading migrations and principals afresh.
+const runtimes = new Map<string, ReturnType<typeof createRuntime>>();
+export const createRemoteClientAuthRuntime = (options: RemoteClientRuntimeOptions): ReturnType<typeof createRuntime> => {
+  const key = options.path.resolve(options.storePath);
+  const existing = runtimes.get(key);
+  if (existing) return existing;
+  const runtime = createRuntime(options);
+  const dispose = runtime.dispose;
+  runtime.dispose = async () => {
+    try { await dispose(); }
+    finally { if (runtimes.get(key) === runtime) runtimes.delete(key); }
+  };
+  runtimes.set(key, runtime);
+  return runtime;
 };

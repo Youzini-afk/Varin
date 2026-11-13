@@ -1,6 +1,7 @@
+import { countUiWork } from '@/lib/performance-observation';
 import React from 'react';
 import { create } from 'zustand';
-import { getRuntimeEndpointGeneration, ConversationOrganizationError, type ConversationOrganizationMetadataItem, type ConversationOrganizationMetadataResult, type ConversationOrganizationAPI, type ConversationOrganizationCommand, type ConversationOrganizationOperation, type ConversationOrganizationReceipt, type ConversationOrganizationSnapshot, type ConversationOrganizationQuery, type BotSummary } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, ConversationOrganizationError, type ConversationOrganizationMetadataItem, type ConversationOrganizationMetadataResult, type ConversationOrganizationAPI, type ConversationOrganizationCommand, type ConversationOrganizationOperation, type ConversationOrganizationReceipt, type ConversationOrganizationSnapshot, type ConversationOrganizationQuery, type BotSummary, type ConversationOrganizationEvent } from '@varin/application-client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { useThreadStore } from './useThreadStore';
@@ -164,12 +165,15 @@ export async function submitOrganizationMetadata(items: ConversationOrganization
   } finally {
     if (currentMutationHost(owner.host)) {
       await refreshConversationOrganization();
-      if (currentMutationHost(owner.host)) await useThreadStore.getState().loadCatalog();
-      if (currentMutationHost(owner.host)) await useExternalAgentStore.getState().refresh();
+      const nativeIds = remaining.flatMap(item => item.conversation.kind === 'native' ? [item.conversation.id] : []);
+      if (currentMutationHost(owner.host) && nativeIds.length) await useThreadStore.getState().refreshThreads(nativeIds);
+      if (currentMutationHost(owner.host) && remaining.some(item => item.conversation.kind === 'external')) await useExternalAgentStore.getState().refresh();
     }
   }
 }
-export function useConversationOrganization(active = true) {
+export function useConversationOrganization(active?: boolean): void;
+export function useConversationOrganization<T>(active: boolean, selector: (state: OrganizationState) => T): T;
+export function useConversationOrganization<T>(active = true, selector?: (state: OrganizationState) => T) {
   const { conversationOrganization: api, bots } = useRuntimeAPIs(); const hostKey = useThreadStore(state => state.hostKey);
   React.useEffect(() => {
     if (!api || !active) return;
@@ -177,7 +181,8 @@ export function useConversationOrganization(active = true) {
     if (!binding || binding.host !== host || binding.api !== api) {
       binding?.stop(); const controller = new AbortController();
       const requests = new Map<string, Promise<void>>();
-      let refreshing: Promise<void> | null = null, dirty = false, timer: ReturnType<typeof setTimeout> | undefined;
+      const dirty = new Map<string, ConversationOrganizationQuery>(), failedReads = new Map<string, ConversationOrganizationQuery>();
+      let refreshing: Promise<void> | null = null, timer: ReturnType<typeof setTimeout> | undefined;
       const valid = () => binding === owner && !controller.signal.aborted && host === getRuntimeEndpointGeneration();
       const load = (query: ConversationOrganizationQuery, more = false): Promise<void> => {
         const key = organizationQueryKey(query), running = requests.get(key); if (running) return running;
@@ -186,6 +191,7 @@ export function useConversationOrganization(active = true) {
         useConversationOrganizationStore.setState(state => ({ pages: { ...state.pages, [key]: { query, snapshot: previous?.snapshot ?? null, loading: true, error: null } } }));
         const request = (async () => {
           try {
+            if (import.meta.env.DEV) countUiWork('organization.refresh');
             let page = await api.read({ ...query, ...(more ? { cursor: previous!.snapshot!.nextCursor! } : {}) }, controller.signal);
             // Refresh only the window the person already loaded, never every continuation.
             while (!more && page.nextCursor && pageLength(page) < pageLength(previous?.snapshot) && valid()) {
@@ -193,23 +199,35 @@ export function useConversationOrganization(active = true) {
               page = appendPage(page, next);
             }
             if (!valid()) return;
+            failedReads.delete(key);
             const snapshot = more ? appendPage(previous!.snapshot!, page) : page;
             useConversationOrganizationStore.setState(state => { const pages = { ...state.pages, [key]: { query, snapshot, loading: false, error: null } }; return { pages, snapshot: mergePages(pages), loading: false }; });
           } catch (error) {
-            if (valid()) useConversationOrganizationStore.setState(state => ({ loading: false, pages: { ...state.pages, [key]: { query, snapshot: previous?.snapshot ?? null, loading: false, error: message(error) } }, error: message(error) }));
+            if (valid()) {
+              useConversationOrganizationStore.setState(state => ({ loading: false, pages: { ...state.pages, [key]: { query, snapshot: previous?.snapshot ?? null, loading: false, error: message(error) } }, error: message(error) }));
+              failedReads.set(key, query);
+              if (!timer) timer = setTimeout(() => { timer = undefined; void refresh([...failedReads.values()]); }, 1500);
+            }
           }
         })().finally(() => requests.delete(key));
         requests.set(key, request); return request;
       };
-      const refresh = (): Promise<void> => {
-        dirty = true; if (refreshing) return refreshing;
-        refreshing = (async () => {
-          while (dirty && valid()) {
-            dirty = false;
-            const queries = Object.values(useConversationOrganizationStore.getState().pages).map(page => page.query);
-            for (const query of queries.length ? queries : [rootQuery]) { if (!valid()) return; await load(query); }
+      const refresh = (queries?: readonly ConversationOrganizationQuery[]): Promise<void> => {
+        const scopes = queries ?? Object.values(useConversationOrganizationStore.getState().pages).map(page => page.query);
+        for (const query of scopes.length || queries ? scopes : [rootQuery]) dirty.set(organizationQueryKey(query), query);
+        if (refreshing) return refreshing;
+        refreshing = Promise.resolve().then(async () => {
+          while (dirty.size && valid()) {
+            const batch = [...dirty.values()]; dirty.clear();
+            for (const query of batch) {
+              if (!valid()) return;
+              // If a foreground page read was already underway when invalidated,
+              // wait and reread it; joining its older result can miss this event.
+              await requests.get(organizationQueryKey(query));
+              if (valid()) await load(query);
+            }
           }
-        })().finally(() => { refreshing = null; }); return refreshing;
+        }).finally(() => { refreshing = null; }); return refreshing;
       };
       const owner = { host, api, controller, refresh, load, users: 0, stop() { controller.abort(); stopEvents(); if (timer) clearTimeout(timer); } };
       binding = owner;
@@ -218,18 +236,28 @@ export function useConversationOrganization(active = true) {
         : { host, snapshot: null, pages: {}, loading: true, error: null, pending: {}, failed: {}, metadata: {}, bots: null, botsError: null });
       const loadBots = async () => { try { const values = await bots?.list(controller.signal); if (valid()) useConversationOrganizationStore.setState({ bots: values ?? [], botsError: null }); } catch (error) { if (valid()) useConversationOrganizationStore.setState({ botsError: message(error) }); } };
       const stopEvents = subscribeVarinEvents(event => { if (event.type === 'bot-changed' || event.type === 'stream-ready') void loadBots(); });
-      const observe = async () => {
-        await refresh(); await loadBots(); if (!valid()) return;
-        let observedCursor = Math.min(...Object.values(useConversationOrganizationStore.getState().pages).flatMap(page => page.snapshot ? [page.snapshot.cursor] : []));
-        if (!Number.isFinite(observedCursor)) observedCursor = 0;
-        try { await api.observe(observedCursor, event => { if (valid() && event.cursor > observedCursor) { observedCursor = event.cursor; void refresh(); } }, { signal: controller.signal }); }
-        catch (error) { if (valid()) useConversationOrganizationStore.setState({ error: message(error) }); }
-        if (valid()) timer = setTimeout(() => void observe(), 1500);
+      const onEvent = (event: ConversationOrganizationEvent) => {
+        if (!valid()) return;
+        if ('stream' in event) { if (event.stream === 'resync') void refresh(); return; }
+        const pages = Object.values(useConversationOrganizationStore.getState().pages);
+        const metadata = ['organization.changed', 'thread.created', 'thread.updated', 'thread.deleted', 'external.created', 'external.changed', 'external.child_accepted'].includes(event.kind);
+        const activity = ['run.accepted', 'run.changed', 'run.cancel_requested', 'assistant.output', 'history.appended', 'permission.opened', 'question.opened'].includes(event.kind);
+        if (metadata) void refresh(pages.length ? pages.map(page => page.query) : [rootQuery]);
+        // Activity cannot change manual classification. Only already-loaded recent
+        // windows depend on it, including ancestor activity in conversation trees.
+        else if (activity && event.thread_id) void refresh(pages.filter(page => page.query.sort === 'recent').map(page => page.query));
       };
-      void observe();
+      // Subscribe before loading. Bus readiness/resync closes the initial read race
+      // and reconnects without owning another polling/retry loop in this store.
+      void api.observe(0, onEvent, { signal: controller.signal }).catch(error => {
+        if (valid()) useConversationOrganizationStore.setState({ error: message(error) });
+      });
+      if (Object.keys(useConversationOrganizationStore.getState().pages).length) void refresh();
+      else void load(rootQuery);
+      void loadBots();
     }
     const owner = binding; owner.users++;
     return () => { if (--owner.users === 0) { owner.stop(); if (binding === owner) binding = null; } };
   }, [api, bots, hostKey, active]);
-  return useConversationOrganizationStore();
+  return useConversationOrganizationStore<T | undefined>(selector ?? (() => undefined));
 }

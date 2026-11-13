@@ -1,6 +1,7 @@
 //! Real guardian/Storage/ProcessWaitTools continuation output. Explicit fresh binary dependency;
 //! this does not run the blocked Host socket route or use a paid provider.
 use super::*;
+use base64::Engine;
 use crate::storage::Storage;
 use crate::tools::{
     serve_resource, KernelResourceClient, KernelToolExecutor, ToolBinding, ToolKind,

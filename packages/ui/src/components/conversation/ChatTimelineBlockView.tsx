@@ -1,3 +1,4 @@
+import { countUiWork } from '@/lib/performance-observation';
 import React from 'react';
 import { motion } from 'motion/react';
 import type { ChatTimelineProjection } from './chatTimelineProjection';
@@ -27,6 +28,7 @@ export const ChatTimelineBlockView = (props: Omit<BlockProps, 'projection'> & { 
 };
 
 const TimelineRow = React.memo(({ block, projection, sorted, expanded, activityTransition, onExpandedChange, extensionPresentation, ...props }: BlockProps) => {
+  if (import.meta.env.DEV) countUiWork('timeline.row.render');
   const presentation = useConversationPresentation();
   const { t } = useI18n();
   const showThinking = useUIStore(state => state.showReasoningTraces);

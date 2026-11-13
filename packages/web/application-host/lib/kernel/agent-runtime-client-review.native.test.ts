@@ -96,11 +96,18 @@ it('framed IPC rejects malformed parameters and stale or grant-scoped authority'
     { method: 'runtime.content.collect', epoch: 'stale', params: {} },
     { method: 'runtime.content.collect', grantId: 'tool-grant', params: {} },
     { method: 'runtime.content.collect', params: { path: '/different-owner' } },
+    ...[
+      'runtime.followup.eventTransport.sources', 'runtime.followup.eventTransport.imports',
+      'runtime.followup.eventSources.list', 'runtime.mcp.interaction.pending',
+      'runtime.managed_process.pending', 'runtime.host_job.code_exchange.pending',
+      'runtime.host_job.pending', 'runtime.observations.reconcile',
+      'runtime.source.cleanup', 'runtime.mcp.resource.pending',
+    ].map(method => ({ method, params: { unexpected: true } })),
     { method: 'runtime.thread.create', params: { threadId: '', branchId: 'branch' } },
     { method: 'runtime.events.read', params: { cursor: -1, limit: 1 } },
     { method: 'runtime.events.read', params: { cursor: 0, limit: 1.5 } },
     { method: 'runtime.input.submit', params: { key: 'key', threadId: 't', branchId: 'b', input: {}, configuration: {} } },
-  ]) expect((await f.raw(request)).ok).toBe(false);
+  ]) expect((await f.raw(request)).ok, JSON.stringify(request)).toBe(false);
   expect((await f.runtimeClient.status()).epoch).toBeGreaterThan(0);
   await expect(f.runtimeClient.run('missing')).rejects.toThrow();
   await expect(f.runtimeClient.operation('missing')).rejects.toThrow();
@@ -126,7 +133,7 @@ it('abort retains wire credit until receipt and cancels queued admission without
   const controller = new AbortController();
   const first = f.runtimeClient.status(controller.signal);
   const rejected = expect(first).rejects.toThrow(/cancelled/i);
-  const second = f.runtimeClient.status();
+  const remaining = Array.from({length: KERNEL_REQUEST_WINDOW - 1}, () => f.runtimeClient.status());
   await expect.poll(() => f.held.length).toBe(KERNEL_REQUEST_WINDOW);
   controller.abort();
   await rejected;
@@ -138,7 +145,7 @@ it('abort retains wire credit until receipt and cancels queued admission without
   await queuedRejected;
   expect(f.requests.filter(value => value.method === 'runtime.status')).toHaveLength(KERNEL_REQUEST_WINDOW);
   f.release();
-  await second;
+  await Promise.all(remaining);
   expect((await f.runtimeClient.status()).epoch).toBeGreaterThan(0);
 }, 30_000);
 

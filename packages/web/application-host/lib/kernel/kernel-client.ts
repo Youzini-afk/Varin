@@ -21,6 +21,7 @@ import { CredentialBridge, type PrivateCredentialResponse } from "./credential-b
 import type { ExistingHostCredentialOwner, CredentialScope } from "./credential-owner.js";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { kernelPerformance, type KernelRequestMeasurement } from "./kernel-performance.js";
 import { KernelRequestWindow } from "./request-window.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -32,6 +33,8 @@ export { KernelClientError } from './kernel-error.js';
 import {
   KERNEL_PROTOCOL_VERSION,
   KERNEL_REQUEST_WINDOW,
+  KERNEL_STREAM_CREDITS,
+  KERNEL_INLINE_MAX_BYTES,
   KERNEL_DEFERRED_RESPONSE_METHODS,
   type KernelRequestCreditReleased,
   type KernelWorkspaceIdle,
@@ -593,6 +596,7 @@ export class KernelScopedClient {
 }
 
 interface PendingRequest {
+  measurement?: KernelRequestMeasurement | undefined;
   method: KernelMethod;
   release(): void;
   cancel(): void;
@@ -665,7 +669,7 @@ export class KernelClient {
   private readonly pendingIdle: Array<() => void> = [];
   private takePending(id: string): PendingRequest | undefined {
     const pending = this.pending.get(id);
-    if (pending) this.pending.delete(id);
+    if (pending) { this.pending.delete(id); pending.measurement?.finished(); }
     if (!this.pending.size) for (const done of this.pendingIdle.splice(0)) done();
     return pending;
   }
@@ -1101,7 +1105,7 @@ export class KernelClient {
     }
     const requiredCapabilities = ["storage", "workingState", "recovery", "branchCas", "pins", "gc"];
     const expectedHostGeneration = this.options.hostGeneration ?? `${this.options.hostId}:${process.pid}`;
-    if (result.protocolVersion !== KERNEL_PROTOCOL_VERSION || result.requestWindow !== KERNEL_REQUEST_WINDOW || !result.kernelEpoch || result.kernelEpoch !== transport.kernelEpoch || result.applicationBuildVersion !== this.options.buildVersion
+    if (result.protocolVersion !== KERNEL_PROTOCOL_VERSION || result.requestWindow !== KERNEL_REQUEST_WINDOW || result.streamCredits !== KERNEL_STREAM_CREDITS || result.inlineMaxBytes !== KERNEL_INLINE_MAX_BYTES || !result.kernelEpoch || result.kernelEpoch !== transport.kernelEpoch || result.applicationBuildVersion !== this.options.buildVersion
       || result.buildVersion !== result.kernelBuildIdentity
       || (manifest && (result.kernelBuildIdentity !== manifest.buildIdentity || result.targetTriple !== manifest.targetTriple || result.arch !== manifest.arch))
       || (this.options.kernelBuildIdentity !== undefined && result.kernelBuildIdentity !== this.options.kernelBuildIdentity)
@@ -1254,7 +1258,8 @@ export class KernelClient {
     for (const runId of this.runPreparations.keys()) this.cancelRunPreparation(runId);
     this.window.close(error);
     this.controlWindow.close(error);
-    for (const pending of this.pending.values()) { pending.reject(error); pending.release(); }
+    for (const pending of this.pending.values()) {
+      pending.measurement?.finished(true); pending.reject(error); pending.release(); }
     this.pending.clear();
     for (const done of this.pendingIdle.splice(0)) done();
     for (const entry of this.processSubscriptions.values()) { entry.closed = true; entry.reject(error); }
@@ -1292,8 +1297,10 @@ export class KernelClient {
     // already-dispatched operation or mistake rejection for an executor stop.
     const queueCancelled = () => newExecution && this.draining
       ? new KernelClientError({ code: 'host-draining', message: 'Host stopped execution admission', retryable: true }) : cancelled();
+    const measurement = kernelPerformance?.start(method);
     const release = this.closed && method === "kernel.shutdown" ? () => undefined : await (CONTROL_RESPONSE_METHODS.has(method) ? this.controlWindow : this.window).acquire(queueSignal, queueCancelled)
       .catch(error => { throw new KernelRequestError(error instanceof Error ? error : new Error(String(error)), method, 'not_dispatched'); });
+    measurement?.admitted();
     let admitted = false;
     try {
       this.assertAdmissionOpen(method);
@@ -1321,7 +1328,7 @@ export class KernelClient {
       };
       const promise = new Promise<T>((resolve, reject) => {
         rejectPending = reject;
-        this.pending.set(id, { method, resolve: resolve as (value: unknown) => void, reject, release, cancel: abort, grantId: grant?.grantId });
+        this.pending.set(id, { method, measurement, resolve: resolve as (value: unknown) => void, reject, release, cancel: abort, grantId: grant?.grantId });
       });
       admitted = true;
       void promise.catch(() => undefined);
@@ -1342,7 +1349,7 @@ export class KernelClient {
         throw new KernelRequestError(error instanceof Error ? error : new Error(String(error)), method, 'not_dispatched');
       throw error;
     } finally {
-      if (!admitted) release();
+      if (!admitted) { release(); measurement?.finished(); }
     }
   }
 

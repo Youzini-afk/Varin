@@ -152,7 +152,7 @@ impl Storage {
         }
         let conn = Connection::open(catalog_path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "synchronous", "FULL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         if initialize_catalog {
             conn.execute_batch("BEGIN IMMEDIATE")?;

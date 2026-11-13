@@ -14,6 +14,7 @@ pub(super) fn execute(
     let owner = runtime.catalog();
     match method {
         "runtime.host_job.code_exchange.pending" => {
+            let _: KernelEmptyParams = serde_json::from_value(params)?;
             let operations = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.pending_code_exchanges().map_err(domain)?;
             let result = operations.into_iter().map(HostJobPending::from_operation).collect::<std::result::Result<Vec<_>, _>>().map_err(domain)?;
             Ok(serde_json::to_value(result)?)
@@ -346,6 +347,7 @@ pub(super) fn execute(
             Ok(serde_json::to_value(result)?)
         }
         "runtime.host_job.pending" => {
+            let _: KernelEmptyParams = serde_json::from_value(params)?;
             let db = owner
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;

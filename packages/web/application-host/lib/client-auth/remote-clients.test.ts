@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { createSettingsFileStore } from '@varin/settings-store';
+import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -24,6 +25,19 @@ const createRuntime = async () => {
 };
 
 describe('remote client auth runtime', () => {
+  it('does not open credential stores or create a principal before the first consumer', async () => {
+    const { dir, runtime } = await createRuntime();
+    try {
+      await new Promise(resolve => setImmediate(resolve));
+      expect(await fs.readdir(dir)).toEqual([]);
+      await runtime.dispose();
+      expect(await fs.readdir(dir)).toEqual([]);
+    } finally {
+      await runtime.dispose();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('creates, authenticates, lists, and revokes client tokens', async () => {
     const { dir, runtime } = await createRuntime();
     try {
@@ -51,6 +65,7 @@ describe('remote client auth runtime', () => {
       expect(purged.purged).toBe(1);
       expect(await runtime.listClients()).toHaveLength(0);
     } finally {
+      await runtime.dispose().catch(() => undefined);
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
@@ -67,6 +82,7 @@ describe('remote client auth runtime', () => {
       expect(authenticated?.ok).toBe(true);
       expect(authenticated?.clientId).toBe(active.client.id);
     } finally {
+      await runtime.dispose().catch(() => undefined);
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
@@ -86,6 +102,7 @@ describe('remote client auth runtime', () => {
       expect(firstClient(listed).id).toBe(second.client.id);
       expect(firstClient(listed).clientKind).toBe('desktop-local');
     } finally {
+      await runtime.dispose().catch(() => undefined);
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
@@ -103,6 +120,7 @@ describe('remote client auth runtime', () => {
       expect(authenticated?.client?.profile).toBe('full-control');
       expect(authenticated?.client?.capabilities).toContain('process:control');
     } finally {
+      await runtime.dispose().catch(() => undefined);
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
@@ -118,6 +136,7 @@ describe('remote client auth runtime', () => {
         expect(stat.isFile()).toBe(true);
       }
     } finally {
+      await runtime.dispose().catch(() => undefined);
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
@@ -141,6 +160,7 @@ describe('remote client auth runtime', () => {
       expect(client.lastTransport).toBe('direct');
       expect(await runtime.hasActiveRelayClients()).toBe(true);
     } finally {
+      await runtime.dispose().catch(() => undefined);
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
@@ -159,6 +179,7 @@ describe('remote client auth runtime', () => {
       expect(clients).toHaveLength(1);
       expect(typeof firstClient(clients).revokedAt).toBe('string');
     } finally {
+      await runtime.dispose().catch(() => undefined);
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
@@ -175,6 +196,7 @@ describe('remote client auth runtime', () => {
       expect((await runtime.listClients()).map((client) => client.label).sort())
         .toEqual(['Laptop A', 'Laptop B']);
     } finally {
+      await runtime.dispose().catch(() => undefined);
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
@@ -187,7 +209,49 @@ describe('remote client auth runtime', () => {
       await expect(runtime.createClient({ label: 'Laptop' })).rejects.toBeInstanceOf(SyntaxError);
       expect(await fs.readFile(storePath, 'utf8')).toBe(malformed);
     } finally {
+      await runtime.dispose().catch(() => undefined);
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+
+describe('cached credential authority', () => {
+  it('authenticates repeatedly without store reads or writes after usage has been flushed', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-auth-cache-'));
+    const storePath = path.join(dir, 'clients.json');
+    const clientStore = createSettingsFileStore({ filePath: storePath, defaultValue: { version: 3, clients: [] } });
+    const reads = vi.spyOn(clientStore, 'read'), writes = vi.spyOn(clientStore, 'transact');
+    const runtime = createRemoteClientAuthRuntime({ fsPromises: fs, path, crypto, storePath, clientStore });
+    try {
+      const created = await runtime.createClient({ label: 'Phone' });
+      await runtime.authenticateBearerToken(created.token);
+      await runtime.flushUsage();
+      reads.mockClear(); writes.mockClear();
+      for (let count = 0; count < 50; count++) {
+        const authenticated = await runtime.authenticateBearerToken(created.token);
+        expect(authenticated?.principalId).toBe(created.client.principalId);
+        authenticated!.client.capabilities.push('forged');
+        expect((await runtime.listClients())[0]!.capabilities).not.toContain('forged');
+      }
+      expect(reads).not.toHaveBeenCalled(); expect(writes).not.toHaveBeenCalled();
+    } finally { await runtime.dispose(); await fs.rm(dir, { recursive: true, force: true }); }
+  });
+
+  it('does not publish failed credential mutations and retains revocation after reopen', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-auth-commit-'));
+    const storePath = path.join(dir, 'clients.json');
+    const clientStore = createSettingsFileStore({ filePath: storePath, defaultValue: { version: 3, clients: [] } });
+    let runtime = createRemoteClientAuthRuntime({ fsPromises: fs, path, crypto, storePath, clientStore });
+    try {
+      const created = await runtime.createClient({ label: 'Phone' });
+      vi.spyOn(clientStore, 'transact').mockRejectedValueOnce(new Error('Disk unavailable'));
+      await expect(runtime.revokeClient(created.client.id)).rejects.toThrow('Disk unavailable');
+      expect((await runtime.authenticateBearerToken(created.token))?.ok).toBe(true);
+      await runtime.revokeClient(created.client.id);
+      await runtime.dispose();
+      runtime = createRemoteClientAuthRuntime({ fsPromises: fs, path, crypto, storePath });
+      expect(await runtime.authenticateBearerToken(created.token)).toBeNull();
+    } finally { await runtime.dispose(); await fs.rm(dir, { recursive: true, force: true }); }
   });
 });

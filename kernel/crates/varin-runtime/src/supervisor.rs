@@ -443,7 +443,7 @@ impl RunSupervisor {
         worker.join = Some(join);
         Ok(())
     }
-    /// Called on actual completion/input notifications, never a timer or empty polling loop.
+    /// Called on completion/input notifications and sparse maintenance while workers exist.
     pub fn advance_pending(&self) -> Result<()> {
         self.reap()?;
         let pending: Vec<String> = self
@@ -1255,6 +1255,12 @@ impl RunSupervisor {
             }
         }
         Ok(())
+    }
+    /// Only live executor ownership needs the fallback completion check. Idle catalogs
+    /// never poll SQLite; normal completion wakes still do the timely work.
+    pub fn has_active_workers(&self) -> bool {
+        self.workers.lock().map(|workers| workers.values().any(|worker|worker.join.is_some())).unwrap_or(false)
+            || self.operation_workers.lock().map(|workers|!workers.is_empty()).unwrap_or(false)
     }
     pub fn reap(&self) -> Result<()> {
         self.reconcile_operation_controls()?;

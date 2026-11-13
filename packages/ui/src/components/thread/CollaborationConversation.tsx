@@ -1,11 +1,7 @@
 import React from 'react';
 import type { ThreadIdentity, ThreadSnapshot, ThreadsAPI } from '@varin/application-client';
-import {
-  ThreadProjection,
-  type StreamingTextPart,
-  type StreamingToolCall,
-  type ToolExecutionProgress,
-} from '@/lib/agent-runtime/thread-projection';
+import { ThreadProjection } from '@/lib/agent-runtime/thread-projection';
+import { ThreadStreamingStore } from '@/lib/agent-runtime/thread-streaming-store';
 import { threadHistoryWindow } from '@/lib/agent-runtime/thread-history';
 import { ConversationTimeline } from '../conversation/ConversationTimeline';
 import { ReferenceNavigationContext } from '../conversation/ReferenceNavigation';
@@ -36,13 +32,12 @@ export function CollaborationConversation({
     historyWindow.getSnapshot,
   );
   const [snapshot, setSnapshot] = React.useState<ThreadSnapshot>();
-  const [progress, setProgress] = React.useState<StreamingTextPart[]>([]);
-  const [tools, setTools] = React.useState<StreamingToolCall[]>([]);
-  const [toolProgress, setToolProgress] = React.useState<ToolExecutionProgress[]>([]);
+  const streaming = React.useMemo(() => new ThreadStreamingStore(), [api, host, identity]);
   const [error, setError] = React.useState<string>();
   const [retry, setRetry] = React.useState(0);
   const [question, setQuestion] = React.useState<{ id: string; reveal: number }>();
   React.useEffect(() => {
+    streaming.reset();
     const projection = new ThreadProjection(
       api,
       identity,
@@ -52,14 +47,14 @@ export function CollaborationConversation({
         setError(undefined);
       },
       (failure) => setError(failure instanceof Error ? failure.message : String(failure)),
-      setProgress,
-      setTools,
-      setToolProgress,
+      streaming.publishProgress,
+      streaming.publishTools,
+      streaming.publishToolProgress,
       { contextInspection: false },
     );
     projection.start();
-    return () => projection.close();
-  }, [api, identity, historyWindow, retry]);
+    return () => { projection.close(); streaming.reset(); };
+  }, [api, identity, historyWindow, retry, streaming]);
   const branch = snapshot?.thread.branches.find((branch) => branch.branch_id === identity.branchId);
   const run = snapshot?.activeRun ?? branch?.latest_run;
   const source = snapshot?.launch?.selection.source;
@@ -98,9 +93,8 @@ export function CollaborationConversation({
               latencyMs: history.latencyMs,
               load: historyWindow.loadEarlier,
             }}
-            progress={progress}
-            streamingTools={tools}
-            toolProgress={toolProgress}
+            streamingStore={streaming}
+            streamingEnabled={!history.connecting}
             cwd={source?.live_root?.canonicalRoot ?? ''}
             working={Boolean(branch?.active_run_id) && run?.state !== 'waiting'}
             readOnly

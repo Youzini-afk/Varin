@@ -22,14 +22,17 @@ export function createPrincipalStore(filePath = path.join(resolveVarinDataDir(pr
     }
     return document;
   }
-  // Persist the initial subject before exposing it, including concurrent startup.
-  const transact = <T>(work: (document: PrincipalDocument) => T) => store.transact(raw => {
-    const document = parse(raw); return { document, result: work(document) };
+  // Initialization is the only writer. Share its promise so concurrent first
+  // requests cannot observe an unpersisted or independently generated subject.
+  let initialized: Promise<PrincipalDocument> | undefined;
+  const document = (): Promise<PrincipalDocument> => initialized ??= store.transact(raw => {
+    const value = parse(raw);
+    return { document: value, result: value, write: value.ownerId === id };
   });
   return {
-    ownerId: () => transact(d => d.ownerId),
-    resolve: (id: string) => transact(d => d.principals.find(p => p.id === id && !p.disabled)?.id ?? null),
-    isOwner: (id: string) => transact(d => d.ownerId === id && d.principals.some(p => p.id === id && !p.disabled)),
+    ownerId: async () => (await document()).ownerId,
+    resolve: async (id: string) => (await document()).principals.find(p => p.id === id && !p.disabled)?.id ?? null,
+    isOwner: async (id: string) => { const value = await document(); return value.ownerId === id && value.principals.some(p => p.id === id && !p.disabled); },
   };
 }
 export type PrincipalStore = ReturnType<typeof createPrincipalStore>;

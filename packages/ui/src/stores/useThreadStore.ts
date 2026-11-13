@@ -1,9 +1,10 @@
+import { countUiWork } from '@/lib/performance-observation';
 import type { ThreadSummary } from '@varin/protocol';
 import { create } from 'zustand';
 import { useThreadDraftStore, type ThreadDraft } from './useThreadDraftStore';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import {
-  getRuntimeApiBaseUrl, getRuntimeKey,
+  getRuntimeApiBaseUrl, getRuntimeKey, getThreadObservationBus,
   subscribeRuntimeEndpointWillChange, subscribeRuntimeEndpointChanged,
   type ThreadIdentity, type ThreadsAPI,
 } from '@varin/application-client';
@@ -27,6 +28,7 @@ interface ThreadNavigationState {
   catalogLoading: boolean;
   catalogError: string | null;
   loadCatalog(): Promise<void>;
+  refreshThreads(threadIds: readonly string[]): Promise<void>;
   resolveThread(target: { threadId: string; branchId?: string }): Promise<{ identity: ThreadIdentity; botId: string | null; parentThreadId: string | null }>;
   selectThread(identity: { threadId: string; branchId?: string }): Promise<ThreadIdentity>;
   openDraft(options?: Pick<ThreadDraft, 'workspacePath' | 'sourceSelection' | 'organization' | 'projectId' | 'botId'>): string;
@@ -45,6 +47,8 @@ const deleted = new Set<string>();
 const deletedBranches = new Set<string>();
 let catalogPending: Promise<void> | undefined;
 let catalogAgain = false;
+let inspectPending: Promise<void> | undefined;
+const dirtyThreads = new Set<string>();
 const selections = new Map<string, ThreadIdentity>();
 const draftSelections = new Map<string, string>();
 const materializations = new Map<string, Promise<ThreadIdentity>>();
@@ -81,6 +85,9 @@ function mergeSummary(previous: ThreadSummary | undefined, incoming: ThreadSumma
   };
 }
 
+const sortSummaries = (threads: ThreadSummary[]): ThreadSummary[] => threads.sort((a, b) =>
+  Number(b.pinned) - Number(a.pinned) || b.updated_at_ms - a.updated_at_ms || a.thread_id.localeCompare(b.thread_id));
+
 export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
   hostKey: threadHostKey(), selectedIdentity: null, selectedDraftKey: null, threads: [], catalogLoaded: false,
   catalogLoading: false, catalogError: null,
@@ -93,6 +100,7 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
         do {
           catalogAgain = false;
           const selectedNavigation = navigation;
+          if (import.meta.env.DEV) countUiWork('catalog.list');
           const threads = await api.list({ archived: 'include' });
           if (owner !== binding || request !== catalogRequest) return;
           const current = get();
@@ -109,7 +117,7 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
           // creation or selection. A subsequent current read still owns removal.
           const reconcileSelection = selected && !retained && selectedNavigation === navigation;
           if (reconcileSelection && fallback) selections.set(current.hostKey, fallback);
-          set({ threads: merged, catalogLoaded: true, catalogError: null,
+          set({ threads: sortSummaries(merged), catalogLoaded: true, catalogError: null,
             ...(reconcileSelection ? { selectedIdentity: fallback } : {}) });
         } while (catalogAgain && owner === binding);
       } catch (error) {
@@ -119,11 +127,55 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
     })();
     catalogPending = pending; return pending;
   },
+  refreshThreads(threadIds) {
+    for (const id of threadIds) dirtyThreads.add(id);
+    if (inspectPending) return inspectPending;
+    const api = requireAPI(), owner = binding;
+    const pending = Promise.resolve().then(async () => {
+      while (dirtyThreads.size && owner === binding) {
+        // A complete read owns membership. Resolve deltas after it, not in a race
+        // that can remove a newly accepted creation from an older list response.
+        if (catalogPending) await catalogPending;
+        if (owner !== binding) return;
+        const ids = [...dirtyThreads]; dirtyThreads.clear();
+        const generation = catalogRequest, selectedNavigation = navigation;
+        try {
+          if (import.meta.env.DEV) countUiWork('catalog.inspectMany');
+          const updates = await api.inspectMany(ids);
+          if (owner !== binding) return;
+          if (generation !== catalogRequest) { for (const id of ids) dirtyThreads.add(id); continue; }
+          const state = get(), previous = new Map(state.threads.map(thread => [thread.thread_id, thread]));
+          for (const id of ids) previous.delete(id);
+          const old = new Map(state.threads.map(thread => [thread.thread_id, thread]));
+          for (const incoming of updates) {
+            if (deleted.has(incoming.thread_id) || incoming.deleted_at_ms !== null) continue;
+            const summary = mergeSummary(old.get(incoming.thread_id), incoming);
+            previous.set(incoming.thread_id, deletedBranches.size ? { ...summary, branches: summary.branches.filter(branch => !deletedBranches.has(branch.branch_id)) } : summary);
+          }
+          const selected = state.selectedIdentity;
+          const updatedSelection = selected && ids.includes(selected.threadId) && selectedNavigation === navigation;
+          const target = selected ? previous.get(selected.threadId) : undefined;
+          const fallback = updatedSelection && !target?.branches.some(branch => branch.branch_id === selected.branchId)
+            ? target ? { runtime: 'agent' as const, threadId: target.thread_id, branchId: target.main_branch_id } : null : selected;
+          if (updatedSelection && fallback !== selected) {
+            if (fallback) selections.set(state.hostKey, fallback); else selections.delete(state.hostKey);
+          }
+          set({ threads: sortSummaries([...previous.values()]), ...(state.catalogLoaded ? { catalogError: null } : {}),
+            ...(updatedSelection ? { selectedIdentity: fallback } : {}) });
+        } catch (error) {
+          if (owner === binding) { for (const id of ids) dirtyThreads.add(id); set({ catalogError: errorMessage(error) }); }
+          throw error;
+        }
+      }
+    }).finally(() => { if (inspectPending === pending) inspectPending = undefined; });
+    inspectPending = pending;
+    return pending;
+  },
   async resolveThread(target) {
     requireAPI(); const owner = binding;
     let thread = get().threads.find(thread => thread.thread_id === target.threadId);
     if (!thread || target.branchId && !thread.branches.some(branch => branch.branch_id === target.branchId)) {
-      await get().loadCatalog(); thread = get().threads.find(thread => thread.thread_id === target.threadId);
+      await get().refreshThreads([target.threadId]); thread = get().threads.find(thread => thread.thread_id === target.threadId);
     }
     if (owner !== binding) throw new Error('Conversation navigation was superseded');
     if (!thread) throw new Error('Conversation is unavailable on this Host');
@@ -183,7 +235,7 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
       // Creation is authoritative. First send mounts the real conversation and
       // its observer immediately; an older sidebar read cannot undo that navigation.
       if (options?.waitForCatalog === false) selectCreated();
-      const catalogReady = get().loadCatalog().catch(() => {});
+      const catalogReady = get().refreshThreads([identity.threadId]).catch(() => {});
       if (options?.waitForCatalog !== false) { await catalogReady; selectCreated(); }
       return identity;
     })();
@@ -199,7 +251,7 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
     const updated = await api.update({ runtime: 'agent', threadId, expectedRevision: thread.revision, key, ...patch });
     if (owner !== binding) return;
     mutationKeys.delete(fingerprint);
-    set(state => ({ threads: state.threads.map(value => value.thread_id === threadId ? mergeSummary(value, updated) : value) }));
+    set(state => ({ threads: sortSummaries(state.threads.map(value => value.thread_id === threadId ? mergeSummary(value, updated) : value)) }));
   },
   async deleteThread(threadId) {
     const api = requireAPI(); const owner = binding;
@@ -248,44 +300,54 @@ export const useThreadStore = create<ThreadNavigationState>((set, get) => ({
   },
 }));
 
-/** One binding per mounted Surface, with abort and epoch fencing before Host replacement. */
+/** One binding per mounted Surface; all views share the Host observation bus. */
 export function bindThreadStore(api: ThreadsAPI): () => void {
   let stopped = false;
-  let abort = new AbortController();
+  let stopObservation: (() => void) | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
   const reset = () => {
-    deleted.clear(); deletedBranches.clear(); binding += 1; navigation += 1; catalogRequest += 1; catalogPending = undefined; catalogAgain = false;
-    abort.abort(); if (retry) clearTimeout(retry); abort = new AbortController();
+    deleted.clear(); deletedBranches.clear(); dirtyThreads.clear(); inspectPending = undefined;
+    binding += 1; navigation += 1; catalogRequest += 1; catalogPending = undefined; catalogAgain = false;
+    stopObservation?.(); stopObservation = undefined;
+    if (retry) clearTimeout(retry); retry = undefined;
     boundAPI = api;
     const hostKey = threadHostKey();
     useThreadStore.setState({ hostKey, selectedIdentity: null, selectedDraftKey: draftSelections.get(hostKey) ?? null, threads: [], catalogLoaded: false, catalogLoading: false, catalogError: null });
   };
   const start = () => {
-    reset(); const owner = binding; let cursor = 0; let dirty = false; let refreshing = false;
-    const refresh = async () => {
-      dirty = true; if (refreshing) return; refreshing = true;
-      try { while (dirty && owner === binding && !stopped) { dirty = false; await useThreadStore.getState().loadCatalog(); } }
-      finally { refreshing = false; }
-    };
-    const observe = async () => {
-      if (stopped || owner !== binding) return;
+    reset(); const owner = binding;
+    const current = () => !stopped && owner === binding;
+    const refresh = async (full = false): Promise<void> => {
+      if (!current()) return;
       try {
-        await refresh();
-        if (stopped || owner !== binding) return;
+        if (full || !useThreadStore.getState().catalogLoaded) await useThreadStore.getState().loadCatalog();
+        if (current() && dirtyThreads.size) await useThreadStore.getState().refreshThreads([]);
+        if (!current()) return;
         const restored = selections.get(threadHostKey());
-        if (!useThreadStore.getState().selectedIdentity && !useThreadStore.getState().selectedDraftKey && restored) await useThreadStore.getState().selectThread(restored).catch(() => {});
-        await api.observe(cursor, event => {
-          if ('cursor' in event && !('stream' in event) && event.cursor > cursor && owner === binding) {
-            cursor = event.cursor; void refresh().catch(() => {});
-          }
-        }, { signal: abort.signal });
-      } catch (error) { if (owner === binding && !abort.signal.aborted) useThreadStore.setState({ catalogError: errorMessage(error) }); }
-      if (!stopped && owner === binding && !abort.signal.aborted) retry = setTimeout(() => void observe(), 1000);
+        if (!useThreadStore.getState().selectedIdentity && !useThreadStore.getState().selectedDraftKey && restored)
+          await useThreadStore.getState().selectThread(restored).catch(() => {});
+      } catch (error) {
+        if (!current()) return;
+        useThreadStore.setState({ catalogError: errorMessage(error) });
+        if (!retry) retry = setTimeout(() => { retry = undefined; void refresh(full); }, 1000);
+      }
     };
-    void observe();
+    // Catalog summaries include branch/run state and visible activity. Metadata
+    // unrelated to a Thread cannot invalidate this directory.
+    stopObservation = getThreadObservationBus(api).subscribe({ kinds: ['thread.*', 'branch.*', 'run.*', 'assistant.output', 'history.appended', 'permission.opened', 'question.opened'] }, event => {
+      if (!current()) return;
+      if ('stream' in event) { if (event.stream === 'resync') void refresh(true); return; }
+      if (!event.thread_id) return;
+      dirtyThreads.add(event.thread_id);
+      void refresh();
+    });
+    void refresh(true);
   };
   const willChange = subscribeRuntimeEndpointWillChange(reset);
   const changed = subscribeRuntimeEndpointChanged(start);
   start();
-  return () => { stopped = true; willChange(); changed(); abort.abort(); if (retry) clearTimeout(retry); binding += 1; boundAPI = undefined; catalogPending = undefined; catalogAgain = false; };
+  return () => {
+    stopped = true; willChange(); changed(); stopObservation?.(); if (retry) clearTimeout(retry);
+    binding += 1; boundAPI = undefined; catalogPending = undefined; catalogAgain = false; inspectPending = undefined; dirtyThreads.clear();
+  };
 }

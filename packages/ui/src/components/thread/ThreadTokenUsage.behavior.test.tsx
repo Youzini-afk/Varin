@@ -30,7 +30,7 @@ beforeEach(() => {
   const { window } = parseHTML('<html><body><div id="root"></div></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('CustomEvent', window.CustomEvent); vi.stubGlobal('document', window.document); vi.stubGlobal('HTMLElement', window.HTMLElement);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = window.document.getElementById('root')! as unknown as HTMLElement; root = createRoot(container);
-  api.usage.mockReset(); api.observe.mockReset().mockImplementation(() => new Promise(() => {}));
+  api.usage.mockReset(); api.observe.mockReset().mockImplementation((_cursor, _listener, {signal}) => new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), {once: true})));
   useThreadStore.setState({ selectedIdentity: identity });
 });
 afterEach(async () => {
@@ -53,7 +53,7 @@ it('renders original branch measurements without zero-filling missing values or 
   const value = snapshot(); value.rows.push({ ...value.rows[0]!, modelId: 'estimated-model', measurement: 'estimated' }); api.usage.mockResolvedValue(value);
   await render();
   expect(api.usage).toHaveBeenCalledWith(identity, expect.any(AbortSignal));
-  expect(api.observe).toHaveBeenCalledWith(42, expect.any(Function), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  expect(api.observe).toHaveBeenCalledWith(null, expect.any(Function), expect.objectContaining({ signal: expect.any(AbortSignal), threadIds: [] }));
   await act(async () => container.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
   expect(container.textContent).toContain(BigInt('18446744073709551616').toLocaleString());
   const counts = [...container.querySelectorAll('dd')].map(value => value.textContent);
@@ -106,7 +106,7 @@ it('groups purposes by channel and model while keeping estimates and unreported 
 it('retains the last same-branch snapshot after observation failure and refresh reconnects', async () => {
   api.usage.mockResolvedValue(snapshot()); api.observe.mockRejectedValueOnce(new Error('Host unavailable'));
   await render();
-  expect(container.textContent).toContain('reported-model'); expect(container.querySelector('[role=alert]')?.textContent).toBe('Host unavailable');
+  expect(container.textContent).toContain('reported-model'); expect(container.querySelector('[role=alert]')?.textContent).toMatch(/observation|connect/i);
   api.usage.mockResolvedValue(snapshot('refreshed-model'));
   await act(async () => container.querySelector('button')!.click());
   expect(container.textContent).toContain('refreshed-model'); expect(container.textContent).not.toContain('Host unavailable');
@@ -121,11 +121,13 @@ it('discards previous Host responses even when the new Host has the same thread 
   expect(container.textContent).toContain('new-host-model'); expect(container.textContent).not.toContain('old-host-model');
 });
 it('coalesces durable event bursts while one usage read is pending', async () => {
-  let event!: (event: unknown) => void; api.observe.mockImplementation((_cursor, onEvent) => { event = onEvent; return new Promise(() => {}); });
+  let event!: (event: unknown) => void; api.observe.mockImplementation((_cursor, onEvent, {signal}) => { event = onEvent; return new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), {once: true})); });
   let release!: (value: ThreadUsage) => void;
   api.usage.mockResolvedValueOnce(snapshot()).mockReturnValueOnce(new Promise<ThreadUsage>(resolve => { release = resolve; })).mockResolvedValue(snapshot('latest'));
   await render();
-  await act(async () => { for (let cursor = 43; cursor < 48; cursor++) event({ kind: 'model.settled', cursor }); });
+  await act(async () => { event({kind: 'model.settled', cursor: 41, thread_id: 'other', branch_id: 'other'}); event({kind: 'thread.read', cursor: 42, thread_id: identity.threadId, branch_id: identity.branchId}); });
+  expect(api.usage).toHaveBeenCalledTimes(1);
+  await act(async () => { for (let cursor = 43; cursor < 48; cursor++) event({ kind: 'model.settled', cursor, thread_id: identity.threadId, branch_id: identity.branchId }); });
   expect(api.usage).toHaveBeenCalledTimes(2);
   await act(async () => release(snapshot('intermediate')));
   expect(api.usage).toHaveBeenCalledTimes(3); expect(container.textContent).toContain('latest');
@@ -145,7 +147,7 @@ it('keeps hidden usage views unsubscribed and releases an existing stream when t
   expect(api.observe).toHaveBeenCalledTimes(2); expect(container.textContent).toContain('reopened-usage');
 });
 
-it('does not subscribe when the first usage read resolves after the surface has been hidden', async () => {
+it('stops its early subscription and ignores a read that resolves after the surface has been hidden', async () => {
   let finish!: (value: ThreadUsage) => void;
   api.usage.mockReturnValueOnce(new Promise<ThreadUsage>(resolve => { finish = resolve; })).mockResolvedValue(snapshot('visible-usage'));
   await render();
@@ -153,7 +155,7 @@ it('does not subscribe when the first usage read resolves after the surface has 
   await render(false);
   expect(firstSignal.aborted).toBe(true);
   await act(async () => finish(snapshot('hidden-usage')));
-  expect(api.observe).not.toHaveBeenCalled(); expect(container.textContent).not.toContain('hidden-usage');
+  expect(api.observe).toHaveBeenCalledTimes(1); expect(api.observe.mock.calls[0]![2].signal.aborted).toBe(true); expect(container.textContent).not.toContain('hidden-usage');
   await render();
-  expect(api.observe).toHaveBeenCalledTimes(1); expect(container.textContent).toContain('visible-usage');
+  expect(api.observe).toHaveBeenCalledTimes(2); expect(container.textContent).toContain('visible-usage');
 });

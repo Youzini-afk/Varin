@@ -327,14 +327,18 @@ impl ControlCommands {
                 Ok(operation_cancellation_receipt(&operation))
             }
             "runtime.source.cleanup" => {
+                let _: KernelEmptyParams = serde_json::from_value(params)?;
                 self.resources.replay_source_delivery_releases()?;
                 Ok(json!({}))
             }
-            "runtime.observations.reconcile" => Ok(serde_json::to_value(
-                runtime
-                    .reconcile_observations()
-                    .map_err(|e| KernelError::Operation(e.to_string()))?,
-            )?),
+            "runtime.observations.reconcile" => {
+                let _: KernelEmptyParams = serde_json::from_value(params)?;
+                Ok(serde_json::to_value(
+                    runtime
+                        .reconcile_observations()
+                        .map_err(|e| KernelError::Operation(e.to_string()))?,
+                )?)
+            },
             "runtime.child.wait.cancel" => {
                 runtime
                     .reconcile_observations()

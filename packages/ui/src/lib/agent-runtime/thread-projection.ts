@@ -1,6 +1,8 @@
-import { subscribeRuntimeEndpointWillChange } from '@varin/application-client';
-import type { ThreadIdentity, ThreadSnapshot, ThreadsAPI } from '@varin/application-client';
+import { countUiWork } from '../performance-observation';
+import { getThreadObservationBus, subscribeRuntimeEndpointWillChange } from '@varin/application-client';
+import type { ThreadIdentity, ThreadSnapshot, ThreadsAPI, ThreadObservationEvent } from '@varin/application-client';
 import type { AgentResourceReference } from '@varin/protocol';
+import { shareSnapshot } from './structural-sharing';
 import { PartialJson } from '@/lib/interactive-ui/partial-json';
 import { useThreadContextUsageStore } from '@/stores/useThreadContextUsageStore';
 
@@ -32,6 +34,10 @@ export class ThreadProjection {
   private initialized = false;
   private refreshing = false;
   private dirty = false;
+  private fullRefresh = false;
+  private snapshot?: ThreadSnapshot;
+  private unsubscribe?: () => void;
+  private relatedSubscriptions = new Map<string, () => void>();
   private activeRunId: string | null = null;
   private readonly progress = new Map<string, ProgressView>();
   private progressObservation = 0;
@@ -42,6 +48,7 @@ export class ThreadProjection {
   private removeEndpoint: (() => void) | undefined;
   private contextSnapshot?: ThreadSnapshot;
   private contextRefreshing = false;
+  private contextDirty = false;
   constructor(private readonly api: ThreadsAPI, private readonly identity: ThreadIdentity,
     private readonly publish: (snapshot: ThreadSnapshot) => void,
     private readonly report: (error: unknown) => void,
@@ -50,15 +57,27 @@ export class ThreadProjection {
     private readonly publishToolProgress: (progress: ToolExecutionProgress[]) => void = () => {},
     private readonly options: { contextInspection?: boolean } = {}) {}
 
-  async refresh(): Promise<void> {
+  async refresh(full = true): Promise<void> {
     this.dirty = true;
+    this.fullRefresh ||= full;
     if (this.refreshing || this.abort.signal.aborted) return;
     this.refreshing = true;
     try {
       while (this.dirty && !this.abort.signal.aborted) {
         this.dirty = false;
         const observedBeforeSnapshot = this.progressObservation;
-        const snapshot = await this.api.snapshot(this.identity, this.abort.signal);
+        const inspectContext = this.fullRefresh || this.contextDirty;
+        this.contextDirty = false;
+        const afterHeadId = !this.fullRefresh ? this.snapshot?.historyPage.head ?? undefined : undefined;
+        this.fullRefresh = false;
+        if (import.meta.env.DEV) countUiWork('projection.refresh');
+        let snapshot = await this.api.snapshot(this.identity, this.abort.signal, afterHeadId ? { afterHeadId } : undefined);
+        if (afterHeadId && snapshot.historyPage.afterHeadId === afterHeadId && this.snapshot) {
+          const known = new Set(this.snapshot.history.map(item => item.id));
+          snapshot = { ...snapshot, history: [...this.snapshot.history, ...snapshot.history.filter(item => !known.has(item.id))],
+            historyPage: { ...snapshot.historyPage, previous: this.snapshot.historyPage.previous } };
+        }
+        snapshot = shareSnapshot(this.snapshot, snapshot);
         if (!this.abort.signal.aborted) {
           if (!this.initialized) { this.cursor = Math.max(this.cursor, snapshot.eventCursor); this.initialized = true; }
           let activeRunId = snapshot.thread.branches.find(branch => branch.branch_id === this.identity.branchId)?.active_run_id ?? null;
@@ -88,9 +107,13 @@ export class ThreadProjection {
               this.progress.delete(runId);
             }
           }
+          const previous = this.snapshot;
+          this.snapshot = snapshot;
+          this.syncRelatedSubscriptions(snapshot);
           this.publishCurrentProgress();
           this.publish(snapshot);
-          if (this.options.contextInspection !== false) {
+          if (this.options.contextInspection !== false && (inspectContext || !previous || previous.historyPage.head !== snapshot.historyPage.head
+            || previous.context !== snapshot.context || previous.activeRun?.id !== snapshot.activeRun?.id)) {
             this.contextSnapshot = snapshot;
             void this.refreshContext();
           }
@@ -124,9 +147,31 @@ export class ThreadProjection {
     // Snapshot carries a cursor captured before its reads. Replay covers commits made during
     // those reads, without replaying every older thread merely to display this branch.
     this.removeEndpoint = subscribeRuntimeEndpointWillChange(() => this.close());
-    void this.observe();
+    this.unsubscribe = getThreadObservationBus(this.api).subscribe({ threadId: this.identity.threadId, branchId: this.identity.branchId }, this.observe);
+    void this.refresh();
   }
-  close(): void { this.removeEndpoint?.(); this.abort.abort(); this.progress.clear(); this.toolProgress.clear(); }
+  close(): void {
+    this.removeEndpoint?.(); this.unsubscribe?.();
+    for (const unsubscribe of this.relatedSubscriptions.values()) unsubscribe();
+    this.relatedSubscriptions.clear();
+    this.abort.abort(); this.progress.clear(); this.toolProgress.clear();
+  }
+
+  private syncRelatedSubscriptions(snapshot: ThreadSnapshot) {
+    const relatedThreads = new Set((snapshot.children ?? []).map(child => child.child_thread_id));
+    for (const child of snapshot.childExecutions ?? []) relatedThreads.add(child.child_thread_id);
+    // Manual context jobs can finish without waking the parent Run. Their helper
+    // Run state is part of this snapshot, not only the expanded job history view.
+    for (const { run } of snapshot.context.jobs) relatedThreads.add(run.thread_id);
+    relatedThreads.delete(this.identity.threadId);
+    for (const [id, unsubscribe] of this.relatedSubscriptions) if (!relatedThreads.has(id)) { unsubscribe(); this.relatedSubscriptions.delete(id); }
+    for (const threadId of relatedThreads) if (!this.relatedSubscriptions.has(threadId)) {
+      if (getThreadObservationBus(this.api).getThreadCursor(threadId) > snapshot.eventCursor) this.dirty = true;
+      this.relatedSubscriptions.set(threadId, getThreadObservationBus(this.api).subscribe({ threadId, kinds: ['thread.*', 'branch.*', 'run.*', 'launch.*', 'execution.*', 'child.*', 'operation.*'] }, event => {
+        if (!('stream' in event) && event.kind !== 'thread.read') void this.refresh(false);
+      }));
+    }
+  }
 
   private publishCurrentProgress(activity?: 'text' | 'thinking' | 'retry' | 'provider'): void {
     const current = this.activeRunId ? this.progress.get(this.activeRunId) : undefined;
@@ -134,121 +179,116 @@ export class ThreadProjection {
     this.publishTools(current ? [...current.calls.values()] : this.interruptedTools);
   }
 
-  private async observe(): Promise<void> {
-    while (!this.abort.signal.aborted) {
-      try {
-        if (!this.initialized) void this.refresh();
-        if (this.abort.signal.aborted) return;
-        await this.api.observe(this.initialized ? this.cursor : null, event => {
-          if (this.abort.signal.aborted) return;
-          if ('cursor' in event && typeof event.cursor === 'number' && !('stream' in event)) {
-            if (event.cursor <= this.cursor) return;
-            this.cursor = event.cursor;
-            void this.refresh();
-          } else if ('stream' in event && event.stream === 'progress') {
-            if (event.threadId !== this.identity.threadId || event.branchId !== this.identity.branchId) return;
-            const tool = event.event as { kind?: string; operationId?: string; toolName?: string; details?: unknown } | null;
-            if (tool?.kind === 'tool_progress') {
-              if (typeof tool.operationId !== 'string' || typeof tool.toolName !== 'string' || !tool.details
-                || this.completedTools.has(tool.operationId)) return;
-              const stream = `${event.kernelEpoch}:${event.streamId}`;
-              const previous = this.toolProgress.get(tool.operationId);
-              if (previous?.stream === stream && event.sequence <= previous.sequence) return;
-              // Each tool frame is a complete presentation snapshot. It remains valid
-              // after the model's tool-call message commits, and across skipped frames.
-              this.toolProgress.set(tool.operationId, { runId: event.runId, operationId: tool.operationId,
-                toolName: tool.toolName, details: tool.details, stream, sequence: event.sequence });
-              this.publishToolProgress([...this.toolProgress.values()]);
-              return;
-            }
-            const retryEvent = (event.event as { events?: ProviderProgress[] }).events?.some(part => part.kind === 'retry_scheduled');
-            if (this.committedRequests.has(event.requestId) && !retryEvent) return;
-            const observed = ++this.progressObservation;
-            const stream = `${event.kernelEpoch}:${event.streamId}`;
-            let progress = this.progress.get(event.runId);
-            if (!progress || progress.stream !== stream || progress.requestId !== event.requestId) {
-              progress = { stream, requestId: event.requestId, sequence: progress?.stream === stream ? progress.sequence : 0,
-                firstObserved: observed, items: new Map(), calls: new Map(), readers: new Map(), nextOrder: 0 };
-              this.progress.set(event.runId, progress);
-            }
-            if (event.sequence !== progress.sequence + 1) {
-              progress.items.clear();
-              progress.calls.clear();
-              progress.readers.clear();
-              if (event.runId === this.activeRunId) this.publishCurrentProgress();
-              void this.refresh();
-            }
-            progress.sequence = event.sequence;
-            const batch = event.event as { kind: 'batch'; events: ProviderProgress[] };
-            if (batch.kind !== 'batch' || !Array.isArray(batch.events)) return;
-            let activity: 'text' | 'thinking' | 'retry' | 'provider' | undefined;
-            for (const payload of batch.events) {
-              const data = payload?.data;
-              if (payload.kind === 'provider') activity = 'provider';
-              if (payload.kind === 'retry_scheduled' && typeof data?.attempt === 'number' && typeof data.delay_ms === 'number') {
-                progress.retry = { type: 'retry', attempt: data.attempt, retryAt: Date.now() + data.delay_ms };
-                activity = 'retry';
-              }
-              if (payload?.kind === 'provider' && typeof data?.call_id === 'string') {
-                const old = progress.calls.get(data.call_id);
-                if (data.kind === 'tool_call_started' || data.kind === 'tool_arguments_delta') progress.calls.set(data.call_id, {
-                  id: data.request_id ? JSON.stringify([event.runId, data.request_id, data.call_id]) : old?.id ?? data.call_id,
-                  name: data.name ?? old?.rawName ?? old?.name ?? '', rawName: data.name ?? old?.rawName ?? old?.name,
-                  rawArguments: (old?.rawArguments ?? '') + (data.delta ?? ''), sequence: event.sequence,
-                  order: old?.order ?? progress.nextOrder++,
-                });
-                const call = progress.calls.get(data.call_id);
-                if (call && (data.kind === 'tool_call_started' || data.kind === 'tool_arguments_delta')) {
-                  let reader = progress.readers.get(data.call_id);
-                  const fresh = !reader;
-                  if (!reader) { reader = new PartialJson(); progress.readers.set(data.call_id, reader); }
-                  const input = reader.feed(fresh ? call.rawArguments : data.delta ?? '') as
-                    { ref?: string; reference?: { name?: string }; arguments?: Record<string, unknown>; [key: string]: unknown } | undefined;
-                  const targetName = typeof input?.name === 'string' && reader.fieldComplete(input, 'name') ? input.name
-                    : typeof input?.reference?.name === 'string' && reader.fieldComplete(input.reference, 'name') ? input.reference.name : undefined;
-                  const wrapped = call.rawName === 'tool_invoke' && targetName !== undefined;
-                  if (wrapped) {
-                    call.name = targetName!;
-                    call.gateway = { name: 'tool_invoke', arguments: input as import('@varin/protocol').JsonValue };
-                  }
-                  const args = wrapped ? input?.arguments : input;
-                  if (args && typeof args === 'object' && !Array.isArray(args)) {
-                    const visible = { ...args };
-                    // Half-written paths are useful text, but are not navigable resources.
-                    if (!reader.fieldComplete(args, 'path')) delete visible.path;
-                    call.arguments = visible as import('@varin/protocol').JsonValue;
-                  }
-                  if (args && reader.fieldComplete(args, 'ref') && typeof args.ref === 'string') call.reference = args.ref;
-                }
-              }
-              if (payload.kind === 'provider' && (data?.kind === 'text_delta' || data?.kind === 'reasoning_delta')
-                && typeof data.item_id === 'string' && typeof data.text === 'string') {
-                if (data.text.length) activity = data.kind === 'text_delta' ? 'text' : 'thinking';
-                const key = `${data.kind}:${data.item_id}`;
-                const old = progress.items.get(key);
-                const identity = { id: `model-item:${new TextEncoder().encode(event.requestId).length}:${event.requestId}:${data.item_id}`,
-                  order: old && old.type !== 'retry' ? old.order : progress.nextOrder++ };
-                progress.items.set(key, data.kind === 'reasoning_delta'
-                  ? { ...identity, type: 'thinking', thinking: (old?.type === 'thinking' ? old.thinking : '') + data.text }
-                  : { ...identity, type: 'text', text: (old?.type === 'text' ? old.text : '') + data.text });
-              }
-            }
-            if (event.runId !== this.activeRunId) { this.activeRunId = event.runId; void this.refresh(); }
-            this.publishCurrentProgress(activity);
-          }
-        }, { signal: this.abort.signal });
-      } catch (error) { if (!this.abort.signal.aborted) this.report(error); }
-      if (this.abort.signal.aborted) return;
-      // A closed transport has no reliable presentation deltas; reconstruct from history.
-      this.progress.clear(); this.publishProgress([]); this.publishTools([]);
+  private observe = (event: ThreadObservationEvent): void => {
+    if (this.abort.signal.aborted) return;
+    if ('stream' in event && event.stream === 'resync') {
+      this.cursor = event.cursor;
+      this.progress.clear(); this.toolProgress.clear(); this.activeRunId = null;
+      this.committedRequests.clear(); this.completedTools.clear(); this.interruptedTools = [];
+      this.publishProgress([]); this.publishTools([]); this.publishToolProgress([]);
       void this.refresh();
-      await new Promise<void>(resolve => {
-        const finish = () => { clearTimeout(timer); this.abort.signal.removeEventListener('abort', finish); resolve(); };
-        const timer = setTimeout(finish, 1_000);
-        this.abort.signal.addEventListener('abort', finish, { once: true });
-      });
+    } else if (!('stream' in event)) {
+      if (event.cursor <= this.cursor) return;
+      this.cursor = event.cursor;
+      if (/^(model\.|inference\.|context\.|usage\.)/.test(event.kind)) this.contextDirty = true;
+      // History bodies are immutable, but an existing assistant item's modelRequest
+      // gains late provider usage. Re-read the visible window for those receipts;
+      // ordinary append/lifecycle facts still use the anchored body delta.
+      const receipt = /^(model\.(settled|interrupted)|inference\.(settled|receipt_pending|recovered)|usage\.updated)$/.test(event.kind);
+      if (event.kind !== 'thread.read') void this.refresh(!this.initialized || receipt || /^(branch\.(navigated|forked)|history\.(reset|replaced)|thread\.forked)/.test(event.kind));
+    } else if ('stream' in event && event.stream === 'progress') {
+      if (event.threadId !== this.identity.threadId || event.branchId !== this.identity.branchId) return;
+      const tool = event.event as { kind?: string; operationId?: string; toolName?: string; details?: unknown } | null;
+      if (tool?.kind === 'tool_progress') {
+        if (typeof tool.operationId !== 'string' || typeof tool.toolName !== 'string' || !tool.details
+          || this.completedTools.has(tool.operationId)) return;
+        const stream = `${event.kernelEpoch}:${event.streamId}`;
+        const previous = this.toolProgress.get(tool.operationId);
+        if (previous?.stream === stream && event.sequence <= previous.sequence) return;
+        // Each tool frame is a complete presentation snapshot. It remains valid
+        // after the model's tool-call message commits, and across skipped frames.
+        this.toolProgress.set(tool.operationId, { runId: event.runId, operationId: tool.operationId,
+          toolName: tool.toolName, details: tool.details, stream, sequence: event.sequence });
+        this.publishToolProgress([...this.toolProgress.values()]);
+        return;
+      }
+      const retryEvent = (event.event as { events?: ProviderProgress[] }).events?.some(part => part.kind === 'retry_scheduled');
+      if (this.committedRequests.has(event.requestId) && !retryEvent) return;
+      const observed = ++this.progressObservation;
+      const stream = `${event.kernelEpoch}:${event.streamId}`;
+      let progress = this.progress.get(event.runId);
+      if (!progress || progress.stream !== stream || progress.requestId !== event.requestId) {
+        progress = { stream, requestId: event.requestId, sequence: progress?.stream === stream ? progress.sequence : 0,
+          firstObserved: observed, items: new Map(), calls: new Map(), readers: new Map(), nextOrder: 0 };
+        this.progress.set(event.runId, progress);
+      }
+      if (event.sequence <= progress.sequence) return;
+      if (event.sequence !== progress.sequence + 1) {
+        progress.items.clear();
+        progress.calls.clear();
+        progress.readers.clear();
+        if (event.runId === this.activeRunId) this.publishCurrentProgress();
+        void this.refresh(false);
+      }
+      progress.sequence = event.sequence;
+      const batch = event.event as { kind: 'batch'; events: ProviderProgress[] };
+      if (batch.kind !== 'batch' || !Array.isArray(batch.events)) return;
+      let activity: 'text' | 'thinking' | 'retry' | 'provider' | undefined;
+      for (const payload of batch.events) {
+        const data = payload?.data;
+        if (payload.kind === 'provider') activity = 'provider';
+        if (payload.kind === 'retry_scheduled' && typeof data?.attempt === 'number' && typeof data.delay_ms === 'number') {
+          progress.retry = { type: 'retry', attempt: data.attempt, retryAt: Date.now() + data.delay_ms };
+          activity = 'retry';
+        }
+        if (payload?.kind === 'provider' && typeof data?.call_id === 'string') {
+          const old = progress.calls.get(data.call_id);
+          if (data.kind === 'tool_call_started' || data.kind === 'tool_arguments_delta') progress.calls.set(data.call_id, {
+            id: data.request_id ? JSON.stringify([event.runId, data.request_id, data.call_id]) : old?.id ?? data.call_id,
+            name: data.name ?? old?.rawName ?? old?.name ?? '', rawName: data.name ?? old?.rawName ?? old?.name,
+            rawArguments: (old?.rawArguments ?? '') + (data.delta ?? ''), sequence: event.sequence,
+            order: old?.order ?? progress.nextOrder++,
+          });
+          const call = progress.calls.get(data.call_id);
+          if (call && (data.kind === 'tool_call_started' || data.kind === 'tool_arguments_delta')) {
+            let reader = progress.readers.get(data.call_id);
+            const fresh = !reader;
+            if (!reader) { reader = new PartialJson(); progress.readers.set(data.call_id, reader); }
+            const input = reader.feed(fresh ? call.rawArguments : data.delta ?? '') as
+              { ref?: string; reference?: { name?: string }; arguments?: Record<string, unknown>; [key: string]: unknown } | undefined;
+            const targetName = typeof input?.name === 'string' && reader.fieldComplete(input, 'name') ? input.name
+              : typeof input?.reference?.name === 'string' && reader.fieldComplete(input.reference, 'name') ? input.reference.name : undefined;
+            const wrapped = call.rawName === 'tool_invoke' && targetName !== undefined;
+            if (wrapped) {
+              call.name = targetName!;
+              call.gateway = { name: 'tool_invoke', arguments: input as import('@varin/protocol').JsonValue };
+            }
+            const args = wrapped ? input?.arguments : input;
+            if (args && typeof args === 'object' && !Array.isArray(args)) {
+              const visible = { ...args };
+              // Half-written paths are useful text, but are not navigable resources.
+              if (!reader.fieldComplete(args, 'path')) delete visible.path;
+              call.arguments = visible as import('@varin/protocol').JsonValue;
+            }
+            if (args && reader.fieldComplete(args, 'ref') && typeof args.ref === 'string') call.reference = args.ref;
+          }
+        }
+        if (payload.kind === 'provider' && (data?.kind === 'text_delta' || data?.kind === 'reasoning_delta')
+          && typeof data.item_id === 'string' && typeof data.text === 'string') {
+          if (data.text.length) activity = data.kind === 'text_delta' ? 'text' : 'thinking';
+          const key = `${data.kind}:${data.item_id}`;
+          const old = progress.items.get(key);
+          const identity = { id: `model-item:${new TextEncoder().encode(event.requestId).length}:${event.requestId}:${data.item_id}`,
+            order: old && old.type !== 'retry' ? old.order : progress.nextOrder++ };
+          progress.items.set(key, data.kind === 'reasoning_delta'
+            ? { ...identity, type: 'thinking', thinking: (old?.type === 'thinking' ? old.thinking : '') + data.text }
+            : { ...identity, type: 'text', text: (old?.type === 'text' ? old.text : '') + data.text });
+        }
+      }
+      if (event.runId !== this.activeRunId) { this.activeRunId = event.runId; void this.refresh(false); }
+      this.publishCurrentProgress(activity);
     }
-  }
+  };
 }
 
 export interface SkillMaterialMetadata {

@@ -1250,8 +1250,8 @@ impl Catalog {
         principal: Option<&str>,
         query: OrganizationQuery,
     ) -> Result<OrganizationSnapshot> {
-        let read = self.db.unchecked_transaction()?;
-        snapshot(&read, principal, query)
+        let _read = self.db.is_autocommit().then(||self.db.unchecked_transaction()).transpose()?;
+        snapshot(&self.db, principal, query)
     }
 }
 fn direct_bot(db: &Connection, r: &ConversationRef) -> Result<Option<String>> {
@@ -2264,6 +2264,7 @@ pub(super) fn check_legacy_format(db: &Connection) -> Result<()> {
 }
 #[cfg(test)]
 pub(crate) fn remove_for_legacy_fixture(db: &Connection) {
+    super::upgrades::remove_read_views_for_legacy_fixture(db);
     db.execute_batch("DROP TABLE IF EXISTS organization_retired_containers;DROP TABLE IF EXISTS organization_positions;DROP TABLE IF EXISTS organization_containers;DROP TABLE IF EXISTS organization_commands;DROP TABLE IF EXISTS organization_spaces;").unwrap();
 }
 

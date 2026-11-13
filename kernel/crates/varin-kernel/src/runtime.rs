@@ -1,7 +1,7 @@
 use crate::error::{response_error, KernelError};
 use crate::protocol::*;
 use crate::protocol_generated::{
-    KERNEL_CONTROL_RESPONSE_METHODS, KERNEL_DEFERRED_RESPONSE_METHODS, KERNEL_REQUEST_WINDOW,
+    KERNEL_CONTROL_RESPONSE_METHODS, KERNEL_DEFERRED_RESPONSE_METHODS, KERNEL_REQUEST_WINDOW, KERNEL_STREAM_CREDITS, KERNEL_INLINE_MAX_BYTES,
 };
 use crate::storage::materialization::{
     Admission as MaterializationAdmission, Control as MaterializationControl,
@@ -543,7 +543,7 @@ impl Kernel {
             self.collect_obsolete_materialized_views(completions)?;
             return Ok(Some(response_ok(
                 id,
-                json!({"protocolVersion": PROTOCOL_VERSION, "kernelVersion": KERNEL_VERSION, "kernelBuildIdentity": KERNEL_BUILD_IDENTITY, "targetTriple": KERNEL_TARGET, "arch": KERNEL_ARCH, "applicationBuildVersion": build_version, "buildVersion": KERNEL_BUILD_IDENTITY, "kernelEpoch": self.epoch, "requestWindow": KERNEL_REQUEST_WINDOW, "hostId": host_id, "hostGeneration": host_generation, "storageRoot": canonical_root, "capabilities": KERNEL_CAPABILITIES}),
+                json!({"protocolVersion": PROTOCOL_VERSION, "kernelVersion": KERNEL_VERSION, "kernelBuildIdentity": KERNEL_BUILD_IDENTITY, "targetTriple": KERNEL_TARGET, "arch": KERNEL_ARCH, "applicationBuildVersion": build_version, "buildVersion": KERNEL_BUILD_IDENTITY, "kernelEpoch": self.epoch, "requestWindow": KERNEL_REQUEST_WINDOW, "streamCredits": KERNEL_STREAM_CREDITS, "inlineMaxBytes": KERNEL_INLINE_MAX_BYTES, "hostId": host_id, "hostGeneration": host_generation, "storageRoot": canonical_root, "capabilities": KERNEL_CAPABILITIES}),
             )));
         }
         if !self.handshaken {
@@ -2628,8 +2628,8 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .lock()
                     .map_err(|_| "admission epoch poisoned")?
                     .clone();
-                // Arrival belongs to the authenticated control offer, before JSON encoding,
-                // content upload or hydration can make a later small input overtake it.
+                // The transport orders inline arrivals and stream offers before body decoding.
+                // Cancellation and input reservation are registered before dispatch in both cases.
                 let input_order = agent_control.reserve_input(&meta, epoch.as_deref(), &cancel)?;
                 let wire_lane = if meta["method"].as_str().is_some_and(|method| KERNEL_CONTROL_RESPONSE_METHODS.contains(&method)) {
                     WireLane::Control
@@ -2949,6 +2949,19 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 (token, None)
             };
+            // Installed Catalog readers have their own WAL connections and admission queue.
+            // Before initialization completes, requests retain the actor's existing wait path.
+            let response_id = request["id"].as_str().unwrap_or_default().to_owned();
+            let mut request = request;
+            match agent_control.read_request(&mut request, token.clone()) {
+                Ok(true) => continue,
+                Ok(false) => {},
+                Err(error) => {
+                    if let Ok(mut active) = cancellations.lock() { active.remove(&response_id); }
+                    let _ = response_tx.send(response_error(&response_id, &error));
+                    continue;
+                }
+            }
             // Enqueue the intent before fast OS control. A resulting terminal fact can then
             // never overtake its cancel command in the owner's FIFO and lose causality.
             if agent_tx

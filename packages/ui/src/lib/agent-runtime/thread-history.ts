@@ -1,3 +1,5 @@
+import { shareSnapshot } from './structural-sharing';
+import { getThreadObservationBus } from '@varin/application-client';
 import type { ThreadHistoryItem, ThreadHistoryPage, ThreadHistoryRun, ThreadIdentity, ThreadRunUsage, ThreadsAPI, ThreadSnapshot } from '@varin/application-client';
 
 export interface ThreadHistoryWindowView extends ThreadHistoryPage {
@@ -25,22 +27,37 @@ export class ThreadHistoryWindow {
   private usagePending = new Map<string, Promise<void>>();
   private usageDirty = new Set<string>();
   private usageRevision?: string;
+  private unsubscribeUsage?: () => void;
   private navigationEnabled = false;
   private navigationPending?: Promise<void>;
   private navigationHead?: string | null;
   private navigationStale = true;
   private navigationRuns: ThreadHistoryRun[] = [];
   private activeRunId?: string;
-  constructor(private api: Pick<ThreadsAPI, 'historyPage' | 'historyUsage' | 'historyRuns' | 'historyRunPreview'>, private identity: ThreadIdentity,
+  constructor(private api: Pick<ThreadsAPI, 'historyPage' | 'historyUsage' | 'historyRuns' | 'historyRunPreview'> & Partial<Pick<ThreadsAPI, 'observe'>>, private identity: ThreadIdentity,
     private options: { usage?: boolean } = {}) {}
 
   getSnapshot = (): ThreadHistoryWindowView => this.view;
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     this.controller ??= new AbortController();
+    if (!this.unsubscribeUsage && this.api.observe && this.options.usage !== false) {
+      this.unsubscribeUsage = getThreadObservationBus(this.api as Pick<ThreadsAPI, 'observe'>).subscribe({
+        threadId: this.identity.threadId, branchId: this.identity.branchId,
+        kinds: ['model.settled', 'model.interrupted', 'inference.settled', 'inference.receipt_pending', 'inference.recovered', 'usage.updated', 'run.completed', 'run.failed', 'run.cancelled'],
+      }, event => {
+        if (!this.target) return;
+        if (!('stream' in event)) {
+          const runId = (event.data as { runId?: string }).runId;
+          if (runId && !this.view.items.some(item => item.run_id === runId)) return;
+        }
+        this.readUsage({ headId: this.target, limit: this.view.items.length });
+      });
+    }
     return () => {
       this.listeners.delete(listener);
       if (!this.listeners.size) {
+        this.unsubscribeUsage?.(); this.unsubscribeUsage = undefined;
         this.controller?.abort(); this.controller = undefined;
         this.pending = undefined; this.usagePending.clear(); this.usageDirty.clear(); this.usageRevision = undefined;
         this.navigationPending = undefined; this.navigationStale = true;
@@ -49,7 +66,9 @@ export class ThreadHistoryWindow {
     };
   };
   private publish(patch: Partial<ThreadHistoryWindowView>) {
-    this.view = { ...this.view, ...patch };
+    const next = shareSnapshot(this.view, { ...this.view, ...patch });
+    if (next === this.view) return;
+    this.view = next;
     for (const listener of this.listeners) listener();
   }
   private chain() {
@@ -86,14 +105,9 @@ export class ThreadHistoryWindow {
     if (this.view.reset !== priorReset) { this.navigationHead = undefined; this.navigationRuns = []; this.publish({ runs: [] }); }
     if (this.navigationEnabled) { this.publishRuns(); void this.readNavigation(); }
     if (this.view.connecting) void this.loadEarlier();
-    // A new durable event can publish a late original usage receipt. Re-read
-    // that cut in the background without delaying the body or live progress.
-    const unresolved = page.items.some(item => {
-      const run = this.usage.get(item.run_id);
-      if (!run) return item.run_id !== snapshot.activeRun?.id;
-      return run.requests.some(request => request.usage.measurement === 'missing' || request.usage.inputTokens === null || request.usage.outputTokens === null);
-    });
-    const revision = JSON.stringify([page.head, unresolved ? snapshot.eventCursor : null, snapshot.activeRun?.id, snapshot.activeRun?.state]);
+    // Late usage receipts are invalidated by the scoped usage subscription, not every
+    // durable cursor (read markers, child chatter, title edits or unrelated runs).
+    const revision = JSON.stringify([page.head, snapshot.activeRun?.id, snapshot.activeRun?.state]);
     if (page.head && revision !== this.usageRevision) {
       this.usageRevision = revision;
       this.readUsage({ headId: page.head });

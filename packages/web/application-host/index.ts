@@ -2265,18 +2265,31 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return { workspaceId: selected.workspaceId, canonicalRoot: workspace.root };
     } }));
   documentSources.bindAttachments(threadAttachments);
-  app.use('/api/threads', uiAuthController.requireAuth, createThreadPrincipalMiddleware(agentRuntime,
-    (req, res) => uiAuthController!.resolveAuthContext(req, res), id => hostPrincipals().isOwner(id)));
+  app.use(['/api/threads', '/api/interactive-ui'], uiAuthController.requireAuth, createThreadPrincipalMiddleware(agentRuntime,
+    req => uiAuthController!.resolveRequestAuth(req), id => hostPrincipals().isOwner(id)));
   registerThreadAttachmentRoutes(app, threadAttachments, uiAuthController.requireAuth);
+  const organizationInitialization = new Map<string | null, Promise<void>>();
+  const ensureOrganization = (principalId: string | null): Promise<void> => {
+    let initialized = organizationInitialization.get(principalId);
+    if (!initialized) {
+      initialized = conversationOrganization.read(principalId, { limit: 1 }).then(() => undefined).catch(error => {
+        organizationInitialization.delete(principalId);
+        throw error;
+      });
+      organizationInitialization.set(principalId, initialized);
+    }
+    return initialized;
+  };
   registerThreadUserDispatchRoutes(app, createThreadUserDispatch({ runtime: agentRuntime, models: modelsService, attachments: threadAttachments,
-    ensureOrganization: async signal => { await conversationOrganization.read(currentRequestPrincipal() ?? null, { limit: 1 }, signal); } }), uiAuthController.requireAuth);
+    ensureOrganization: async signal => { signal?.throwIfAborted(); await ensureOrganization(currentRequestPrincipal() ?? null); signal?.throwIfAborted(); } }), uiAuthController.requireAuth);
   externalAgents.bindAttachments(threadAttachments);
   registerInteractiveUiRoutes(app, interactiveUi, uiAuthController.requireAuth);
   kernelClient.setResourceOwner(createResourceOwner({ runtime: agentRuntime, resources: threadResources, ui: interactiveUi, attachments: threadAttachments,
     organization: async (request, run, signal) => {
       if (request.action === 'ensure_initialized') {
         if (Object.keys(request.input).length) throw new Error('Invalid organization initialization request');
-        await conversationOrganization.read(run.principal_id ?? null, { limit: 1 }, signal);
+        await ensureOrganization(run.principal_id ?? null);
+        signal?.throwIfAborted();
         return { result: { initialized: true } };
       }
       if (request.action === 'labels') {
@@ -3352,6 +3365,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       previewProxyRuntime.beginDraining();
       stopTask = (async () => {
         const shutdown = createShutdownCollector({ deadline, stopOnFailure: true });
+        await shutdown.run('remoteClientAuthRuntime.dispose', () => remoteClientAuthRuntime.dispose());
         await shutdown.run('unsubscribeTokenizerKernel', () => unsubscribeTokenizerKernel());
         await shutdown.run('stopTokenizerCollection?.', () => stopTokenizerCollection?.());
         // Stop timer/watcher producers before their runtime and storage

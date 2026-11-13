@@ -53,7 +53,7 @@ pub enum RuntimeError {
     },
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 97;
+pub(crate) const FORMAT: i64 = 99;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -104,14 +104,18 @@ fn event(
     subject: &str,
     revision: u64,
     kind: &str,
-    data: Value,
+    mut data: Value,
 ) -> Result<u64> {
+    event_scope::message_participants(tx, subject, kind, &mut data)?;
+    let scope = event_scope::resolve(tx, subject, kind, &data)?;
+    #[cfg(test)]
+    assert!(scope.thread.is_some() || event_scope::is_global(tx, subject, kind)?, "unclassified event scope: {kind} ({subject})");
     tx.execute(
-        "INSERT INTO events(subject,revision,kind,data) VALUES(?1,?2,?3,?4)",
-        params![subject, sql_number(revision)?, kind, encode(&data)?],
+        "INSERT INTO events(subject,revision,kind,data,thread_id,branch_id) VALUES(?1,?2,?3,?4,?5,?6)",
+        params![subject, sql_number(revision)?, kind, encode(&data)?, scope.thread, scope.branch],
     )?;
     let cursor = tx.last_insert_rowid() as u64;
-    threads::record_activity(tx, subject, kind, cursor, &data)?;
+    threads::record_activity(tx, subject, scope.thread.as_deref(), kind, cursor, &data)?;
     Ok(cursor)
 }
 fn fence(run: &Run, epoch: u64) -> Result<()> {
@@ -146,6 +150,9 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
 
 fn check_catalog_schema(db: &Connection, version: i64) -> Result<()> {
     threads::check_format(db)?;
+    if version >= 99 { event_scope::check_format(db)?; }
+    if version >= 98 { threads::check_hidden_format(db)?; }
+    else { threads::check_legacy_hidden_format(db)?; }
     if version >= 95 { organization::check_format(db,version)?; } else { organization::check_legacy_format(db)?; }
     if version >= 93 { model_references::check_format(db)?; }
     else if version == 92 { model_references::check_optional_format(db)?; }
@@ -264,13 +271,14 @@ pub struct Catalog {
     resource_admission: std::sync::Arc<crate::resource_admission::ResourceAdmission>,
     nested_tools: std::sync::Arc<crate::nested_tools::NestedTools>,
     context_compositions: std::sync::Arc<crate::composition::context::ContextCompositions>,
-    _owner: std::sync::Arc<File>,
+    _owner: Option<std::sync::Arc<File>>,
     database_path: std::path::PathBuf,
     epoch: u64,
     plan_cursor_key: [u8; 32],
     continuation_stopping: std::sync::Arc<std::sync::atomic::AtomicBool>,
     event_observers: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, std::sync::mpsc::SyncSender<()>>>>,
     attention_cache: attention::AttentionCache,
+    context_inspections: context_inspection::InspectionCache,
 }
 impl Catalog {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
@@ -305,9 +313,10 @@ impl Catalog {
             0
         };
         let mut db = Connection::open(&database_path)?;
+        threads::install_functions(&db)?;
         db.pragma_update(None, "foreign_keys", true)?;
         db.pragma_update(None, "journal_mode", "WAL")?;
-        db.pragma_update(None, "synchronous", "FULL")?;
+        db.pragma_update(None, "synchronous", "NORMAL")?;
         let content = crate::content::ContentStore::open(root.as_ref().join("content"))?;
         if version != 0 && version != FORMAT {
             upgrades::apply(&mut db, version, &content)?;
@@ -321,12 +330,13 @@ impl Catalog {
             context_compositions: std::sync::Arc::new(
                 crate::composition::context::ContextCompositions::default(),
             ),
-            _owner: std::sync::Arc::new(owner),
+            _owner: Some(std::sync::Arc::new(owner)),
             database_path,
             epoch,
             continuation_stopping: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             event_observers: Default::default(),
             attention_cache: Default::default(),
+            context_inspections: Default::default(),
             plan_cursor_key: {
                 let mut key = [0; 32];
                 key[..16].copy_from_slice(Uuid::new_v4().as_bytes());
@@ -1143,7 +1153,7 @@ impl Catalog {
     ) -> crate::content::ContentCollectionAdmission {
         self.content.prepare_collection(
             self.database_path.clone(),
-            self._owner.clone(),
+            self._owner.clone().expect("content collection requires the writer owner"),
             cancellation,
         )
     }
@@ -1444,20 +1454,21 @@ impl Catalog {
         Ok(())
     }
     pub fn events_after(&self, cursor: u64, limit: u32) -> Result<Vec<Event>> {
-        let mut stmt=self.db.prepare("SELECT cursor,subject,revision,kind,data FROM events WHERE cursor>?1 ORDER BY cursor LIMIT ?2")?;
+        let mut stmt=self.db.prepare("SELECT cursor,subject,revision,kind,data,thread_id,branch_id FROM events WHERE cursor>?1 ORDER BY cursor LIMIT ?2")?;
         let rows = stmt.query_map(params![sql_number(cursor)?, limit], |r| {
             Ok((
                 read_number(r, 0)?,
                 r.get(1)?,
                 read_number(r, 2)?,
                 r.get(3)?,
-                r.get::<_, String>(4)?,
+                r.get::<_, String>(4)?, r.get::<_, Option<String>>(5)?, r.get::<_, Option<String>>(6)?,
             ))
         })?;
         let mut result = Vec::new();
         for row in rows {
-            let (cursor, subject, revision, kind, data) = row?;
+            let (cursor, subject, revision, kind, data, thread_id, branch_id) = row?;
             result.push(Event {
+                thread_id, branch_id,
                 cursor,
                 subject,
                 revision,
@@ -1779,7 +1790,7 @@ const SCHEMA: &str = r#"
 CREATE TABLE runtime_meta(id INTEGER PRIMARY KEY CHECK(id=1),epoch INTEGER NOT NULL);
 INSERT INTO runtime_meta VALUES(1,0);
 CREATE TABLE catalog_principal_owner(id INTEGER PRIMARY KEY CHECK(id=1),owner_principal_id TEXT NOT NULL,claim_legacy INTEGER NOT NULL CHECK(claim_legacy IN(0,1)));
-CREATE TABLE threads(id TEXT PRIMARY KEY,principal_id TEXT,agent_code TEXT NOT NULL UNIQUE,title TEXT NOT NULL DEFAULT 'New thread',title_initialized INTEGER NOT NULL DEFAULT 0 CHECK(title_initialized IN (0,1)),revision INTEGER NOT NULL DEFAULT 1 CHECK(revision>0),created_at_ms INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),updated_at_ms INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),deleted_at_ms INTEGER,activity_cursor INTEGER NOT NULL DEFAULT 0 CHECK(activity_cursor>=0),read_cursor INTEGER NOT NULL DEFAULT 0 CHECK(read_cursor>=0));
+CREATE TABLE threads(id TEXT PRIMARY KEY,principal_id TEXT,hidden_kind TEXT,agent_code TEXT NOT NULL UNIQUE,title TEXT NOT NULL DEFAULT 'New thread',title_initialized INTEGER NOT NULL DEFAULT 0 CHECK(title_initialized IN (0,1)),revision INTEGER NOT NULL DEFAULT 1 CHECK(revision>0),created_at_ms INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),updated_at_ms INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),deleted_at_ms INTEGER,activity_cursor INTEGER NOT NULL DEFAULT 0 CHECK(activity_cursor>=0),read_cursor INTEGER NOT NULL DEFAULT 0 CHECK(read_cursor>=0));
 CREATE TABLE retired_agent_codes(code TEXT PRIMARY KEY);
 CREATE TRIGGER retire_agent_code BEFORE DELETE ON threads BEGIN INSERT INTO retired_agent_codes(code) VALUES(old.agent_code); END;
 CREATE INDEX thread_principals ON threads(principal_id,id);
@@ -1809,7 +1820,8 @@ CREATE TABLE policy_checkpoints(run_id TEXT PRIMARY KEY REFERENCES runs(id),iden
 CREATE TABLE policy_selections(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),generation INTEGER NOT NULL,status TEXT NOT NULL,body TEXT NOT NULL,UNIQUE(run_id,generation));
 CREATE TABLE policy_graph_nodes(action_id TEXT NOT NULL REFERENCES operations(id),node_id TEXT NOT NULL,call_id TEXT NOT NULL,position INTEGER NOT NULL,call TEXT NOT NULL,receipt TEXT,outcome TEXT,PRIMARY KEY(action_id,node_id),UNIQUE(action_id,call_id),UNIQUE(action_id,position));
 CREATE TABLE policy_graph_dependencies(action_id TEXT NOT NULL,node_id TEXT NOT NULL,dependency_id TEXT NOT NULL,PRIMARY KEY(action_id,node_id,dependency_id),FOREIGN KEY(action_id,node_id) REFERENCES policy_graph_nodes(action_id,node_id),FOREIGN KEY(action_id,dependency_id) REFERENCES policy_graph_nodes(action_id,node_id));
-CREATE TABLE events(cursor INTEGER PRIMARY KEY AUTOINCREMENT,subject TEXT NOT NULL,revision INTEGER NOT NULL,kind TEXT NOT NULL,data TEXT NOT NULL);
+CREATE TABLE events(cursor INTEGER PRIMARY KEY AUTOINCREMENT,subject TEXT NOT NULL,revision INTEGER NOT NULL,kind TEXT NOT NULL,data TEXT NOT NULL,thread_id TEXT,branch_id TEXT);
+CREATE INDEX events_thread_cursor ON events(thread_id,cursor);
 CREATE INDEX events_condition ON events(subject,kind,cursor);
 CREATE TABLE waits(id TEXT PRIMARY KEY,run_id TEXT NOT NULL REFERENCES runs(id),body TEXT NOT NULL);
 CREATE TABLE resumptions(wait_id TEXT PRIMARY KEY REFERENCES waits(id),run_id TEXT NOT NULL REFERENCES runs(id),trigger_cursor INTEGER NOT NULL REFERENCES events(cursor),claimed INTEGER NOT NULL,acknowledged INTEGER NOT NULL DEFAULT 0);
@@ -1902,6 +1914,12 @@ pub mod export;
 
 #[path = "catalog_threads.rs"]
 pub mod threads;
+#[path = "catalog_reads.rs"]
+pub mod reads;
+#[path = "catalog_thread_view.rs"]
+mod thread_view;
+#[path = "catalog_context_inspection.rs"]
+mod context_inspection;
 #[path = "catalog_identity.rs"]
 mod identity;
 #[path = "catalog_titles.rs"]
@@ -2172,3 +2190,6 @@ mod quote_tests;
 
 #[path = "catalog_organization.rs"]
 pub mod organization;
+
+#[path = "catalog_event_scope.rs"]
+mod event_scope;

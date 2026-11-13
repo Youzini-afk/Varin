@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import React from 'react';
 import { DndContext, MouseSensor, TouchSensor, KeyboardSensor, useSensor, useSensors, useDraggable, useDroppable, DragOverlay, pointerWithin, closestCenter, type DragEndEvent, type DragOverEvent } from '@dnd-kit/core';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
@@ -72,7 +73,7 @@ export const ConversationOrganizationTree = React.forwardRef<OrganizationNavigat
   const { t } = useI18n();
   const excludeBotConversations = viewKey !== 'bot';
   useExternalAgents();
-  const state = useConversationOrganization();
+  const state = useConversationOrganization(true, useShallow(state => ({ host: state.host, snapshot: state.snapshot, pages: state.pages, loading: state.loading, error: state.error, pending: state.pending, failed: state.failed, metadata: state.metadata, bots: state.bots })));
   const botWorkspace = useBotWorkspaceNavigation();
   const apis = useRuntimeAPIs();
   const projects = useProjectsStore(s => s.projects);

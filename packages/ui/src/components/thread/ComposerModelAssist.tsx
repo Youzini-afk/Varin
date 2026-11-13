@@ -1,6 +1,6 @@
 import React from 'react';
 import { composerWorkflowFailure } from './composerWorkflowState';
-import { ThreadRequestError, getRuntimeEndpointGeneration, type ThreadDispatchCatalog, type ThreadIdentity, type ThreadsAPI } from '@varin/application-client';
+import { ThreadRequestError, getRuntimeEndpointGeneration, getThreadObservationBus, type ThreadDispatchCatalog, type ThreadIdentity, type ThreadsAPI } from '@varin/application-client';
 import { EMPTY_THREAD_DRAFT, useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { readComposerAssistResult } from '@/lib/agent-runtime/composerAssist';
 import { useI18n } from '@/lib/i18n';
@@ -41,10 +41,12 @@ export function ComposerModelAssist({ api, identity, draftKey, text, purpose, di
       } catch (cause) { if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setError(composerWorkflowFailure(cause)); }
       finally { reading = false; }
     };
-    void api.observe(receipt.acceptedCursor, event => { if (!('stream' in event) && /^(child\.|execution\.|run\.|operation\.)/.test(event.kind)) void read(); }, { signal: controller.signal }).catch(cause => {
-      if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setError(composerWorkflowFailure(cause));
-    });
-    void read(); return () => controller.abort();
+    const bus = getThreadObservationBus(api);
+    const subscriptions = [...new Set([identity.threadId, receipt.threadId])].map(threadId => bus.subscribe({
+      threadId, kinds: ['child.*', 'execution.*', 'run.*', 'operation.*'],
+    }, () => void read()));
+    void read(); return () => { subscriptions.forEach(unsubscribe => unsubscribe()); controller.abort(); };
+
   }, [api, host, identity, open, patch, readVersion, state?.receipt, state?.result, state?.failure]);
   if (!api.collaboration?.dispatch) return null;
   const start = async () => {

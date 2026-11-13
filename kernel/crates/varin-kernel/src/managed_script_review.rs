@@ -2,6 +2,7 @@
 //! Test stdio substitutes only transport. Provider output, Documents admission and installed
 //! extension loading are controlled; no fake process, evaluator, Catalog or source grant runs.
 use super::*;
+use base64::Engine;
 use crate::host_query::OwnerChannel;
 use crate::host_tools::{LiveExtensionBinding, ToolBridge};
 use crate::storage::{Storage, process_interactions};

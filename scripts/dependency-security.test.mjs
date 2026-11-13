@@ -157,6 +157,55 @@ test('installed MCP rate-limit IP parsing keeps IPv6 classification and family b
   assert.equal(result.status, 0, result.stderr || result.error?.message);
 });
 
+// GHSA-h7mg-cq63-vhpq: explicit default parameter patterns must not bypass
+// wildcard authorization under Hono's default SmartRouter.
+// https://github.com/advisories/GHSA-h7mg-cq63-vhpq
+test('installed legacy MCP Hono applies wildcard authorization to equivalent parameter routes', async () => {
+  const { Hono } = legacyMcp('hono');
+  const app = new Hono();
+  let handled = 0;
+  app.use('/api/:tenant{[^/]+}/admin/*', async (c, next) => {
+    if (c.req.header('authorization') !== 'Bearer fixture') return c.text('Unauthorized', 401);
+    await next();
+  });
+  app.get('/api/:tenant/admin/:id', c => { handled++; return c.json({ id: c.req.param('id') }); });
+  const blocked = await app.request('/api/example/admin/item');
+  assert.equal(blocked.status, 401);
+  assert.equal(handled, 0, 'authorization must run before the protected handler');
+  const allowed = await app.request('/api/example/admin/item', { headers: { authorization: 'Bearer fixture' } });
+  assert.equal(allowed.status, 200);
+  assert.deepEqual(await allowed.json(), { id: 'item' });
+  assert.equal(handled, 1);
+});
+
+// GHSA-4h7h-rv7c-7m2v: legal multipart parameters must not hide fields from
+// validation while leaving them readable by the downstream body consumer.
+// https://github.com/advisories/GHSA-4h7h-rv7c-7m2v
+test('installed legacy MCP Hono validates multipart fields with extra content-type parameters', async () => {
+  const { Hono } = legacyMcp('hono');
+  const { validator } = legacyMcp('hono/validator');
+  const app = new Hono();
+  let handled = 0;
+  app.post('/form', validator('form', (value, c) => {
+    if ('restricted' in value) return c.text('Restricted field', 400);
+    return value;
+  }), async c => { handled++; return c.json(await c.req.parseBody()); });
+  const send = (field, parameters) => app.request('/form', { method: 'POST',
+    headers: { 'content-type': `multipart/form-data; boundary=fixture${parameters}` },
+    body: `--fixture\r\nContent-Disposition: form-data; name="${field}"\r\n\r\nvalue\r\n--fixture--\r\n`,
+  });
+  for (const parameters of ['', '; charset=utf-8']) {
+    assert.equal((await send('restricted', parameters)).status, 400);
+    assert.equal(handled, 0, 'restricted form fields must not reach the handler');
+  }
+  for (const parameters of ['', '; charset=utf-8']) {
+    const allowed = await send('ordinary', parameters);
+    assert.equal(allowed.status, 200);
+    assert.deepEqual(await allowed.json(), { ordinary: 'value' });
+  }
+  assert.equal(handled, 2);
+});
+
 test('MCP and Bash consumers reject oversized bounded Zod collections before walking elements', () => {
   for (const consumer of [mcp, bash]) {
     assert.equal(consumer('zod/package.json').version, '4.6.7');

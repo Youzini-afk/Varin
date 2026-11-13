@@ -154,7 +154,8 @@ impl RunAssembly {
             && (selected.is_some()
                 || tool_binding.is_some()
                 || p.mcp_binding.is_some()
-                || p.extension_bindings.is_some()
+                // An explicitly empty Host directory conveys no capability.
+                || p.extension_bindings.as_ref().is_some_and(|bindings| !bindings.is_empty())
                 || p.policy_binding.is_some())
         {
             return Err(KernelError::Protocol(

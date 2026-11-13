@@ -15,8 +15,11 @@ export class ThreadRequestError extends Error {
   }
 }
 
+let threadsHttpAPI: ThreadsAPI | undefined;
+
 /** Uses the same Application Host transport/auth selection as the other RuntimeAPIs. */
 export function createThreadsHttpAPI(): ThreadsAPI {
+  if (threadsHttpAPI) return threadsHttpAPI;
   // Image editor source pixels and undo history are local draft state, never request media.
   const imagePayload = (images: readonly import('@varin/protocol').ImageAttachment[]) => images.map(({ data, mimeType, reference }) => ({ data, mimeType, ...(reference === undefined ? {} : { reference }) }));
   const withClientTime = <T extends { clientTime?: import('@varin/protocol').MessageTimeObservation; images?: readonly import('@varin/protocol').ImageAttachment[] }>(input: T) => ({
@@ -58,7 +61,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during attachment request');
     return value;
   };
-  return {
+  return threadsHttpAPI = {
     conversationTree: (identity, signal) => post('tree', identity, signal),
     treePreview: (identity, range, signal) => post('tree/preview', { ...identity, ...range }, signal),
     workflows: {
@@ -186,6 +189,8 @@ export function createThreadsHttpAPI(): ThreadsAPI {
       list: identity => post('goal/list', identity),
     },
     list: (options = {}, signal) => post('list', options, signal),
+    inspectMany: (threadIds, signal) => post('inspectMany', { threadIds }, signal),
+    updateObservationInterests: (input, signal) => post('observe/interests', input, signal),
     attention: signal => post('attention', {}, signal),
     update: input => post('update', input), delete: input => post('delete', input), markRead: input => post('read', input),
     deleteBranch: input => post('branch/delete', input),
@@ -216,7 +221,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     historyUsage: (identity, cursor, signal) => post('history/usage', { ...identity, ...cursor }, signal),
     fileTarget: (input, signal) => post('history/file', input, signal),
     usage: (selected, signal) => post('usage', selected, signal),
-    snapshot: (selected, signal) => post('snapshot', selected, signal), run: runId => post('run', { runId }),
+    snapshot: (selected, signal, options) => post('snapshot', { ...selected, ...options }, signal), run: runId => post('run', { runId }),
     contextInspection: (identity, cursor, signal) => post('context/inspect', { ...identity, ...cursor }, signal),
     inspectTools: (identity, runId) => post('tools/inspect', { ...identity, runId }),
     inspectPolicy: (identity, runId) => post('policy/inspect', { ...identity, runId }),
@@ -236,7 +241,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     reviewMcpSamplingOutput: (input, signal) => post('mcp/interactions/sampling/output', input, signal),
     resume: (runId, waitId) => post('run/resume', { runId, waitId }),
     async retryPreparation(runId) { await post('run/retry-preparation', { runId }); }, events: cursor => post('events', { cursor }),
-    async observe(cursor, listener, { signal }) {
+    async observe(cursor, listener, { signal, threadIds, observationId, onReady }) {
       const controller = new AbortController();
       const abort = () => controller.abort();
       signal.addEventListener('abort', abort, { once: true });
@@ -244,9 +249,10 @@ export function createThreadsHttpAPI(): ThreadsAPI {
       const remove = subscribeRuntimeEndpointWillChange(abort);
       let response: Response | undefined;
       try {
-        response = await runtimeFetch('/api/threads/observe', { query: cursor === null ? {} : { cursor }, signal: controller.signal,
+        response = await runtimeFetch('/api/threads/observe', { query: { ...(cursor === null ? {} : { cursor }), ...(threadIds ? { threadIds: JSON.stringify(threadIds) } : {}), ...(observationId ? { observationId } : {}) }, signal: controller.signal,
           headers: { Accept: 'text/event-stream' } });
         if (!response.ok || !response.body) throw new Error('Thread event stream unavailable');
+        onReady?.();
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';

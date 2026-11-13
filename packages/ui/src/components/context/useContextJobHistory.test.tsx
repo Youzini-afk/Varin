@@ -15,7 +15,7 @@ it('streams the selected job, reconciles its committed summary, and releases obs
   vi.stubGlobal('cancelAnimationFrame', () => { frame = undefined; });
   const element = window.document.getElementById('root')! as unknown as HTMLElement, root = createRoot(element);
   const identity: ThreadIdentity = { runtime: 'agent', threadId: 'parent-thread', branchId: 'parent-branch' };
-  const row = { run: { id: 'summary-run', state: 'executing', revision: 1 }, job: { receipt: { branch_id: 'summary-branch' } } } as ContextJobRow;
+  const row = { run: { id: 'summary-run', state: 'executing', revision: 1 }, job: { receipt: { thread_id: 'summary-thread', branch_id: 'summary-branch' } } } as ContextJobRow;
   let page: ThreadContextHistory = { head: null, previous: null, items: [] };
   let listener!: Parameters<ThreadsAPI['observe']>[1], signal!: AbortSignal;
   const contextHistory = vi.fn(async () => page);
@@ -33,6 +33,9 @@ it('streams the selected job, reconciles its committed summary, and releases obs
   try {
     await act(async () => root.render(<View active />));
     expect(contextHistory).toHaveBeenCalledWith(identity, 'summary-run');
+    const before = contextHistory.mock.calls.length;
+    await act(async () => listener({kind: 'model.settled', cursor: 1, thread_id: 'unrelated', branch_id: 'unrelated', subject: 'unrelated', revision: 1, data: {}}));
+    expect(contextHistory).toHaveBeenCalledTimes(before);
     await act(async () => { delta('unrelated-run', 1, 'wrong task'); delta('summary-run', 1, '{"summary":"Keep '); frame?.(0); });
     expect(element.textContent).toBe('Keep ');
     await act(async () => { delta('summary-run', 2, 'the goal"}'); frame?.(1); });
@@ -40,7 +43,7 @@ it('streams the selected job, reconciles its committed summary, and releases obs
     page = { head: 'answer', previous: null, items: [{ id: 'answer', parent: null, thread_id: 'summary-thread', run_id: 'summary-run', source: 'assistant', provider: null,
       modelRequest: { requestId: 'r', providerFamily: 'openai-completions', modelId: 'model', contextTokens: null, usage: { measurement: 'missing', inputTokens: null, outputTokens: null } },
       content: { id: 'model-item:1:r:answer', content: { kind: 'text', text: '{"summary":"Keep the goal"}' } } }] };
-    await act(async () => listener({ cursor: 1, subject: 'summary-run', revision: 2, kind: 'model.settled', data: {} }));
+    await act(async () => listener({ thread_id: 'summary-thread', branch_id: 'summary-branch', cursor: 2, subject: 'summary-run', revision: 2, kind: 'model.settled', data: {} }));
     expect(element.textContent).toBe('Keep the goal');
     expect(element.querySelectorAll('p')).toHaveLength(1);
     await act(async () => root.render(<View active={false} />));

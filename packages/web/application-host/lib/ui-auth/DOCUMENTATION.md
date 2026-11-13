@@ -86,3 +86,39 @@ whether existing single-owner history is claimed; enabling authentication later 
 reassigns previously public work. Plugin credential capability calls borrow a subject only from
 an authenticated Surface service lease or an actual retained Run tool invocation. Service
 arguments, routing labels and copied invocation IDs cannot establish identity.
+
+## Read-path authority and lifecycle
+
+The principal store initializes once, using a transaction only to persist the first
+owner. Its parsed document remains immutable for the Host lifetime. Subject changes
+are not a runtime API; a trusted update is loaded at the next startup. Existing
+malformed stores fail initialization without being replaced.
+
+The remote-client runtime is shared by resolved credential-store path. Its first
+consumer loads and normalizes records; construction alone performs no I/O or
+identity creation before the Host's offline-restore startup fence. Concurrent
+consumers share initialization, then bearer authentication uses a token-hash index without
+file reads or transactions. Creation, rotation, revocation and purge publish a new
+index only after the file transaction succeeds. Returned capability/directory arrays
+are copies, not mutable grants. Last-used and transport telemetry updates immediately
+in memory and flushes asynchronously on the existing throttle; sticky relay demand
+survives direct/relay switching. Pending telemetry merges into credential mutations
+without reviving revoked or rotated tokens. Shutdown flushes it and releases the
+shared runtime so a subsequent Host can reload persisted state.
+
+`resolveRequestAuth` memoizes in-flight authentication by request identity, including
+session verification and bearer resolution. Session-only and URL-token-disabled
+callers retain their narrower policies. Auth middleware, principal access checks,
+route contexts and WebSocket authorization share these results, not a credential
+cache spanning requests. Secret rotation invalidates request caches as well as URL
+grants.
+
+Thread middleware establishes principal/Host-owner context and gates explicit Host
+sources. It does not scan arbitrary JSON or read Catalog records. Routes explicitly
+declare read/write intent and authorize the exact Thread, Run, Operation and Input
+selectors they consume, including nested family/message/media/follow-up selectors
+and handoff background references. Public reads remain visible; authenticated public
+writes require the Host owner. Export, attachment query routes and interactive UI
+use the same boundary. The shared ownership resolver batches misses and retains
+only immutable positive Catalog mappings after principal initialization. Missing
+IDs fail closed and are not negative-cached.

@@ -11,7 +11,7 @@ base64 = "0.22"
 sha2.workspace = true
 hex.workspace = true
 fs2.workspace = true
-rusqlite = { workspace = true, features = ["hooks"] }
+rusqlite = { workspace = true, features = ["hooks", "functions"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

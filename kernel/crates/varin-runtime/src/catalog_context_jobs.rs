@@ -39,6 +39,7 @@ impl From<&ContextCompactionNode> for ContextNodeAdmission {
 impl ContextJobAdmission {
     pub(super) fn publish(&self, tx: &Transaction<'_>, run_id: &str) -> Result<()> {
         tx.execute("INSERT INTO context_jobs(run_id,job_key,branch_id,through_id,expected_revision,owner_run_id,recipe,plan_hash) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)", params![run_id,self.key,self.branch_id,self.through_id,sql_number(self.expected_revision)?,self.owner_run_id,encode(&self.recipe)?,self.plan_hash])?;
+        tx.execute("UPDATE threads SET hidden_kind=coalesce(hidden_kind,'context_job') WHERE id=(SELECT b.thread_id FROM runs r JOIN branches b ON b.id=r.branch_id WHERE r.id=?1)", [run_id])?;
         if let Some(parent) = &self.owner_run_id {
             goals::bind_inherited(tx, run_id, parent)?;
         }
@@ -48,6 +49,9 @@ impl ContextJobAdmission {
                 params![run_id, node.id, sql_number(index as u64)?, encode(&node.dependencies)?],
             )?;
         }
+        // A manual job has no waiting parent Run. Notify the source branch so every
+        // client discovers the helper and can then observe its ordinary Run lifecycle.
+        event(tx, &self.branch_id, 0, "context.job_created", json!({"job_run_id":run_id}))?;
         Ok(())
     }
 }

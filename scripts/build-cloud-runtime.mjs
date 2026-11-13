@@ -39,6 +39,12 @@ export const CLOUD_RUNTIME_PACKAGE_DIRS = Object.freeze([
 export const verifyCloudRuntimeLock = (root = repoRoot) => {
   const lock = JSON.parse(readFileSync(path.join(root, 'scripts/cloud-runtime.bun.lock'), 'utf8')
     .replace(/,(\s*[}\]])/g, '$1'));
+  const rootPackage = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
+  // createRuntimeRootPackage forwards all root overrides, including transitive
+  // security pins. Bun records them at the lock root, not in its workspace entry.
+  if (!isDeepStrictEqual(lock.overrides ?? {}, rootPackage.overrides ?? {})) {
+    throw new Error('Cloud lock is stale for root overrides; regenerate with bun run update:cloud-runtime-lock');
+  }
   const manifests = CLOUD_RUNTIME_PACKAGE_DIRS.map(directory => ({
     directory, ...JSON.parse(readFileSync(path.join(root, 'packages', directory, 'package.json'), 'utf8')),
   }));

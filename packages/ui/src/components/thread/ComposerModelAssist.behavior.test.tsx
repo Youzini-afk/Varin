@@ -27,7 +27,7 @@ it('starts only explicitly selected normal work and applies the original report 
   await click('composer.workflow.startAssist');
   expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ ...identity, model: 'configured:model', projectId: null, workMode: 'read_only', text: 'composer.workflow.assistMemoryPrompt\n\nOnly selected material' }));
   expect(apply).not.toHaveBeenCalled(); expect(container.textContent).toContain('composer.workflow.assistRunning');
-  await act(async () => { completed = true; event({ kind: 'child.completed' }); });
+  await act(async () => { completed = true; event({ kind: 'child.completed', cursor: 3, subject: 'execution', revision: 1, thread_id: 'child', branch_id: 'child-branch', data: {} }); });
   expect(readExecutionReport).toHaveBeenCalledWith(identity, 'execution', 'report', 0, undefined, expect.any(AbortSignal));
   expect(container.querySelector('textarea')).not.toBeNull(); expect(apply).not.toHaveBeenCalled();
   await click('composer.workflow.applyDraft'); expect(apply).toHaveBeenCalledWith('Editable draft');

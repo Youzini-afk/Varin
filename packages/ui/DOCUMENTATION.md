@@ -55,6 +55,23 @@ Host carries that read cancellation through history, context, child and recovery
 conversation's initial load failure replaces the previous painted scene with its own retry state;
 loading labels identify the selected conversation. Retrying reads that same identity and preserves drafts.
 
+Thread views share the application client's Host observation bus. `ThreadProjection` subscribes to
+its branch and known child execution Threads, ignores `thread.read`, and coalesces relevant durable
+changes into one in-flight read plus a trailing read. Validated `afterHeadId` responses append history;
+navigation and resync replace it. Unchanged JSON subtrees retain their identities, including history
+items and entities reordered in arrays. Context inspection follows actual head/context changes, and
+late usage receipts invalidate only their loaded Thread history window rather than its global cursor.
+
+`ThreadStreamingStore` owns transient provider text, tool arguments, execution progress and activity
+for a mounted Thread view. It ingests every delta in order but publishes at most once per animation
+frame. The timeline subscribes with `useSyncExternalStore`; the controller/composer only observes the
+empty/nonempty boundary, not token text. Row-scoped presentation includes only that row's tool results
+and embeds, so historical rows do not rerender for a live tail. Sidebar/overview disclosure and input
+editing remain independent of streaming. Development-only opt-in counters can be enabled with
+`globalThis.__VARIN_UI_PERFORMANCE__ = {}`; they count work without recording content. Behavioral
+tests drive the real projection and conversation surface to assert background-event read counts and
+stream-frame rendering, not just DTO shape.
+
 Tool cards can render before their Operation is accepted, or from cached history before a new snapshot
 arrives. An absent Operation is not an identity match; without an Operation ID, no read/cancel
 action is available. When the original record arrives, its identity and revision decide which observation is current. Chat render

@@ -1,5 +1,6 @@
+import { ThreadEventStream } from './thread-event-stream.js';
 import { parseConversationOrganizationPlacement } from '@varin/application-client';
-import { currentRequestPrincipal } from './request-principal.js';
+import { currentRequestPrincipal, assertRequestAccess } from './request-principal.js';
 import { parseAttachmentSelections, THINKING_LEVELS, isWorkFocusId } from '@varin/protocol';
 import { parseThreadObjectReferences } from './thread-object-input.js';
 import { ResourceScopeError } from './thread-resource-scope.js';
@@ -106,11 +107,63 @@ const inputBeforeAdmission = <T>(decode: () => T): T => {
   try { return decode(); } catch (error) { throw new ThreadPreAdmissionError(error, 'thread-request-failed'); }
 };
 
+/** Explicit ownership edges used by each route. Payloads such as edited MCP
+ * requests, text, tool answers and material bodies are not authorization input. */
+export async function authorizeThreadRoute(method: string, body: Record<string, unknown>, mode: 'read' | 'write'): Promise<void> {
+  const selected = { threads: [] as string[], runs: [] as string[], operations: [] as string[], inputs: [] as string[] };
+  const referenced = { threads: [] as string[], runs: [] as string[], operations: [] as string[], inputs: [] as string[] };
+  const add = (ids: string[], value: unknown) => { if (typeof value === 'string' && value) ids.push(value); };
+  add(selected.threads, body.threadId);
+  add(selected.threads, body.sourceAgent);
+  for (const key of ['runId', 'expectedRunId', 'previousRunId']) add(selected.runs, body[key]);
+  add(selected.operations, body.operationId);
+  add(selected.inputs, body.inputId);
+  add(referenced.threads, body.parentThreadId);
+  add(referenced.runs, body.sourceRunId);
+  if (method === 'inspectMany') {
+    if (!Array.isArray(body.threadIds) || body.threadIds.some(id => typeof id !== 'string' || !id)) throw new Error('Thread identities are required');
+    selected.threads.push(...body.threadIds as string[]);
+  }
+  const request = body.request && typeof body.request === 'object' ? body.request as Record<string, unknown> : {};
+  if (method === 'messages/send') add(selected.threads, request.targetThreadId);
+  if (method === 'messages/exchanges/control') add(selected.operations, request.operationId);
+  if (method === 'messages/exchange') add(referenced.threads, request.senderThreadId);
+  if (method === 'family/runs' || method === 'family/read' || method === 'family/item') {
+    add(referenced.threads, request.threadId); add(referenced.runs, request.runId);
+  }
+  if (method === 'followup/source-route/put') add(selected.threads, (body.route as Record<string, unknown> | undefined)?.threadId);
+  if (method === 'followup/arrangement/put') {
+    const arrangement = body.arrangement as Record<string, unknown> | undefined;
+    add(selected.threads, arrangement?.threadId); add(referenced.runs, arrangement?.sourceRunId);
+  }
+  if (method === 'followup/register') {
+    const trigger = body.trigger as Record<string, unknown> | undefined;
+    const sources = trigger?.kind === 'any' || trigger?.kind === 'all' ? trigger.sources : trigger ? [trigger] : [];
+    if (Array.isArray(sources)) for (const source of sources) add(referenced.operations, source?.operationId);
+  }
+  if (method === 'media/read') {
+    const holder = body.holder as OutputMediaHolder;
+    if (holder?.kind === 'family') { add(referenced.threads, holder.threadId); add(referenced.runs, holder.runId); }
+    else if (holder?.kind === 'input') add(referenced.inputs, holder.inputId);
+    else if (holder?.kind === 'operation' || holder?.kind === 'child_report') add(referenced.operations, holder.operationId);
+  }
+  if (method === 'submit' || method === 'enqueue' || method === 'child/continue') {
+    if (Array.isArray(body.references)) for (const reference of body.references) if (reference?.kind === 'thread') add(referenced.threads, reference.threadId);
+  }
+  // A single batched lookup resolves all edges. Read-only references don't turn
+  // a write into permission to modify the referenced public conversation.
+  const all = { threads: [...selected.threads, ...referenced.threads], runs: [...selected.runs, ...referenced.runs],
+    operations: [...selected.operations, ...referenced.operations], inputs: [...selected.inputs, ...referenced.inputs] };
+  await assertRequestAccess(all, 'read');
+  if (mode === 'write') await assertRequestAccess(selected, 'write');
+}
+
 /** Mounted in the existing authenticated Application Host, shared by Web and Electron. */
 export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler, research?: ThreadResearchAPI, computer?: ThreadComputerAPI, materials?: ThreadMaterialsAPI,
   integrations?: Pick<ReturnType<typeof import('./thread-integrations.js').createThreadIntegrations>, 'submit'>,
   eventSources?: Pick<import('../extensions/event-sources.js').PluginEventSources, 'discover' | 'validateArrangement'>): void {
   const fields: Record<string, readonly string[]> = {
+    'observe/interests': ['observationId', 'threadIds'],
     'next-step': ['runtime', 'threadId', 'branchId', 'runId', 'headId'],
     'child/integration': ['runtime', 'threadId', 'branchId', 'key', 'executionId', 'publicationId', 'action', 'sourceOwner', 'expectedBindingFingerprint', 'resolutions', 'operationId', 'sourceRunId'],
     'materials/upload': ['runtime', 'threadId', 'branchId', 'request'],
@@ -211,7 +264,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     attention: [], create: ['key', 'organization'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'attachmentImageReferences', 'materials', 'attachments', 'expectedHead', 'model', 'source', 'agent', 'clientTime', 'skills', 'references', 'contentReferences', 'contentReferenceOccurrences'],
     usage: ['runtime', 'threadId', 'branchId'],
     'context/inspect': ['runtime', 'threadId', 'branchId', 'headId'],
-    snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'],
+    inspectMany: ['threadIds'], snapshot: ['runtime', 'threadId', 'branchId', 'afterHeadId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'],
     'history/runs': ['runtime', 'threadId', 'branchId', 'headId'], 'history/run-preview': ['runtime', 'threadId', 'branchId', 'headId', 'runId'],
     'history/usage': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'attachmentImageReferences', 'materials', 'attachments', 'mode', 'clientTime', 'skills', 'references', 'contentReferences', 'contentReferenceOccurrences'],
     'input/edit': ['inputId', 'expectedRevision', 'text', 'images', 'skills', 'contentReferences', 'contentReferenceOccurrences'], 'input/cancel': ['inputId', 'expectedRevision'],
@@ -221,7 +274,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   fields['operation/calls'] = ['operationId'];
   fields['operation/retrieval-trace'] = ['operationId', 'headId', 'beforeId'];
   fields['operation/retrieval-file'] = ['operationId', 'itemId', 'path'];
-  const post = (method: string, action: (body: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>) => {
+  const post = (method: string, mode: 'read' | 'write', action: (body: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>) => {
     app.post(`/api/threads/${method}`, requireAuth, async (request, response) => {
       const controller = new AbortController();
       const closed = () => { if (!response.writableEnded) controller.abort(new DOMException('Request closed', 'AbortError')); };
@@ -245,6 +298,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
           if (method.startsWith('computer/')) throw new ComputerError('computer-request-invalid', 'Choose an Agent Thread and branch; Stop also requires the exact Run shown in its Computer state');
           throw new ThreadPreAdmissionError(error, 'thread-request-failed');
         }
+        await authorizeThreadRoute(method, body, mode);
         response.json(await action(body, controller.signal));
       }
       catch (error) {
@@ -278,17 +332,17 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   };
   const selection = (body: Record<string, unknown>): ThreadResearchSelection => ({ ...identity(body), sourceRunId: text(body.sourceRunId) });
   if (materials) {
-    if (materials.collection) post('materials/collection', (body, signal) => materials.collection!(identity(body), object(body.request) as Parameters<NonNullable<ThreadMaterialsAPI['collection']>>[1], signal));
+    if (materials.collection) post('materials/collection', 'read', (body, signal) => materials.collection!(identity(body), object(body.request) as Parameters<NonNullable<ThreadMaterialsAPI['collection']>>[1], signal));
     // The material owner validates the request and derives its domain from the real Thread.
-    post('materials/upload', (body, signal) => materials.upload(identity(body), object(body.request) as unknown as import('@varin/application-client').ThreadMaterialUpload, signal));
-    post('materials/read', (body, signal) => materials.read(identity(body), object(body.request) as ThreadMaterialReadRequest, signal));
-    post('materials/read-source', (body, signal) => materials.readSource(selection(body), object(body.request) as ThreadMaterialSourceReadRequest, signal));
-    post('materials/read-artifact', (body, signal) => materials.readArtifact(selection(body), object(body.request) as ThreadMaterialArtifactReadRequest, signal));
+    post('materials/upload', 'write', (body, signal) => materials.upload(identity(body), object(body.request) as unknown as import('@varin/application-client').ThreadMaterialUpload, signal));
+    post('materials/read', 'read', (body, signal) => materials.read(identity(body), object(body.request) as ThreadMaterialReadRequest, signal));
+    post('materials/read-source', 'read', (body, signal) => materials.readSource(selection(body), object(body.request) as ThreadMaterialSourceReadRequest, signal));
+    post('materials/read-artifact', 'read', (body, signal) => materials.readArtifact(selection(body), object(body.request) as ThreadMaterialArtifactReadRequest, signal));
   }
   if (computer) {
-    post('computer/decide', (body, signal) => computer.decide(identity(body), { requestId: text(body.requestId), expectedRevision: Number(body.expectedRevision), decision: body.decision as 'grant' | 'deny', key: text(body.key), ...(body.reason === undefined ? {} : { reason: body.reason as string }) }, signal));
-    post('computer/state', (body, signal) => computer.state(identity(body), signal));
-    post('computer/stop', body => computer.stop(identity(body), { runId: text(body.runId), ...(body.desktopId === undefined ? {} : { desktopId: text(body.desktopId) }) }));
+    post('computer/decide', 'write', (body, signal) => computer.decide(identity(body), { requestId: text(body.requestId), expectedRevision: Number(body.expectedRevision), decision: body.decision as 'grant' | 'deny', key: text(body.key), ...(body.reason === undefined ? {} : { reason: body.reason as string }) }, signal));
+    post('computer/state', 'read', (body, signal) => computer.state(identity(body), signal));
+    post('computer/stop', 'write', body => computer.stop(identity(body), { runId: text(body.runId), ...(body.desktopId === undefined ? {} : { desktopId: text(body.desktopId) }) }));
   }
   if (research) {
     const request = <T>(value: unknown, allowed: readonly string[]): T => {
@@ -296,25 +350,25 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       if (Object.keys(input).some(key => !allowed.includes(key))) throw new Error('Unsupported research request field');
       return input as T;
     };
-    post('research/scopes', (body, signal) => research.scopes(identity(body), signal));
-    post('research/list', (body, signal) => research.list(selection(body), request(body.request, ['state', 'specId', 'limit']), signal));
-    post('research/get', (body, signal) => research.get(selection(body), text(body.attemptId), signal));
-    post('research/logs', (body, signal) => research.logs(selection(body), request(body.request, ['attemptId', 'stream', 'offset', 'maxBytes']), signal));
-    post('research/artifact', (body, signal) => research.artifact(selection(body), request(body.request, ['attemptId', 'artifactId', 'offset', 'maxBytes']), signal));
+    post('research/scopes', 'read', (body, signal) => research.scopes(identity(body), signal));
+    post('research/list', 'read', (body, signal) => research.list(selection(body), request(body.request, ['state', 'specId', 'limit']), signal));
+    post('research/get', 'read', (body, signal) => research.get(selection(body), text(body.attemptId), signal));
+    post('research/logs', 'read', (body, signal) => research.logs(selection(body), request(body.request, ['attemptId', 'stream', 'offset', 'maxBytes']), signal));
+    post('research/artifact', 'read', (body, signal) => research.artifact(selection(body), request(body.request, ['attemptId', 'artifactId', 'offset', 'maxBytes']), signal));
     // Cancelling a response reader never requests job cancellation. These are explicit commands.
-    post('research/cancel', body => research.cancel(selection(body), text(body.attemptId)));
-    post('research/collect', body => research.collect(selection(body), text(body.attemptId)));
-    post('research/submit', body => {
+    post('research/cancel', 'write', body => research.cancel(selection(body), text(body.attemptId)));
+    post('research/collect', 'write', body => research.collect(selection(body), text(body.attemptId)));
+    post('research/submit', 'write', body => {
       const input = request<Parameters<ThreadResearchAPI['submit']>[1]>(body.request,
         ['requestId', 'retryOfAttemptId', 'title', 'specId', 'command', 'args', 'cwd', 'env', 'inputs', 'resources', 'outputPaths', 'machineId']);
       text(input.requestId);
       return research.submit(selection(body), input);
     });
-    post('research/resources', (body, signal) => research.resources(selection(body), signal));
-    post('research/sources', (body, signal) => research.sources(selection(body), request(body.request, ['kind']), signal));
+    post('research/resources', 'read', (body, signal) => research.resources(selection(body), signal));
+    post('research/sources', 'read', (body, signal) => research.sources(selection(body), request(body.request, ['kind']), signal));
   }
-  post('process/terminal', body => adapter.openProcessTerminal({ ...identity(body), operationId: text(body.operationId) }));
-  if (integrations) post('child/integration', body => {
+  post('process/terminal', 'write', body => adapter.openProcessTerminal({ ...identity(body), operationId: text(body.operationId) }));
+  if (integrations) post('child/integration', 'write', body => {
     const common = { ...identity(body), key: text(body.key), executionId: text(body.executionId), publicationId: text(body.publicationId),
       ...(body.sourceOwner === undefined ? {} : { sourceOwner: { ownerId: text(object(body.sourceOwner).ownerId), generation: revision(object(body.sourceOwner).generation) } }) };
     if (body.action === 'preview') return integrations.submit({ ...common, action: 'preview' });
@@ -330,23 +384,23 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     });
     return integrations.submit({ ...common, action: 'apply', expectedBindingFingerprint: text(body.expectedBindingFingerprint), resolutions });
   });
-  post('plan/read', (body, signal) => adapter.readPlan(identity(body), signal));
-  post('plan/update', (body, signal) => {
+  post('plan/read', 'read', (body, signal) => adapter.readPlan(identity(body), signal));
+  post('plan/update', 'write', (body, signal) => {
     if (typeof body.content !== 'string') throw new Error('Plan content must be text');
     return adapter.updatePlan({ ...identity(body), key: text(body.key),
       expectedHeadId: body.expectedHeadId === null ? null : text(body.expectedHeadId),
       expectedRef: body.expectedRef === null ? null : text(body.expectedRef), content: body.content }, signal);
   });
-  post('mcp/interactions/list', (body, signal) => adapter.listMcpInteractions({ ...identity(body),
+  post('mcp/interactions/list', 'read', (body, signal) => adapter.listMcpInteractions({ ...identity(body),
     ...(body.cursor === undefined ? {} : { cursor: text(body.cursor) }), ...(body.limit === undefined ? {} : { limit: revision(body.limit) }) }, signal));
-  post('mcp/interactions/read', (body, signal) => adapter.readMcpInteraction({ ...identity(body),
+  post('mcp/interactions/read', 'read', (body, signal) => adapter.readMcpInteraction({ ...identity(body),
     operationId: text(body.operationId), interactionId: text(body.interactionId) }, signal));
   // The original interaction owner decodes and validates the response against its saved request.
-  post('mcp/interactions/respond', (body, signal) => adapter.respondMcpInteraction({ ...identity(body),
+  post('mcp/interactions/respond', 'write', (body, signal) => adapter.respondMcpInteraction({ ...identity(body),
     operationId: text(body.operationId), interactionId: text(body.interactionId), expectedRevision: revision(body.expectedRevision),
     response: body.response as McpElicitationResponse }, signal));
   // The owner validates the complete request. The route only admits public identity/selection shapes.
-  post('mcp/interactions/sampling/request', (body, signal) => {
+  post('mcp/interactions/sampling/request', 'write', (body, signal) => {
     const target = { ...identity(body), operationId: text(body.operationId), interactionId: text(body.interactionId),
       expectedRevision: revision(body.expectedRevision) };
     if (body.action === 'generate') return adapter.reviewMcpSamplingRequest({ ...target, action: 'generate',
@@ -354,18 +408,18 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     if (body.model !== undefined || body.editedRequest !== undefined) throw new Error('Only generation accepts a model and reviewed request');
     return adapter.reviewMcpSamplingRequest({ ...target, action: text(body.action) as Exclude<McpSamplingRequestAction, 'generate'> }, signal);
   });
-  post('mcp/interactions/sampling/output', (body, signal) => adapter.reviewMcpSamplingOutput({ ...identity(body),
+  post('mcp/interactions/sampling/output', 'write', (body, signal) => adapter.reviewMcpSamplingOutput({ ...identity(body),
     operationId: text(body.operationId), interactionId: text(body.interactionId), expectedRevision: revision(body.expectedRevision),
     action: text(body.action) as McpSamplingOutputAction }, signal));
-  post('permission/decide', body => {
+  post('permission/decide', 'write', body => {
     if (body.decision !== 'allow_once' && body.decision !== 'allow_always' && body.decision !== 'deny') throw new Error('Invalid permission decision');
     return adapter.decidePermission({ ...identity(body), operationId: text(body.operationId), permissionId: text(body.permissionId), decision: body.decision });
   });
-  post('question/answer', body => {
+  post('question/answer', 'write', body => {
     if (!Array.isArray(body.answers)) throw new Error('Question answers must be an array');
     return adapter.answerQuestion({ ...identity(body), operationId: text(body.operationId), answers: body.answers as import('@varin/protocol').QuestionAnswer[] });
   });
-  post('messages/send', (body, signal) => {
+  post('messages/send', 'write', (body, signal) => {
     const request = object(body.request);
     if (Object.keys(request).some(key => !['key', 'targetThreadId', 'targetBranchId', 'replyTo', 'kind', 'text', 'attachments', 'afterCurrent', 'contentReferences', 'contentReferenceOccurrences', 'attachmentImageReferences'].includes(key))) throw new Error('Invalid message field');
     if (request.afterCurrent !== undefined && typeof request.afterCurrent !== 'boolean') throw new Error('Invalid message timing');
@@ -379,21 +433,21 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       ...(request.targetBranchId === undefined ? {} : { targetBranchId: text(request.targetBranchId) }),
       ...(request.replyTo === undefined ? {} : { replyTo: text(request.replyTo) }) }, signal);
   });
-  post('messages/control', (body, signal) => {
+  post('messages/control', 'write', (body, signal) => {
     const request = object(body.request);
     if (Object.keys(request).some(key => !['messageId', 'expectedRevision', 'action', 'text'].includes(key))
       || !['send_now', 'cancel', 'edit'].includes(String(request.action))) throw new Error('Invalid queued message action');
     return adapter.controlMessage(identity(body), { messageId: text(request.messageId), expectedRevision: revision(request.expectedRevision),
       action: String(request.action), ...(request.text === undefined ? {} : { text: typeof request.text === 'string' ? request.text : text(request.text) }) }, signal);
   });
-  post('messages/exchanges/queued', (body, signal) => adapter.queuedExchanges(identity(body), signal));
-  post('messages/exchanges/control', (body, signal) => {
+  post('messages/exchanges/queued', 'read', (body, signal) => adapter.queuedExchanges(identity(body), signal));
+  post('messages/exchanges/control', 'write', (body, signal) => {
     const request = object(body.request);
     if (Object.keys(request).some(key => !['operationId', 'expectedRevision', 'action'].includes(key))
       || (request.action !== 'send_now' && request.action !== 'cancel' && request.action !== 'retry')) throw new Error('Invalid queued exchange action');
     return adapter.controlExchange(identity(body), { operationId: text(request.operationId), expectedRevision: revision(request.expectedRevision), action: request.action }, signal);
   });
-  post('messages/list', (body, signal) => {
+  post('messages/list', 'read', (body, signal) => {
     const request = object(body.request);
     if (Object.keys(request).some(key => !['direction', 'cursor', 'limit'].includes(key))) throw new Error('Invalid message listing field');
     if (request.direction !== 'incoming' && request.direction !== 'outgoing') throw new Error('Invalid message direction');
@@ -401,8 +455,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       ...(request.cursor === undefined ? {} : { cursor: text(request.cursor) }),
       ...(request.limit === undefined ? {} : { limit: revision(request.limit) }) }, signal);
   });
-  post('messages/get', (body, signal) => adapter.getMessage(identity(body), text(body.messageId), signal));
-  post('messages/feed', (body, signal) => {
+  post('messages/get', 'read', (body, signal) => adapter.getMessage(identity(body), text(body.messageId), signal));
+  post('messages/feed', 'read', (body, signal) => {
     const request = object(body.request);
     if (Object.keys(request).some(key => !['before', 'after', 'limit'].includes(key))) throw new Error('Invalid message feed field');
     return adapter.messageFeed(identity(body), {
@@ -411,13 +465,13 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       ...(request.limit === undefined ? {} : { limit: revision(request.limit) }),
     }, signal);
   });
-  post('messages/exchange', (body, signal) => {
+  post('messages/exchange', 'read', (body, signal) => {
     const request = object(body.request);
     if (Object.keys(request).some(key => !['messageId', 'senderThreadId', 'senderBranchId', 'path'].includes(key))) throw new Error('Invalid file exchange read field');
     return adapter.codeExchange(identity(body), { messageId: text(request.messageId), senderThreadId: text(request.senderThreadId), senderBranchId: text(request.senderBranchId),
       ...(request.path === undefined ? {} : { path: text(request.path) }) }, signal);
   });
-  post('family/list', (body, signal) => {
+  post('family/list', 'read', (body, signal) => {
     if (body.includeSelf !== undefined && typeof body.includeSelf !== 'boolean') throw new Error('includeSelf must be boolean');
     const query = body.query;
     if (query !== undefined && typeof query !== 'string') throw new Error('query must be a string');
@@ -431,10 +485,10 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       ...(body.scope===undefined?{}:{scope:text(body.scope)}), ...(query===undefined?{}:{query}),
       ...(body.cursor===undefined?{}:{cursor:text(body.cursor)}), ...(body.limit===undefined?{}:{limit:revision(body.limit)}) }, signal);
   });
-  post('family/runs', (body, signal) => adapter.familyRuns(identity(body), familyRequest<FamilyRunsParams>(body.request), signal));
-  post('family/read', (body, signal) => adapter.familyRead(identity(body), familyRequest<FamilyReadParams>(body.request), signal));
-  post('family/item', (body, signal) => adapter.familyItem(identity(body), familyRequest<FamilyItemParams>(body.request), signal));
-  post('child/continue', (body, signal) => {
+  post('family/runs', 'read', (body, signal) => adapter.familyRuns(identity(body), familyRequest<FamilyRunsParams>(body.request), signal));
+  post('family/read', 'read', (body, signal) => adapter.familyRead(identity(body), familyRequest<FamilyReadParams>(body.request), signal));
+  post('family/item', 'read', (body, signal) => adapter.familyItem(identity(body), familyRequest<FamilyItemParams>(body.request), signal));
+  post('child/continue', 'write', (body, signal) => {
     const input = inputBeforeAdmission(() => {
       if (typeof body.text !== 'string') throw new Error('Input text is required');
       const images = parseThreadImages(body.images);
@@ -451,32 +505,32 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     });
     return adapter.continueChild(input, signal);
   });
-  post('child/executions', (body, signal) => adapter.childExecutions(identity(body), body.operationId === undefined ? undefined : text(body.operationId), signal));
-  post('child/execution/report', (body, signal) => adapter.readChildExecutionReport(identity(body), text(body.executionId), text(body.itemId),
+  post('child/executions', 'read', (body, signal) => adapter.childExecutions(identity(body), body.operationId === undefined ? undefined : text(body.operationId), signal));
+  post('child/execution/report', 'read', (body, signal) => adapter.readChildExecutionReport(identity(body), text(body.executionId), text(body.itemId),
     body.offset === undefined ? 0 : revision(body.offset), body.maxBytes === undefined ? 65536 : revision(body.maxBytes), signal));
-  post('child/report', (body, signal) => adapter.readChildReport(identity(body), text(body.operationId), text(body.itemId), body.offset === undefined ? 0 : revision(body.offset), body.maxBytes === undefined ? 65536 : revision(body.maxBytes), signal));
-  post('child/list', body => adapter.children(identity(body)));
-  post('child/page',(body,signal)=>adapter.childPage(identity(body),familyRequest<Omit<FamilyListParams,'callerThreadId'>>(body.options??{}),signal));
-  post('child/cancel', body => adapter.cancelChild(identity(body), text(body.operationId)));
-  post('child/wait/cancel', body => adapter.cancelChildWait(identity(body), text(body.waitId)));
-  post('tree/cancel', body => adapter.cancelTree(identity(body)));
-  post('resources/draft-skills', (body, signal) => {
+  post('child/report', 'read', (body, signal) => adapter.readChildReport(identity(body), text(body.operationId), text(body.itemId), body.offset === undefined ? 0 : revision(body.offset), body.maxBytes === undefined ? 65536 : revision(body.maxBytes), signal));
+  post('child/list', 'read', body => adapter.children(identity(body)));
+  post('child/page', 'read',(body,signal)=>adapter.childPage(identity(body),familyRequest<Omit<FamilyListParams,'callerThreadId'>>(body.options??{}),signal));
+  post('child/cancel', 'write', body => adapter.cancelChild(identity(body), text(body.operationId)));
+  post('child/wait/cancel', 'write', body => adapter.cancelChildWait(identity(body), text(body.waitId)));
+  post('tree/cancel', 'write', body => adapter.cancelTree(identity(body)));
+  post('resources/draft-skills', 'read', (body, signal) => {
     if (body.source === undefined) return adapter.draftSkills({}, signal);
     const source = object(body.source);
     if (Object.keys(source).some(key => !['resourceOwner', 'path'].includes(key))) throw new Error('Unsupported draft source field');
     return adapter.draftSkills({ source: { resourceOwner: parseSourceResourceOwner(source.resourceOwner), path: text(source.path) } }, signal);
   });
-  post('source/files', (body, signal) => adapter.files(identity(body), { ...parseThreadSourceFileOptions(body),
+  post('source/files', 'read', (body, signal) => adapter.files(identity(body), { ...parseThreadSourceFileOptions(body),
     ...(body.source === undefined ? {} : { source: threadSource(body.source) }) }, signal));
-  post('source/draft-files', (body, signal) => {
+  post('source/draft-files', 'read', (body, signal) => {
     const source = object(body.source);
     if (Object.keys(source).some(key => !['resourceOwner', 'path'].includes(key))) throw new Error('Pending source is malformed');
     return adapter.draftSourceFiles({ ...parseThreadSourceFileOptions(body),
       source: { resourceOwner: parseSourceResourceOwner(source.resourceOwner), path: text(source.path) } }, signal);
   });
-  post('resources/skills', (body, signal) => adapter.skills(identity(body),
+  post('resources/skills', 'read', (body, signal) => adapter.skills(identity(body),
     body.source === undefined ? {} : { source: threadSource(body.source) }, signal));
-  post('resources/refresh', (body, signal) => {
+  post('resources/refresh', 'write', (body, signal) => {
     let instructionDirectories: string[] | undefined;
     if (body.instructionDirectories !== undefined) {
       if (!Array.isArray(body.instructionDirectories) || !body.instructionDirectories.every(path => typeof path === 'string')) throw new Error('Invalid instruction directories');
@@ -494,28 +548,28 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     return adapter.refreshResources({ ...identity(body), expectedRevision: revision(body.expectedRevision),
       ...(instructionDirectories ? { instructionDirectories } : {}), ...(supportingFiles ? { supportingFiles } : {}) }, signal);
   });
-  post('followup/jobs', (body, signal) => listThreadFollowupJobs(adapter, identity(body), text(body.runId), signal));
-  post('followup/registrations/pending', (body, signal) => pendingThreadFollowupRegistrations(adapter, identity(body), signal));
-  post('followup/registration/cancel', (body, signal) => cancelThreadFollowupRegistration(adapter, { ...identity(body), key: text(body.key), runId: text(body.runId) }, signal));
-  post('followup/register', (body, signal) => {
+  post('followup/jobs', 'read', (body, signal) => listThreadFollowupJobs(adapter, identity(body), text(body.runId), signal));
+  post('followup/registrations/pending', 'read', (body, signal) => pendingThreadFollowupRegistrations(adapter, identity(body), signal));
+  post('followup/registration/cancel', 'write', (body, signal) => cancelThreadFollowupRegistration(adapter, { ...identity(body), key: text(body.key), runId: text(body.runId) }, signal));
+  post('followup/register', 'write', (body, signal) => {
     if (body.repeat !== undefined && body.repeat !== 'once' && body.repeat !== 'each') throw new Error('Invalid follow-up repetition');
     return registerThreadFollowup(adapter, { ...identity(body), key: text(body.key), runId: text(body.runId),
       trigger: followupTrigger(body.trigger), instruction: text(body.instruction),
       ...(body.repeat === undefined ? {} : { repeat: body.repeat }) }, signal);
   });
-  post('followup/arrangements', async (body, signal) => {
+  post('followup/arrangements', 'read', async (body, signal) => {
     const thread = await adapter.requireIdentity(identity(body), signal);
     const botId = text(body.botId);
     if (thread.bot_id !== botId) throw new Error('Select an entry conversation for this Bot');
     return adapter.runtime.botArrangements({ botId, principalId: currentRequestPrincipal() ?? null }, signal);
   });
-  post('followup/event-sources', async (body, signal) => {
+  post('followup/event-sources', 'read', async (body, signal) => {
     await adapter.requireIdentity(identity(body), signal);
     if (!eventSources) throw new Error('Plugin event sources are unavailable');
     return eventSources.discover(currentRequestPrincipal() ?? null, signal);
   });
-  post('followup/source-routes', (body, signal) => listThreadSourceRoutes(adapter, identity(body), text(body.followupId), signal));
-  post('followup/source-route/put', (body, signal) => {
+  post('followup/source-routes', 'read', (body, signal) => listThreadSourceRoutes(adapter, identity(body), text(body.followupId), signal));
+  post('followup/source-route/put', 'write', (body, signal) => {
     const value = object(body.route);
     if (Object.keys(value).some(key => !['followupId', 'expectedRevision', 'objectId', 'threadId', 'branchId', 'externalConversationId', 'senderId', 'userInput'].includes(key))) throw new Error('Invalid source route field');
     if (typeof value.userInput !== 'boolean') throw new Error('Explicit user input selection is required');
@@ -529,9 +583,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     if (route.userInput && !route.senderId) throw new Error('Your exact source sender identity is required');
     return putThreadSourceRoute(adapter, { ...identity(body), route }, signal);
   });
-  post('followup/source-route/remove', (body, signal) => removeThreadSourceRoute(adapter, { ...identity(body),
+  post('followup/source-route/remove', 'write', (body, signal) => removeThreadSourceRoute(adapter, { ...identity(body),
     followupId: text(body.followupId), expectedRevision: revision(body.expectedRevision), objectId: text(body.objectId) }, signal));
-  post('followup/arrangement/put', async (body, signal) => {
+  post('followup/arrangement/put', 'write', async (body, signal) => {
     const target = identity(body);
     await adapter.requireIdentity(target, signal);
     if (!eventSources) throw new Error('Plugin event sources are unavailable');
@@ -540,50 +594,50 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       object(arrangement.filter) as import('@varin/extension-contract').JsonObject, signal);
     return putThreadArrangement(adapter, { ...target, arrangement }, signal);
   });
-  post('followup/backlog', (body, signal) => {
+  post('followup/backlog', 'write', (body, signal) => {
     if (body.action !== 'process_now' && body.action !== 'discard') throw new Error('Invalid backlog control');
     return controlThreadBacklog(adapter, { ...identity(body), followupId: text(body.followupId),
       expectedRevision: revision(body.expectedRevision), action: body.action }, signal);
   });
-  post('followup/occurrence', (body, signal) => getThreadFollowupOccurrence(adapter, identity(body), text(body.followupId), text(body.occurrenceId), signal));
-  post('followup/occurrences', (body, signal) => listThreadFollowupOccurrences(adapter, identity(body), text(body.followupId),
+  post('followup/occurrence', 'read', (body, signal) => getThreadFollowupOccurrence(adapter, identity(body), text(body.followupId), text(body.occurrenceId), signal));
+  post('followup/occurrences', 'read', (body, signal) => listThreadFollowupOccurrences(adapter, identity(body), text(body.followupId),
     body.after === undefined ? undefined : revision(body.after), signal));
-  post('followup/get', (body, signal) => getThreadFollowup(adapter, identity(body), text(body.followupId), signal));
-  post('followup/list', (body, signal) => listThreadFollowups(adapter, identity(body), signal));
-  post('followup/control', (body, signal) => {
+  post('followup/get', 'read', (body, signal) => getThreadFollowup(adapter, identity(body), text(body.followupId), signal));
+  post('followup/list', 'read', (body, signal) => listThreadFollowups(adapter, identity(body), signal));
+  post('followup/control', 'write', (body, signal) => {
     if (body.action !== 'pause' && body.action !== 'resume' && body.action !== 'cancel') throw new Error('Invalid follow-up control');
     return controlThreadFollowup(adapter, { ...identity(body), followupId: text(body.followupId),
       expectedRevision: revision(body.expectedRevision), action: body.action }, signal);
   });
-  post('goal/start', (body, signal) => startThreadGoal(adapter, { ...identity(body), key: text(body.key),
+  post('goal/start', 'write', (body, signal) => startThreadGoal(adapter, { ...identity(body), key: text(body.key),
     runId: text(body.runId), objective: text(body.objective), budget: goalBudget(body.budget) }, signal));
-  post('goal/update', (body, signal) => updateThreadGoal(adapter, { ...identity(body), goalId: text(body.goalId),
+  post('goal/update', 'write', (body, signal) => updateThreadGoal(adapter, { ...identity(body), goalId: text(body.goalId),
     expectedRevision: revision(body.expectedRevision), objective: text(body.objective), budget: goalBudget(body.budget) }, signal));
-  post('goal/control', (body, signal) => {
+  post('goal/control', 'write', (body, signal) => {
     if (body.action !== 'pause' && body.action !== 'resume' && body.action !== 'complete' && body.action !== 'cancel') {
       throw new Error('Invalid Goal control');
     }
     return controlThreadGoal(adapter, { ...identity(body), goalId: text(body.goalId),
       expectedRevision: revision(body.expectedRevision), action: body.action }, signal);
   });
-  post('goal/list', (body, signal) => listThreadGoals(adapter, identity(body), signal));
-  post('tools/inspect',(body,signal)=>adapter.inspectTools(identity(body),text(body.runId),signal));
-  post('policy/inspect', body => adapter.inspectPolicy(identity(body), text(body.runId)));
-  post('policy/restart', (body, signal) => adapter.restartPolicy(identity(body), text(body.runId), text(body.selectionId), signal));
-  post('policy/cancel', (body, signal) => adapter.cancelPolicyUpdate(identity(body), text(body.runId), text(body.selectionId), signal));
-  post('models', () => adapter.listModels());
-  post('model/select',body=>adapter.selectModel({...identity(body),runId:text(body.runId),key:text(body.key),model:modelSelection(body.model)}));
+  post('goal/list', 'read', (body, signal) => listThreadGoals(adapter, identity(body), signal));
+  post('tools/inspect', 'read',(body,signal)=>adapter.inspectTools(identity(body),text(body.runId),signal));
+  post('policy/inspect', 'read', body => adapter.inspectPolicy(identity(body), text(body.runId)));
+  post('policy/restart', 'write', (body, signal) => adapter.restartPolicy(identity(body), text(body.runId), text(body.selectionId), signal));
+  post('policy/cancel', 'write', (body, signal) => adapter.cancelPolicyUpdate(identity(body), text(body.runId), text(body.selectionId), signal));
+  post('models', 'read', () => adapter.listModels());
+  post('model/select', 'write',body=>adapter.selectModel({...identity(body),runId:text(body.runId),key:text(body.key),model:modelSelection(body.model)}));
   const catalogIdentity = (body: Record<string, unknown>): import('@varin/application-client').ThreadCatalogIdentity => {
     if (body.runtime !== 'agent') throw new Error('Explicit Thread runtime selection is required');
     return { runtime: 'agent', threadId: text(body.threadId) };
   };
-  post('attention', (_body, signal) => adapter.attention(signal));
-  post('list', (body, signal) => {
+  post('attention', 'read', (_body, signal) => adapter.attention(signal));
+  post('list', 'read', (body, signal) => {
     if (body.query !== undefined && typeof body.query !== 'string') throw new Error('Search query must be a string');
     if (body.archived !== undefined && !['exclude', 'include', 'only'].includes(String(body.archived))) throw new Error('Invalid archive filter');
     return adapter.list(body as import('@varin/application-client').ThreadListOptions, signal);
   });
-  post('update', body => {
+  post('update', 'write', body => {
     for (const field of ['pinned', 'archived']) if (body[field] !== undefined && typeof body[field] !== 'boolean') throw new Error('Thread flag must be boolean');
     if (body.titleMode !== undefined && body.titleMode !== 'automatic' && body.titleMode !== 'manual') throw new Error('Invalid title mode');
     return adapter.update({ ...catalogIdentity(body), key: text(body.key), expectedRevision: revision(body.expectedRevision),
@@ -592,34 +646,34 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       ...(body.pinned === undefined ? {} : { pinned: body.pinned as boolean }),
       ...(body.archived === undefined ? {} : { archived: body.archived as boolean }) });
   });
-  post('delete', body => adapter.delete({ ...catalogIdentity(body), key: text(body.key), expectedRevision: revision(body.expectedRevision) }));
-  post('read', body => adapter.markRead({ ...catalogIdentity(body), key: text(body.key), throughCursor: revision(body.throughCursor) }));
-  post('create', body => adapter.create(text(body.key), body.organization === undefined ? undefined : { organization: parseConversationOrganizationPlacement(body.organization) }));
-  post('recovery/source', (body, signal) => adapter.recoverySource({ ...identity(body), entryId: text(body.entryId) }, signal));
-  post('navigation/prepare', (body, signal) => adapter.prepareNavigation({ ...identity(body), entryId: text(body.entryId) }, signal));
-  post('tree', (body, signal) => adapter.conversationTree(identity(body), signal));
-  post('tree/preview', (body, signal) => adapter.treePreview(identity(body), { firstItemId: text(body.firstItemId), lastItemId: text(body.lastItemId), ...(body.query === undefined ? {} : { query: text(body.query) }) }, signal));
-  post('navigation/receipt', (body, signal) => adapter.navigationReceipt({ ...identity(body), key: text(body.key) }, signal));
-  post('navigate', (body, signal) => adapter.navigate({ ...identity(body), key: text(body.key), expectedHeadId: body.expectedHeadId === null ? null : text(body.expectedHeadId), targetHeadId: body.targetHeadId === null ? null : text(body.targetHeadId), ...(body.undoOf === undefined ? {} : { undoOf: text(body.undoOf) }) }, signal));
-  post('fork', (body, signal) => adapter.fork({ ...identity(body), key: text(body.key), headId: body.headId === null ? null : text(body.headId) }, signal));
-  post('branch/delete', (body, signal) => adapter.deleteBranch({ ...identity(body), key: text(body.key) }, signal));
-  post('source/list', (body, signal) => adapter.listSourceTargets(Object.keys(body).length ? identity(body) : null, signal));
-  post('source/resolve', (body, signal) => adapter.resolveSource(identity(body), { resourceOwner: parseSourceResourceOwner(body.resourceOwner), path: text(body.path) }, signal));
-  post('source/prepare', (body, signal) => {
+  post('delete', 'write', body => adapter.delete({ ...catalogIdentity(body), key: text(body.key), expectedRevision: revision(body.expectedRevision) }));
+  post('read', 'write', body => adapter.markRead({ ...catalogIdentity(body), key: text(body.key), throughCursor: revision(body.throughCursor) }));
+  post('create', 'write', body => adapter.create(text(body.key), body.organization === undefined ? undefined : { organization: parseConversationOrganizationPlacement(body.organization) }));
+  post('recovery/source', 'read', (body, signal) => adapter.recoverySource({ ...identity(body), entryId: text(body.entryId) }, signal));
+  post('navigation/prepare', 'read', (body, signal) => adapter.prepareNavigation({ ...identity(body), entryId: text(body.entryId) }, signal));
+  post('tree', 'read', (body, signal) => adapter.conversationTree(identity(body), signal));
+  post('tree/preview', 'read', (body, signal) => adapter.treePreview(identity(body), { firstItemId: text(body.firstItemId), lastItemId: text(body.lastItemId), ...(body.query === undefined ? {} : { query: text(body.query) }) }, signal));
+  post('navigation/receipt', 'read', (body, signal) => adapter.navigationReceipt({ ...identity(body), key: text(body.key) }, signal));
+  post('navigate', 'write', (body, signal) => adapter.navigate({ ...identity(body), key: text(body.key), expectedHeadId: body.expectedHeadId === null ? null : text(body.expectedHeadId), targetHeadId: body.targetHeadId === null ? null : text(body.targetHeadId), ...(body.undoOf === undefined ? {} : { undoOf: text(body.undoOf) }) }, signal));
+  post('fork', 'write', (body, signal) => adapter.fork({ ...identity(body), key: text(body.key), headId: body.headId === null ? null : text(body.headId) }, signal));
+  post('branch/delete', 'write', (body, signal) => adapter.deleteBranch({ ...identity(body), key: text(body.key) }, signal));
+  post('source/list', 'read', (body, signal) => adapter.listSourceTargets(Object.keys(body).length ? identity(body) : null, signal));
+  post('source/resolve', 'read', (body, signal) => adapter.resolveSource(identity(body), { resourceOwner: parseSourceResourceOwner(body.resourceOwner), path: text(body.path) }, signal));
+  post('source/prepare', 'write', (body, signal) => {
     if (body.mode !== 'fixed_branch' && body.mode !== 'materialized' && body.mode !== 'live_root'&&body.mode!=='native_workspace') throw new Error('Invalid source mode');
     return adapter.prepareSource(normalizeThreadSourcePreparation({ ...identity(body), resourceOwner: parseSourceResourceOwner(body.resourceOwner), key: text(body.key), workspaceId: text(body.workspaceId), mode: body.mode,
       content: body.content, captureScopes: body.captureScopes, ...(body.selection !== undefined ? { selection: body.selection } : {}) } as import('@varin/application-client').ThreadPrepareSource), signal);
   });
-  post('context/compact', (body, signal) => {
+  post('context/compact', 'write', (body, signal) => {
     return adapter.compact({ ...identity(body), key: text(body.key), throughId: text(body.throughId), expectedRevision: revision(body.expectedRevision),
       model: modelSelection(body.model) }, signal);
   });
-  post('context/publish', body => adapter.publishContext(identity(body), text(body.runId)));
-  post('context/history', body => adapter.contextHistory(identity(body), text(body.runId),
+  post('context/publish', 'write', body => adapter.publishContext(identity(body), text(body.runId)));
+  post('context/history', 'read', body => adapter.contextHistory(identity(body), text(body.runId),
     body.headId === undefined && body.beforeId === undefined ? undefined : { headId: text(body.headId), beforeId: text(body.beforeId) }));
-  post('context/cancel', body => adapter.cancelContext(identity(body), text(body.runId)));
-  post('context/resume', async body => { await adapter.resumeContext(identity(body), text(body.runId)); return {}; });
-  post('submit', async body => {
+  post('context/cancel', 'write', body => adapter.cancelContext(identity(body), text(body.runId)));
+  post('context/resume', 'write', async body => { await adapter.resumeContext(identity(body), text(body.runId)); return {}; });
+  post('submit', 'write', async body => {
     const input = inputBeforeAdmission(() => {
       const images = parseThreadImages(body.images);
       const attachmentImageReferences = parseAttachmentImageReferences(body.attachmentImageReferences, images);
@@ -641,16 +695,17 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     });
     return adapter.submit(input);
   });
-  post('history/page', (body, signal) => adapter.historyPage(identity(body), { headId: text(body.headId), ...(body.beforeId === undefined ? {} : { beforeId: text(body.beforeId) }), ...(body.limit === undefined ? {} : { limit: Number(body.limit) }) }, signal));
-  post('history/runs', (body, signal) => adapter.historyRuns(identity(body), { headId: body.headId === null ? null : text(body.headId) }, signal));
-  post('history/run-preview', (body, signal) => adapter.historyRunPreview(identity(body), { headId: text(body.headId), runId: text(body.runId) }, signal));
-  post('history/usage', (body, signal) => adapter.historyUsage(identity(body), { headId: text(body.headId), ...(body.beforeId === undefined ? {} : { beforeId: text(body.beforeId) }), ...(body.limit === undefined ? {} : { limit: Number(body.limit) }) }, signal));
-  post('history/file', (body, signal) => adapter.fileTarget({ ...identity(body), itemId: text(body.itemId), path: text(body.path) }, signal));
-  post('snapshot', (body, signal) => adapter.snapshot(identity(body), signal));
-  post('next-step', (body, signal) => adapter.nextStep(identity(body), text(body.runId), text(body.headId), signal));
-  post('context/inspect', (body, signal) => adapter.contextInspection(identity(body), { headId: body.headId === null ? null : text(body.headId) }, signal));
-  post('usage', (body, signal) => adapter.usage(identity(body), signal));
-  post('enqueue', async body => {
+  post('history/page', 'read', (body, signal) => adapter.historyPage(identity(body), { headId: text(body.headId), ...(body.beforeId === undefined ? {} : { beforeId: text(body.beforeId) }), ...(body.limit === undefined ? {} : { limit: Number(body.limit) }) }, signal));
+  post('history/runs', 'read', (body, signal) => adapter.historyRuns(identity(body), { headId: body.headId === null ? null : text(body.headId) }, signal));
+  post('history/run-preview', 'read', (body, signal) => adapter.historyRunPreview(identity(body), { headId: text(body.headId), runId: text(body.runId) }, signal));
+  post('history/usage', 'read', (body, signal) => adapter.historyUsage(identity(body), { headId: text(body.headId), ...(body.beforeId === undefined ? {} : { beforeId: text(body.beforeId) }), ...(body.limit === undefined ? {} : { limit: Number(body.limit) }) }, signal));
+  post('history/file', 'read', (body, signal) => adapter.fileTarget({ ...identity(body), itemId: text(body.itemId), path: text(body.path) }, signal));
+  post('snapshot', 'read', (body, signal) => adapter.snapshot(identity(body), signal, body.afterHeadId === undefined ? {} : { afterHeadId: text(body.afterHeadId) }));
+  post('inspectMany', 'read', (body, signal) => adapter.inspectMany(body.threadIds as string[], signal));
+  post('next-step', 'read', (body, signal) => adapter.nextStep(identity(body), text(body.runId), text(body.headId), signal));
+  post('context/inspect', 'read', (body, signal) => adapter.contextInspection(identity(body), { headId: body.headId === null ? null : text(body.headId) }, signal));
+  post('usage', 'read', (body, signal) => adapter.usage(identity(body), signal));
+  post('enqueue', 'write', async body => {
     const input = inputBeforeAdmission(() => {
       const selected = identity(body);
       if (!['boundary', 'interrupt', 'next_run'].includes(String(body.mode))) throw new Error('Invalid input mode');
@@ -665,31 +720,36 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     });
     return adapter.enqueue(input);
   });
-  post('media/read', (body, signal) => adapter.mediaRead(identity(body), {
+  post('media/read', 'read', (body, signal) => adapter.mediaRead(identity(body), {
     holder: object(body.holder) as unknown as OutputMediaHolder,
     partIndex: revision(body.partIndex), chunkIndex: revision(body.chunkIndex), expectedContentRef: text(body.expectedContentRef),
   }, signal));
-  post('input/edit', (body, signal) => {
+  post('input/edit', 'write', (body, signal) => {
     if (typeof body.text !== 'string') throw new Error('Input text must be a string');
     return adapter.editInput(text(body.inputId), revision(body.expectedRevision), body.text, parseThreadImages(body.images), signal, parseThreadSkills(body.skills, body.text), body.contentReferences === undefined && body.contentReferenceOccurrences === undefined ? undefined : parseContentReferenceInput(body as ContentReferenceInput, body.text));
   });
-  post('input/cancel', async body => { await adapter.requireInput(text(body.inputId)); return adapter.runtime.cancelInput(text(body.inputId), revision(body.expectedRevision)); });
-  post('input/send-now', (body, signal) => adapter.sendInputNow(text(body.inputId), revision(body.expectedRevision), text(body.expectedRunId), signal));
-  post('run', body => adapter.requireRun(text(body.runId))); 
-  post('run/cancel', async body => { await adapter.requireRun(text(body.runId)); return adapter.runtime.cancelRun(text(body.runId)); });
-  post('run/resume', body => adapter.resume(text(body.runId), text(body.waitId)));
-  post('run/retry-preparation', async body => { await adapter.retryPreparation(text(body.runId)); return {}; });
-  post('operation', body => adapter.requireOperation(text(body.operationId)));
-  post('operation/calls', async (body, signal) => {
+  post('input/cancel', 'write', async body => { await adapter.requireInput(text(body.inputId)); return adapter.runtime.cancelInput(text(body.inputId), revision(body.expectedRevision)); });
+  post('input/send-now', 'write', (body, signal) => adapter.sendInputNow(text(body.inputId), revision(body.expectedRevision), text(body.expectedRunId), signal));
+  post('run', 'read', body => adapter.requireRun(text(body.runId)));
+  post('run/cancel', 'write', async body => { await adapter.requireRun(text(body.runId)); return adapter.runtime.cancelRun(text(body.runId)); });
+  post('run/resume', 'write', body => adapter.resume(text(body.runId), text(body.waitId)));
+  post('run/retry-preparation', 'write', async body => { await adapter.retryPreparation(text(body.runId)); return {}; });
+  post('operation', 'read', body => adapter.requireOperation(text(body.operationId)));
+  post('operation/calls', 'read', async (body, signal) => {
     const operationId = text(body.operationId);
     await adapter.requireOperation(operationId);
     return adapter.runtime.toolCalls(operationId, signal);
   });
-  post('operation/cancel', body => adapter.cancelOperation(text(body.operationId)));
-  post('operation/retrieval-file', (body, signal) => adapter.retrievalFileTarget(text(body.operationId), text(body.itemId), text(body.path), signal));
-  post('operation/retrieval-trace', (body, signal) => adapter.retrievalTrace(text(body.operationId),
+  post('operation/cancel', 'write', body => adapter.cancelOperation(text(body.operationId)));
+  post('operation/retrieval-file', 'read', (body, signal) => adapter.retrievalFileTarget(text(body.operationId), text(body.itemId), text(body.path), signal));
+  post('operation/retrieval-trace', 'read', (body, signal) => adapter.retrievalTrace(text(body.operationId),
     body.beforeId === undefined ? undefined : { headId: text(body.headId), beforeId: text(body.beforeId) }, signal));
-  post('events', body => adapter.runtime.events(revision(body.cursor), 256, undefined, currentRequestPrincipal()));
+  post('events', 'read', body => adapter.runtime.events(revision(body.cursor), 256, undefined, currentRequestPrincipal()));
+  post('observe/interests', 'read', async body => {
+    if (body.threadIds !== null && (!Array.isArray(body.threadIds) || body.threadIds.some(id => typeof id !== 'string' || !id))) throw new Error('Thread interests are required');
+    await adapter.updateObservationInterests(text(body.observationId), body.threadIds as string[] | null);
+    return {};
+  });
   app.get('/api/threads/observe', requireAuth, async (request, response) => {
     let cursor: number;
     if (request.query.cursor === undefined) {
@@ -699,15 +759,25 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       try { cursor = revision(Number(request.query.cursor)); }
       catch { response.status(400).json({ error: 'Invalid event cursor' }); return; }
     }
+    let threadIds: string[] | undefined;
+    let observationId: string | undefined;
+    try {
+      if (request.query.observationId !== undefined) observationId = text(request.query.observationId);
+      if (request.query.threadIds !== undefined) {
+        if (typeof request.query.threadIds !== 'string') throw new Error('Invalid thread interests');
+        const ids: unknown = JSON.parse(request.query.threadIds);
+        if (!Array.isArray(ids) || ids.some(id => typeof id !== 'string' || !id)) throw new Error('Invalid thread interests');
+        threadIds = ids as string[];
+      }
+    } catch (error) {
+      response.status(error && typeof error === 'object' && 'code' in error && error.code === 'forbidden' ? 403 : 400).json({ error: 'Invalid thread interests' }); return;
+    }
     if (response.destroyed) return;
     response.status(200).set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     response.flushHeaders();
-    const close = adapter.observe(cursor, event => {
-      const writable = response.write(`data: ${JSON.stringify(event)}\n\n`);
-      // A slow consumer reconnects from its durable cursor instead of retaining unbounded buffers.
-      if (!writable) response.end();
-      return writable;
-    }, () => response.end());
-    response.once('close', close);
+    const stream = new ThreadEventStream(response, cursor);
+    const close = adapter.observe(cursor, stream.send, () => stream.end(), { ...(threadIds === undefined ? {} : { threadIds }), ...(observationId === undefined ? {} : { observationId }) });
+    if (response.destroyed || response.writableEnded) close();
+    else response.once('close', close);
   });
 }

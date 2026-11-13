@@ -1,3 +1,6 @@
+import { shareSnapshot } from '@/lib/agent-runtime/structural-sharing';
+import { ThreadStreamingStore } from '@/lib/agent-runtime/thread-streaming-store';
+import { countUiWork } from '@/lib/performance-observation';
 import { prepareQuotedFiles } from '@/lib/agent-runtime/quoteAttachments';
 import { draftImageReferences } from '@/lib/images/references';
 import { flushUiSessions } from '@/lib/interactive-ui/sessions';
@@ -87,10 +90,10 @@ import { ConversationScrollbar } from '../conversation/ConversationScrollbar';
 import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
 import { VarinLogo } from '@/components/ui/VarinLogo';
 import { cn, formatDirectoryName } from '@/lib/utils';
-import { ThreadProjection, type StreamingTextPart } from '@/lib/agent-runtime/thread-projection';
+import { ThreadProjection } from '@/lib/agent-runtime/thread-projection';
 import { threadHistoryWindow } from '@/lib/agent-runtime/thread-history';
 import { ThreadInputQueue } from './ThreadQueuedInput';
-import { threadLiveActivity, type ThreadLiveActivity, type ThreadProgressActivity } from './threadLiveActivity';
+import { threadLiveActivity, type ThreadLiveActivity } from './threadLiveActivity';
 
 const EMPTY_MODELS: ThreadModelInfo[] = [];
 
@@ -157,14 +160,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const identityGeneration = React.useRef(0);
   const forkKeys = React.useRef(new Map<string, string>());
   const compactionKeys = React.useRef(new Map<string, string>());
-  const [progress, setProgress] = React.useState<StreamingTextPart[]>([]);
-  const [streamingTools, setStreamingTools] = React.useState<import('@/lib/agent-runtime/thread-projection').StreamingToolCall[]>([]);
-  const [toolProgress, setToolProgress] = React.useState<import('@/lib/agent-runtime/thread-projection').ToolExecutionProgress[]>([]);
-  const [progressActivity, setProgressActivity] = React.useState<ThreadProgressActivity | null>(null);
-  const publishProgress = React.useCallback((parts: StreamingTextPart[], context?: ThreadProgressActivity) => {
-    setProgress(parts);
-    setProgressActivity(current => !context ? null : current?.runId === context.runId && current.activity === context.activity ? current : { runId: context.runId, activity: context.activity });
-  }, []);
+  const streaming = React.useMemo(() => new ThreadStreamingStore(), [api, host, identity]);
+  const hasProgress = React.useSyncExternalStore(streaming.subscribe, streaming.getHasProgress, streaming.getHasProgress);
+  if (import.meta.env.DEV) countUiWork('conversation.render');
   const messageInput = React.useRef<ComposerEditorHandle | null>(null);
   const [modelCatalog, setModelCatalog] = React.useState<{ api: ThreadsAPI; host: number; models: ThreadModelInfo[] }>();
   const modelsReady = modelCatalog?.api === api && modelCatalog.host === host;
@@ -214,11 +212,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     identityGeneration.current += 1; forkKeys.current.clear(); compactionKeys.current.clear();
     setPreparingSource(false);
     pendingAction.current = null; resourceFailure.current = null; setPending(false); setError(undefined);
-    setSnapshot(undefined); setProgress([]); setProgressActivity(null); setToolProgress([]);
-    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; historyWindow.accept(value); handoff.observe(value); setSnapshot(value); setLoadFailure(undefined); }, value => setLoadFailure({ scope: viewScope, message: value instanceof Error ? value.message : 'Thread unavailable' }), publishProgress, setStreamingTools, setToolProgress);
+    setSnapshot(undefined); streaming.reset();
+    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; historyWindow.accept(value); handoff.observe(value); setSnapshot(value); setLoadFailure(undefined); }, value => setLoadFailure({ scope: viewScope, message: value instanceof Error ? value.message : 'Thread unavailable' }), streaming.publishProgress, streaming.publishTools, streaming.publishToolProgress);
     projection.current = view; view.start();
-    return () => { identityGeneration.current += 1; view.close(); };
-  }, [api, identity, host, handoff, historyWindow, viewScope, publishProgress]);
+    return () => { identityGeneration.current += 1; view.close(); streaming.reset(); };
+  }, [api, identity, host, handoff, historyWindow, viewScope, streaming]);
   const snapshot = snapshotHost.current === host && snapshotState?.identity.threadId === identity.threadId && snapshotState?.identity.branchId === identity.branchId ? snapshotState : undefined;
   const defaultProjectId = snapshot?.creationDefaults?.projectId;
   const defaultSource = snapshot?.creationDefaults?.source;
@@ -241,8 +239,17 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const activityObserver = React.useRef(onActivity);
   activityObserver.current = onActivity;
   const observed = Boolean(onActivity);
-  const liveActivity = React.useMemo(() => observed && snapshot ? threadLiveActivity(snapshot, streamingTools, progressActivity) : null, [observed, snapshot, streamingTools, progressActivity]);
-  React.useEffect(() => { activityObserver.current?.(liveActivity); }, [liveActivity]);
+  React.useEffect(() => {
+    if (!observed || !snapshot) { activityObserver.current?.(null); return; }
+    let previous: ThreadLiveActivity | undefined;
+    const publish = () => {
+      const { streamingTools, progressActivity } = streaming.getSnapshot();
+      const next = shareSnapshot(previous, threadLiveActivity(snapshot, streamingTools, progressActivity));
+      if (next !== previous) { previous = next; activityObserver.current?.(next); }
+    };
+    publish();
+    return streaming.subscribe(publish);
+  }, [observed, snapshot, streaming]);
   React.useEffect(() => () => activityObserver.current?.(null), []);
   React.useEffect(() => {
     const failure = resourceFailure.current, resourceId = snapshot?.context.checkpoint?.resources?.snapshot.id;
@@ -252,7 +259,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     }
   }, [snapshot, error]);
   React.useEffect(() => {
-    if (!snapshot || scrollMode !== 'following-end' || history.connecting || typeof document === 'undefined') return;
+    if (!snapshot || snapshot.thread.activity_cursor <= snapshot.thread.read_cursor || scrollMode !== 'following-end' || history.connecting || typeof document === 'undefined') return;
     const acknowledge = () => {
       if (document.visibilityState !== 'hidden' && host === getRuntimeEndpointGeneration()) {
         void useThreadStore.getState().markRead(identity.threadId, snapshot.thread.activity_cursor).catch(() => {});
@@ -496,7 +503,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     showOverview('recovery');
     void recovery.recover(treeNavigation.entryId);
   }, [treeNavigation, draftKey, snapshot, history.connecting, readOnly, active, pending, draft.pendingInput, recovery, showOverview, t]);
-  const empty = Boolean(snapshot && !visibleHistory.length && !progress.length && !active && !firstMessage.message && !pending && !draft.pendingInput);
+  const empty = Boolean(snapshot && !visibleHistory.length && !hasProgress && !active && !firstMessage.message && !pending && !draft.pendingInput);
   // The empty home animates away only when this view is sending; arriving history or a switch replaces it at once.
   const sendDeparts = Boolean(snapshot && (pending || draft.pendingInput || draft.firstSend || firstMessage.message));
   const emptyWorkspacePath = preparedSource?.path ?? workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot;
@@ -566,7 +573,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       navigation={{ runs: history.runs, readPreview: historyWindow.readRunPreview, ensureItem: historyWindow.ensureItem, error: history.navigationError, retry: historyWindow.retryNavigation }}
       earlierHistory={{ available: Boolean(history.previous), loading: history.loading, error: history.error, latencyMs: history.latencyMs, load: historyWindow.loadEarlier }}
       liveUser={firstMessage.message} liveUserStatus={firstMessage.status}
-      progress={snapshot && !history.connecting ? progress : []} streamingTools={snapshot && !history.connecting ? streamingTools : []} toolProgress={toolProgress} cwd={emptyWorkspacePath ?? ''} working={active && !history.connecting && !launch?.preparation_failure && !pause} readOnly={readOnly || !snapshot || history.connecting}
+      streamingStore={streaming} streamingEnabled={Boolean(snapshot && !history.connecting)} cwd={emptyWorkspacePath ?? ''} working={active && !history.connecting && !launch?.preparation_failure && !pause} readOnly={readOnly || !snapshot || history.connecting}
       memory={snapshot?.thread.bot_id ? memorySelection : undefined}
       onQuote={quote => { if (!readOnly && currentViewScope.current === viewScope) { setText(current => [current.trimEnd(), quote].filter(Boolean).join('\n\n')); messageInput.current?.focus(); } }}
       onQuestion={operationId => { setQuestionOperation(operationId); setQuestionReveal(value => value + 1); }}

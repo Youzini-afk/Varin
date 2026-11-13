@@ -211,6 +211,12 @@ export class AgentRuntimeClient {
     signal?.throwIfAborted();
     return consume(access);
   }
+  ownershipResolve(selection: import('./ownership-resolver.js').OwnershipSelection): Promise<import('./ownership-resolver.js').OwnershipResolution> {
+    return this.kernel.agentRuntimeRequest('runtime.ownership.resolve', {
+      threads: [...selection.threads ?? []], runs: [...selection.runs ?? []],
+      operations: [...selection.operations ?? []], inputs: [...selection.inputs ?? []],
+    });
+  }
   constructor(
     private readonly kernel: KernelClient,
     private readonly prepareMcpOwner?: McpPreparer,
@@ -579,6 +585,19 @@ export class AgentRuntimeClient {
     // remains drainable until its actual source/resource work has settled.
     void pending.then(() => registration.release(), () => registration.release());
     return waitWithSignal(pending, signal);
+  }
+
+  threadView(input: import('./protocol.generated.js').ThreadViewParams, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadSnapshot> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.view', input, signal);
+  }
+  inspectThreads(threadIds: string[], signal?: AbortSignal): Promise<import('@varin/application-client').ThreadSummary[]> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.inspectMany', { threadIds }, signal);
+  }
+  contextInspection(threadId: string, branchId: string, headId: string | null, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadContextInspection> {
+    return this.kernel.agentRuntimeRequest('runtime.context.inspection', { threadId, branchId, headId }, signal);
+  }
+  policyPreparation(runId: string): ThreadPolicyInspection['preparation'] {
+    return structuredClone(this.policyObservations.get(runId)?.preparation ?? null);
   }
 
   onExit(listener: (error: Error) => void): () => void {
@@ -1674,7 +1693,7 @@ export class AgentRuntimeClient {
     return this.kernel.agentRuntimeRequest('runtime.launch.list', {}, signal);
   }
   async inspectPolicy(runId: string, signal?: AbortSignal): Promise<ThreadPolicyInspection> {
-    return { ...await this.policySelections(runId, signal), preparation: structuredClone(this.policyObservations.get(runId)?.preparation ?? null) };
+    return { ...await this.policySelections(runId, signal), preparation: this.policyPreparation(runId) };
   }
   policySelections(runId: string, signal?: AbortSignal): Promise<PolicySelections> {
     return this.kernel.agentRuntimeRequest('runtime.policy.inspect', { runId }, signal);

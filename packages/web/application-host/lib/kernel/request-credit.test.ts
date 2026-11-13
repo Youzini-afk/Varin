@@ -1,19 +1,21 @@
 import { expect, it } from 'vitest';
 import { KERNEL_PROTOCOL_VERSION, KERNEL_REQUEST_WINDOW } from './protocol.generated.js';
+import { KernelRequestWindow } from './request-window.js';
 import { KernelClient, KernelClientError, type KernelGrantHandle } from './kernel-client.js';
 
 /** Real client admission/cancellation with only the transport replaced by an in-memory fixture. */
-function fixture() {
+function fixture(capacity: number = KERNEL_REQUEST_WINDOW) {
   const client = new KernelClient({ hostId: 'credit-review', storageRoot: '/unused', buildVersion: 'review' });
   const owner = client as unknown as {
     epoch: string; handshakeResult: unknown; grantFromResponse(value: Record<string, unknown>): KernelGrantHandle; transport: { send(frame: Record<string, unknown>, lane: string): Promise<void>; cancelRequest(): void; close(): Promise<void> };
-    pending: Map<string, unknown>;
+    pending: Map<string, unknown>; window: KernelRequestWindow; controlWindow: KernelRequestWindow;
     requestRaw(method: string, params: unknown, options: unknown): Promise<unknown>;
     consumeFrame(frame: unknown): void;
     failAll(error: Error): void;
     whenRequestsIdle(): Promise<void>;
   };
   owner.epoch = 'epoch'; owner.handshakeResult = {};
+  owner.window = new KernelRequestWindow(capacity); owner.controlWindow = new KernelRequestWindow(capacity);
   const sent: Array<{ frame: Record<string, unknown>; lane: string }> = [];
   owner.transport = { async send(frame, lane) { sent.push({ frame, lane }); }, cancelRequest() {}, async close() {} };
   const request = (method: string, signal?: AbortSignal) => owner.requestRaw(method, {}, { allowBootstrap: true, signal });
@@ -55,7 +57,8 @@ it.each(['model', 'tool', 'wait'])('admitted driver %s work releases only wire c
 });
 
 it('releases only body admission credit while original input receipts and cancellation stay owned', async () => {
-  const f = fixture();
+  // Deliberately small admission budget stresses nesting independently of production sizing.
+  const f = fixture(2);
   let inputDone = false;
   const first = f.request('process.write').then(() => { inputDone = true; });
   const second = f.request('process.write');
@@ -149,7 +152,8 @@ it.each(['scan', 'measure', 'single-capture'] as const)('keeps a disconnected %s
 });
 
 it('two accepted nested invocations release their body credits for original Host inspection and permission callbacks', async () => {
-  const f = fixture();
+  // Deliberately small admission budget stresses nesting independently of production sizing.
+  const f = fixture(2);
   const first = f.request('runtime.tools.invoke'), second = f.request('runtime.tools.invoke');
   await tick();
   const inspect = f.request('runtime.operation.inspect'), permission = f.request('runtime.permission.open');
@@ -164,7 +168,8 @@ it('two accepted nested invocations release their body credits for original Host
 });
 
 it('a retained nested extension can reenter one more level without holding its ancestors transport credits', async () => {
-  const f = fixture();
+  // Deliberately small admission budget stresses nesting independently of production sizing.
+  const f = fixture(2);
   const outer = f.request('runtime.tools.invoke'); await tick(); f.release(0);
   const child = f.request('runtime.tools.invoke'); await tick(); f.release(1);
   const operation = f.request('runtime.operation.inspect'), run = f.request('runtime.run.inspect'), launch = f.request('runtime.launch.inspect');

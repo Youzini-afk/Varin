@@ -26,7 +26,7 @@ beforeEach(() => {
   container = document.getElementById('root')!; root = createRoot(container);
   api.summary.mockReset().mockResolvedValue({ throughCursor: 5, recordingStartedAtMs: Date.now(), threads: [], external: [], rows: [row, { ...row, modelId: 'unpriced', priced: false, costUsd: 0 }, { ...row, modelId: 'subscription', billing: 'subscription', costUsd: 0, referenceUsd: 100 }] } satisfies UsageSummary);
   api.read.mockReset().mockResolvedValue({ channels: [{ id: 'channel', name: 'Actual channel', models: [] }] });
-  api.observe.mockReset().mockImplementation(() => new Promise(() => {}));
+  api.observe.mockReset().mockImplementation((_cursor, _listener, {signal}) => new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), {once: true})));
 });
 afterEach(async () => { await act(async () => root.unmount()); vi.unstubAllGlobals(); });
 it('renders real usage and missing-price labels, then changes the calendar query from the range control', async () => {
@@ -39,5 +39,5 @@ it('renders real usage and missing-price labels, then changes the calendar query
   const control = [...container.querySelectorAll('button')].find(button => button.textContent === 'usage.7d');
   await act(async () => control!.click());
   expect(api.summary.mock.calls.at(-1)![0].days).toHaveLength(14);
-  expect(api.observe).toHaveBeenCalledWith(5, expect.any(Function), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  expect(api.observe).toHaveBeenCalledWith(null, expect.any(Function), expect.objectContaining({ signal: expect.any(AbortSignal) }));
 });

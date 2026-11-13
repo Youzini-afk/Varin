@@ -1,5 +1,5 @@
 import React from 'react';
-import { getRuntimeEndpointGeneration, type ThreadIdentity, type ThreadsAPI, type ThreadContextHistory, type ThreadHistoryItem } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, getThreadObservationBus, type ThreadObservationEvent, type ThreadIdentity, type ThreadsAPI, type ThreadContextHistory, type ThreadHistoryItem } from '@varin/application-client';
 import { HistoryPresentation } from '@/components/conversation/historyPresentation';
 import type { ChatTextContent, ChatThinkingContent } from '@/components/conversation/types';
 import type { ContextJobRow } from '@/lib/contextPresentation';
@@ -13,6 +13,7 @@ export function useContextJobHistory(api: ThreadsAPI, identity: ThreadIdentity, 
   const [view, setView] = React.useState<{ owner: string; page?: ThreadContextHistory; live: Part[]; error?: string; loading: boolean }>({ owner: '', live: [], loading: false });
   const runId = row?.run.id;
   const jobBranchId = row?.job.receipt.branch_id;
+  const jobThreadId = row?.job.receipt.thread_id;
   const running = !!row && !['completed', 'failed', 'cancelled'].includes(row.run.state);
   const owner = JSON.stringify([getRuntimeEndpointGeneration(), identity.threadId, identity.branchId, runId]);
   const generation = React.useRef(0), refresh = React.useRef<() => Promise<void>>(async () => {});
@@ -46,13 +47,14 @@ export function useContextJobHistory(api: ThreadsAPI, identity: ThreadIdentity, 
     };
     refresh.current = read;
     void read();
-    const observe = async () => {
-      while (valid()) {
-      try {
-        await api.observe(null, event => {
+    const onEvent = (event: ThreadObservationEvent) => {
           if (!valid()) return;
+          if ('stream' in event && event.stream === 'resync') {
+            live.clear(); textReaders.clear(); stream = ''; request = ''; sequence = -1;
+            setView(old => ({...old, live: []})); void read(); return;
+          }
           if (!('stream' in event)) {
-            if (event.subject === runId || event.subject === jobBranchId || event.subject === identity.branchId) void read();
+            void read();
             return;
           }
           if (event.stream !== 'progress' || event.runId !== runId || committedRequests.has(event.requestId)) return;
@@ -75,21 +77,13 @@ export function useContextJobHistory(api: ThreadsAPI, identity: ThreadIdentity, 
             } else live.set(partKey, { type: 'thinking', id, thinking: (old?.type === 'thinking' ? old.thinking : '') + data.text });
           }
           frame ??= requestAnimationFrame(() => { frame = undefined; if (valid()) setView(old => ({ ...old, owner, live: [...live.values()] })); });
-        }, { signal: abort.signal });
-      } catch (error) { if (valid()) setView(old => ({ ...old, error: String(error) })); }
-      if (!valid()) break;
-      live.clear(); textReaders.clear(); stream = ''; sequence = -1;
-      setView(old => ({ ...old, live: [] })); void read();
-      // Use the same reconnect cadence as the main Thread projection.
-      await new Promise<void>(resolve => {
-        const finish = () => { clearTimeout(timer); abort.signal.removeEventListener('abort', finish); resolve(); };
-        const timer = setTimeout(finish, 1000); abort.signal.addEventListener('abort', finish, { once: true });
-      });
-      }
     };
-    if (running) void observe();
-    return () => { abort.abort(); if (frame !== undefined) cancelAnimationFrame(frame); generation.current = current + 1; refresh.current = async () => {}; };
-  }, [api, identity, owner, runId, jobBranchId, running, active]);
+    const subscriptions = running ? [
+      getThreadObservationBus(api).subscribe({threadId: jobThreadId, branchId: jobBranchId, kinds: ['progress', 'model.*', 'inference.*', 'run.*', 'history.appended']}, onEvent),
+      getThreadObservationBus(api).subscribe({threadId: identity.threadId, branchId: identity.branchId, kinds: ['context.*']}, onEvent),
+    ] : [];
+    return () => { subscriptions.forEach(unsubscribe => unsubscribe()); abort.abort(); if (frame !== undefined) cancelAnimationFrame(frame); generation.current = current + 1; refresh.current = async () => {}; };
+  }, [api, identity, owner, runId, jobBranchId, jobThreadId, running, active]);
   React.useEffect(() => { if (active) void refresh.current(); }, [active, row?.run.revision, row?.job.published_revision]);
   const page = view.owner === owner ? view.page : undefined;
   const earlier = async () => {

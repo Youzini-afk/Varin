@@ -37,7 +37,7 @@ fn bot_gate_reopen_preserves_original_wait_trigger_and_revalidates_epoch() {
     )
     .unwrap();
     let wait = db
-        .register_wait("question:original", &r.run_id, "source", "source.ready", 0)
+        .register_wait("question:original", &r.run_id, "thread", "source.ready", 0)
         .unwrap();
     db.commit_execution(
         &r.run_id,
@@ -53,7 +53,7 @@ fn bot_gate_reopen_preserves_original_wait_trigger_and_revalidates_epoch() {
     db.park_bot_run(&r.run_id, epoch).unwrap();
     assert_eq!(record::<Wait>(&db.db, "waits", &wait.id).unwrap(), wait);
     let tx = db.db.transaction().unwrap();
-    let trigger = event(&tx, "source", 1, "source.ready", Value::Null).unwrap();
+    let trigger = event(&tx, "thread", 1, "source.ready", Value::Null).unwrap();
     tx.commit().unwrap();
     db.reconcile_waits().unwrap();
     let fired = record::<Wait>(&db.db, "waits", &wait.id).unwrap();

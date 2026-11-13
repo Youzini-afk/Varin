@@ -1,8 +1,8 @@
 # Thread Application Host consumer
 
-`thread-adapter.ts` admits native `agent` Thread identities through the Application Host. Rust owns the
+[thread-adapter.ts](thread-adapter.ts) admits native `agent` Thread identities through the Application Host. Rust owns the
 thread/branch, history, queue, Run, Operation and durable events. The Host holds no second
-conversation store. `thread-routes.ts` uses the same authentication middleware as
+conversation store. [thread-routes.ts](thread-routes.ts) uses the same authentication middleware as
 other Application Host routes; `@varin/application-client` owns its framework-neutral API
 and HTTP consumer, installed on Web RuntimeAPIs (including the Web surface in Electron).
 
@@ -18,14 +18,14 @@ source materialization and execution. A preparation failure records a safe durab
 resume; it is not reported as successful execution. Startup rebinds eligible saved launches
 through the same current credential owner; an unresolved model/effect Wait remains blocked.
 
-Observe installs a notification listener before reading durable events. Presentation
-progress is transient; replay reads committed events after the caller's cursor. Consumers
-must preserve the last delivered durable cursor and reconnect after stream close, then
-refresh snapshots after a progress sequence gap. A slow SSE socket is closed rather than
-holding unbounded event buffers. Disconnect does not cancel accepted work. Run/Operation
-cancellation returns the authority's actual cancellation/effect state; it does not fabricate
-completion of background processes. Operation inspection exposes actual handoff/external
-receipt facts.
+Observation uses the shared [Host event hub](event-hub.ts) and
+[client bus](../../../../application-client/src/thread-observation.ts). The hub installs its native listener
+before reading durable events; each client keeps its cursor, permissions and transient progress interests.
+Initial connection readiness, reconnect or a sequence gap causes authoritative resync. Adding a view
+updates interests without reconnecting and losing in-flight progress. Slow sockets close without holding
+unbounded delivery buffers; lagging cursors replay from Catalog. Disconnect never cancels accepted work.
+Run/Operation cancellation returns actual cancellation/effect state, not fabricated executor completion.
+The full ownership and transport boundaries live in [Host adapters](DOCUMENTATION.md).
 
 The product workbench and default main conversation use this native path. The projection controller
 reconstructs durable history, queue and Operation facts while keeping transient progress separate.
@@ -43,7 +43,7 @@ admission transaction; Host restart reacquires current grants against that saved
 recovery contracts require the independent crash/reopen evidence; they do not imply replay of
 already-dispatched provider requests or unknown external effects.
 
-Independent acceptance in `thread-http-review.native.test.ts` uses the public HTTP client,
+Independent acceptance in [thread-http-review.native.test.ts](thread-http-review.native.test.ts) uses the public HTTP client,
 authenticated Express routes, real kernel and loopback model service. It covers atomic initial
 credential pinning, completed-submit retry without a second provider call, stable create retry,
 history/SSE, mismatched thread/branch rejection, queued input edit/cancel, active cancellation and
@@ -51,7 +51,7 @@ credential-bound next-run completion. It uses fake credentials and proves no liv
 
 ## Research consumers
 
-`research-runtime.ts` connects the original Experiment/Source/Resource services to genuine Catalog
+[research-runtime.ts](research-runtime.ts) connects the original Experiment/Source/Resource services to genuine Catalog
 invocations. The same authenticated `/api/threads/research/*` routes expose the framework-neutral
 `ThreadsAPI.research` to `ThreadConversation` and the shared Research facts view. Read scope is the actual task family; control remains the caller Thread
 and its descendants. Changing a branch or source does not hide older independent jobs. Historical
@@ -85,16 +85,16 @@ still follow the actual serializer/remote API contract. PNG/JPEG/WebP, other for
 behavior and transport limits require their own evidence, not a universal image-support claim.
 PDFs and arbitrary URLs/local/blob refs are not accepted as image substitutes.
 
-This path uses the existing HTTP JSON policy (50MB) and framed kernel transport (16MiB). Size
-errors retain the UI draft/images and surface an actionable error. Accumulated history is read through head-anchored reference pages and immutable body chunks,
-so the Host does not ask one framed RPC to return the complete inline conversation. Individual
-input uploads still use the existing request frame boundary. Image bodies use that existing content authority. PDF attachments instead use the scoped material path below.
-
+HTTP upload policy is owned by [Host assembly](../../index.ts). Private frame bounds constrain packets,
+not total streamed content; [kernel transport](../../../../../kernel/README.md#transport-lifetime) streams
+larger bodies through the same content authority. Size errors retain the UI draft/images. History is
+head-anchored and paged rather than returned as one complete inline conversation. PDF attachments use
+the scoped material path below.
 
 ## Retained PDF attachments
 
 `ThreadsAPI.materials.upload` accepts the filename, PDF MIME type and original base64 bytes under a
-validated Thread/branch identity. `web-runtime.ts` checks the scope and bytes, then calls
+validated Thread/branch identity. [web-runtime.ts](web-runtime.ts) checks the scope and bytes, then calls
 `documentReader.ingest`; MaterialStore retains the original PDF and returns its fixed source snapshot.
 The browser does not extract or replace its contents, and no new Rust PDF transport is introduced.
 
@@ -106,18 +106,26 @@ Switching Host/Thread/branch or unmounting fences stale upload results.
 
 ## Paged conversation projection
 
-Snapshots hydrate the newest 20 history records using `history.page` references and the existing
-immutable content chunk reader. Twenty is a display page size, not a conversation/input limit.
-`ThreadsAPI.historyPage(identity, {headId, beforeId})` exposes explicit earlier-page reads;
-opaque provider material and image bytes are preserved in the hydrated history items.
+Snapshots use one native `runtime.thread.view` read for a coherent current window and event cursor.
+The display page default lives in [thread-adapter.ts](thread-adapter.ts), not a conversation/input limit.
+A valid `afterHeadId` returns only appended history; a rewind, branch change or out-of-window anchor
+returns a full window. Queue, operations, context and child facts remain current in either response.
+Host consumer tests supply this native projection and verify scoped transport, cancellation and error preservation.
+The Catalog thread-view tests exercise durable history and closed resource-observer reconstruction,
+including original producer identity, branch isolation and missing versus corrupt optional records.
 
-The Agent workbench's Load earlier history action pins its view to the returned head. Background
-Run, input and operation facts remain live. New messages do not get silently concatenated into a
-saved historical view; Show latest messages returns to the newest projection. Only pages the
-user explicitly loads are retained for that historical view. Switching thread/Host invalidates
-in-flight view requests. Active/indeterminate operation discovery comes from the thread
-query independently of the visible history page, so older background jobs do not disappear
-just because their originating tool message scrolled outside the newest page.
+`ThreadsAPI.historyPage` reads explicit older pages through the existing immutable content reader,
+retaining opaque provider material and image bytes. Load earlier history pins the returned head;
+new messages do not silently enter that saved view. Show latest returns to the live projection.
+Only requested pages are retained, and Host/Thread/branch changes fence late results. Active or
+indeterminate operations are discovered independently of visible history, so old background work does
+not disappear when its original message is outside the page.
+
+[Projection](../../../../ui/src/lib/agent-runtime/thread-projection.ts) coalesces affected durable events
+with at most one read and a trailing refresh, preserving unchanged object identities.
+[Streaming state](../../../../ui/src/lib/agent-runtime/thread-streaming-store.ts) publishes per-request
+text/thinking/tool deltas independently of that projection. Durable output clears only its matching
+request; rendered historical rows do not rebuild for each live fragment.
 
 ## Conversation branching
 
@@ -191,46 +199,24 @@ receipts; it does not claim cross-Host atomicity. See [managed Source consumers]
 
 ## Initial trusted context
 
-Production Host admission resolves ordinary main-thread context through `thread-context.ts`.
-It reads the existing `agent.personalization` catalog, applies the shared global → project → Thread
-section rules, and renders the matching notes with the existing protocol renderer. Thread
-scope uses the Thread ID; configured project membership is resolved by the Host from the admitted
-workspace, never from renderer-supplied project/profile text. Bot personas remain a separate owner.
+[thread-context.ts](thread-context.ts) resolves Host-owned global/project/Thread personalization and
+[thread-resource-scope.ts](thread-resource-scope.ts) captures resources from the admitted Source.
+Project membership is Host-derived, not renderer profile text; Bot personas retain their separate owner.
+Fixed/live/managed Sources keep their original provenance, and resource reads retain their original grants.
+Discovery and ancestry contracts live in [resource admission](../agent-resources/DOCUMENTATION.md).
 
-`thread-resource-scope.ts` prepares native global and trusted-project resources from the exact admitted
-Source. `thread-context.ts` renders the captured system, appended system, instructions and skill
-catalog with their original identities. Fixed-source reads retain their branch/revision; live and
-managed Sources retain their actual owner. Explicit resource refresh prepares a candidate before
-checkpoint publication. Symlinks, invalid text, missing material and unavailable access remain distinct.
-See [resource admission](../agent-resources/DOCUMENTATION.md) for discovery, ancestry and scoped reads.
+Rust commits the initial effective prompt, instruction identities, typed personalization basis and memory
+checkpoint atomically with input/launch admission. Failed admission publishes none; replay retains the
+original checkpoint. User text remains instruction, generated summaries external data. Captured content
+uses ContentStore, not another memory database.
 
-Rust commits the initial effective system prompt, instruction source identities and memory checkpoint
-in the same transaction as the first admitted input and launch selection. Failed admission publishes
-none of them. Replays keep the admitted checkpoint; later Runs and explicit compaction use its
-current committed revision.
-User messages remain user instructions, while generated summaries remain external data. Forks carry
-the frozen system snapshot while replaying retained original conversation history. Context bodies
-use the existing immutable content store and GC roots, not a second memory database.
-
-The checkpoint also records a typed personalization basis: original system sections, their immutable
-instruction identities, and the Host-resolved project/thread scopes. The original sections
-contain no note catalog. Committed profile/note changes re-render from this basis through the existing
-personalization owner, so deleting the last note removes its memory sections and resetting an override
-restores the real original section. A later workspace selection does not silently substitute a live
-file or change the checkpoint's original scope.
-
-The Host refreshes after committed personalization changes and before ordinary submit/enqueue, fork,
-compaction and explicit resume. A post-admission check closes the race where an edit arrived before
-the first checkpoint existed. Refresh reads are serialized per branch; failures remain visible and
-later admission retries the authoritative read. The kernel CAS rejects stale revisions or changed
-source/scope provenance and preserves the current summary, its through-message boundary, and tail.
-Already prepared/dispatched ModelStep requests retain their recorded contents and bindings; only later
-context compilation sees the new checkpoint. Compaction candidates based on a superseded checkpoint
-cannot publish over it, and an explicit compaction request may need retry after a concurrent edit.
-
-Refresh replaces the system snapshot at a committed context boundary. Ordinary notes, frozen memory
-snapshots, resource refresh and selected context transforms retain their own receipt/publication rules.
-Context without the required typed provenance cannot be inferred from edited system text or imported.
+Committed personalization changes re-render from the original typed basis, preserving source/scope,
+summary boundary and tail. Deleting the last note or resetting an override removes it from the effective
+prompt without guessing provenance from edited text. Refresh is serialized per branch, including a
+post-admission check for concurrent first-input edits; failures remain visible and later admission retries.
+Catalog CAS rejects stale candidates. Already dispatched model requests retain their original bytes;
+only later compilation sees the new checkpoint. Compaction based on a superseded checkpoint must retry.
+Detailed context composition and publication belong to [runtime](../../../../../docs/runtime.md#上下文准备与压缩).
 
 ## User clarification
 
@@ -247,7 +233,8 @@ Waits retain the policy's committed private state and original continuation. The
 answer route address the original operation directly and do not require a fabricated model request.
 
 The authenticated `question/answer` route requires the explicit thread/branch identity,
-`operationId` and nonempty `answer`. Rust accepts an answer only for the currently waiting question.
+`operationId` and the typed answer payload defined by [thread-routes.ts](thread-routes.ts). Rust accepts
+an answer only for the currently waiting question.
 The answer history item, terminal Operation, acknowledged Wait and runnable continuation commit
 atomically. Identical answer retries return the same receipt; different or late cancelled answers
 conflict. Multiple questions are served sequentially through their own Waits. Source selection and
@@ -268,9 +255,9 @@ not call `ask_user`, create a model message, or introduce a second permissions d
 The persisted request binds the exact Run/request/operation/call/arguments, tool schema version,
 MCP owner reference and generation, policy generation, credential actor, and execution epoch.
 
-The authenticated `permission/decide` route checks the selected thread and branch and accepts only
-`allow_once` or `deny` for that exact permission ID. The conversation UI shows the tool owner and
-arguments with separate Allow once and Deny controls. The live authorizer awaits the decision
+The authenticated `permission/decide` route checks the selected thread and branch and passes the explicit decision
+for that exact permission ID to the [permission owner](../mcp/DOCUMENTATION.md). The conversation UI
+shows the tool owner and arguments; persistent choices retain the same policy scope, not a blanket grant. The live authorizer awaits the decision
 without a catalog lock or resource claim; it consumes an allow-once decision before returning to
 dispatch. The MCP owner rechecks current owner and policy immediately at execution, failing closed
 on changes rather than reopening a prompt while holding resource claims. One approval cannot
@@ -285,7 +272,7 @@ policy or durable approval authority. Opened/decided/consumed events retain the 
 
 ## Continuing Goals
 
-`thread-goals.ts` exposes start/update/control/list through authenticated Thread routes and the typed
+[thread-goals.ts](thread-goals.ts) exposes start/update/control/list through authenticated Thread routes and the typed
 application client. Start checks the selected source Run; every mutation also validates Thread/branch
 scope in the Catalog transaction. Objective and optional output-token budget remain separate from
 ordinary message input. There is no Host Goal database, inferred authorization or timer.
@@ -304,7 +291,7 @@ missing/pending usage and provider-specific token fields remain distinct; no syn
 is shown. Complete/cancelled Goals retain their history; Goal-owned process continuations do not expose
 independent controls that could bypass a Goal pause.
 
-`thread-goals.test.ts`, `thread-followups.test.ts` and `thread-continuation.test.ts` exercise the public
+[thread-goals.test.ts](thread-goals.test.ts), [thread-followups.test.ts](thread-followups.test.ts) and [thread-continuation.test.ts](thread-continuation.test.ts) exercise the public
 HTTP client, authenticated registered routes and actual launch-consumer logic with controlled RPC
 facts. UI behavior tests cover retained drafts, conflicts, uncertain writes and late views. Native
 Goal authority is separately exercised in Rust; these checks do not claim an unexecuted product

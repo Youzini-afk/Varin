@@ -1,6 +1,7 @@
 import { parseConversationOrganizationEntry, parseConversationOrganizationQuery, parseConversationOrganizationSnapshot, ConversationOrganizationError, type ConversationOrganizationAPI, type ConversationOrganizationFailureCode } from './conversation-organization.js';
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from './transport/runtime-switch.js';
+import { getThreadObservationBus } from './thread-observation.js';
 import { createThreadsHttpAPI } from './threads-http.js';
 
 /** Every request is fenced through body decoding, including writes with an uncertain outcome. */
@@ -41,9 +42,18 @@ export function createConversationOrganizationHttpAPI(): ConversationOrganizatio
     command: (input, signal) => post('command', input, signal),
     project: (input, signal) => post('project', input, signal),
     metadata: (input, signal) => post('metadata', input, signal),
-    // Reuse the existing authenticated, multiplexed durable observation channel.
-    observe: (cursor, listener, options) => createThreadsHttpAPI().observe(cursor, event => {
-      if ('cursor' in event && typeof event.cursor === 'number') listener(event as import('./conversation-organization.js').ConversationOrganizationEvent);
-    }, options),
+    // The bus owns the connection/cursor/retry. This adapter keeps the public
+    // abortable observation contract without opening another Host stream.
+    observe: (_cursor, listener, { signal }) => new Promise<void>(resolve => {
+      if (signal.aborted) { resolve(); return; }
+      const stop = getThreadObservationBus(createThreadsHttpAPI()).subscribe({ kinds: [
+        'organization.changed', 'thread.created', 'thread.updated', 'thread.deleted',
+        'external.created', 'external.changed', 'external.child_accepted',
+        'run.accepted', 'run.changed', 'run.cancel_requested', 'assistant.output', 'history.appended', 'permission.opened', 'question.opened',
+      ] }, event => { if (!('stream' in event) || event.stream === 'resync') listener(event); });
+      const finish = () => { stop(); changed(); signal.removeEventListener('abort', finish); resolve(); };
+      const changed = subscribeRuntimeEndpointWillChange(finish);
+      signal.addEventListener('abort', finish, { once: true });
+    }),
   };
 }

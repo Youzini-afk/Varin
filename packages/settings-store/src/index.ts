@@ -35,7 +35,7 @@ export interface SettingsFileStore {
 export interface SettingsFileStoreOptions {
   filePath: string;
   defaultValue?: VarinSettingsDocument;
-  fsModule?: Pick<typeof fs, 'readFileSync'>;
+  fsModule?: Pick<typeof fs, 'readFileSync'> & Partial<Pick<typeof fs, 'watch' | 'statSync'>>;
   fsPromises?: Pick<
     typeof fsPromisesDefault,
     'chmod' | 'mkdir' | 'open' | 'readFile' | 'rename' | 'rm' | 'stat' | 'writeFile'
@@ -55,6 +55,17 @@ type ReleaseLock = () => Promise<void>;
 
 const mutationQueues = new Map<string, Promise<unknown>>();
 const LOCK_RETRY_MS = 25;
+
+// Text, rather than object identity, is shared across stores in the same Host.
+// The missing sentinel preserves each caller's own default value.
+interface CachedDocument {
+  raw?: string | null;
+  generation: number;
+  signature?: string;
+  loading?: Promise<string | null>;
+}
+const documents = new Map<string, CachedDocument>();
+const statSignature = (stat: fs.Stats): string => `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${stat.ino}`;
 
 const errorCode = (error: unknown): string | undefined => (
   error !== null && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
@@ -110,36 +121,57 @@ export const createSettingsFileStore = ({
   const previousPath = `${resolvedPath}.previous`;
   const directory = pathModule.dirname(resolvedPath);
 
-  const read = async (): Promise<VarinSettingsDocument> => {
-    try {
-      return parseSettings(await fsPromises.readFile(resolvedPath, 'utf8'));
-    } catch (error) {
-      if (errorCode(error) === 'ENOENT') {
-        try {
-          return parseSettings(await fsPromises.readFile(previousPath, 'utf8'));
-        } catch (previousError) {
-          if (errorCode(previousError) === 'ENOENT') return readDefault();
-          throw previousError;
-        }
-      }
-      throw error;
+  const cached = documents.get(resolvedPath) ?? { generation: 0 };
+  documents.set(resolvedPath, cached);
+  const invalidate = (): void => { cached.generation++; delete cached.raw; delete cached.signature; delete cached.loading; };
+  const signature = async (): Promise<string> => (await Promise.all([resolvedPath, previousPath].map(async target => {
+    try { return statSignature(await fsPromises.stat(target)); }
+    catch (error) { if (errorCode(error) === 'ENOENT') return 'missing'; throw error; }
+  }))).join('|');
+  const signatureSync = (): string | undefined => {
+    if (!fsModule.statSync) return undefined;
+    return [resolvedPath, previousPath].map(target => {
+      try { return statSignature(fsModule.statSync!(target)); }
+      catch (error) { if (errorCode(error) === 'ENOENT') return 'missing'; throw error; }
+    }).join('|');
+  };
+  const load = async (): Promise<string | null> => {
+    try { return await fsPromises.readFile(resolvedPath, 'utf8'); }
+    catch (error) {
+      if (errorCode(error) !== 'ENOENT') throw error;
+      try { return await fsPromises.readFile(previousPath, 'utf8'); }
+      catch (previousError) { if (errorCode(previousError) === 'ENOENT') return null; throw previousError; }
     }
   };
-
-  const readSync = (): VarinSettingsDocument => {
-    try {
-      return parseSettings(fsModule.readFileSync(resolvedPath, 'utf8'));
-    } catch (error) {
-      if (errorCode(error) === 'ENOENT') {
-        try {
-          return parseSettings(fsModule.readFileSync(previousPath, 'utf8'));
-        } catch (previousError) {
-          if (errorCode(previousError) === 'ENOENT') return readDefault();
-          throw previousError;
-        }
-      }
-      throw error;
+  const decode = (raw: string | null): VarinSettingsDocument => raw === null ? readDefault() : parseSettings(raw);
+  const read = async (): Promise<VarinSettingsDocument> => {
+    // Watch notifications can lag behind completed writes (notably on macOS).
+    // Verify identity on every read; only unchanged document text is reused.
+    const next = await signature();
+    if (next !== cached.signature) { invalidate(); cached.signature = next; }
+    if (cached.raw !== undefined) return decode(cached.raw);
+    if (!cached.loading) {
+      const generation = cached.generation;
+      const loading = load().then(raw => {
+        if (cached.generation === generation) cached.raw = raw;
+        return raw;
+      }).finally(() => { if (cached.loading === loading) delete cached.loading; });
+      cached.loading = loading;
     }
+    return decode(await cached.loading);
+  };
+  const readSync = (): VarinSettingsDocument => {
+    const next = signatureSync();
+    if (next === undefined || next !== cached.signature) { invalidate(); if (next !== undefined) cached.signature = next; }
+    if (cached.raw === undefined) {
+      try { cached.raw = fsModule.readFileSync(resolvedPath, 'utf8'); }
+      catch (error) {
+        if (errorCode(error) !== 'ENOENT') throw error;
+        try { cached.raw = fsModule.readFileSync(previousPath, 'utf8'); }
+        catch (previousError) { if (errorCode(previousError) !== 'ENOENT') throw previousError; cached.raw = null; }
+      }
+    }
+    return decode(cached.raw);
   };
 
   const acquireLock = async (signal?: AbortSignal): Promise<ReleaseLock> => {
@@ -157,7 +189,6 @@ export const createSettingsFileStore = ({
         const token = randomUUID();
         try {
           await handle.writeFile(JSON.stringify({ pid: processLike.pid, token }), 'utf8');
-          await handle.sync();
         } catch (error) {
           await handle.close().catch(() => undefined);
           await fsPromises.rm(lockPath, { force: true }).catch(() => undefined);
@@ -244,10 +275,13 @@ export const createSettingsFileStore = ({
     }
     const temporaryPath = `${resolvedPath}.tmp-${processLike.pid}-${randomUUID()}`;
     try {
-      await fsPromises.writeFile(temporaryPath, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode });
+      const raw = JSON.stringify(settings, null, 2);
+      await fsPromises.writeFile(temporaryPath, raw, { encoding: 'utf8', mode });
       // Apply the existing file's mode to our replacement, independently of this process's umask.
       if (preserveMode) await fsPromises.chmod(temporaryPath, mode);
       await replaceFile(temporaryPath);
+      invalidate();
+      cached.raw = raw;
     } finally {
       await fsPromises.rm(temporaryPath, { force: true });
     }
@@ -272,7 +306,8 @@ export const createSettingsFileStore = ({
     mutator: (current: VarinSettingsDocument) => SettingsFileTransaction<Result> | Promise<SettingsFileTransaction<Result>>,
     options: { signal?: AbortSignal } = {},
   ): Promise<Result> => withMutationLock(async () => {
-    const current = await read();
+    // Cross-process mutations must read under the lock, never from a watch cache.
+    const current = decode(await load());
     // Once the mutator starts, finish its atomic commit before releasing the
     // lock. Cancellation while queued or acquiring a lock never starts it.
     options.signal?.throwIfAborted();

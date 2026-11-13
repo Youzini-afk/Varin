@@ -37,8 +37,10 @@ Host token、自定义 header、本地/relay 身份留在 main；敏感 bootstra
 
 ## Host、扩展与私有进程
 
-公开 Surface、extension broker 和私有 kernel 协议是不同边界。接收 owner 核验身份、epoch、generation 与精确操作形状。
-传入别人的 Thread/Run ID 不能成为代其执行的权限。
+公开 Surface、extension broker 和私有 kernel 协议是不同边界。公开 Surface 与 broker 消息来自不可信方，接收 owner
+核验身份、generation 与操作形状。私有 kernel 协议是同一构建在已认证 epoch 内的通道，类型由 schema 生成，
+接收方解码即得到类型化的值，两端重复做通用形状校验不会多防住什么；数据归属与领域权限由数据 owner 判断。
+传入别人的 Thread/Run ID 不能成为代其执行的权限。主体与归属事实可以在请求入口解析后复用，见[性能](performance.md#成本与边界)。
 
 Varin brokered Host 扩展在受管 child；isolated Surface 只有授予的 capability。
 Trusted-native 有显式 trust/restart 语义。新代次准备不能破坏已受理 pin，撤权继续阻止旧 owner 的新调用。

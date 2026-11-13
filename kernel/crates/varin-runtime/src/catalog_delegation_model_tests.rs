@@ -893,6 +893,14 @@ fn disabled_selection_commits_original_parent_binding_without_inference() {
     let f = Fixture::new();
     let mut db = f.open();
     let child = child(&mut db, "chat", false);
+    // The initial execution intentionally aliases its parent's Operation id. Event kind,
+    // not a cross-table subject UNION, chooses the correct conversation owner.
+    assert_eq!(child.execution_id, child.operation_id);
+    let operation_scope = super::event_scope::resolve(&db.db, &child.operation_id, "operation.settled", &Value::Null).unwrap();
+    assert_eq!(operation_scope.thread.as_deref(), Some(child.parent_thread_id.as_str()));
+    let accepted = db.events_after(0, 256).unwrap().into_iter()
+        .find(|event| event.kind == "child.accepted" && event.subject == child.operation_id).unwrap();
+    assert_eq!(accepted.thread_id.as_deref(), Some(child.parent_thread_id.as_str()));
     let before = child.configuration_ref.clone();
     let p = db
         .capture_delegation_model(PrepareParams {
@@ -926,6 +934,10 @@ fn disabled_selection_commits_original_parent_binding_without_inference() {
         .load()
         .unwrap();
     db.commit_delegation_model(p).unwrap();
+    let selected = db.events_after(0, 256).unwrap().into_iter()
+        .find(|event| event.kind == "child.model_selected" && event.subject == child.execution_id).unwrap();
+    assert_eq!(selected.thread_id.as_deref(), Some(child.child_thread_id.as_str()));
+    assert_eq!(selected.branch_id.as_deref(), Some(child.child_branch_id.as_str()));
     assert_eq!(
         db.delegated_execution(&child.execution_id)
             .unwrap()
@@ -1001,6 +1013,7 @@ fn standalone_v82_selection_assets_upgrade_without_replaying_paid_work() {
         // These native child/inference APIs are the original82 owners; only Zone2
         // tables/indexes differ in83, and no Zone2 records have been fabricated.
         followups::events::restore_pre_arrangement_fixture(&raw).unwrap();
+        crate::catalog::upgrades::remove_read_views_for_legacy_fixture(&raw);
         raw.execute_batch("BEGIN;DROP TABLE thread_creations;DROP TABLE calendar_invocations;DROP TABLE calendar_legacy_manual_boundaries;DROP INDEX thread_principals;ALTER TABLE threads DROP COLUMN principal_id;DROP TABLE catalog_principal_owner;UPDATE runs SET body=json_remove(body,'$.principal_id');DROP TABLE attachment_deliveries;DROP INDEX model_steps_active;ALTER TABLE model_steps DROP COLUMN driver_id;CREATE UNIQUE INDEX model_steps_active ON model_steps(run_id,coalesce(node_id,'')) WHERE state IN ('prepared','dispatched');DROP TABLE driver_calls;DROP TABLE driver_checkpoints;DROP TABLE run_drivers;DELETE FROM runtime_domains WHERE name='run_drivers';UPDATE run_launches SET body=json_remove(body,'$.selection.driver','$.selection.driver_models');UPDATE delegated_executions SET body=json_remove(body,'$.launch.driver','$.launch.driver_models');DROP TABLE context_observation_captures;DROP TABLE context_observation_imports;DROP INDEX context_observation_queue_cursor;DROP INDEX context_observation_queue_page;DROP TABLE IF EXISTS organization_retired_containers;DROP TABLE IF EXISTS organization_positions;DROP TABLE IF EXISTS organization_containers;DROP TABLE IF EXISTS organization_commands;DROP TABLE IF EXISTS organization_spaces;PRAGMA user_version=82;COMMIT;").unwrap();
         assert_eq!(inspect_catalog_format(&raw).unwrap(), 82);
         drop(raw);

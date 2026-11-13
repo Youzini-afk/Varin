@@ -160,7 +160,7 @@ it('the actual Host start owner keeps a frozen summary tool-free even when curre
   const runtime = new AgentRuntimeClient(kernel as unknown as import('./kernel-client.js').KernelClient, undefined, undefined, undefined, undefined, extensions);
   expect(await runtime.startRun('summary')).toEqual({ runId: 'summary', epoch: 1 });
   expect(extensions).not.toHaveBeenCalled();
-  expect(request).toHaveBeenCalledWith('runtime.run.start', { runId: 'summary' }, expect.any(AbortSignal), { settleCancellation: true });
+  expect(request).toHaveBeenCalledWith('runtime.run.start', { runId: 'summary', extensionBindings: [] }, expect.any(AbortSignal), { settleCancellation: true });
 });
 
 it('replans a model candidate when tokenizer preparation changes its counting basis before admission', async () => {

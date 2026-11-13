@@ -55,7 +55,7 @@ export interface ConversationOrganizationReceipt {
   key: string; revision: number; cursor: number; containers: ConversationOrganizationContainer[];
   positions: ConversationOrganizationPosition[]; removed: string[];
 }
-export interface ConversationOrganizationEvent { cursor: number; subject: string; revision: number; kind: string; data: unknown }
+export type ConversationOrganizationEvent = import('@varin/protocol').RuntimeEvent | import('./thread-observation.js').ThreadObservationResync;
 export type ConversationOrganizationFailureCode = 'invalid_request' | 'forbidden' | 'not_found' | 'conflict' | 'projects_unavailable' | 'unavailable' | 'unknown_outcome' | 'invalid_response';
 export class ConversationOrganizationError extends Error {
   constructor(readonly code: ConversationOrganizationFailureCode, message: string, readonly status = 400, readonly details?: unknown) { super(message); this.name = 'ConversationOrganizationError'; }

@@ -23,7 +23,7 @@ Web / Electron / mobile renderer
 ```
 
 - `application-client` 定义无框架依赖的产品 API、DTO 和类型化失败；`protocol` 提供共享领域和 Surface 类型。
-  私有 Rust wire 由 `kernel/protocol/schema.json` 生成，不能作为 renderer 的任意方法透传口。
+  私有 Rust wire 由 [kernel/protocol/schema.json](../kernel/protocol/schema.json) 生成，不能作为 renderer 的任意方法透传口。
 - `ui` 负责 React 呈现、Thread 投影、Document Registry 与编辑器分组，不拥有文件写入、凭据或耐久执行。
 - `web` 是 Application Host。Electron 内嵌同一 Host 并提供窗口、preload、通知和更新；移动端连接 Host。
   客户端只观察或提交明确操作，不增加另一套后端或对话数据库。
@@ -52,9 +52,10 @@ Web / Electron / mobile renderer
 | 语义向量与索引 | 独立派生存储进程 |
 | 外壳、布局和视图状态 | UI kernel 与选中扩展 |
 
-Catalog 与 Storage 是不同存储域。当前 Agent Catalog 的 `FORMAT` 为 96；Storage 的 format 为 22，
-SQLite `user_version` 为 16。版本以各自源码为准；Catalog 的升级链不能套用于 Storage。
-Storage 当前只接受自己的现行格式及 schema fingerprint，不提供旧格式转换，见[打开入口](../kernel/crates/varin-kernel/src/storage/core.rs)。
+Catalog 与 Storage 是不同存储域，格式、结构检查和升级能力分别由
+[Catalog](../kernel/crates/varin-runtime/src/catalog.rs) 与
+[Storage 打开入口](../kernel/crates/varin-kernel/src/storage/core.rs)定义。
+Storage 只接受自己的现行格式及 schema fingerprint；Catalog 的升级链不能套用于它。
 
 项目登记仍由当前 Application Host 的 Settings 保存，同一 Host 的客户端共享这份配置；
 Catalog 中按可信 principal 隔离的会话分类只引用项目 ID，不把项目设置变成用户私有副本。
@@ -69,20 +70,31 @@ Catalog 中按可信 principal 隔离的会话分类只引用项目 ID，不把�
 Host 校验真实 Thread/branch 和输入，准备模型、凭据、Source、策略与扩展候选。Rust Catalog 耐久受理后固定本次
 Run/request 的配置与正文，Supervisor 调用冻结的 RunDriver，原执行 owner 记录真实模型和工具工作。内置 Rust 循环是默认 driver，可信扩展可以选择独立算法；权限、资源与记录并不因此变成另一个数据库。设置变化不会重写已受理请求、队列输入或原回执。
 
-UI 通过 `ThreadsAPI` 读快照与历史，`/api/threads/observe` 传输持久事件和临时进度。断线后按 durable cursor 追平；
-首次订阅与快照读取并行，进度携带 Thread、branch、Run 和 request 身份。文字、公开思考和工具参数增量在
-独立传输消费者中按序发送，消费较慢时合并相邻增量；传输等待不阻塞模型执行，也不丢弃组成正文的片段。
-持久历史只替换对应 request 的临时内容，避免前一次请求的提交清空下一次请求的流式输出。
-视图关闭、Host 切换或观察流中断不代表执行取消。浏览器直连将固定白名单内的长观察请求复用到同 Host 的
-`/api/varin/observations/ws`，避免 HTTP/1 同源连接被 SSE 与长轮询占满；已有 relay 仍使用原复用通道。
-此适配器只转交原路由的响应与取消，保留身份、Origin、游标、revision 和租约，不受理任意 HTTP 请求或自动重放写入。
-逐通道 pull 控制响应背压；连接断开关闭各原观察者，恢复由各业务消费者按原语义负责。
-终端与语音的 WebSocket 仍有独立职责，旧运行时 socket 不再受理。
+UI 通过 `ThreadsAPI` 读取组合快照与分页历史。Catalog 的独立只读连接在一致快照内收集视图元数据，
+正文在 writer 锁外读取并保留原内容租约；一个视图不再由 Host 逐项拼接跨进程查询。
+Host 的共享事件 reader 读取持久事件，各 HTTP 观察者仍有自己的 cursor、主体权限和进度兴趣。
+客户端同一 Host 复用一个观察总线，按 Thread、branch 和事件种类分发；订阅就绪、重连或缺口触发权威重读。
+普通变化只刷新受影响的视图和列表条目，不把每次进度变成全目录读取。
+
+临时文字、公开思考和工具参数按 request 保存在独立流式状态中，持久历史只替换对应 request 的临时内容。
+传输等待不阻塞模型执行；视图关闭、Host 切换或断线不代表执行取消。
+原生事件作用域、追平和投影合同见[运行时观察](runtime.md#读取与观察)，具体入口见
+[Host adapters](../packages/web/application-host/lib/kernel/DOCUMENTATION.md#native-thread-admission-and-product-views)。
+
+浏览器直连将白名单内的长观察请求复用到同 Host 的 `/api/varin/observations/ws`，避免同源连接被 SSE 与长轮询占满；
+relay 使用原复用通道。适配器保留原路由的身份、Origin、cursor、revision、租约与逐通道背压，
+不受理任意 HTTP 请求、不自动重放写入。终端与语音 WebSocket 保留各自职责。
 
 PDF 上传由 ThreadMaterials 校验实际 Thread/branch，通过原 documentReader 与 MaterialStore 保存原始字节。
 输入只携带已核验的固定 snapshot 来源，`document_read` 再按原作用域读取。浏览器不创建另一套文档存储或解析权威。
 
 ## 权限、完成与失败
+
+HTTP 认证在同一请求内复用；主体与凭据由原 owner 常驻维护，持久变更成功后才发布新认证状态。
+路由按实际输入字段批量核验 Thread、Run、Operation 和 Input 的不可变归属，不扫描不透明正文猜测权限。
+私有工作不能跨主体访问，已认证的非 Host owner 对公开工作只有读取权。见
+[认证边界](../packages/web/application-host/lib/ui-auth/DOCUMENTATION.md)与
+[归属解析](../packages/web/application-host/lib/kernel/ownership-resolver.ts)。
 
 工具可见只表示可以选择。项目信任、客户端身份、工具策略、原 invocation 与实际资源 owner 分别核验权限。
 能力标签和逻辑资源排程不等于 OS sandbox；Thread ID、内容 hash 或另一个 Host 上的同名路径也不是授权。
@@ -99,30 +111,15 @@ Thread/worktree 保留，供核对和后续处理。
 
 ## 数据与交付
 
-内部结构可以继续演进，由原存储 owner 在打开时自动升级已支持的旧版本，业务读取与执行随后使用当前结构。
-Agent Catalog 的[升级链](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)支持 78 → 79 → 80 → 81 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94 → 95 → 96 → 97，以及独立格式 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94 → 95 → 96 → 97；可从任一已支持的旧格式打开。
-94 → 95 增加按可信主体分区的共享会话组织：混合容器、会话位置、局部排序代际、稳定受理回执与初始化代际。95 → 96 在原升级事务中区分明确位置和执行父任务的位置继承，保留已有分类、稳定引用与受理回执；恢复旧位置仍提交新的单调版本，不回退版本号。
-96 → 97 保留会话归属、已有分类与原回执，由原 Settings 初始化补齐此前漏入目录的公开原生会话；目录可见性与原会话列表一致。
-升级仅增加原 Catalog 结构并与格式号原子提交，不重建 Thread、分支、短引用、历史或已受理执行，不移动文件。
-初始项目来自成功读取的原 Settings 文档，损坏／不可读不等于空列表；第一次访问不会认领其他主体或旧公开会话。
-84 → 85 为消息、派发、历史及上下文保留增加 typed 附件关系；旧材料引用只由升级器转换一次，新发送不解析正文建立权限。附件字节仍由原 Storage／材料 owner 保管。
-85 → 86 允许明确 User 派发保留空工具来源，并增加原子任务报告身份；旧工具派发正文和回执保持不变，不回放执行效果。
-86 → 87 为原 Thread/Run 及派生执行保存可信认证主体。Host 首次初始化时固定旧记录归属策略，之后启用认证不会自动认领原公开工作；该升级不重放执行。
-87 → 88 保存小型 Thread 创建证据与日程受理身份，保留原 principal、Bot 绑定、初始 branch 和回执，不因正文回收重建已受理工作。旧库已丢失的身份明确未知，不从 profile 或 ID 前缀补造；日程旧定义的新手动请求使用升级事务生成的 admission key 前缀，旧未知请求不能借刷新配置重新执行。
-88 → 89 增加 Bot 长期事件安排、稳定接收与独立匹配水位、对象路由和跨 Host consumer；旧 follow-up 保持 work 归属和原执行身份。正文继续由 ContentStore 保存，升级不重放触发或外部效果。
-89 → 90 为新自动 root 增加显式扩展准备阶段；旧 launch 缺少该字段时仍按原精确身份恢复，转换不重写原绑定、历史或回执。格式标记阻止旧程序误读新的待准备状态。
-90 → 91 从仍保留的 Responses 原始回执恢复遗漏的缓存写入 Token；只补充能核验请求身份、协议和已有计数的 ModelStep／规划回执及既有账本，不创建历史账目、不改冻结价格、不重放执行。无原始证据的记录继续保持未知。
-91 → 92 保护原输入正文中的冻结引用与位置关系；历史内容、资源归属和幂等回执不改写，旧程序不能静默忽略新输入的引用投影。
-92 → 93 增加 Catalog 本地 typed 模型引用与执行编号；92 的引用正文布局在七张索引表和两列均缺失时初始化，已发布的完整协作索引则校验并保留原引用空间、编号与分配高水位。局部或损坏索引只读拒绝，转换不改写原正文与回执。
-93 → 94 保护新压缩 recipe 中独立冻结的正文来源映射；旧 recipe 不重写，继续使用原切片、引用与保留语义，旧程序不能静默忽略新映射。
-78 → 79 初始化外部 Agent 记录，79 → 80 初始化用量账本及开始记账时间；旧回执缺少可靠结算时间与归属，不补造账本。
-80 → 81 初始化 Zone2 环境捕获表；81 → 83 为原历史引用建立稀疏文本范围索引，支持派发选择读取。
-独立格式 82 已有这些索引但没有 Zone2 表，82 → 83 只初始化缺少的捕获结构。预检查按真实版本区分两种布局，不以 `>=81` 猜测结构存在。
-83 → 84 将既有 Run 固定为历史内置 driver，并加入 driver 私有 checkpoint、调用记录及明确归属的并行模型索引。
-原正文对象、消息身份、环境捕获回执和已派发绑定不改变。
-转换、最终版本号与升级事件在同一事务中提交，然后才推进 epoch 和执行恢复；正文对象、会话身份、队列和原回执保留，不复制整库。
-事务提交前失败或进程中断时回滚未完成转换，下次打开重试；失败信息保留源版本、目标版本和原始原因。
-未知、更新或结构损坏的格式仍只读拒绝并保留资产。工作区、Git、历史原生数据与外部配置仍由原 owner 管理。
+内部结构由原存储 owner 在打开时处理。Catalog 支持范围与转换步骤以
+[升级实现](../kernel/crates/varin-runtime/src/catalog_upgrade.rs)为准；文档不重复版本链。
+转换、格式标记和升级事件在同一事务提交，然后才推进 epoch 和恢复执行。失败或中断回滚未提交转换，
+错误保留源版本、目标版本及原因；未知、更新或结构损坏的格式只读拒绝，保留原资产。
+
+升级保留正文对象、会话与主体身份、分支、稳定引用、队列和原回执，不复制整库、不重放模型或外部效果。
+无法从原证据恢复的身份与用量保持未知，不从名称、当前配置或 ID 前缀补造。
+初始项目来自成功读取的 Settings 文档，损坏或不可读不等于空列表；后续启用认证不自动认领旧公开工作。
+工作区、Git、历史原生数据及外部配置仍由各自 owner 管理。
 
 安装布局核验 Rust executable 的 build、wire 和 architecture；协议改动后由正常构建生成匹配二进制。
 定向测试不代表全部安装包、模型账号、代理、物理远端 Host 或电脑驱动已验收，见[运行时验收](runtime-acceptance.md)。
