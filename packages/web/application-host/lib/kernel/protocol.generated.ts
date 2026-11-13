@@ -2171,10 +2171,22 @@ export interface CalendarCalculatedParams {
   failureCode: string | null;
 }
 
+export interface SourcePreparationBinding {
+  threadId: string;
+  branchId: string;
+  key: string;
+  resourceOwner: SourceResourceOwner;
+  workspaceId: string;
+  mode: SourceMode;
+  nativeSource: LaunchSource;
+  preparedSource: LaunchSource;
+}
+
 export interface CalendarAdmitParams {
   occurrenceId: string;
   expectedRevision: number;
   ownerEpoch: number;
+  sourcePreparation?: SourcePreparationBinding;
   configuration: unknown;
   launch: SubmitLaunch;
   initialContext: InitialContext;

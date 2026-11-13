@@ -166,7 +166,7 @@ pub(super) fn execute(
                     p.input_preparation,
                 )
                 .map_err(domain)?;
-            let prepared = preparation.load(launch).map_err(domain)?;
+            let prepared = preparation.with_source_preparation(p.source_preparation).load(launch).map_err(domain)?;
             if cancel.load(Ordering::Acquire) {
                 return Err(KernelError::Cancelled);
             }

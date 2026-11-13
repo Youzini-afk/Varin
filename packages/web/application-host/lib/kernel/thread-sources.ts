@@ -1,3 +1,5 @@
+import { resourceSource } from './thread-context.js';
+import { matchesSourcePreparation } from './source-preparation-binding.js';
 import { parseAgentInputContext, type SourceResourceOwner } from '@varin/protocol';
 import { waitWithSignal } from '../cancellation.js';
 import { normalizeWorkspaceRelativePath } from '../workspace/path-safety.js';
@@ -159,12 +161,31 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
     // A saved registration is a namespace, not authority to read a physical directory.
     // Look up the durable receipt before reopening a now-moved directory or expired draft.
     const workspaceId = input.workspaceId;
+    const bindRegistration = (prepared: ThreadPreparedSource, reference: import('./protocol.generated.js').LaunchSource | undefined): ThreadPreparedSource => {
+      if (prepared.source.workspaceId === workspaceId) return prepared;
+      if (!reference) throw new SourceAdmissionError('source_changed');
+      const bound: ThreadPreparedSource = { ...prepared, sourcePreparation: {
+        threadId: input.threadId, branchId: input.branchId, key: input.key, resourceOwner: input.resourceOwner,
+        workspaceId, mode: input.mode, nativeSource: reference, preparedSource: resourceSource(prepared.source)!,
+      } };
+      if (!matchesSourcePreparation(input, bound)) throw new SourceAdmissionError('source_changed');
+      return bound;
+    };
+    const nativeReference = (reference: { workspace_id: string; execution_workspace_id: string; branch_id: string | null; native_scope?: string } | undefined) => reference
+      ? { workspace_id: reference.workspace_id, execution_workspace_id: reference.execution_workspace_id, branch_id: reference.branch_id,
+        ...(reference.native_scope ? { native_scope: reference.native_scope } : {}), resource_owner: input.resourceOwner,
+        mode: 'native_workspace' as const, revision: null, live_root: null } : undefined;
     const selectedNative = async () => input.selection?.mode === 'native_workspace'
       ? nativeWorkspaces?.prepareSelection(input.selection, input.threadId, signal)
       : input.selection ? undefined : nativeWorkspaces?.prepare(workspaceId,signal);
     if(input.mode==='live_root'||input.mode==='native_workspace'){
       const native=await selectedNative();
-      if(native)return {...native,source:{...native.source,tools:await sourceTools('native_workspace')}};
+      if(native){
+        const prepared = {...native,source:{...native.source,tools:await sourceTools('native_workspace')}};
+        if (native.source.workspaceId === workspaceId) return prepared;
+        const registration = await documents.admitWorkspaceRegistration(workspaceId, signal);
+        return bindRegistration(prepared, nativeReference(registration.nativeSource));
+      }
       if(input.mode==='native_workspace')throw new SourceAdmissionError('source_unavailable');
     }
     const registration = await documents.admitWorkspaceRegistration(workspaceId, signal);
@@ -185,8 +206,8 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
         const entry=await nativeWorkspaces.open(selected,signal);
         path=(await nativeWorkspaces.acquire(selected,entry.grant,signal)).path;
       }
-      return {path,source:{resourceOwner:input.resourceOwner,workspaceId:owningWorkspace,executionWorkspaceId:selected.execution_workspace_id,
-        branchId,mode,...(mode==='fixed_branch'?{revision:0}:{}),tools:await sourceTools(mode)},provenance} as ThreadPreparedSource;
+      return bindRegistration({path,source:{resourceOwner:input.resourceOwner,workspaceId:owningWorkspace,executionWorkspaceId:selected.execution_workspace_id,
+        branchId,mode,...(mode==='fixed_branch'?{revision:0}:{}),tools:await sourceTools(mode)},provenance} as ThreadPreparedSource, nativeReference(registration.nativeSource));
     };
     return workingStates.withBranchStore(owningWorkspace, 'source-prepare', async store => {
       const branchId = `source:${key}`;
@@ -210,7 +231,10 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
       if (await store.getBranchRoot(branchId, { signal })) throw new Error('Source preparation has no original receipt');
       const native=await selectedNative();
       if(native?.source.mode==='native_workspace'){
-        if(native.source.workspaceId!==owningWorkspace)throw new SourceAdmissionError('source_changed');
+        if(native.source.workspaceId!==owningWorkspace
+          || registration.nativeSource && !isDeepStrictEqual(resourceSource(native.source), nativeReference(registration.nativeSource))) {
+          throw new SourceAdmissionError('source_changed');
+        }
         const selected=native.source;
         const capturedPolicy = await documents.resolveTextEncodingPolicy?.(workspaceId);
         const captured=input.content.mode==='surface-drafts'?await readSourceDrafts({documents,consumer:{kind:'thread',threadId:input.threadId,branchId:input.branchId},context:input.content.context,workspaceId,signal}):{editorDrafts:[]};

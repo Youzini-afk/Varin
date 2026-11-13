@@ -189,3 +189,26 @@ it('managed preparation accepts the original native backend but cannot upgrade f
     executionWorkspaceId: 'native-execution', mode: 'native_workspace', branchId: 'native-branch', tools: [] } });
   await expect(consumers.threads.prepare(input)).rejects.toThrow('changed the original selection');
 });
+
+it('calendar admission forwards only the binding returned by its original registered source owner', async () => {
+  const f = fixture({ kind: 'workspace', resourceOwner: { kind: 'local' }, workspaceId: 'registered-subtree' });
+  if (f.work.definition.target.kind !== 'new_work') throw new Error('Expected new work');
+  f.work.definition.target.sourceMode = 'live_root';
+  const reference = { workspace_id: 'owning-workspace', execution_workspace_id: 'original-execution', branch_id: 'original-branch', native_scope: 'selected/subtree' };
+  const nativeSource: ThreadSource = { resourceOwner: { kind: 'local' }, workspaceId: reference.workspace_id,
+    executionWorkspaceId: reference.execution_workspace_id, branchId: reference.branch_id, nativeScope: reference.native_scope,
+    mode: 'native_workspace', tools: [] };
+  const prepare = createThreadSourcePreparer({
+    documents: { admitWorkspaceRegistration: async () => ({ canonicalPath: '/original', nativeSource: reference }) } as never,
+    nativeWorkspaces: { prepare: async () => ({ path: '/native/selected/subtree', source: nativeSource }) } as never,
+    workingStates: {} as never, inspectInventory: async () => { throw new Error('Live view is not a capture'); }, sourceTools: async () => [],
+  });
+  f.prepare.mockImplementation(prepare);
+  await f.adapter.prepareCalendarWork(f.work, '/project', new AbortController().signal);
+  expect(f.runtime.admitCalendar).toHaveBeenCalledWith(expect.objectContaining({ occurrenceId: f.work.occurrence.id,
+    sourcePreparation: expect.objectContaining({ threadId: identity.threadId, branchId: identity.branchId, key: f.work.occurrence.id,
+      workspaceId: 'registered-subtree', nativeSource: expect.objectContaining(reference),
+      preparedSource: expect.objectContaining({ native_scope: 'selected/subtree', workspace_id: 'owning-workspace' }) }),
+    launch: expect.objectContaining({ source: expect.objectContaining({ workspaceId: 'owning-workspace', nativeScope: 'selected/subtree' }) }),
+  }), expect.any(AbortSignal));
+});

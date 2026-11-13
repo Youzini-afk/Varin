@@ -1401,6 +1401,8 @@ pub(crate) struct CalendarAdmitParams {
     pub(crate) occurrence_id: String,
     pub(crate) expected_revision: i64,
     pub(crate) owner_epoch: i64,
+    pub(crate) source_preparation:
+        Option<varin_runtime::catalog::calendar::SourcePreparationBinding>,
     pub(crate) configuration: Value,
     pub(crate) launch: SubmitLaunch,
     pub(crate) initial_context: InitialContext,

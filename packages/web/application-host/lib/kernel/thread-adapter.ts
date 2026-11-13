@@ -1015,7 +1015,7 @@ export class ThreadAdapter {
         : await this.resolveSource(identity, { resourceOwner: { kind: 'local' }, path: projectPath }, signal);
       signal.throwIfAborted();
       stage = 'source_preparation';
-      const { source } = await this.prepareSource({ ...identity, key: occurrence.id, resourceOwner: location.resourceOwner,
+      const { source, sourcePreparation } = await this.prepareSource({ ...identity, key: occurrence.id, resourceOwner: location.resourceOwner,
         workspaceId: location.workspaceId, mode: definition.target.sourceMode, content: { mode: 'saved-files' }, captureScopes: [] }, signal);
       signal.throwIfAborted();
       stage = 'source_admission';
@@ -1041,6 +1041,7 @@ export class ThreadAdapter {
         stage = 'admission';
         const receipt = await this.runtime.admitCalendar({ occurrenceId: occurrence.id, expectedRevision: occurrence.revision,
           ownerEpoch: preparation.owner_epoch, configuration: model.configuration, initialContext,
+          ...(sourcePreparation ? { sourcePreparation } : {}),
           ...(skill ? { inputPreparation: { expectedContextCheckpoint: null, skill } } : {}),
           launch: { inheritSource: false, source: { resourceOwner: source.resourceOwner, workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId,
             ...(source.mode==='native_workspace'&&source.nativeScope?{nativeScope:source.nativeScope}:{}),branchId: source.branchId ?? null, revision: source.revision ?? null, mode: source.mode, liveRoot: source.liveRoot ?? null, ...(source.environmentRunId ? { environmentRunId: source.environmentRunId } : {}) },
