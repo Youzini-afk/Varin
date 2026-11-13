@@ -89,7 +89,7 @@ impl Catalog {
             };
             let item: HistoryItem = record(&self.db, "history", &id)?;
             cursor = item.parent.clone();
-            history.push(self.content.hydrate_history_cancellable(item, cancelled)?);
+            history.push(self.content.load_stored_history_item(item, cancelled)?);
         }
         history.reverse();
         let previous = cursor
@@ -403,6 +403,78 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+    #[test]
+    fn public_thread_history_retains_original_media_holders_in_full_and_delta_views() {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        use crate::output::{IncomingMedia, MediaReadParams, OutputMediaHolder, OutputSource};
+        let f = Fixture::new();
+        let mut db = Catalog::open(&f.0).unwrap();
+        db.create_thread("thread", "main").unwrap();
+        let bytes = vec![17u8; 700_000];
+        let encoded = STANDARD.encode(&bytes);
+        let receipt = db.submit(&SubmitInput {
+            key: "media-input".into(), thread_id: "thread".into(), branch_id: "main".into(),
+            expected_head: None,
+            input: json!({"text":"原始图片", "attachments":[{"media_type":"image/png","data_base64":encoded}]}),
+            configuration: json!({}),
+        }).unwrap();
+        let media = IncomingMedia { media_type: "image/png".into(), data_base64: encoded.clone() }
+            .admit(OutputSource::Operation { operation_id: "original-output".into() }).unwrap();
+        let assistant = db.append_history(&receipt.run_id, db.epoch(), Some(&receipt.input_id),
+            HistorySource::Assistant,
+            json!({"id":"answer","provenance":{"kind":"assistant"},"content":{"kind":"media","media":media},"opaque":null}),
+            None).unwrap();
+        // append_history is the untyped fixture API. Persist the assistant item through
+        // the same typed content owner used by execution's ModelFinished publication.
+        let conversation = serde_json::from_value(assistant.content.clone()).unwrap();
+        let mut stored_assistant: HistoryItem = record(&db.db, "history", &assistant.id).unwrap();
+        stored_assistant.content = db.content.save_conversation(&conversation, &None).unwrap();
+        db.db.execute("UPDATE history SET body=?2 WHERE id=?1",
+            params![assistant.id, encode(&stored_assistant).unwrap()]).unwrap();
+        let full = db.thread_view("thread", "main", 20, None).unwrap();
+        let delta = db.thread_view("thread", "main", 20, Some(&receipt.input_id)).unwrap();
+        assert_eq!(full["history"].as_array().unwrap().len(), 2);
+        assert_eq!(delta["history"], json!([full["history"][1]]));
+        assert_eq!(delta["historyPage"]["afterHeadId"], receipt.input_id);
+        assert!(serde_json::to_vec(&full).unwrap().len() < 20_000,
+            "public views must not resolve media bytes into provider history");
+        drop(db);
+        let mut db = Catalog::open(&f.0).unwrap();
+        assert_eq!(db.thread_view("thread", "main", 20, None).unwrap()["history"], full["history"]);
+        for (index, item_id, pointer) in [
+            (0, receipt.input_id.as_str(), "/content/attachments/0"),
+            (1, assistant.id.as_str(), "/content/content/media"),
+        ] {
+            let item = &full["history"][index];
+            let media = item.pointer(pointer).unwrap();
+            assert!(media.get("data_base64").is_none());
+            let reference = media["content_ref"]["content_object"].as_str().unwrap();
+            let raw: HistoryItem = record(&db.db, "history", item_id).unwrap();
+            let (stored, _) = db.content.load_stored_history_payload(&raw.content, &|| false).unwrap();
+            assert_eq!(item["content"], stored, "same public payload as history.body");
+            let request = MediaReadParams {
+                thread_id: "thread".into(), branch_id: "main".into(),
+                holder: OutputMediaHolder::History { item_id: item_id.into() },
+                part_index: 0, chunk_index: 0, expected_content_ref: reference.into(),
+            };
+            let chunk = db.capture_media_read(&request).unwrap().chunk(&|| false).unwrap();
+            let mut actual = STANDARD.decode(&chunk.bytes_base64).unwrap();
+            for chunk_index in 1..chunk.chunk_count {
+                let mut request = request.clone();
+                request.chunk_index = chunk_index;
+                actual.extend(STANDARD.decode(db.capture_media_read(&request).unwrap().chunk(&|| false).unwrap().bytes_base64).unwrap());
+            }
+            assert_eq!(actual, bytes, "original holder must remain readable");
+            let hydrated = db.content.hydrate_history(raw).unwrap();
+            let provider_media = hydrated.content.pointer(pointer.strip_prefix("/content").unwrap()).unwrap();
+            assert_eq!(provider_media["data_base64"], encoded, "provider reads still resolve original bytes");
+        }
+        db.create_thread("unrelated", "other").unwrap();
+        let foreign = MediaReadParams { thread_id: "unrelated".into(), branch_id: "other".into(),
+            holder: OutputMediaHolder::History { item_id: assistant.id }, part_index: 0, chunk_index: 0,
+            expected_content_ref: full["history"][1]["content"]["content"]["media"]["content_ref"]["content_object"].as_str().unwrap().into() };
+        assert!(db.capture_media_read(&foreign).unwrap().chunk(&|| false).is_err());
     }
     #[test]
     fn cancellation_stops_history_hydration_and_releases_the_reader_snapshot() {

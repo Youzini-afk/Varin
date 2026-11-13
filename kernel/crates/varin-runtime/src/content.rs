@@ -505,8 +505,24 @@ impl ContentStore {
     }
     pub(crate) fn hydrate_history_cancellable(
         &self,
+        item: crate::types::HistoryItem,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<crate::types::HistoryItem> {
+        self.load_history_item(item, cancelled, false)
+    }
+    /// Public conversation views retain media holders; only provider history resolves bytes.
+    pub(crate) fn load_stored_history_item(
+        &self,
+        item: crate::types::HistoryItem,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<crate::types::HistoryItem> {
+        self.load_history_item(item, cancelled, true)
+    }
+    fn load_history_item(
+        &self,
         mut item: crate::types::HistoryItem,
         cancelled: &dyn Fn() -> bool,
+        stored: bool,
     ) -> Result<crate::types::HistoryItem> {
         if cancelled() { return Err(RuntimeError::DispatchCancelled); }
         #[cfg(test)]
@@ -516,7 +532,11 @@ impl ContentStore {
                 hook(&item.id);
             }
         }
-        let (content, provider) = self.load_history_payload_cancellable(&item.content, cancelled)?;
+        let (content, provider) = if stored {
+            self.load_stored_history_payload(&item.content, cancelled)?
+        } else {
+            self.load_history_payload_cancellable(&item.content, cancelled)?
+        };
         item.content = content;
         item.provider = provider;
         Ok(item)
