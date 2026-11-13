@@ -291,8 +291,11 @@ const createRuntime = ({
     snapshot = store;
     byToken = new Map(store.clients.filter(client => !client.revokedAt).map(client => [client.tokenHash, client]));
   };
-  // A Host creates one runtime. Only its commands mutate this credential file.
-  const ready = (async () => {
+  // Constructing the Host must not open stores or create its identity before
+  // the offline-restore fence has been checked. The first actual consumer owns
+  // initialization; concurrent consumers share its result for this lifetime.
+  let initialization: Promise<void> | undefined;
+  const ready = (): Promise<void> => initialization ??= (async () => {
     const raw = await clientStore.read();
     const owner = await principals.ownerId();
     if (raw.version === STORE_VERSION) publish(normalizeStore(raw, owner));
@@ -301,16 +304,14 @@ const createRuntime = ({
       return { document: store, result: store, write: persisted.version !== STORE_VERSION };
     }));
   })();
-  // Keep startup failures observable by all callers without an unhandled rejection.
-  void ready.catch(() => undefined);
-  const readStore = async () => { await ready; return snapshot; };
+  const readStore = async () => { await ready(); return snapshot; };
   type Usage = { lastUsedAt: string; lastTransport: ClientTransport; usesRelay: boolean };
   const pendingUsage = new Map<string, Usage>();
-  let mutation: Promise<unknown> = ready;
+  let mutation: Promise<unknown> = Promise.resolve();
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
   const mutateStore = <Result>(mutator: (store: RemoteClientStore) => Promise<ClientMutation<Result>>): Promise<Result> => {
     const next = mutation.catch(() => undefined).then(async () => {
-      await ready;
+      await ready();
       const usage = new Map(pendingUsage);
       const committed = await clientStore.transact(async persisted => {
         const store = normalizeStore(persisted, await principals.ownerId());
@@ -492,7 +493,7 @@ const createRuntime = ({
     // forwarded request with x-varin-relay-connection; anything else is a
     // direct (local/LAN/tunnel-URL) request. This also drives relay demand.
     const transport = req?.headers?.['x-varin-relay-connection'] ? 'relay' : 'direct';
-    await ready;
+    await ready();
     const tokenHash = hashToken(token);
     let client = byToken.get(tokenHash);
     if (!client || !await principals.resolve(client.principalId)) return null;

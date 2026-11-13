@@ -29,7 +29,9 @@ describe('persistent authenticated principals', () => {
     expect(await fs.readFile(path.join(root, 'ui-principals.json'), 'utf8')).toBe('{"version":99}');
   });
   it('migrates old owner devices, binds pairing to its issuer and isolates token rotation between people', async () => {
-    let { root, principals, clients } = await fixture(); const owner = await principals.ownerId();
+    const { root, ...runtime } = await fixture();
+    let { principals, clients } = runtime;
+    const owner = await principals.ownerId();
     const old = await clients.createClient({ dedupeKey: 'same-device', reuseDedupeIdentity: true });
     const persisted = JSON.parse(await fs.readFile(path.join(root, 'clients.json'), 'utf8'));
     await clients.dispose();

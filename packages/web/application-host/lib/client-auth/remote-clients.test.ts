@@ -25,6 +25,19 @@ const createRuntime = async () => {
 };
 
 describe('remote client auth runtime', () => {
+  it('does not open credential stores or create a principal before the first consumer', async () => {
+    const { dir, runtime } = await createRuntime();
+    try {
+      await new Promise(resolve => setImmediate(resolve));
+      expect(await fs.readdir(dir)).toEqual([]);
+      await runtime.dispose();
+      expect(await fs.readdir(dir)).toEqual([]);
+    } finally {
+      await runtime.dispose();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('creates, authenticates, lists, and revokes client tokens', async () => {
     const { dir, runtime } = await createRuntime();
     try {

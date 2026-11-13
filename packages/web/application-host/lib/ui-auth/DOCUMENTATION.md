@@ -94,8 +94,10 @@ owner. Its parsed document remains immutable for the Host lifetime. Subject chan
 are not a runtime API; a trusted update is loaded at the next startup. Existing
 malformed stores fail initialization without being replaced.
 
-The remote-client runtime is shared by resolved credential-store path. Startup loads
-and normalizes records, then bearer authentication uses a token-hash index without
+The remote-client runtime is shared by resolved credential-store path. Its first
+consumer loads and normalizes records; construction alone performs no I/O or
+identity creation before the Host's offline-restore startup fence. Concurrent
+consumers share initialization, then bearer authentication uses a token-hash index without
 file reads or transactions. Creation, rotation, revocation and purge publish a new
 index only after the file transaction succeeds. Returned capability/directory arrays
 are copies, not mutable grants. Last-used and transport telemetry updates immediately
