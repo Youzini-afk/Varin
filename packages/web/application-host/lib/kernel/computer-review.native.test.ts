@@ -135,7 +135,8 @@ it('source-less public Native work executes the shipped Computer tool, drains ex
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'computer-review' });
   const api = createThreadsHttpAPI();
   const identity = await api.create('source-less-computer');
-  const prepared = await extensions.prepareService({ serviceId: 'varin.computer.observe', version: 1,
+  const observe = COMPUTER_TOOL_DECLARATIONS.find(declaration => declaration.tool?.name === 'computer_observe')!;
+  const prepared = await extensions.prepareService({ serviceId: observe.id, version: observe.version,
     method: 'execute', args: [], routing: { threadId: identity.threadId, branchId: identity.branchId } });
   cleanups.push(async () => { prepared.release(); });
   expect((await api.computer.state(identity)).state).toMatchObject({ work: identity, currentExecution: null, currentRootExecution: null, active: false });
