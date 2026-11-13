@@ -1,3 +1,4 @@
+import { nativeThreadView } from './thread-view.test-helper.js';
 import { EventEmitter } from 'node:events';
 import type { Express, Request, RequestHandler, Response as ExpressResponse } from 'express';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -25,7 +26,7 @@ const definition: Followup = { owner: { kind: 'work' }, name: null, timing: { ki
 /** These are transport contract tests: real HTTP/client/admission functions, with a controlled RPC boundary.
  * Catalog durability, process-stop proof and atomic occurrence consumption are native suite obligations. */
 function fixture() {
-  const facts = { botId: null as string | null, principalId: null as string | null, botDefinitions: [] as Followup[], routes: [] as import('@varin/protocol').FollowupSourceRoute[], reply: structuredClone(definition), list: [structuredClone(definition)], conflict: false,
+  const facts = { snapshotFollowups: [structuredClone(definition)], botId: null as string | null, principalId: null as string | null, botDefinitions: [] as Followup[], routes: [] as import('@varin/protocol').FollowupSourceRoute[], reply: structuredClone(definition), list: [structuredClone(definition)], conflict: false,
     occurrenceViews: new Map<string, FollowupOccurrenceView>(), occurrenceDetailError: false,
     occurrencePages: new Map<number | undefined, FollowupOccurrencesResult>(), occurrenceError: false,
     source: structuredClone(run), jobs: [] as HostJobSource[], registerError: false, pendingError: false, pending: [] as FollowupPendingRegistration[],
@@ -37,6 +38,9 @@ function fixture() {
   const validateLive = vi.fn(async () => { if (facts.liveInvalid) throw new Error('Original live root changed'); });
   const requests = vi.fn(async (method: string, params: Record<string, unknown>, _signal?: AbortSignal): Promise<unknown> => {
     switch (method) {
+      case 'runtime.thread.view':
+        expect(params).toEqual({ threadId: identity.threadId, branchId: identity.branchId, historyLimit: 20 });
+        return nativeThreadView(identity, { followups: facts.snapshotFollowups });
       case 'runtime.thread.inspect': return { thread_id: params.threadId, bot_id: facts.botId, principal_id: facts.principalId, parent_thread_id: null, observer_project_ids: [], branches: [
         { branch_id: identity.branchId, active_run_id: null, head: null, latest_run: null },
         { branch_id: 'branch:other', active_run_id: null, head: null, latest_run: null },

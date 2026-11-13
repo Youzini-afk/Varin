@@ -1,3 +1,4 @@
+import { nativeThreadView } from './thread-view.test-helper.js';
 import { EventEmitter } from 'node:events';
 import type { Express, Request, RequestHandler, Response as ExpressResponse } from 'express';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -35,9 +36,13 @@ function observation(): Operation {
  * boundary is controlled: this does not prove Rust family authorization, persistence or source IO. */
 function routeFixture() {
   const facts = { operation: observation(), denyCancel: false, active: true, operationMissing: false, operationReadError: false,
-    run: structuredClone(run), history: [] as HistoryItem[] };
+    snapshotOperations: null as Operation[] | null, run: structuredClone(run), history: [] as HistoryItem[] };
   const requests = vi.fn(async (method: string, params: Record<string, unknown>): Promise<unknown> => {
     switch (method) {
+      case 'runtime.thread.view':
+        expect(params).toEqual({ threadId: identity.threadId, branchId: identity.branchId, historyLimit: 20 });
+        if (facts.operationReadError) throw new KernelClientError({ code: 'storage-error', message: 'Private original record diagnostics' });
+        return nativeThreadView(identity, { history: facts.history, operations: facts.snapshotOperations ?? [facts.operation] });
       case 'runtime.operation.inspect': case 'runtime.operation.status':
         if (facts.operationReadError) throw new KernelClientError({ code: 'storage-error', message: 'Private original record diagnostics' });
         if (facts.operationMissing || params.operationId !== facts.operation.id) {
@@ -355,38 +360,17 @@ function closedFiniteHistory(f: ReturnType<typeof routeFixture>, origin: 'model'
   return { operationId, result };
 }
 
-it.each(['model', 'policy'] as const)('reconstructs the closed observer from the original finite %s result when it is absent from active Operations', async origin => {
+it.each(['model', 'policy'] as const)('preserves the native closed observer and original finite %s result without extra reads', async origin => {
   const f = routeFixture();
-  const { operationId } = closedFiniteHistory(f, origin);
+  closedFiniteHistory(f, origin);
   const originalCompletion = structuredClone(f.facts.operation.call_completion);
   const snapshot = await f.api.snapshot(identity);
   expect(snapshot.activeRun).toBeNull();
   expect(snapshot.operations).toEqual([f.facts.operation]);
   expect(snapshot.operations[0]!.call_completion).toEqual(originalCompletion);
   expect(snapshot.operations[0]!.mcp_resource_subscription).toMatchObject({ availability: 'closed', localReleased: true, remoteCleanup: 'unknown' });
-  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.operation.inspect').map(([, params]) => params))
-    .toEqual([{ operationId, allowMissing: true }]);
+  expect(f.requests.mock.calls.map(([method]) => method)).toEqual(['runtime.thread.view']);
   expect(f.models.resolveModel).not.toHaveBeenCalled(); expect(f.models.rebindModel).not.toHaveBeenCalled();
-});
-
-it.each(['ordinary-result', 'other-branch', 'none-effect'] as const)('does not promote %s into a resource observer through finite history', async variant => {
-  const f = routeFixture();
-  const { operationId } = closedFiniteHistory(f);
-  if (variant === 'ordinary-result') delete f.facts.operation.mcp_resource_subscription;
-  if (variant === 'other-branch') f.facts.run.branch_id = 'branch:original-history-fork';
-  if (variant === 'none-effect') f.facts.operation.effect = 'none';
-  expect((await f.api.snapshot(identity)).operations).toEqual([]);
-  const reads = f.requests.mock.calls.filter(([method]) => method === 'runtime.operation.inspect').map(([, params]) => params);
-  expect(reads).toEqual([{ operationId, allowMissing: true }]);
-});
-
-it.each(['model', 'policy'] as const)('does not substitute external data identity for the original %s producer identity', async origin => {
-  const f = routeFixture();
-  const { operationId, result } = closedFiniteHistory(f, origin);
-  result.completion.content.data.operationId = 'operation:unrelated';
-  expect((await f.api.snapshot(identity)).operations).toEqual(origin === 'model' ? [f.facts.operation] : []);
-  const reads = f.requests.mock.calls.filter(([method]) => method === 'runtime.operation.inspect').map(([, params]) => params);
-  expect(reads).toEqual(origin === 'model' ? [{ operationId, allowMissing: true }] : []);
 });
 
 it('keeps ordinary read-only ToolResults without durable Operations readable and does not inspect a fabricated row', async () => {
@@ -394,6 +378,7 @@ it('keeps ordinary read-only ToolResults without durable Operations readable and
   const { result } = closedFiniteHistory(f);
   Object.assign(result.completion, { effect: 'none' });
   f.facts.operationMissing = true;
+  f.facts.snapshotOperations = [];
   const snapshot = await f.api.snapshot(identity);
   expect(snapshot.history).toHaveLength(1);
   expect(snapshot.operations).toEqual([]);
@@ -404,19 +389,18 @@ it('allows an actually missing optional history Operation without weakening requ
   const f = routeFixture();
   const { operationId } = closedFiniteHistory(f, 'policy');
   f.facts.operationMissing = true;
+  f.facts.snapshotOperations = [];
   expect((await f.api.snapshot(identity)).operations).toEqual([]);
-  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.operation.inspect').map(([, params]) => params))
-    .toEqual([{ operationId, allowMissing: true }]);
+  expect(f.requests.mock.calls.map(([method]) => method)).toEqual(['runtime.thread.view']);
   await expect(f.api.operation(operationId)).rejects.toMatchObject({ status: 404, code: 'not-found' });
 });
 
-it('propagates real storage errors from optional Operation lookup instead of inventing an empty successful snapshot', async () => {
+it('propagates native projection storage errors instead of inventing an empty successful snapshot', async () => {
   const f = routeFixture();
-  const { operationId } = closedFiniteHistory(f, 'policy');
+  closedFiniteHistory(f, 'policy');
   f.facts.operationReadError = true;
   await expect(f.api.snapshot(identity)).rejects.toMatchObject({ status: 400, code: 'storage-error' });
-  expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.operation.inspect').map(([, params]) => params))
-    .toEqual([{ operationId, allowMissing: true }]);
+  expect(f.requests.mock.calls.map(([method]) => method)).toEqual(['runtime.thread.view']);
   const response = await f.request('/api/threads/snapshot', identity);
   expect(await response.json()).toEqual({ code: 'storage-error', error: 'Thread request could not be completed' });
 });

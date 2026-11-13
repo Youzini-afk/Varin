@@ -1,3 +1,4 @@
+import { nativeThreadView } from './thread-view.test-helper.js';
 import { EventEmitter } from 'node:events';
 import type { Express, Request, RequestHandler, Response as ExpressResponse } from 'express';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -29,10 +30,13 @@ const accepted: GoalControlReceipt = { id: goal.id, revision: goal.revision, gen
  * client are real; RPC responses are controlled. Catalog authorization, durability, actual usage gates
  * and atomic continuation admission belong to the native suite, not this socket-free fixture. */
 function fixture() {
-  const facts = { reply: structuredClone(accepted), list: [structuredClone(goal)], source: structuredClone(source),
+  const facts = { snapshotGoals: [structuredClone(goal)], reply: structuredClone(accepted), list: [structuredClone(goal)], source: structuredClone(source),
     showRun: false, listError: false, writeError: null as Error | null };
   const requests = vi.fn(async (method: string, params: Record<string, unknown>, _signal?: AbortSignal): Promise<unknown> => {
     switch (method) {
+      case 'runtime.thread.view':
+        expect(params).toEqual({ threadId: identity.threadId, branchId: expect.any(String), historyLimit: 20 });
+        return nativeThreadView({ ...identity, branchId: String(params.branchId) }, { goals: facts.snapshotGoals });
       case 'runtime.thread.inspect': return { thread_id: params.threadId, parent_thread_id: null, observer_project_ids: [], branches: [
         { branch_id: identity.branchId, active_run_id: facts.showRun ? source.id : null,
           head: null, latest_run: facts.showRun ? facts.source : null },
@@ -163,8 +167,11 @@ it('list and snapshot keep the selected branch current and preserve unknown, est
   expect(await f.api.goals.list({ ...identity, branchId: 'branch:other' })).toEqual([other]);
   // An older command receipt is not a replacement for the latest full projection.
   expect(await f.api.goals.start({ ...identity, key: 'old-key', runId: source.id, objective: goal.objective, budget: goal.budget })).toEqual(accepted);
+  f.facts.snapshotGoals = [current, second];
   expect((await f.api.snapshot(identity)).goals).toEqual([current, second]);
+  f.facts.snapshotGoals = [other];
   expect((await f.api.snapshot({ ...identity, branchId: 'branch:other' })).goals).toEqual([other]);
+  expect(f.requests.mock.calls.at(-1)?.slice(0, 2)).toEqual(['runtime.thread.view', { threadId: identity.threadId, branchId: 'branch:other', historyLimit: 20 }]);
 });
 
 it('all Goal routes authenticate first and reject unknown fields and invalid budgets or revisions before RPC admission', async () => {

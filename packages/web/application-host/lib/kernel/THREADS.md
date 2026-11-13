@@ -110,6 +110,9 @@ Snapshots use one native `runtime.thread.view` read for a coherent current windo
 The display page default lives in [thread-adapter.ts](thread-adapter.ts), not a conversation/input limit.
 A valid `afterHeadId` returns only appended history; a rewind, branch change or out-of-window anchor
 returns a full window. Queue, operations, context and child facts remain current in either response.
+Host consumer tests supply this native projection and verify scoped transport, cancellation and error preservation.
+The Catalog thread-view tests exercise durable history and closed resource-observer reconstruction,
+including original producer identity, branch isolation and missing versus corrupt optional records.
 
 `ThreadsAPI.historyPage` reads explicit older pages through the existing immutable content reader,
 retaining opaque provider material and image bytes. Load earlier history pins the returned head;

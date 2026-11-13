@@ -544,4 +544,149 @@ mod tests {
         db.create_thread("foreign", "other").unwrap();
         assert!(db.thread_view("thread", "other", 20, None).is_err());
     }
+    /// Projection rules moved from the Host; exercise durable rows and real history hydration,
+    /// rather than reproducing that algorithm in a mocked RPC response.
+    #[test]
+    fn finite_resource_observers_keep_original_producer_and_branch_identity() {
+        for origin in ["model", "policy"] {
+            for variant in [
+                "original",
+                "ordinary-result",
+                "other-branch",
+                "other-thread",
+                "none-effect",
+                "spoofed-data",
+                "missing",
+                "corrupt",
+            ] {
+                let f = Fixture::new();
+                let mut db = Catalog::open(&f.0).unwrap();
+                db.create_thread("thread", "main").unwrap();
+                let submit = |key: &str, thread: &str, branch: &str| SubmitInput {
+                    key: key.into(),
+                    thread_id: thread.into(),
+                    branch_id: branch.into(),
+                    expected_head: None,
+                    input: json!({"text":"original"}),
+                    configuration: json!({}),
+                };
+                let receipt = db.submit(&submit("input", "thread", "main")).unwrap();
+                let operation_id = if origin == "model" {
+                    "request:original:tool:subscribe"
+                } else {
+                    "action:original:node:subscribe"
+                };
+                let mut operation = serde_json::to_value(
+                    db.admit_operation(
+                        operation_id,
+                        &receipt.run_id,
+                        db.epoch(),
+                        Lifetime::Thread,
+                        json!({"kind":"fixture"}),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+                operation["phase"] = json!("terminal");
+                operation["outcome"] = json!("succeeded");
+                operation["effect"] = json!(if variant == "none-effect" {
+                    "none"
+                } else {
+                    "confirmed"
+                });
+                operation["cancel_requested"] = json!(true);
+                operation["mcp_resource_subscription"] = json!({
+                    "binding":{"operationId":operation_id,"executionOwner":{"kind":"external","identity":"original","epoch":"original"},
+                        "endpoint":{"server":"original","resourceKey":"original","configurationVersion":"original","credentialVersion":"original"},
+                        "schemaVersion":"original","uri":"file:///opaque"},
+                    "sourceScope":"workspace","acceptanceRef":null,"listenerId":"original", "availability":"closed",
+                    "localReleased":true,"mcpHolderReleased":true,"remoteCleanup":"unknown","lastEventCursor":null,"problem":null
+                });
+                if variant == "ordinary-result" {
+                    operation["mcp_resource_subscription"] = Value::Null;
+                }
+                if variant == "other-branch" || variant == "other-thread" {
+                    let thread = if variant == "other-thread" {
+                        db.create_thread("foreign", "other").unwrap();
+                        "foreign"
+                    } else {
+                        db.db.execute("INSERT INTO branches(id,thread_id,head) VALUES('other','thread',NULL)", []).unwrap();
+                        "thread"
+                    };
+                    let foreign = db
+                        .submit(&submit("foreign-input", thread, "other"))
+                        .unwrap();
+                    operation["run_id"] = json!(foreign.run_id);
+                }
+                let output = json!({"data":{"operationId":if variant == "spoofed-data" { "operation:unrelated" } else { operation_id }},"parts":[]});
+                let completion = json!({"kind":"result","outcome":"succeeded","effect":"confirmed","content":output});
+                operation["call_completion"] = json!({"kind":"result","outcome":"succeeded","effect":"confirmed",
+                    "content_ref":db.content.save_output(&serde_json::from_value(output.clone()).unwrap()).unwrap()});
+                let history = if origin == "model" {
+                    json!({"provenance":{"kind":"tool_data","call_id":"subscribe"},"content":{"kind":"tool_result",
+                        "result":{"request_id":"request:original","call_id":"subscribe","completion":completion}}})
+                } else {
+                    json!({"provenance":{"kind":"policy_tool_data","reference":{"action_id":"action:original","node_id":"subscribe"}},
+                        "content":{"kind":"output","output":output}})
+                };
+                db.append_history(
+                    &receipt.run_id,
+                    db.epoch(),
+                    Some(&receipt.input_id),
+                    HistorySource::Tool,
+                    history.clone(),
+                    None,
+                )
+                .unwrap();
+                // Persist the original terminal record; no continuing observer is in active operations.
+                if variant == "corrupt" {
+                    operation["revision"] = json!("unreadable");
+                }
+                db.db
+                    .execute(
+                        "UPDATE operations SET body=?1 WHERE id=?2",
+                        params![operation.to_string(), operation_id],
+                    )
+                    .unwrap();
+                if variant == "missing" {
+                    db.db
+                        .execute("DELETE FROM operations WHERE id=?1", [operation_id])
+                        .unwrap();
+                }
+                assert!(
+                    db.active_thread_operations("thread", Some("main"))
+                        .unwrap()
+                        .is_empty()
+                );
+                let result = db.thread_view("thread", "main", 20, None);
+                if variant == "corrupt" {
+                    assert!(
+                        result.is_err(),
+                        "{origin}: corruption must not become an absent optional row"
+                    );
+                    continue;
+                }
+                let view = result.unwrap();
+                assert_eq!(
+                    view["history"].as_array().unwrap().last().unwrap()["content"],
+                    history
+                );
+                let expected =
+                    variant == "original" || (origin == "model" && variant == "spoofed-data");
+                assert_eq!(
+                    view["operations"].as_array().unwrap().len(),
+                    usize::from(expected),
+                    "{origin}/{variant}"
+                );
+                if expected {
+                    assert_eq!(view["operations"][0]["id"], operation_id);
+                    assert_eq!(view["operations"][0]["call_completion"], completion);
+                    assert_eq!(
+                        view["operations"][0]["mcp_resource_subscription"]["availability"],
+                        "closed"
+                    );
+                }
+            }
+        }
+    }
 }
