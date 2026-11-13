@@ -208,3 +208,18 @@ test('redacted and disabled thinking never exposes text through the collapsed he
   await render(false, false);
   expect(container.children.length).toBe(0);
 });
+
+test('a completed computer wait shows its unmet condition rather than a generic success receipt', async () => {
+  message = { ...message, stopReason: 'toolUse', content: [
+    { type: 'toolCall', id: 'query', name: 'computer_query', arguments: { app: 'Preferences', match: { name: 'Saved' } } },
+    { type: 'toolCall', id: 'await', name: 'computer_await', arguments: { app: 'Preferences', match: { name: 'Saved' }, condition: 'present' } },
+  ] };
+  executions = {
+    query: { toolCallId: 'query', name: 'computer_query', args: {}, status: 'success' },
+    await: { toolCallId: 'await', name: 'computer_await', args: {}, status: 'success', result: { status: 'timed_out', elapsedMs: 1000, condition: 'present' } },
+  };
+  await render(); await settle();
+  expect(heading().textContent).toContain('chat.tools.computer.timedOut');
+  expect(heading().textContent).toContain('Saved');
+  expect(heading().textContent).not.toContain('chat.dialogue.finished');
+});

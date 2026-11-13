@@ -168,24 +168,24 @@ mod native {
         mem::size_of,
     };
     use windows::{
-        core::BOOL,
         Win32::{
             Foundation::{CloseHandle, HWND, LPARAM, RECT},
             Graphics::{
-                Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED},
+                Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute},
                 Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO},
             },
             System::{
                 Diagnostics::ToolHelp::{
-                    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+                    CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
                     TH32CS_SNAPPROCESS,
                 },
                 StationsAndDesktops::{
-                    CloseDesktop, OpenInputDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_READOBJECTS,
+                    CloseDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_READOBJECTS, OpenInputDesktop,
                 },
             },
             UI::{HiDpi::GetDpiForWindow, WindowsAndMessaging::*},
         },
+        core::BOOL,
     };
 
     #[derive(Clone, Debug)]
@@ -393,7 +393,7 @@ mod native {
     }
     /// Revalidate after provider calls/capture. Handle recycling and geometry
     /// changes must not bind a new image or input to an earlier observation.
-    pub fn validate(target: &Target) -> Result<()> {
+    pub fn validate_identity(target: &Target) -> Result<()> {
         let mut pid = 0;
         unsafe {
             GetWindowThreadProcessId(target.hwnd, Some(&mut pid));
@@ -404,6 +404,10 @@ mod native {
                 "The selected window no longer belongs to the observed application",
             ));
         }
+        Ok(())
+    }
+    pub fn validate(target: &Target) -> Result<()> {
+        validate_identity(target)?;
         crate::targeting::check_geometry(
             bounds(target.hwnd)?,
             Some(target.bounds),

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::collections::HashSet;
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -41,6 +41,10 @@ impl Request {
                 | "type_text"
                 | "press_key"
                 | "set_value"
+                | "set_checked"
+                | "set_expanded"
+                | "select"
+                | "scroll_into_view"
                 | "inject_input"
                 | "open"
         )
@@ -107,6 +111,8 @@ pub struct RequestState {
     dispatched: u64,
     semantic: bool,
     verified: bool,
+    mechanism: Option<String>,
+    observed_state: Option<Value>,
 }
 impl RequestState {
     pub fn begin(&mut self, id: &str) -> Result<()> {
@@ -114,6 +120,8 @@ impl RequestState {
         self.dispatched = 0;
         self.semantic = false;
         self.verified = false;
+        self.mechanism = None;
+        self.observed_state = None;
         self.check()
     }
     pub fn end(&mut self) {
@@ -150,6 +158,12 @@ impl RequestState {
         self.semantic = true;
         Ok(())
     }
+    pub fn mechanism(&mut self, mechanism: &str) {
+        self.mechanism = Some(mechanism.to_owned());
+    }
+    pub fn observed_state(&mut self, state: Value) {
+        self.observed_state = Some(state);
+    }
     pub fn verify(&mut self) {
         self.verified = true;
     }
@@ -169,6 +183,12 @@ impl RequestState {
     pub fn receipt(&self, failure: Option<&Failure>) -> Value {
         let mut receipt =
             json!({"effect": self.effect(failure.is_none()), "dispatchedEvents": self.dispatched});
+        if let Some(mechanism) = &self.mechanism {
+            receipt["mechanism"] = json!(mechanism);
+        }
+        if let Some(state) = &self.observed_state {
+            receipt["observedState"] = state.clone();
+        }
         if let Some(error) = failure {
             let code = match error.code {
                 "target-changed"
@@ -189,7 +209,7 @@ impl RequestState {
         receipt
     }
     pub fn failure(&self, error: &Failure) -> Value {
-        json!({"ok":false, "cancelled":error.code == "cancelled", "rejected": self.effect(false) == "none", "error":error.message, "receipt":self.receipt(Some(error))})
+        json!({"ok":false, "code":error.code, "cancelled":error.code == "cancelled", "rejected": self.effect(false) == "none", "error":error.message, "receipt":self.receipt(Some(error))})
     }
 }
 
@@ -278,6 +298,51 @@ pub fn normalize_pointer(value: i32, origin: i32, length: i32) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn state_feedback_without_dispatch_is_a_noop_not_verification() {
+        let mut state = RequestState::default();
+        state.begin("already-checked").unwrap();
+        state.mechanism("accessibility");
+        state.observed_state(json!({"checked":true}));
+        assert_eq!(state.receipt(None)["effect"], "none");
+        assert_eq!(state.receipt(None)["observedState"]["checked"], true);
+        state.attempt_semantic().unwrap();
+        assert_eq!(state.receipt(None)["effect"], "dispatched");
+        state.verify();
+        assert_eq!(state.receipt(None)["effect"], "verified");
+        state.end();
+        state.begin("next").unwrap();
+        assert!(state.receipt(None).get("observedState").is_none());
+        assert!(state.receipt(None).get("mechanism").is_none());
+    }
+    #[test]
+    fn a_semantic_failure_does_not_become_a_clean_rejection() {
+        let mut state = RequestState::default();
+        state.begin("toggle").unwrap();
+        state.mechanism("accessibility");
+        state.attempt_semantic().unwrap();
+        state.observed_state(json!({"checked":"mixed"}));
+        let failure = state.failure(&Failure::new("verification-failed", "Still mixed"));
+        assert_eq!(failure["code"], "verification-failed");
+        assert_eq!(failure["receipt"]["effect"], "unknown");
+        assert_eq!(failure["rejected"], false);
+        assert_eq!(failure["receipt"]["observedState"]["checked"], "mixed");
+    }
+    #[test]
+    fn state_actions_use_the_existing_action_receipt_and_query_does_not() {
+        for tool in ["set_checked", "set_expanded", "select", "scroll_into_view"] {
+            assert!(
+                Request::parse(&json!({"id":"a","tool":tool}).to_string())
+                    .unwrap()
+                    .is_action()
+            );
+        }
+        assert!(
+            !Request::parse(r#"{"id":"q","tool":"query_elements"}"#)
+                .unwrap()
+                .is_action()
+        );
+    }
     #[test]
     fn cancellation_before_delivery_survives_begin_but_not_the_next_request() {
         let mut state = RequestState::default();

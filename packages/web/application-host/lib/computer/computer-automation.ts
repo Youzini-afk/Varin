@@ -614,6 +614,9 @@ export function createComputerAutomation(options: {
             await entry?.ready.catch(() => undefined);
             if (entry?.lease)
                 await removeLease(entry.lease);
+            // The service may release references held by this exact delegated
+            // assignment, without conflating matching execution IDs from peers.
+            return entry?.actor;
         },
         async delegated<T>(token: string, desktopId: string, access: ComputerAccess, run: () => Promise<T>): Promise<T> {
             const lease = foreign.get(token);

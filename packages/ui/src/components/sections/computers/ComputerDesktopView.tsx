@@ -215,6 +215,7 @@ function ComputerDesktopPaneView({ desktop }: { desktop: ComputerDesktop }) {
         <span className="typography-meta text-muted-foreground" data-control={control?.owner ?? 'unknown'}>
           {control?.workStatus === 'cancelling' ? t('computer.automation.cancelling') : control?.workStatus === 'cancel-unconfirmed' ? t('computer.automation.cancel-unconfirmed') : controlLabel}
           {control?.operator && control.activity?.app ? ` · ${control.activity.app}` : ''}
+          {control.owner === 'agent' && control.activity?.status === 'running' ? ` · ${t(`computer.operation.${control.activity.operation}`)}` : ''}
           {frame?.capturedAt ? <time className="ml-2" dateTime={frame.capturedAt}>{new Date(frame.capturedAt).toLocaleTimeString()}</time> : null}
           {control && control.owner === 'human' && !control.reachable ? ` — ${t('settings.computers.view.control.reconnecting')}` : ''}
         </span>

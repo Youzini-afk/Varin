@@ -118,3 +118,18 @@ it('does not publish a late takeover error over a newer control observation', as
   expect(container.textContent).toContain('computer.automation.cancel-unconfirmed');
   expect(container.textContent).not.toContain('obsolete takeover failure');
 });
+
+it('shows background semantic activity beside the original operator without adding another takeover control', async () => {
+  const { document, window } = parseHTML('<html><body></body></html>');
+  vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  const container = document.createElement('div'); document.body.append(container);
+  await act(async () => { root = createRoot(container); root.render(<ComputerDesktopPane desktop={desktop} />); });
+  const work = { runtime: 'agent' as const, threadId: 'semantic-task', branchId: 'branch' };
+  const operator: ComputerActor = { execution: { work, runId: 'run' }, rootWork: work, rootExecution: { work, runId: 'run' }, label: 'Preferences task' };
+  await emit(0, { ...control(operator), activity: { app: 'Preferences', operation: 'set_checked', status: 'running', updatedAt: 'now' } });
+  expect(container.textContent).toContain('Preferences');
+  expect(container.textContent).toContain('computer.operation.set_checked');
+  expect([...container.querySelectorAll('button')].filter(button => button.textContent === 'settings.computers.view.takeover')).toHaveLength(1);
+  await emit(0, { ...control(operator), owner: 'human', activity: { app: 'Preferences', operation: 'set_checked', status: 'idle', updatedAt: 'now' } });
+  expect(container.textContent).not.toContain('computer.operation.set_checked');
+});

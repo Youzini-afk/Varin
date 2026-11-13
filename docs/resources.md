@@ -442,6 +442,8 @@ UIA 只由 helper 的 MTA 线程持有；同用户本机控制管道与 stdin EO
 二进制按 Host candidate 发布并核验架构、摘要和真实签名状态；未知动作/旧输入释放状态不因替换 helper 自动清除。
 
 assignment 在资源 Host 预留成功后才发布 grant。输入使用原 assignment/epoch，handback 后需新观察；远端重启不会悄悄续旧 token。
+`computer_query` 和 `computer_await` 在目标 Host 读取界面；等待期间不占输入 lane，也不接管桌面。
+局部读取和属性查询复用原观察身份，不刷新旧截图的坐标条件；平台能力不足时仍可选择已有截图、键鼠或应用协议。
 Browser/Office 读取与效果有不同工具合同，任意 JS evaluate 仍属效果，不因 caller 称其只读而变权限。
 
 Stop 指向原执行/assignment，关闭旧准入并排空真实输入 writer。应用调用返回不证明应用后台工作全结束；unknown effect 与

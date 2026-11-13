@@ -36,7 +36,7 @@ def write_response(request_id, response):
 
 def observation_only(operation):
     tool = operation.get("tool")
-    if tool in ("capture_frame", "get_app_state", "list_apps", "capabilities", "ping"):
+    if tool in ("capture_frame", "get_app_state", "query_elements", "release_elements", "list_apps", "capabilities", "ping"):
         return True
     if tool == "browser":
         return operation.get("op") in ("status", "tabs", "snapshot") or (operation.get("op") == "act" and (operation.get("act") or {}).get("kind") == "screenshot")

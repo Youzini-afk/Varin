@@ -466,3 +466,32 @@ describe('Windows native helper contract', () => {
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 });
+
+describe('request-scoped read cancellation', () => {
+  it('removes an aborted queued read without cancelling the current native request', async () => {
+    const driver = createDriverSession(echoSpec());
+    const controller = new AbortController();
+    try {
+      const input = driver.request({ tool: 'slow' });
+      const read = driver.request({ tool: 'query_elements' }, { signal: controller.signal });
+      const cancelled = expect(read).rejects.toThrow('read cancelled');
+      controller.abort(new Error('read cancelled'));
+      await cancelled;
+      expect((await input).ok).toBe(true);
+      expect((await driver.request({ tool: 'click' })).ok).toBe(true);
+    } finally { await driver.dispose(); }
+  });
+
+  it('signals only the original active read and leaves the next input queued until it returns', async () => {
+    const driver = createDriverSession(echoSpec());
+    const controller = new AbortController();
+    try {
+      const read = driver.request({ tool: 'awaitflag' }, { signal: controller.signal });
+      const input = driver.request({ tool: 'click' });
+      controller.abort();
+      expect(await read).toMatchObject({ ok: false, cancelled: true });
+      expect(await input).toMatchObject({ ok: true, text: 'did:click' });
+      expect(driver.alive()).toBe(true);
+    } finally { await driver.dispose(); }
+  });
+});

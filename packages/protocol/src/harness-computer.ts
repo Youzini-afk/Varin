@@ -91,7 +91,7 @@ export interface ComputerWorkAssociation {
 export interface ComputerActivity {
   execution?: ComputerExecutionRef;
   app: string;
-  operation: "observe" | ComputerAction["kind"];
+  operation: "observe" | "query" | "await" | ComputerAction["kind"];
   status: "running" | "idle" | "error";
   updatedAt: string;
 }
@@ -207,7 +207,7 @@ export interface ComputerAutomationProjection {
 
 export function parseComputerActivity(value: unknown): ComputerActivity {
   if (!computerObject(value) || !computerId(value.app) || !computerId(value.updatedAt)
-    || !["observe", "click", "type", "key", "scroll", "drag", "set_value", "secondary"].includes(String(value.operation))
+    || !["observe", "query", "await", "click", "type", "key", "scroll", "drag", "set_value", "secondary", "set_checked", "set_expanded", "select", "scroll_into_view"].includes(String(value.operation))
     || !["running", "idle", "error"].includes(String(value.status))
     || 'sessionId' in value) throw new Error("computer_activity_invalid");
   const execution = value.execution === undefined ? undefined : parseComputerExecutionRef(value.execution);
@@ -341,6 +341,11 @@ export interface ComputerCapabilities {
   driverVersion?: string;
   /** Application protocols implemented by this driver, independent of whether an app is running. */
   applicationTools?: { browser: boolean; office: boolean };
+  /** Native semantic support of this driver/session; absence means not reported. */
+  semanticQuery?: boolean;
+  scopedObservation?: boolean;
+  semanticActions?: string[];
+  semanticEvents?: "polling" | "partial" | "complete";
   /** Accessibility/UIA tree reading. */
   observeTree: boolean;
   /** Window/desktop image capture. */
@@ -385,6 +390,18 @@ export interface ComputerFrame {
 /** One accessibility-tree node from an observation, addressed by `index`. */
 export interface ComputerElement {
   index: number;
+  parentIndex?: number;
+  depth?: number;
+  role?: string;
+  platformRole?: string;
+  nativeElementId?: string;
+  targetId?: string;
+  enabled?: boolean;
+  selected?: boolean;
+  checked?: boolean | "mixed";
+  expanded?: boolean;
+  hasMoreChildren?: boolean;
+  ancestorNames?: string[];
   /** Driver-private child-index path captured with this observation (macOS AX). */
   path?: number[];
   runtimeId?: number[];
@@ -448,6 +465,11 @@ export interface ComputerObservation {
   /** Display page in this fixed observation; element indexes are never renumbered. */
   treePage?: { offset: number; total: number; nextOffset?: number };
   elements: ComputerElement[];
+  view?: "outline" | "tree";
+  /** Original region when this observation is a scoped read. */
+  within?: ComputerElementRef;
+  complete?: boolean;
+  truncatedReason?: string;
   focusedSummary?: string;
   selectedText?: string;
   screenshot?: { mime: "image/png"; base64: string; width?: number; height?: number; source?: "window" | "screen" };
@@ -456,14 +478,15 @@ export interface ComputerObservation {
 
 /** Structured action against one observed app on a desktop. */
 export interface ComputerAction {
-  kind: "click" | "type" | "key" | "scroll" | "drag" | "set_value" | "secondary";
+  kind: "click" | "type" | "key" | "scroll" | "drag" | "set_value" | "secondary"
+    | "set_checked" | "set_expanded" | "select" | "scroll_into_view";
   /** App selector: process name, window title substring, or pid. */
-  app: string;
+  app?: string;
   /** Window selector within the app: native handle number or window title. */
   window?: number | string;
   /**
-   * Elements require the newest tree for this app/window. Coordinates require
-   * the retained latest screenshot; a tree-only read does not discard it.
+   * Semantic targets retain their original window and execution. Coordinates
+   * require the retained latest screenshot; a tree-only read does not discard it.
    * Native dispatch validates screenshot geometry before sending coordinates.
    */
   observationId?: string;
@@ -478,7 +501,7 @@ export interface ComputerAction {
   toY?: number;
   clickCount?: number;
   mouseButton?: "left" | "right" | "middle";
-  /** Auto uses real pointer/keyboard input. Explicit accessibility/app_post select their native mechanisms. */
+  /** Auto prefers a supported semantic primary action for an ordinary element click. */
   clickMethod?: "auto" | "accessibility" | "app_post" | "global";
   direction?: "up" | "down" | "left" | "right";
   pages?: number;
@@ -486,6 +509,9 @@ export interface ComputerAction {
   /** Key chord, e.g. `enter`, `ctrl+s`, `f5`. */
   key?: string;
   value?: string;
+  checked?: boolean;
+  expanded?: boolean;
+  selection?: "replace" | "add" | "remove";
   /** Secondary action name from the element's `actions` list. */
   action?: string;
   /** Capture after input only when requested. Default none supports deterministic action batches. */
@@ -517,6 +543,9 @@ export interface ComputerActionReceipt {
   effect: "none" | "dispatched" | "partial" | "verified" | "unknown";
   reason?: { code: "target-changed" | "focus-changed" | "target-unavailable" | "unsupported" | "input-rejected" | "cancelled" | "control-changed" | "connection-lost" | "session-closed" | "verification-failed" | "driver-error"; message: string };
   recovery?: "observe" | "reconnect" | "wait-for-control";
+  mechanism?: "accessibility" | "global" | "app_post";
+  /** Only properties directly read back from the original target. */
+  observedState?: ComputerProperties;
   /** Counts accepted input events, not characters visible in an app. */
   dispatchedEvents?: number;
 }
@@ -534,10 +563,12 @@ export interface ComputerListResult {
 export interface ComputerObserveParams {
   /** Absent = the caller's default desktop target. */
   desktopId?: string;
-  app: string;
+  app?: string;
   /** Window selector within the app: native handle number or window title. */
   window?: number | string;
   includeScreenshot?: boolean;
+  within?: ComputerElementRef;
+  view?: "outline" | "tree";
   /** Include the app's window inventory. Can be requested later with the same observationId. */
   includeWindows?: boolean;
   /** Read another page from the same retained observation without scanning again. */
@@ -547,6 +578,59 @@ export interface ComputerObserveParams {
   textLimit?: number | "max";
   maxTreeNodes?: number;
   maxTreeDepth?: number;
+}
+
+export interface ComputerElementRef {
+  observationId: string;
+  elementIndex: number;
+}
+export interface ComputerMatch {
+  role?: string;
+  name?: string;
+  nameMatch?: "exact" | "contains";
+  value?: string;
+  enabled?: boolean;
+  selected?: boolean;
+  checked?: boolean | "mixed";
+  expanded?: boolean;
+}
+export type ComputerProperty = "name" | "value" | "role" | "enabled" | "selected" | "checked" | "expanded" | "actions";
+export type ComputerPropertyValue = string | boolean | string[];
+export type ComputerProperties = Partial<Record<ComputerProperty, ComputerPropertyValue>>;
+export interface ComputerQueryParams {
+  desktopId?: string;
+  app?: string;
+  window?: number | string;
+  match?: ComputerMatch;
+  target?: ComputerElementRef;
+  within?: ComputerElementRef;
+  properties?: ComputerProperty[];
+  offset?: number;
+  limit?: number;
+  maxTreeNodes?: number;
+  maxTreeDepth?: number;
+}
+export interface ComputerQueryResult {
+  observation?: ComputerObservation;
+  properties?: ComputerProperties;
+  unavailableProperties?: ComputerProperty[];
+  complete: boolean;
+  nextOffset?: number;
+  reason?: string;
+  status?: "ok" | "unavailable" | "target_lost";
+}
+export interface ComputerAwaitParams extends ComputerQueryParams {
+  condition: "present" | "absent" | "window_opened" | "window_closed" | "property" | "changed";
+  property?: ComputerProperty;
+  equals?: ComputerPropertyValue;
+  timeoutMs?: number;
+}
+export interface ComputerAwaitResult {
+  status: "satisfied" | "timed_out" | "cancelled" | "target_lost" | "unavailable";
+  condition: ComputerAwaitParams["condition"];
+  elapsedMs: number;
+  last?: ComputerQueryResult;
+  reason?: string;
 }
 
 export interface ComputerObserveResult {
@@ -783,7 +867,7 @@ export interface ComputerEvidenceEntry {
   /** Original admitted work and Run; labels and caller-provided session IDs never replace it. */
   execution?: ComputerExecutionRef;
   lane: "observe" | "action";
-  /** Service funnel: observe | act | open | fileWrite | browser | office | control. */
+  /** Service funnel: observe | query | await | act | open | fileWrite | browser | office | control. */
   tool: string;
   /** Sub-operation: action kind, browser op, control transition… */
   op?: string;

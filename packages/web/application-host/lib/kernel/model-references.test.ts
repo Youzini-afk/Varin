@@ -67,6 +67,25 @@ describe('typed Host model references', () => {
     const resolved = await resolveHostToolArguments(refs,call('computer_act',{action:{kind:'click',observationId:output.observation.id,elementIndex:1}}),declaration('computer'));
     expect(resolved).toEqual({desktopId:'original-desktop',automationEpoch:'original-epoch',action:{kind:'click',observationId:'native-observation',app:'12',window:21,elementIndex:1}});
   });
+  it('projects await evidence as a reusable scoped reference without exposing driver identity', async () => {
+    const {refs} = port();
+    const raw = {status:'satisfied',last:{complete:true,observation:{
+      id:'native-match',desktopId:'original-desktop',machineId:'machine',automationEpoch:'epoch',
+      app:{pid:12,name:'Editor'},windowHandle:21,treeLines:['duplicate presentation'],
+      elements:[{index:12,parentIndex:5,role:'checkbox',checked:'mixed',nativeElementId:'private',path:[1,2],name:'Autosave'}],
+    }}};
+    const output = await projectHostToolData(refs,call('computer_await',{}),declaration('computer'),raw) as typeof raw;
+    const observation = output.last.observation;
+    expect(observation.id).toMatch(/^obs:/);
+    expect(observation.elements).toEqual([{index:12,parentIndex:5,role:'checkbox',checked:'mixed',name:'Autosave'}]);
+    expect(observation.treeLines).toBeUndefined();
+    expect(raw.last.observation.elements[0]?.nativeElementId).toBe('private');
+    const params = {within:{observationId:observation.id,elementIndex:12},match:{name:'Save'}};
+    expect(await resolveHostToolArguments(refs,call('computer_query',params,'query'),declaration('computer')))
+      .toEqual({desktopId:'original-desktop',within:{observationId:'native-match',elementIndex:12},match:{name:'Save'}});
+    await expect(resolveHostToolArguments(refs,call('computer_query',{...params,desktopId:'other'},'conflict'),declaration('computer')))
+      .rejects.toThrow('different desktopId');
+  });
   it('uses the same native managed-process target shape for script environments', async () => {
     const {refs} = port();
     const output = await projectHostToolData(refs,call('script_open',{}),declaration('script'),{environmentId:'original-operation',cellId:'not-another-environment'},source) as Record<string,unknown>;

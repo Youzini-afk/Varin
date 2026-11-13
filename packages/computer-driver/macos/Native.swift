@@ -16,6 +16,16 @@ final class RequestContext {
     let id: String
     var events = 0
     var verified = false
+    var mechanism: String?
+    var observedState: JSONObject = [:]
+    var readOnly: Bool { ["ping", "capabilities", "list_apps", "get_app_state", "query_elements", "release_elements", "capture_frame"].contains(operation["tool"] as? String ?? "") }
+    func receipt(effect: String? = nil) -> JSONObject {
+        var value: JSONObject = ["effect": effect ?? (events == 0 ? "none" : verified ? "verified" : "dispatched"),
+            "dispatchedEvents": events]
+        if let mechanism { value["mechanism"] = mechanism }
+        if !observedState.isEmpty { value["observedState"] = observedState }
+        return value
+    }
     init(_ operation: JSONObject) { self.operation = operation; id = operation["id"] as? String ?? "" }
     func check() throws {
         if DriverLifecycle.shared.stopping || (ProcessInfo.processInfo.environment["VARIN_DRIVER_CANCEL_DIR"].map {
@@ -25,16 +35,16 @@ final class RequestContext {
     func failure(_ error: Error) -> JSONObject {
         let failure = error as? DriverFailure ?? DriverFailure(code: "driver-error", message: "The native operation failed; observe before retrying", uncertain: true)
         let effect = failure.uncertain ? "unknown" : events > 0 ? "partial" : "none"
-        return ["ok": false, "error": failure.message, "cancelled": failure.code == "cancelled", "rejected": effect == "none",
-                "receipt": ["effect": effect, "dispatchedEvents": events,
-                            "reason": ["code": failure.code, "message": failure.message],
-                            "recovery": failure.code == "session-closed" ? "reconnect" : "observe"]]
+        var receipt = self.receipt(effect: effect)
+        receipt["reason"] = ["code": failure.code, "message": failure.message]
+        receipt["recovery"] = failure.code == "session-closed" ? "reconnect" : "observe"
+        return ["ok": false, "error": failure.message, "code": failure.code, "cancelled": failure.code == "cancelled", "rejected": effect == "none", "receipt": receipt]
     }
     func progress(_ phase: String, point: CGPoint? = nil, to: CGPoint? = nil, target: CGRect? = nil) {
         guard operation["visual_feedback"] as? Bool == true else { return }
         let tool = operation["tool"] as? String ?? ""
         var value: JSONObject = ["type": "gesture", "phase": phase,
-            "mechanism": ["type_text", "press_key"].contains(tool) ? "keyboard" : ["set_value", "perform_secondary_action"].contains(tool) || operation["click_method"] as? String == "accessibility" ? "semantic" : "pointer"]
+            "mechanism": mechanism == "accessibility" ? "semantic" : ["type_text", "press_key"].contains(tool) ? "keyboard" : "pointer"]
         if let point { value["point"] = ["x": point.x, "y": point.y] }
         if let to { value["to"] = ["x": to.x, "y": to.y] }
         if let target { value["target"] = rectJSON(target) }
@@ -187,7 +197,7 @@ func resolveTarget(_ operation: JSONObject) throws -> WindowTarget {
        CFGetTypeID(focused) == AXUIElementGetTypeID(), let frame = axFrame(focused as! AXUIElement) {
         candidates = candidates.filter { $0.bounds == frame }
     }
-    guard candidates.count == 1 else { throw DriverFailure(code: "target-unavailable", message: candidates.isEmpty ? "The selected application window is unavailable" : "Choose an exact window handle from list_apps") }
+    guard candidates.count == 1 else { throw DriverFailure(code: candidates.isEmpty ? "target-unavailable" : "target-ambiguous", message: candidates.isEmpty ? "The selected application window is unavailable" : "Choose an exact window handle from list_apps") }
     return candidates[0]
 }
 

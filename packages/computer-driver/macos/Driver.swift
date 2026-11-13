@@ -2,15 +2,9 @@ import AppKit
 import ApplicationServices
 import Foundation
 
-struct TreeObservation {
-    let target: WindowTarget
-    let root: AXUIElement?
-    let elements: [String: AXUIElement]
-}
-
 final class DesktopDriver {
     let capture = CaptureOwner()
-    private var observations: [CGWindowID: TreeObservation] = [:]
+    private let accessibility = AccessibilityOwner()
     private var desktopObserved: CGRect?
     private var desktopSession: String?
     private var keys = Set<CGKeyCode>()
@@ -32,6 +26,9 @@ final class DesktopDriver {
             "observeTree": accessibility, "elementAction": accessibility, "screenshot": screen,
             "coordinateInput": accessibility, "textInput": accessibility, "drag": accessibility,
             "multiWindow": true, "interruptibleInput": true, "occludedCapture": true,
+            "semanticQuery": accessibility, "scopedObservation": accessibility,
+            "semanticActions": accessibility ? ["set_checked", "set_expanded", "select", "scroll_into_view"] : [],
+            "semanticEvents": "polling",
             "permissions": ["accessibility": accessibility ? "granted" : "not-granted", "screenCapture": screen ? "granted" : "not-granted"],
             "status": accessibility && screen ? "ready" : "unavailable",
             "detail": accessibility && screen ? "Native platform behavior requires macOS acceptance testing" : "Grant Varin Computer Accessibility and Screen Recording permissions separately in macOS settings"]
@@ -57,58 +54,63 @@ final class DesktopDriver {
             if op["screenshot"] as? Bool == true { snapshot["screenshotPngBase64"] = frame.png.base64EncodedString(); snapshot["screenshotSource"] = "screen" }
             return snapshot
         }
-        let target = try resolveTarget(op)
-        var tree: [JSONObject] = [], lines: [String] = [], elements: [String: AXUIElement] = [:]
-        let root = AXIsProcessTrusted() ? (try? target.axWindow()) : nil
-        let maxNodes = (op["max_tree_nodes"] as? Int).flatMap { $0 > 0 ? $0 : nil } ?? 1200
-        let maxDepth = (op["max_tree_depth"] as? Int).flatMap { $0 > 0 ? $0 : nil } ?? 64
-        func visit(_ node: AXUIElement, path: [Int]) throws {
-            try context.check()
-            if tree.count >= maxNodes || path.count > maxDepth { return }
-            let role = axString(node, kAXRoleAttribute).replacingOccurrences(of: "AX", with: "", options: .anchored)
-            let title = axString(node, kAXTitleAttribute)
-            let name = title.isEmpty ? axString(node, kAXDescriptionAttribute) : title
-            let token = observations[target.id]?.elements.first(where: { CFEqual($0.value, node) })?.key ?? UUID().uuidString
-            var record: JSONObject = ["index": tree.count, "automationId": token, "path": path, "controlType": role, "name": name, "actions": axActions(node)]
-            let value = axString(node, kAXValueAttribute)
-            if !value.isEmpty { record["value"] = value }
-            if let rect = axFrame(node) { record["frame"] = rectJSON(rect.offsetBy(dx: -target.bounds.minX, dy: -target.bounds.minY)) }
-            lines.append("\(tree.count) \(role) \(name)")
-            tree.append(record); elements[token] = node
-            for (index, child) in axChildren(node).enumerated() { try visit(child, path: path + [index]) }
+        let target = try accessibility.target(op)
+        func unavailableTree(_ reason: String) -> JSONObject {
+            ["app": ["name": target.name, "pid": target.pid, "windowTitle": target.title],
+                "windowTitle": target.title, "windowHandle": target.id, "windowBounds": rectJSON(target.bounds),
+                "dpiScale": target.scale, "elements": [], "treeLines": [reason],
+                "complete": false, "truncatedReason": "accessibility_unavailable"]
         }
-        if let root { try visit(root, path: []) }
-        else { lines.append("Accessibility is unavailable or the window mapping is ambiguous; no unrelated tree was attached.") }
-        var snapshot: JSONObject = ["app": ["name": target.name, "pid": target.pid, "windowTitle": target.title],
-            "windowTitle": target.title, "windowHandle": target.id, "windowBounds": rectJSON(target.bounds), "dpiScale": target.scale,
-            "windows": allWindows().filter { $0.pid == target.pid }.map { $0.descriptor }, "elements": tree, "treeLines": lines]
+        var snapshot: JSONObject
+        if AXIsProcessTrusted() {
+            do { snapshot = try accessibility.read(context, target: target) }
+            catch let failure as DriverFailure where op["within"] == nil && op["platform_target"] == nil
+                && ["target-unavailable", "target-ambiguous", "unavailable"].contains(failure.code) {
+                // Keep the pre-existing screenshot-only path when the app has
+                // no usable AX window. A scoped read never substitutes a tree.
+                snapshot = unavailableTree(failure.message)
+            }
+        } else {
+            if op["within"] != nil { try requireAccessibility() }
+            snapshot = unavailableTree("Accessibility is unavailable.")
+        }
         if op["screenshot"] as? Bool == true {
             let frame = try capture.window(target, check: context.check)
-            snapshot["screenshotPngBase64"] = frame.png.base64EncodedString(); snapshot["screenshotSource"] = "window"; snapshot["capturedAt"] = frame.at; snapshot["nativeTarget"] = frame.sessionID
+            snapshot["screenshotPngBase64"] = frame.png.base64EncodedString(); snapshot["screenshotSource"] = "window"; snapshot["capturedAt"] = frame.at
+            snapshot["nativeTarget"] = accessibility.nativeTarget(target, capture: frame.sessionID) ?? frame.sessionID
         }
         try target.validate()
-        let windows = allWindows()
-        capture.retainWindows(windows)
-        let live = Set(windows.map { $0.id })
-        observations = observations.filter { live.contains($0.key) }
-        observations[target.id] = TreeObservation(target: target, root: root, elements: elements)
+        capture.retainWindows(allWindows())
         return snapshot
     }
 
-    private func element(_ record: JSONObject, target: WindowTarget) throws -> AXUIElement {
-        guard let path = record["path"] as? [Int], let observation = observations[target.id], observation.target.pid == target.pid,
-              let token = record["automationId"] as? String, let original = observation.elements[token],
-              let root = observation.root, CFEqual(root, try target.axWindow()) else {
-            throw DriverFailure(code: "target-changed", message: "The element is not bound to the latest observation of this window")
+    private func query(_ context: RequestContext) throws -> JSONObject {
+        try settle(context); try requireAccessibility()
+        let op = context.operation
+        let target: WindowTarget
+        do { target = try accessibility.target(op) }
+        catch let error as DriverFailure {
+            if op["window_only"] as? Bool == true, op["platform_target"] == nil, error.code == "target-unavailable" {
+                return ["ok": false, "code": "window_not_found", "error": error.message]
+            }
+            throw error
         }
-        var current = root
-        for index in path {
-            let children = axChildren(current)
-            guard children.indices.contains(index) else { throw DriverFailure(code: "target-changed", message: "The observed element path changed") }
-            current = children[index]
+        if op["window_only"] as? Bool == true {
+            return ["ok": true, "snapshot": try accessibility.windowSnapshot(target, renew: op["platform_target"] == nil), "complete": true]
         }
-        guard CFEqual(original, current) else { throw DriverFailure(code: "target-changed", message: "The observed element was replaced") }
-        return current
+        if let record = op["element"] as? JSONObject {
+            let node = try accessibility.element(record, target: target)
+            let requested = op["properties"] as? [String] ?? semanticPropertyNames
+            let properties = try axProperties(node, requested: requested, shortValue: true)
+            try context.check()
+            let unavailable = requested.filter { properties[$0] == nil }
+            return ["ok": true, "properties": properties, "unavailableProperties": unavailable, "complete": unavailable.isEmpty]
+        }
+        let snapshot = try accessibility.read(context, target: target, query: true)
+        var result: JSONObject = ["ok": true, "snapshot": snapshot, "complete": snapshot["complete"] ?? false]
+        result["nextOffset"] = snapshot["nextOffset"]
+        result["reason"] = snapshot["truncatedReason"]
+        return result
     }
 
     private var flags: CGEventFlags {
@@ -158,31 +160,36 @@ final class DesktopDriver {
         let op = context.operation, human = op["tool"] as? String == "inject_input"
         let app = (op["app"] as? String ?? "").lowercased()
         let desktop = human || ["0", "desktop", "screen", "shared desktop"].contains(app)
-        let target: WindowTarget? = desktop ? nil : (try resolveTarget(op))
-        let captureIdentity = op["platform_target"] as? String
-        if !human, op["expected_bounds"] != nil, captureIdentity == nil {
+        let target: WindowTarget? = desktop ? nil : (try accessibility.target(op))
+        let tool = op["tool"] as? String ?? ""
+        let node = try (op["element"] as? JSONObject).map { record -> AXUIElement in
+            guard let target else { throw DriverFailure(code: "unsupported", message: "The desktop image has no accessibility element mapping") }
+            return try accessibility.element(record, target: target)
+        }
+        let method = op["click_method"] as? String ?? "auto"
+        let ordinaryClick = tool == "click" && (op["mouse_button"] as? String ?? "left") == "left"
+            && (op["click_count"] as? Int ?? 1) == 1 && op["x"] == nil && op["y"] == nil
+        let semantic = ["set_value", "perform_secondary_action", "set_checked", "set_expanded", "select", "scroll_into_view"].contains(tool)
+            || ordinaryClick && (method == "accessibility" || method == "auto" && op["input"] as? String != "global" && node.map { axActions($0).contains(kAXPressAction) } == true)
+        if method == "accessibility", !semantic { throw DriverFailure(code: "unsupported", message: "Accessibility clicking requires a single left-button element primary action") }
+        let captureIdentity = accessibility.captureIdentity(op["platform_target"] as? String)
+        if !human, !semantic, op["expected_bounds"] != nil, captureIdentity == nil {
             throw DriverFailure(code: "target-changed", message: "Coordinate input requires the original native capture generation")
         }
         let bounds: CGRect
         if let target {
-            if let expected = rectFromJSON(op["expected_bounds"]), expected != target.bounds {
+            if !semantic, let expected = rectFromJSON(op["expected_bounds"]), expected != target.bounds {
                 throw DriverFailure(code: "target-changed", message: "The window moved or resized; observe again")
             }
-            if let dpi = op["expected_dpi"] as? Double, CGFloat(dpi) != target.scale {
+            if !semantic, let dpi = op["expected_dpi"] as? Double, CGFloat(dpi) != target.scale {
                 throw DriverFailure(code: "target-changed", message: "The window display scale changed; observe again")
             }
-            if let captureIdentity { try capture.validateWindow(target, identity: captureIdentity, check: context.check) }
+            if !semantic, let captureIdentity { try capture.validateWindow(target, identity: captureIdentity, check: context.check) }
             bounds = target.bounds
         } else {
             if !human && desktopObserved == nil { throw DriverFailure(code: "target-changed", message: "Observe the desktop before sending input") }
             bounds = try capture.validateDesktop(human ? nil : desktopObserved, identity: human ? nil : captureIdentity ?? desktopSession, check: context.check)
         }
-        let node = try (op["element"] as? JSONObject).map { record -> AXUIElement in
-            guard let target else { throw DriverFailure(code: "unsupported", message: "The desktop image has no accessibility element mapping") }
-            return try element(record, target: target)
-        }
-        let tool = op["tool"] as? String ?? ""
-        let semantic = tool == "set_value" || tool == "perform_secondary_action" || op["click_method"] as? String == "accessibility"
         if op["input"] as? String == "app_post" || op["click_method"] as? String == "app_post" {
             throw DriverFailure(code: "unsupported", message: "Window message input is not supported on macOS")
         }
@@ -190,8 +197,8 @@ final class DesktopDriver {
         func validate() throws {
             try requireAccessibility()
             if let target {
-                if let captureIdentity { try capture.validateWindow(target, identity: captureIdentity, check: context.check) }
-                if semantic { try target.validate() } else { try target.focusMatches() }
+                if !semantic, let captureIdentity { try capture.validateWindow(target, identity: captureIdentity, check: context.check) }
+                if semantic { try accessibility.validateWindow(target) } else { try target.focusMatches() }
             }
             else { _ = try capture.validateDesktop(bounds, identity: human ? nil : captureIdentity ?? desktopSession, check: context.check) }
             if ["type_text", "press_key"].contains(tool), let node,
@@ -208,28 +215,17 @@ final class DesktopDriver {
             guard bounds.contains(point) else { throw DriverFailure(code: "input-rejected", message: "The input point is outside the observed target") }
             return point
         }
-        let kind = human ? op["kind"] as? String ?? "" : ["click": "click", "type_text": "text", "press_key": "key", "scroll": "scroll", "drag": "drag", "set_value": "set_value", "perform_secondary_action": "secondary"][tool] ?? ""
+        let kind = human ? op["kind"] as? String ?? "" : ["click": "click", "type_text": "text", "press_key": "key", "scroll": "scroll", "drag": "drag", "set_value": "set_value", "perform_secondary_action": "secondary", "set_checked": "set_checked", "set_expanded": "set_expanded", "select": "select", "scroll_into_view": "scroll_into_view"][tool] ?? ""
         let buttonName = op[human ? "button" : "mouse_button"] as? String ?? "left"
         guard let button = ["left": CGMouseButton.left, "right": .right, "middle": .center][buttonName] else {
             throw DriverFailure(code: "input-rejected", message: "The requested pointer button is invalid")
         }
+        context.mechanism = semantic ? "accessibility" : "global"
         if semantic {
-            guard let node else { throw DriverFailure(code: "target-changed", message: "This semantic action requires a current observed element") }
+            guard let node else { throw DriverFailure(code: "target_lost", message: "This semantic action requires an observed element") }
             try validate(); context.progress("target", target: axFrame(node))
-            if kind == "set_value" {
-                let value = op["value"] as? String ?? ""
-                let status = AXUIElementSetAttributeValue(node, kAXValueAttribute as CFString, value as CFString)
-                guard status == .success else { throw DriverFailure(code: "input-rejected", message: "The selected control did not accept a value", uncertain: status == .cannotComplete) }
-                context.events += 1
-                guard axString(node, kAXValueAttribute) == value else { throw DriverFailure(code: "verification-failed", message: "The control did not confirm the requested value") }
-                context.verified = true
-            } else {
-                let action = kind == "secondary" ? op["action"] as? String ?? "" : kAXPressAction
-                guard axActions(node).contains(action) else { throw DriverFailure(code: "unsupported", message: "The selected control does not expose that action") }
-                let status = AXUIElementPerformAction(node, action as CFString)
-                guard status == .success else { throw DriverFailure(code: "input-rejected", message: "The accessibility action was not confirmed", uncertain: status == .cannotComplete) }
-                context.events += 1
-            }
+            try performSemantic(kind, node: node, context: context)
+            if context.events > 0 { lastInput = Date() }
         } else if ["click", "down", "up", "move"].contains(kind) {
             let location = try point(op["x"], op["y"])
             try target?.ownsPoint(location)
@@ -295,8 +291,8 @@ final class DesktopDriver {
                 try post(event, context: context, validate: validate); remaining -= amount
             }
         } else { throw DriverFailure(code: "unsupported", message: "The requested native operation is not supported") }
-        context.progress("dispatched")
-        return ["ok": true, "receipt": ["effect": context.verified ? "verified" : "dispatched", "dispatchedEvents": context.events]]
+        if context.events > 0 { context.progress("dispatched") }
+        return ["ok": true, "receipt": context.receipt()]
     }
 
     func perform(_ context: RequestContext) throws -> JSONObject {
@@ -307,6 +303,8 @@ final class DesktopDriver {
         case "release_input": try releaseInput(); return ["ok": true]
         case "list_apps": return ["ok": true, "apps": listApps()]
         case "get_app_state": return ["ok": true, "snapshot": try observe(context)]
+        case "query_elements": return try query(context)
+        case "release_elements": accessibility.release(op["elements"] as? [JSONObject] ?? []); return ["ok": true]
         case "capture_frame":
             let (frame, bounds) = try capture.desktop(check: context.check)
             return ["ok": true, "frame": frame.json(bounds: bounds)]

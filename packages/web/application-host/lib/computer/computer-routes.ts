@@ -1,3 +1,4 @@
+import { computerReadRequest } from './computer-request.js';
 import type { Express, Request, RequestHandler, Response } from "express";
 import { HarnessServiceError } from "../harness/service-error.js";
 import { ComputerBeforeDispatchError, ComputerEffectError, type ComputerService } from "./computer-service.js";
@@ -78,13 +79,13 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
   // takeover identity; a raw automatic endpoint is never a second bypass around Thread admission.
   app.use('/api/computers/desktops/:desktopId', requireAuth, (request, response, next) => {
     const operation = request.path.slice(1);
-    const automatic = request.method === 'POST' && ['observe', 'act', 'open', 'cancel', 'release', 'browser', 'office', 'software', 'artifacts/write'].includes(operation)
+    const automatic = request.method === 'POST' && ['observe', 'query', 'await', 'act', 'open', 'cancel', 'release', 'browser', 'office', 'software', 'artifacts/write'].includes(operation)
       || request.method === 'POST' && ['prepare', 'lifecycle'].includes(operation) && request.body?.automation === true;
     const token = request.get('X-Varin-Computer-Lease');
     if (!automatic && !token) { next(); return; }
     if (!token) { sendError(response, new ComputerBeforeDispatchError(new HarnessServiceError('forbidden', 'Automatic input requires a Host desktop assignment')), 'Assignment required'); return; }
     const body = request.body;
-    const read = request.method === 'GET' || operation === 'observe' || operation === 'evidence' || operation === 'artifacts/inspect'
+    const read = request.method === 'GET' || ['observe', 'query', 'await'].includes(operation) || operation === 'evidence' || operation === 'artifacts/inspect'
       || operation === 'browser' && (['status', 'tabs', 'snapshot'].includes(body?.op) || body?.op === 'act' && body?.act?.kind === 'screenshot')
       || operation === 'office' && (['status', 'docs'].includes(body?.op) || body?.op === 'act' && body?.act?.kind === 'read');
     let entered = false;
@@ -198,26 +199,30 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     const controller = new AbortController();
     response.once("close", () => { if (!response.writableEnded) controller.abort(); });
     try {
-      const body = request.body ?? {};
       const observation = await computers.observe({
-        desktopId: String(request.params.desktopId ?? ""),
-        app: typeof body.app === "string" ? body.app : "",
-        signal: controller.signal,
-        ...(body.window !== undefined && (typeof body.window === "number" || typeof body.window === "string")
-          ? { window: body.window } : {}),
-        ...(typeof body.includeScreenshot === "boolean" ? { includeScreenshot: body.includeScreenshot } : {}),
-        ...(typeof body.includeWindows === "boolean" ? { includeWindows: body.includeWindows } : {}),
-        ...(typeof body.textLimit === "number" || body.textLimit === "max" ? { textLimit: body.textLimit } : {}),
-        ...(typeof body.observationId === 'string' ? { observationId: body.observationId } : {}),
-        ...(typeof body.offset === 'number' ? { offset: body.offset } : {}),
-        ...(typeof body.maxTreeNodes === "number" ? { maxTreeNodes: body.maxTreeNodes } : {}),
-        ...(typeof body.maxTreeDepth === "number" ? { maxTreeDepth: body.maxTreeDepth } : {}),
+        ...computerReadRequest('observe', request.body ?? {}),
+        desktopId: String(request.params.desktopId ?? ''), signal: controller.signal,
       });
       response.json({ observation });
     } catch (error) {
       sendError(response, error, "Unable to observe the desktop");
     }
   });
+
+  for (const operation of ['query', 'await'] as const) {
+    app.post(`/api/computers/desktops/:desktopId/${operation}`, requireAuth, async (request: Request, response: Response) => {
+      response.setHeader('Cache-Control', 'no-store');
+      const controller = new AbortController();
+      response.once('close', () => { if (!response.writableEnded) controller.abort(); });
+      try {
+        const target = { desktopId: String(request.params.desktopId ?? ''), signal: controller.signal };
+        const result = operation === 'query'
+          ? await computers.query({ ...computerReadRequest('query', request.body ?? {}), ...target })
+          : await computers.awaitCondition({ ...computerReadRequest('await', request.body ?? {}), ...target });
+        response.json({ result });
+      } catch (error) { sendError(response, error, 'Unable to read the desktop condition'); }
+    });
+  }
 
   /** One structured automated action against an app on this desktop. */
   app.post("/api/computers/desktops/:desktopId/act", requireAuth, async (request: Request, response: Response) => {

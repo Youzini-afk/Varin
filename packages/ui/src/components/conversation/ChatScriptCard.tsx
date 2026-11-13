@@ -8,7 +8,8 @@ import type { ChatToolCall, ChatToolExecutionState, ChatToolResultMessage } from
 import { ToolDisclosure } from './ToolDisclosure';
 import { useToolDisclosureChoices } from './toolDisclosureContext';
 import { getToolSummary } from '@/components/chat/message/parts/toolSummary';
-import { presentInvocation, toolRecord } from './toolInvocation';
+import { invocationData, presentInvocation, toolRecord } from './toolInvocation';
+import { computerResultSummary } from './computerToolPresentation';
 import { toolSubject } from './toolSubject';
 import { useToolTargets } from './toolTargetContext';
 import { standaloneDescendants } from './standaloneTools';
@@ -102,7 +103,10 @@ function ScriptCallRow({ call, live, renderCall }: { call: OperationCallSummary;
   const label = scriptToolLabels[call.name];
   const savedCall = operation?.intent as { call?: { arguments?: unknown } } | undefined;
   const original = presentInvocation({ name: call.name, arguments: live?.args ?? savedCall?.call?.arguments ?? {} });
-  const summary = toolSubject({ name: original.name, arguments: original.arguments as ChatToolCall['arguments'] }, toolRecord(live?.result), t, targets)
+  const completion = operation?.call_completion;
+  const data = toolRecord(invocationData(live?.result ?? (completion && completion.kind !== 'not_dispatched' ? completion.content?.data : undefined), original));
+  const receipt = computerResultSummary(original.name, data, toolRecord(original.arguments), t);
+  const summary = toolSubject({ name: original.name, arguments: original.arguments as ChatToolCall['arguments'] }, data, t, targets)
     || getToolSummary({ toolName: original.name, arguments: original.arguments }).text;
   React.useEffect(() => {
     if (!open || !api) return;
@@ -114,9 +118,9 @@ function ScriptCallRow({ call, live, renderCall }: { call: OperationCallSummary;
   }, [api, call.operationId, status, open, retry]);
   return <ToolDisclosure id={'script-call:' + call.operationId} className="rounded-md" onExpanded={setOpen}>
     <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md py-1.5 pr-2 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden" style={{ paddingLeft: `${call.depth * 12 + 4}px` }}>
-      <StatusIcon status={status} /><span className="min-w-0 flex-1" title={call.name}><span className="block truncate">{label ? t(label) : call.name}</span>
+      {status === 'success' && receipt ? <Icon name="computer" className="size-3.5 shrink-0" /> : <StatusIcon status={status} />}<span className="min-w-0 flex-1" title={call.name}><span className="block truncate">{label ? t(label) : call.name}</span>
         {summary && summary !== call.name && <span className="block truncate typography-micro" title={summary}>{summary}</span>}</span>
-      <span className="shrink-0 typography-micro">{call.cancelRequested && call.phase !== 'terminal' ? t('chat.children.stopping') : t(`chat.timeline.tools.${status}`)}</span>
+      <span className="min-w-0 max-w-[50%] whitespace-normal break-words text-right typography-micro">{call.cancelRequested && call.phase !== 'terminal' ? t('chat.children.stopping') : receipt || t(`chat.timeline.tools.${status}`)}</span>
       <Icon name="arrow-right-s" className="tool-disclosure-chevron size-3.5" />
     </summary>
     <div className="ml-3 space-y-2 border-l border-border/50 py-2 pl-3">

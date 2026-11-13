@@ -23,7 +23,9 @@ DispatchQueue.global(qos: .userInitiated).async {
             do { response = try driver.perform(context) }
             catch { response = context.failure(error) }
             let tool = operation["tool"] as? String ?? ""
-            if !isCapture && (!["ping", "capabilities", "list_apps", "get_app_state", "inject_input"].contains(tool) || response["ok"] as? Bool != true) {
+            // A cancelled read owns no synthetic input. Releasing here would
+            // interrupt a viewer's held key/button on the shared native owner.
+            if !context.readOnly && (tool != "inject_input" || response["ok"] as? Bool != true) {
                 do { try driver.releaseInput() }
                 catch { response = context.failure(DriverFailure(code: "connection-lost", message: "Release of synthetic input was not confirmed", uncertain: true)) }
             }

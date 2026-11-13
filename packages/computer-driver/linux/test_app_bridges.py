@@ -59,15 +59,16 @@ class AppBridges(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("driver_for_gesture", Path(__file__).with_name("driver-host.py"))
         module = importlib.util.module_from_spec(spec)
         inputs = [{"id": "gesture", "tool": "inject_input"}, {"id": "browser-read", "tool": "browser", "op": "tabs"},
-                  {"id": "office-read", "tool": "office", "op": "act", "act": {"kind": "read"}}]
+                  {"id": "office-read", "tool": "office", "op": "act", "act": {"kind": "read"}},
+                  {"id": "semantic-read", "tool": "query_elements"}, {"id": "semantic-release", "tool": "release_elements"}]
         output = io.StringIO()
         with patch.dict("sys.modules", {"runtime": runtime}), patch.dict(os.environ, {"XDG_SESSION_TYPE": "x11", "WAYLAND_DISPLAY": ""}), patch("sys.stdin", io.StringIO("\n".join(json.dumps(op) for op in inputs))), patch("sys.stdout", output):
             spec.loader.exec_module(module)
             module.main()
         replies = [json.loads(line) for line in output.getvalue().splitlines()]
         self.assertEqual([(reply["id"], reply["ok"]) for reply in replies],
-                         [("gesture", True), ("browser-read", True), ("office-read", False)])
-        self.assertEqual(observed, [True, True])
+                         [("gesture", True), ("browser-read", True), ("office-read", False), ("semantic-read", True), ("semantic-release", True)])
+        self.assertEqual(observed, [True, True, True, True])
         self.assertFalse(held[0])  # EOF owns cleanup.
 
 

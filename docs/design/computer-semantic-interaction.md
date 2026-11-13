@@ -1,6 +1,9 @@
 # Computer Use：语义查询、局部观察与条件等待
 
-状态：设计提案，尚未实施。2026-11-14。
+状态：工具、Host、界面以及 Windows UIA、macOS AX、Linux X11 AT-SPI 的主要调用链已实现。
+当前范围与用法见 [Computer Use 模块说明](../../packages/web/application-host/lib/computer/DOCUMENTATION.md) 和
+[驱动合同](../../packages/computer-driver/README.md)。本稿保留尚未交付的原生事件订阅、Wayland 语义接入和实机验收设计。
+当前等待由目标 Host 分段采样，不宣称具备事件覆盖；Wayland 仍保留原 portal 输入/画面能力。
 
 基于 Varin `a264fe0c6`（0.9.46），参考 agent-desktop `2f650705`。本文确定后续实现的目标与边界；当前行为仍以源码和 [Computer Use 模块说明](../../packages/web/application-host/lib/computer/DOCUMENTATION.md)为准。
 

@@ -3,6 +3,7 @@ import type { ChatToolCall } from './types';
 import { toolRecord, toolText } from './toolInvocation';
 import { processCommand, type ToolTargets } from './toolTargetContext';
 import { toolValueLabel } from './toolLabels';
+import { computerActionLabel, computerConditionLabel, computerProperties } from './computerToolPresentation';
 import { readUserQuestions } from '@varin/protocol';
 
 type Translate = ReturnType<typeof useI18n>['t'];
@@ -15,6 +16,7 @@ export function toolActionLabel(value: unknown, t: Translate): string {
     : word === 'remember' ? 'save' : word === 'correct' ? 'update' : word === 'describe' ? 'inspect'
       : word === 'set_value' ? 'write' : ['status', 'environment'].includes(word) ? 'inspect'
         : ['docs', 'tabs', 'apps', 'access'].includes(word) ? 'list' : ['observe', 'snapshot'].includes(word) ? 'read'
+          : word === 'query' ? 'search' : word === 'await' ? 'inspect'
           : word === 'grant' ? 'apply' : word === 'artifact' ? 'register' : word;
   return words.includes(action as typeof words[number]) ? t(`chat.toolAction.${action as typeof words[number]}`) : word;
 }
@@ -97,14 +99,23 @@ export function toolSubject(call: Pick<ChatToolCall, 'name' | 'arguments'>, data
   }
   if (call.name.startsWith('computer_')) {
     const act = toolRecord(args.act ?? args.action), response = toolRecord(data.result), doc = toolRecord(response.doc);
-    const observation = toolRecord(data.observation ?? response.observation), app = toolRecord(observation.app);
-    const verb = toolActionLabel(act.kind ?? args.op ?? args.action ?? call.name.slice(9), t);
+    const observation = toolRecord(data.observation ?? response.observation ?? toolRecord(data.last).observation), app = toolRecord(observation.app);
+    const match = toolRecord(args.match), reference = toolRecord(args.target ?? args.within);
+    const verb = computerActionLabel(act, t) || (call.name === 'computer_await' ? computerConditionLabel(args.condition, t) : '')
+      || toolActionLabel(act.kind ?? args.op ?? args.action ?? call.name.slice(9), t);
+    // A post-action observation can renumber elements. Never reuse the old index in a new tree.
+    const sameObservation = observation.id !== undefined && observation.id === (act.observationId ?? reference.observationId);
+    const element = sameObservation && Array.isArray(observation.elements) ? observation.elements.map(toolRecord).find(item => item.index === (act.elementIndex ?? reference.elementIndex)) : undefined;
+    const control = toolText(element?.name) || toolText(toolRecord(toolRecord(response.receipt).observedState).name)
+      || toolText(toolRecord(data.properties ?? toolRecord(data.last).properties).name) || toolText(match.name);
     const target = toolText(doc.title) || toolText(args.path) || toolText(args.url) || toolText(args.relativePath)
-      || toolText(act.doc) || toolText(act.app) || toolText(args.app) || toolText(app.name) || toolText(args.query)
+      || toolText(act.doc) || toolText(observation.windowTitle) || toolText(act.app) || toolText(args.app) || toolText(app.name) || toolText(args.query)
       || toolText(args.command) || toolText(args.requestId) || toolText(toolRecord(data.desktop).label) || toolText(args.desktopId);
-    const position = typeof act.elementIndex === 'number' ? '#' + act.elementIndex
+    const position = control ? '' : typeof (act.elementIndex ?? reference.elementIndex) === 'number' ? '#' + (act.elementIndex ?? reference.elementIndex)
       : typeof act.x === 'number' && typeof act.y === 'number' ? `(${act.x}, ${act.y})` : '';
-    return subjectJoin(verb, target, subjectJoin(act.sheet, act.range), act.url ?? act.path, act.key ?? act.text ?? act.value,
+    const condition = call.name === 'computer_await' && typeof args.property === 'string' && args.equals !== undefined
+      ? computerProperties({ [args.property]: args.equals }, undefined, undefined, t).map(item => item.text).join(' · ') : '';
+    return subjectJoin(verb, target, control, condition, subjectJoin(act.sheet, act.range), act.url ?? act.path, act.key ?? act.text ?? act.value,
       act.direction, position, paths(args.packages ?? args.groups), count(response.tabs ?? response.docs ?? data.apps ?? data.desktops, t));
   }
   if (call.name.startsWith('mcp_')) {

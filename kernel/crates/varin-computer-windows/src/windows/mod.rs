@@ -5,15 +5,15 @@ mod operations;
 pub mod uia;
 pub mod window;
 use crate::protocol::{Failure, Request, Result};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     io::{self, BufRead, Write},
-    sync::{mpsc, Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     thread,
 };
 use windows::Win32::{
-    System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED},
-    UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2},
+    System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize},
+    UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext},
 };
 
 #[derive(Clone)]
@@ -92,7 +92,7 @@ pub fn run() -> Result<()> {
                 operations::Runtime::new(worker_owner.clone(), worker_output.clone(), capture_only);
             while let Ok(request) = receiver.recv() {
                 let result = worker_owner
-                    .begin(&request.id)
+                    .begin_request(&request.id, !request.is_action())
                     .and_then(|_| runtime.execute(&request));
                 let mut response = match result {
                     Ok(mut response) => {
@@ -104,7 +104,11 @@ pub fn run() -> Result<()> {
                     Err(error) => {
                         // Automatic actions and failed human requests release only
                         // this instance's tracked input. Unknown semantic effects stay unknown.
-                        let release = worker_owner.release(false);
+                        let release = if request.is_action() {
+                            worker_owner.release(false)
+                        } else {
+                            Ok(())
+                        };
                         let mut response = worker_owner.failure(&error);
                         if release.is_err() {
                             response["inputReleased"] = json!(false);

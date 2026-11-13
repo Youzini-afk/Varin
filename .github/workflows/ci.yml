@@ -583,8 +583,10 @@ jobs:
           bun run test:packages:platform
           bun run --cwd packages/web test:platform
       - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        name: Compile the native macOS Computer helper
-        run: node packages/computer-driver/macos/build-helper.mjs "$RUNNER_TEMP/varin-computer"
+        name: Verify the native macOS Computer helper
+        run: |
+          node packages/computer-driver/macos/build-helper.mjs "$RUNNER_TEMP/varin-computer"
+          node --test packages/computer-driver/macos/test_semantic.mjs
       - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' }}
         name: Compile and ad-hoc sign the bundled FSKit executor
         run: |

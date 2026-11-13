@@ -13,15 +13,29 @@ const browserAction = schema({ kind: { enum: ['navigate', 'evaluate', 'click', '
 const officeFields = { doc: string, sheet: string, range: string };
 const officeAction = schema({ ...officeFields, kind: { enum: ['write', 'insert', 'save', 'export'] },
   values: { type: 'array', items: { type: 'array', items: {} } }, text: { type: 'string' }, path: string, url: string, filter: string }, ['kind']);
-const action = schema({ kind: { enum: ['click', 'type', 'key', 'scroll', 'drag', 'set_value', 'secondary'] }, app: string,
-  window: { anyOf: [number, string] }, observationId: string, elementIndex: integer, x: number, y: number,
+const windowSelector = { anyOf: [number, string] };
+const index = { type: 'integer', minimum: 0 };
+const elementRef = schema({ observationId: string, elementIndex: index }, ['observationId', 'elementIndex']);
+const property = { enum: ['name', 'value', 'role', 'enabled', 'selected', 'checked', 'expanded', 'actions'] };
+const checked = { enum: [true, false, 'mixed'] };
+const boolean = { type: 'boolean' };
+const queryMatch = schema({ role: string, name: string, nameMatch: { enum: ['exact', 'contains'] },
+  value: { type: 'string' }, enabled: boolean, selected: boolean, checked, expanded: boolean });
+const scanBudget = { maxTreeNodes: { type: 'integer', minimum: 1 }, maxTreeDepth: { type: 'integer', minimum: 1 } };
+const queryFields = { ...desktop, app: string, window: windowSelector, target: elementRef, within: elementRef,
+  match: queryMatch, properties: { type: 'array', items: property, minItems: 1, uniqueItems: true },
+  offset: index, limit: { type: 'integer', minimum: 1 }, ...scanBudget };
+const action = schema({ kind: { enum: ['click', 'type', 'key', 'scroll', 'drag', 'set_value', 'secondary',
+  'set_checked', 'set_expanded', 'select', 'scroll_into_view'] }, app: string,
+  window: windowSelector, observationId: string, elementIndex: index, x: number, y: number,
   fromX: number, fromY: number, toX: number, toY: number, clickCount: integer,
   mouseButton: { enum: ['left', 'right', 'middle'] }, clickMethod: { enum: ['auto', 'accessibility', 'app_post', 'global'] },
   direction: { enum: ['up', 'down', 'left', 'right'] }, pages: number, text: { type: 'string' }, key: string,
-  value: { type: 'string' }, action: string, returnState: { enum: ['none', 'tree', 'screenshot'] },
+  value: { type: 'string' }, checked: boolean, expanded: boolean, selection: { enum: ['replace', 'add', 'remove'] },
+  action: string, returnState: { enum: ['none', 'tree', 'screenshot'] },
 }, ['kind']);
 const declaration = (method: string, operation: 'read' | 'effect', description: string, inputSchema: JsonObject, job = false): VarinExtensionServiceProvision => ({
-  id: `varin.computer.${method}`, version: 1,
+  id: `varin.computer.${method}`, version: ['observe', 'act'].includes(method) ? 2 : 1,
   tool: { name: `computer_${method}`, description, completion: job ? 'job' : 'result', ...(job ? { lifetime: 'thread' as const } : {}), operation, inputSchema, outputSchema: { type: 'object' },
     disclosure:{summary:({observe:'Observe an assigned application window, accessibility tree and optional screenshot.',act:'Send input to an assigned application using its observation and automation epoch.',browser_read:'Read assigned Chromium tabs, snapshots or screenshots.',browser:'Launch or operate assigned Chromium.',office_read:'Read live LibreOffice documents and unsaved content.',office:'Launch, open or operate live LibreOffice documents.'} as Record<string,string>)[method] ?? description,
       aliases:['桌面','应用',...(method==='observe'||method==='browser_read'?['截图','屏幕']:[])],
@@ -45,10 +59,14 @@ export const COMPUTER_TOOL_DECLARATIONS = [
   declaration('artifact', 'effect', 'Register the current revision of a managed desktop home file as this real Thread’s Computer artifact. The existing Bot work and artifact download consumers can read that exact revision. Requires the desktop assignment; changed file or Host identity cannot silently replace it.', schema({ ...desktop, relativePath: string }, ['relativePath'])),
   declaration('apps', 'read', 'List applications with visible or minimized windows. Filter by app name, PID or window title with query; includeHidden includes background windows.', schema({ ...desktop, query: string, includeHidden: { type: 'boolean' } })),
   declaration('control', 'effect', 'Acquire control of a desktop, then take a fresh observation before input. Children require a root grant. Returns the current automationEpoch.', schema(desktop)),
-  declaration('observe', 'read', 'Read the selected app window and optionally capture its image. Other windows are omitted by default; includeWindows returns the app window inventory, also available later with the same observationId without rescanning. Use observationId for actions. Take a fresh observation after human handback.', schema({ ...desktop, app: string, window: { anyOf: [number, string] }, includeScreenshot: { type: 'boolean' }, includeWindows: { type: 'boolean' }, observationId: string,
-    offset: { type: 'integer', minimum: 0 }, textLimit: { anyOf: [{ type: 'integer', minimum: 1 }, { const: 'max' }] },
-    maxTreeNodes: { type: 'integer', minimum: 1 }, maxTreeDepth: { type: 'integer', minimum: 1 } })),
-  declaration('act', 'effect', 'Act on an assigned desktop using the observation ref in action.observationId; it carries the original desktop, app, window and automation epoch. Direct targets and explicit epoch remain supported. Verify the result with a new observation. From scripts, forward image parts explicitly with emitImage.', schema({ ...desktop, ...epoch, action }, ['action'])),
+  declaration('observe', 'read', 'Read an assigned window outline, full tree, observed region or optional screenshot. within reads the current original region; observationId pages a retained result without rescanning. Take a fresh screenshot before using coordinates after the window moves or human handback.', schema({ ...desktop, app: string, window: windowSelector, includeScreenshot: boolean, includeWindows: boolean, observationId: string, within: elementRef,
+    view: { enum: ['outline', 'tree'] }, offset: index, textLimit: { anyOf: [{ type: 'integer', minimum: 1 }, { const: 'max' }] }, ...scanBudget })),
+  declaration('query', 'read', 'Find matching controls on the assigned desktop by role, name, value and state (within narrows to an observed region), or read specified properties of one target. Names match exactly unless nameMatch is contains. Results may be incomplete; unknown properties are not false.', schema(queryFields)),
+  declaration('await', 'read', 'Wait on the assigned desktop for a window, control, or property. present/absent checks the current state; changed compares with the initial read. Use an observed target for a property or the original window for window_closed. Cancellation stops this wait only. timeoutMs is optional.', schema({ ...queryFields,
+    condition: { enum: ['present', 'absent', 'window_opened', 'window_closed', 'property', 'changed'] },
+    property, equals: { anyOf: [{ type: 'string' }, boolean, { type: 'array', items: string }] }, timeoutMs: index,
+  }, ['condition'])),
+  declaration('act', 'effect', 'Act on an assigned desktop with the original observationId and elementIndex. set_checked, set_expanded, select and scroll_into_view express a control action; type inserts text, set_value replaces it. Ordinary element clicks prefer a supported accessibility action. Use global for explicit physical clicks. A dispatched action is not proof of task completion.', schema({ ...desktop, ...epoch, action }, ['action'])),
   declaration('open', 'effect', 'Open exactly one URL, path or application on the assigned desktop’s machine. localhost and file paths refer to that machine. A dispatch receipt does not prove the application finished; never replay unknown input.', schema({ ...desktop, ...epoch, url: string, path: string, command: string, args: { type: 'array', items: { type: 'string' } } })),
   declaration('put', 'effect', 'Write base64 file bytes atomically into the managed desktop user’s home through its original owner. Returns the stored revision. Requires a control assignment; unsupported desktops report unavailable. Re-inspect an unknown result before retrying.', schema({ ...desktop, relativePath: string, contentBase64: { type: 'string' } }, ['relativePath', 'contentBase64'])),
   declaration('install', 'effect', 'Install recipe groups or packages in the assigned managed Linux desktop environment. Requires control. Reported package results retain failures; successful installation does not prove application usability.', schema({ ...desktop, groups: { type: 'array', items: string }, packages: { type: 'array', items: string } })),

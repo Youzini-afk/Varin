@@ -75,7 +75,8 @@ def capabilities():
             keyboard = active and bool(session.devices & 1)
             state = session.state
         return {"platform": "linux", "driver": "linux-portal", "driverVersion": "1", "applicationTools": {"browser": True, "office": True},
-                "observeTree": False, "elementAction": False, "screenshot": active,
+                "observeTree": False, "elementAction": False, "semanticQuery": False,
+                "semanticActions": [], "semanticEvents": "polling", "screenshot": active,
                 "coordinateInput": pointer, "textInput": keyboard, "drag": pointer,
                 "multiWindow": True, "interruptibleInput": True, "occludedCapture": True,
                 "sessionType": "wayland", "status": "ready" if active else "unprobed",
@@ -84,7 +85,8 @@ def capabilities():
                 **({} if active else {"detail": "Observe Shared desktop or open the viewer to request screen and input authorization"})}
     except Exception:
         return {"platform": "linux", "driver": "linux-portal", "driverVersion": "1", "applicationTools": {"browser": True, "office": True},
-                "observeTree": False, "elementAction": False, "screenshot": False,
+                "observeTree": False, "elementAction": False, "semanticQuery": False,
+                "semanticActions": [], "semanticEvents": "polling", "screenshot": False,
                 "coordinateInput": False, "textInput": False, "drag": False,
                 "sessionType": "wayland", "status": "unavailable",
                 "detail": "The session bus, desktop portals or GStreamer PipeWire capture dependencies are unavailable"}
@@ -261,6 +263,14 @@ def perform_operation(operation, emit=lambda *_args: None):
         return {"ok": True, "frame": frame}
     if tool == "list_apps":
         return {"ok": True, "apps": [{"name": "Shared desktop", "pid": 0, "windows": windows(owner())}]}
+    if tool == "release_elements":
+        return {"ok": True}
+    if tool in ("query_elements", "set_checked", "set_expanded", "select", "scroll_into_view") or (tool == "get_app_state" and operation.get("within")):
+        # Reading semantics must not open another chooser or attach arbitrary
+        # accessibility windows to the already authorized portal screen.
+        result = SessionError("unsupported", "The authorized portal screen has no verified accessibility-window mapping").response()
+        result.update({"code": "unsupported", "complete": False})
+        return result
     if tool == "get_app_state":
         return {"ok": True, "snapshot": snapshot(operation)}
     if tool in ("browser", "office"):

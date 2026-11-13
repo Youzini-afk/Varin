@@ -6,7 +6,7 @@ import { COMPUTER_CAPABILITY, COMPUTER_TOOL_DECLARATIONS } from '@varin/extensio
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import type { ThreadComputerAPI, ThreadIdentity } from '@varin/application-client';
-import { computerWorkKey, sameComputerWork, sameComputerExecution, parseComputerWorkRef, type ComputerActParams, type ComputerObserveParams, type ComputerWorkRef, type ComputerActor, type ComputerAccessRequest, type ComputerExecutionRef, type ComputerWorkScope } from '@varin/protocol';
+import { computerWorkKey, sameComputerWork, sameComputerExecution, parseComputerWorkRef, type ComputerActParams, type ComputerObserveParams, type ComputerQueryParams, type ComputerAwaitParams, type ComputerWorkRef, type ComputerActor, type ComputerAccessRequest, type ComputerExecutionRef, type ComputerWorkScope } from '@varin/protocol';
 import { compileToolJsonSchema } from '../models/schema.js';
 import { ComputerEffectError, type ComputerService, type ComputerExecutionEvidence } from '../computer/computer-service.js';
 import { HarnessServiceError } from '../harness/service-error.js';
@@ -248,9 +248,16 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
           await runtime.reconcileObservations();
           return result({ request: decision }, decision.status === 'indeterminate' ? 'unknown' : 'confirmed', true, decision.status === 'indeterminate' ? 'indeterminate' : 'succeeded');
         }
+        const actionTarget = object(params.action) ? params.action : undefined;
+        const reference = params.observationId ?? (object(params.target) ? params.target.observationId : undefined)
+          ?? (object(params.within) ? params.within.observationId : undefined) ?? actionTarget?.observationId;
+        const originalDesktop = typeof reference === 'string' ? computers.desktopForObservation(reference) : undefined;
+        if (originalDesktop && params.desktopId !== undefined && params.desktopId !== originalDesktop) {
+          throw new ComputerError('computer-request-invalid', 'The reference belongs to a different desktop');
+        }
         const desktopId = method === 'prepare'
           ? (await computers.preparationTarget(typeof params.connectionId === 'string' ? params.connectionId : undefined)).id
-          : await computers.resolveDesktop(typeof params.desktopId === 'string' ? params.desktopId : computers.automation.desktopFor(execution) ?? undefined, configured.defaultDesktopId);
+          : await computers.resolveDesktop(typeof params.desktopId === 'string' ? params.desktopId : originalDesktop ?? computers.automation.desktopFor(execution) ?? undefined, configured.defaultDesktopId);
         if (method === 'request') return await computers.automation.manage(work, execution, async (stopSignal, actor) => {
           if (sameComputerWork(actor.execution.work, actor.rootWork)) {
             throw new ComputerError('computer-request-invalid', 'Only a child task requests a desktop assignment from its root. The root task can use computer_control directly; computer_request is not an operating-system permission prompt.');
@@ -359,8 +366,13 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
             }
             case 'observe': {
               const parts: OutputPart<IncomingMedia>[] = [];
-              const observation = observationOutput(await computers.observe({ ...params as unknown as ComputerObserveParams, desktopId, signal }), parts);
+              const observation = observationOutput(await computers.observe({ ...params as unknown as ComputerObserveParams, view: params.view === 'tree' ? 'tree' : 'outline', desktopId, signal }), parts);
               return result({ observation }, 'none', true, 'succeeded', parts);
+            }
+            case 'query': return result(await computers.query({ ...params as unknown as ComputerQueryParams, desktopId, signal }));
+            case 'await': {
+              const waited = await computers.awaitCondition({ ...params as unknown as ComputerAwaitParams, desktopId, signal });
+              return result(waited, 'none', true, waited.status === 'cancelled' ? 'cancelled' : 'succeeded');
             }
             case 'act': {
               inputCallStarted = true;
