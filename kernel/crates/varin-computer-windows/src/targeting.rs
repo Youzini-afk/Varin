@@ -8,6 +8,32 @@ use serde::{Deserialize, Serialize};
 pub struct ElementRecord {
     #[serde(default)]
     pub index: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_element_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_index: Option<usize>,
+    #[serde(default)]
+    pub depth: usize,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub platform_role: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expanded: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focused: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_children: Option<bool>,
+    #[serde(default)]
+    pub has_more_children: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ancestor_names: Vec<String>,
     #[serde(default)]
     pub runtime_id: Vec<i32>,
     #[serde(default)]
@@ -22,6 +48,8 @@ pub struct ElementRecord {
     pub class_name: String,
     #[serde(default)]
     pub value: String,
+    #[serde(skip)]
+    pub value_available: bool,
     #[serde(default)]
     pub native_window_handle: isize,
     pub frame: Option<Rect>,
@@ -75,8 +103,12 @@ pub fn relocate(observed: &ElementRecord, live: &[ElementRecord]) -> Result<Opti
         }
     }
     match candidates.as_slice() {
-        [] => Ok(None), [index] => Ok(Some(*index)),
-        _ => Err(Failure::new("target-changed", "Observed element has multiple matching controls; observe again and choose a distinguishable element")),
+        [] => Ok(None),
+        [index] => Ok(Some(*index)),
+        _ => Err(Failure::new(
+            "target-changed",
+            "Observed element has multiple matching controls; observe again and choose a distinguishable element",
+        )),
     }
 }
 
@@ -118,6 +150,61 @@ mod tests {
             control_type: "ControlType.Button".into(),
             ..Default::default()
         }
+    }
+    #[test]
+    fn query_does_not_treat_unknown_or_mixed_states_as_false() {
+        let mut record = ElementRecord {
+            role: "checkbox".into(),
+            name: "Auto save".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            matches(&record, &serde_json::json!({"checked":false})),
+            None
+        );
+        record.checked = Some(serde_json::json!("mixed"));
+        assert_eq!(
+            matches(&record, &serde_json::json!({"checked":false})),
+            Some(false)
+        );
+        assert_eq!(
+            matches(&record, &serde_json::json!({"checked":"mixed"})),
+            Some(true)
+        );
+        assert_eq!(
+            matches(
+                &record,
+                &serde_json::json!({"expanded":false,"role":"button"})
+            ),
+            Some(false)
+        );
+    }
+    #[test]
+    fn query_names_are_exact_until_contains_is_explicit() {
+        let record = ElementRecord {
+            name: "Save changes".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            matches(&record, &serde_json::json!({"name":"Save"})),
+            Some(false)
+        );
+        assert_eq!(
+            matches(
+                &record,
+                &serde_json::json!({"name":"Save","nameMatch":"contains"})
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            matches(
+                &record,
+                &serde_json::json!({"name":"save","nameMatch":"contains"})
+            ),
+            Some(false)
+        );
+        assert_eq!(matches(&record, &serde_json::json!({"value":""})), None);
+        assert_eq!(matches(&record, &serde_json::Value::Null), Some(true));
     }
     #[test]
     fn runtime_identity_precedes_names() {
@@ -170,15 +257,61 @@ mod tests {
         };
         assert!(check_geometry(bounds, Some(bounds), 1.5, Some(1.5)).is_ok());
         assert!(check_geometry(bounds, None, 1.5, Some(2.0)).is_err());
-        assert!(check_geometry(
-            Rect {
-                x: -399.0,
-                ..bounds
-            },
-            Some(bounds),
-            1.5,
-            None
-        )
-        .is_err());
+        assert!(
+            check_geometry(
+                Rect {
+                    x: -399.0,
+                    ..bounds
+                },
+                Some(bounds),
+                1.5,
+                None
+            )
+            .is_err()
+        );
     }
+}
+
+/// The bounded traversal uses exactly the same known facts as property reads.
+/// `None` means a requested state was unavailable, never a false comparison.
+pub fn matches(record: &ElementRecord, query: &serde_json::Value) -> Option<bool> {
+    use serde_json::Value;
+    if query.is_null() {
+        return Some(true);
+    }
+    let query = query.as_object()?;
+    let mut unknown = false;
+    for (name, expected) in query {
+        let actual = match name.as_str() {
+            "nameMatch" | "valueMatch" => continue,
+            "name" => Some(Value::String(record.name.clone())),
+            "role" => (!record.role.is_empty()).then(|| Value::String(record.role.clone())),
+            "value" => record
+                .value_available
+                .then(|| Value::String(record.value.clone())),
+            "enabled" => record.enabled.map(Value::Bool),
+            "checked" => record.checked.clone(),
+            "selected" => record.selected.map(Value::Bool),
+            "expanded" => record.expanded.map(Value::Bool),
+            "focused" => record.focused.map(Value::Bool),
+            _ => None,
+        };
+        let Some(actual) = actual else {
+            unknown = true;
+            continue;
+        };
+        let contains =
+            query.get(&format!("{name}Match")).and_then(Value::as_str) == Some("contains");
+        let equal = if contains {
+            actual.as_str()?.contains(expected.as_str()?)
+        } else if name == "role" {
+            actual == *expected || expected.as_str() == Some(record.platform_role.as_str())
+        } else {
+            actual == *expected
+        };
+        if !equal {
+            return Some(false);
+        }
+    }
+    if unknown { None } else { Some(true) }
 }

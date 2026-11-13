@@ -566,7 +566,7 @@ export const VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION: VarinBuiltinExtensionD
 
 export const VARIN_BUILTIN_COMPUTER_EXTENSION: VarinBuiltinExtensionDefinition = {
   enabledByDefault: true,
-  manifest: { id: VARIN_BUILTIN_COMPUTER_EXTENSION_ID, displayName: 'Computer Use', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+  manifest: { id: VARIN_BUILTIN_COMPUTER_EXTENSION_ID, displayName: 'Computer Use', version: '1.1.0', schemaVersion: 1, engines: { varin: '*' },
     entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
     capabilities: { host: [COMPUTER_CAPABILITY] }, provides: { services: [...COMPUTER_TOOL_DECLARATIONS] } },
 };

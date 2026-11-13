@@ -7,6 +7,7 @@ import { viewedImages } from './viewedImages';
 import { ChatAssistantUsageFooter } from './ChatAssistantUsageFooter';
 import { standaloneDescendants } from './standaloneTools';
 import { scriptToolLabels } from './scriptPresentation';
+import { computerResultSummary } from './computerToolPresentation';
 import { toolSubject } from './toolSubject';
 import React from 'react';
 import { ConversationImage } from '@/components/images/ConversationImage';
@@ -788,8 +789,10 @@ export const ChatSortedActivityGroup: React.FC<{
       || (isFileChangeTool(item.call.name) && ['failed', 'partial'].includes(fileChangePhase(execution, result, item.streaming)));
   });
   const latest = activity.at(-1);
+  const latestData = latest?.kind === 'tool' ? toolRecord(invocationData(resultByCallId.get(latest.call.id)?.details ?? executionById[latest.call.id]?.result, latest.call)) : {};
+  const latestReceipt = latest?.kind === 'tool' ? computerResultSummary(latest.call.name, latestData, toolRecord(latest.call.arguments), t) : '';
   const latestLabel = latest?.kind === 'tool'
-    ? toolSubject(latest.call, toolRecord(resultByCallId.get(latest.call.id)?.details ?? executionById[latest.call.id]?.result), t)
+    ? [toolSubject(latest.call, latestData, t), latestReceipt].filter(Boolean).join(' · ')
       || (scriptToolLabels[latest.call.name] ? t(scriptToolLabels[latest.call.name]!) : latest.call.name)
     : latest?.kind === 'thinking'
       ? hiddenThinkingLabel

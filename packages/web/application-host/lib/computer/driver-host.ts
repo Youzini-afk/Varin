@@ -35,6 +35,12 @@ export interface DriverRequest {
     | "capabilities"
     | "list_apps"
     | "get_app_state"
+    | "query_elements"
+    | "release_elements"
+    | "set_checked"
+    | "set_expanded"
+    | "select"
+    | "scroll_into_view"
     | "click"
     | "perform_secondary_action"
     | "scroll"
@@ -74,6 +80,12 @@ export interface DriverResponse {
     windows?: Array<Record<string, unknown>>;
   }>;
   snapshot?: Record<string, unknown>;
+  properties?: import("@varin/protocol").ComputerQueryResult["properties"];
+  unavailableProperties?: import("@varin/protocol").ComputerProperty[];
+  complete?: boolean;
+  nextOffset?: number;
+  reason?: string;
+  code?: string;
   capabilities?: Record<string, unknown>;
   /** Whole-desktop frame returned by `capture_frame` (BC5.B). */
   frame?: {
@@ -164,11 +176,12 @@ interface PendingDriverRequest {
   timeout?: ReturnType<typeof setTimeout>;
   onGesture?: (event: DriverGesture) => void;
   beforeDispatch?: () => void;
+  cleanupAbort?: () => void;
 }
 
 export interface ComputerDriverSession {
   /** Serialize ops: one request in flight at a time — the desktop input stream is inherently ordered. */
-  request(op: Omit<DriverRequest, "id">, options?: { timeoutMs?: number; onGesture?: (event: DriverGesture) => void; beforeDispatch?: () => void }): Promise<DriverResponse>;
+  request(op: Omit<DriverRequest, "id">, options?: { timeoutMs?: number; signal?: AbortSignal; onGesture?: (event: DriverGesture) => void; beforeDispatch?: () => void }): Promise<DriverResponse>;
   /**
    * Interrupt the in-flight request at the driver's next internal checkpoint
    * (BC4.A). Windows uses its persistent native control pipe; other platforms
@@ -221,9 +234,9 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
   const isAlive = () => child !== null && !child.killed && child.exitCode === null;
 
   const failAll = (error: Error) => {
-    if (active) { clearTimeout(active.timeout); active.reject(error); active = null; }
+    if (active) { clearTimeout(active.timeout); active.cleanupAbort?.(); active.reject(error); active = null; }
     if (captureActive) { clearTimeout(captureActive.timeout); captureActive.reject(error); captureActive = null; }
-    for (const queued of queue.splice(0)) queued.reject(error);
+    for (const queued of queue.splice(0)) { queued.cleanupAbort?.(); queued.reject(error); }
     caps = null;
   };
 
@@ -261,6 +274,7 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
     }
     if (capture) captureActive = null; else active = null;
     clearTimeout(p.timeout);
+    p.cleanupAbort?.();
     p.resolve(message);
     pump();
   };
@@ -271,7 +285,7 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
     active = next;
     try { next.beforeDispatch?.(); }
     catch (error) {
-      active = null; next.reject(error instanceof Error ? error : new Error(String(error))); pump(); return;
+      active = null; next.cleanupAbort?.(); next.reject(error instanceof Error ? error : new Error(String(error))); pump(); return;
     }
     try {
       const target = ensureChild();
@@ -364,8 +378,22 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
       reject(new Error("Computer driver session is disposed or interrupted"));
       return;
     }
-    queue.push({ id: randomUUID(), op: structuredClone(op), timeoutMs: options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, resolve, reject,
-      ...(options.onGesture ? { onGesture: options.onGesture } : {}), ...(options.beforeDispatch ? { beforeDispatch: options.beforeDispatch } : {}) });
+    if (options.signal?.aborted) { reject(options.signal.reason); return; }
+    const next: PendingDriverRequest = { id: randomUUID(), op: structuredClone(op), timeoutMs: options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, resolve, reject,
+      ...(options.onGesture ? { onGesture: options.onGesture } : {}), ...(options.beforeDispatch ? { beforeDispatch: options.beforeDispatch } : {}) };
+    if (options.signal) {
+      const signal = options.signal;
+      const abort = () => {
+        const index = queue.indexOf(next);
+        if (index >= 0) { queue.splice(index, 1); next.cleanupAbort?.(); reject(signal.reason); }
+        // Keep ownership until the original read actually returns. Cancelling
+        // this read must never release input or target a later queued request.
+        else if (active === next) cancelRequest(next.id);
+      };
+      next.cleanupAbort = () => signal.removeEventListener('abort', abort);
+      signal.addEventListener('abort', abort, { once: true });
+    }
+    queue.push(next);
     pump();
   });
 
@@ -422,22 +450,21 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
     return initialization;
   };
 
-  const cancel: ComputerDriverSession["cancel"] = () => {
-    const inFlight = active;
-    if (!inFlight) return false;
+  const cancelRequest = (requestId: string): boolean => {
     if (spec.nativeWindows) {
       if (!control || control.destroyed) return false;
-      void sendControl({ command: 'cancel', requestId: inFlight.id }).catch(error => {
+      void sendControl({ command: 'cancel', requestId }).catch(error => {
         if (!disposed) stop(error instanceof Error ? error : new Error(String(error)));
       });
       return true;
     }
     try {
       mkdirSync(cancelDir, { recursive: true });
-      writeFileSync(path.join(cancelDir, `${inFlight.id}.cancel`), "cancel\n");
+      writeFileSync(path.join(cancelDir, `${requestId}.cancel`), "cancel\n");
       return true;
     } catch { return false; }
   };
+  const cancel: ComputerDriverSession["cancel"] = () => active ? cancelRequest(active.id) : false;
 
   // Coalesce concurrent viewers, but never queue their frame behind a long input.
   // Only capture_frame may use this lane; it cannot replace an Agent observation.
@@ -466,7 +493,12 @@ export function createDriverSession(spec: DriverSpawnSpec): ComputerDriverSessio
         await Promise.allSettled([...retiring]);
         await initialize();
       }
-      const response = await request(op, options);
+      const response = await request(op, options).catch(async error => {
+        // A read deadline may stop a wedged helper. Its request-scoped caller
+        // still owns native resources until that original process has exited.
+        if (options?.signal && !isAlive()) await Promise.allSettled([...retiring]);
+        throw error;
+      });
       if (op.tool === "capabilities" && response.ok && response.capabilities) {
         caps = response.capabilities as unknown as ComputerCapabilities;
       }

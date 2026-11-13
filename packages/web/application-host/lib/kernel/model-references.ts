@@ -97,6 +97,10 @@ export async function resolveHostToolArguments(refs: HostModelReferences, call: 
   const typedSelections = declaration.trustedBuiltin === true ? [args.ref,args.path,args.id,args.pageId,args.observationId,args.automationEpoch,args.environmentId,args.operationId,args.snapshotId,args.collectionId,args.memberId,object(args.member) ? args.member.snapshotId : undefined,
     ...(Array.isArray(args.files) ? args.files.filter(object).flatMap(item => [item.path,item.snapshotId]):[]),
     ...(Array.isArray(args.items) ? args.items.filter(object).map(item => item.id):[]), object(args.action) ? args.action.observationId : undefined, ...(Array.isArray(args.members) ? args.members.filter(object).map(item => item.snapshotId):[])]:[];
+  const computerAction = object(args.action) ? args.action : undefined;
+  if (builtin(declaration,'computer')) for (const candidate of [args.target,args.within]) {
+    if (object(candidate)) typedSelections.push(candidate.observationId);
+  }
   const declaredSelections = (declaration.references?.inputs ?? []).flatMap(position => positions(args,position.path).map(value => value[position.reference]));
   if (![...typedSelections,...declaredSelections].some(value => isModelReference(value))
     && !(builtin(declaration,'web') && call.name === 'materials' && args.action === 'share' && typeof args.targetThreadId === 'string')) return args;
@@ -144,12 +148,23 @@ export async function resolveHostToolArguments(refs: HostModelReferences, call: 
     }
   }
   if (builtin(declaration,'computer')) {
-    const action = object(args.action) ? args.action : undefined;
-    for (const [position,field] of [[args,'observationId'],[args,'automationEpoch'],[action,'observationId']] as const) {
+    const within = object(args.within) ? args.within : undefined;
+    const element = object(args.target) ? args.target : undefined;
+    for (const [position,field,nested] of [[args,'observationId',false],[args,'automationEpoch',false],[computerAction,'observationId',false],
+      [within,'observationId',true],[element,'observationId',true]] as const) {
       if (!position || !isModelReference(position[field])) continue;
       const target = await resolve('observation',position[field] as string,owner.computer);
-      for (const key of ['desktopId','automationEpoch']) if (target[key] !== undefined) put(args,key,target[key],position === args ? field : undefined);
-      for (const key of ['observationId','app','window']) if (target[key] !== undefined && field !== 'automationEpoch') put(position,key,target[key],field);
+      if (target.desktopId !== undefined) put(args,'desktopId',target.desktopId);
+      if (field === 'observationId' && typeof target.observationId !== 'string') throw new Error('This reference is not an observation');
+      if (field === 'automationEpoch' && typeof target.automationEpoch !== 'string') throw new Error('This reference has no automation epoch');
+      if (target.automationEpoch !== undefined && (position === computerAction || field === 'automationEpoch')) {
+        put(args,'automationEpoch',target.automationEpoch,field === 'automationEpoch' ? field : undefined);
+      }
+      if (field === 'observationId') {
+        for (const key of nested ? ['observationId'] : ['observationId','app','window']) {
+          if (target[key] !== undefined && (key === field || position[key] === undefined)) put(position,key,target[key],field);
+        }
+      }
     }
   }
   if (builtin(declaration,'script') && isModelReference(args.environmentId)) {
@@ -224,15 +239,42 @@ export async function projectHostToolData(refs: HostModelReferences, call: HostT
     delete output.browserId;
   }
   if (builtin(declaration,'computer')) {
-    const observation = object(raw.observation) ? raw.observation : object(raw.result) && object(raw.result.observation) ? raw.result.observation : undefined;
-    const visible = object(output.observation) ? output.observation : object(output.result) && object(output.result.observation) ? output.result.observation : undefined;
-    if (observation && visible && typeof observation.id === 'string' && typeof observation.desktopId === 'string') {
+    // Register the original observation in Catalog; only compact, human-scale
+    // facts go to the model. The stored result remains untouched for the UI.
+    const originals = [raw,raw.result,raw.last].filter(object);
+    const projected = [output,output.result,output.last].filter(object);
+    const refsByObservation = new Map<string,string>();
+    for (const [i, original] of originals.entries()) {
+      const observation = original.observation;
+      const target = projected[i];
+      if (!target || !object(observation) || typeof observation.id !== 'string' || typeof observation.desktopId !== 'string') continue;
       const app = object(observation.app) ? observation.app : {};
-      visible.id = await register('observation',owner.computer,{observationId:observation.id,desktopId:observation.desktopId,
-        ...(app.pid !== undefined ? {app:String(app.pid)} : typeof app.name === 'string' ? {app:app.name}:{}),
-        ...(observation.windowHandle !== undefined ? {window:observation.windowHandle}:{}),
-        ...(typeof observation.automationEpoch === 'string' ? {automationEpoch:observation.automationEpoch}:{})});
-      delete visible.nativeTarget; delete visible.machineId; delete visible.automationEpoch;
+      let id = refsByObservation.get(observation.id);
+      if (!id) {
+        try {
+          id = await register('observation',owner.computer,{observationId:observation.id,desktopId:observation.desktopId,
+            ...(app.pid !== undefined ? {app:String(app.pid)} : typeof app.name === 'string' ? {app:app.name}:{}),
+            ...(observation.windowHandle !== undefined ? {window:observation.windowHandle}:{}),
+            ...(typeof observation.automationEpoch === 'string' ? {automationEpoch:observation.automationEpoch}:{})});
+          refsByObservation.set(observation.id,id);
+        } catch {
+          // Preserve the read facts and settled action receipt, not the raw
+          // native identifiers, when Catalog cannot publish a short reference.
+        }
+      }
+      const pick = (value: Record<string,unknown>, fields: readonly string[]) =>
+        Object.fromEntries(fields.filter(key => value[key] !== undefined).map(key => [key,value[key]]));
+      const elements = Array.isArray(observation.elements) ? observation.elements.filter(object) : [];
+      const windowFields = ['windowTitle','view','complete','truncatedReason','treePage','focusedSummary','selectedText','screenshot','windowCount'];
+      target.observation = { ...(id ? { id } : { referenceUnavailable: true }), app: app.name, ...pick(observation,windowFields),
+        ...(Array.isArray(observation.windows) ? { windows: observation.windows.filter(object).map(window => pick(window,['handle','title','visible','minimized','main'])) } : {}),
+        ...(elements.length ? { elements: elements.map(element => ({
+          ...pick(element,['index','parentIndex','depth','name','value','enabled','selected','checked','expanded','actions','hasMoreChildren','ancestorNames']),
+          role: element.role ?? element.controlType ?? element.localizedControlType,
+          ...(element.platformRole !== undefined ? { platformRole: element.platformRole } : {}),
+          ...(observation.screenshot && element.frame ? { frame: element.frame } : {}),
+        })) } : Array.isArray(observation.treeLines) && observation.treeLines.length ? { treeLines: observation.treeLines } : {}),
+      };
     }
     if (object(raw.control) && object(output.control) && typeof raw.control.automationEpoch === 'string') {
       const desktopId = raw.control.desktopId ?? (object(raw.assignment) ? raw.assignment.desktopId : undefined);

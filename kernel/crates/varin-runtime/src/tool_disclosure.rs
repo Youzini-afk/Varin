@@ -187,7 +187,7 @@ pub fn direct_tools(tools: &[ToolSchema], focus: &str) -> Option<Vec<String>> {
                 || name == "document_read"
                 || focus == "office" && (name.starts_with("browser_") || name.starts_with("office_") || matches!(name,
                     "script_open" | "script_run" | "script_close" | "materials"
-                    | "computer_list" | "computer_apps" | "computer_observe" | "computer_act" | "computer_control"
+                    | "computer_list" | "computer_apps" | "computer_observe" | "computer_query" | "computer_await" | "computer_act" | "computer_control"
                     | "computer_cancel" | "computer_release" | "computer_request" | "computer_access"
                     | "computer_grant" | "computer_deny" | "computer_wait" | "computer_open" | "computer_environment"
                     | "computer_browser" | "computer_browser_read" | "computer_office" | "computer_office_read")),
@@ -208,7 +208,8 @@ pub fn related(name: &str) -> &'static [&'static str] {
             &["office_read", "office_write", "office_render", "office_export", "office_environment", "document_read", "file_restore"],
         "computer_browser" | "computer_browser_read" | "computer_office" | "computer_office_read" =>
             &["computer_list", "computer_environment", "computer_control", "computer_request", "computer_access", "computer_observe", "computer_release"],
-        "computer_act" | "computer_open" => &["computer_list", "computer_observe", "computer_control", "computer_request", "computer_release"],
+        "computer_observe" | "computer_query" | "computer_await" | "computer_act" | "computer_open" =>
+            &["computer_list", "computer_observe", "computer_query", "computer_await", "computer_act", "computer_control", "computer_request", "computer_release"],
         "research_search" => &["websearch", "webfetch", "document_read", "materials"],
         "document_read" | "materials" => &["document_read", "materials", "office_read", "office_render"],
         "dispatch" => &["child_status", "child_report", "wait_child", "child_cancel", "send", "threads", "read_thread", "agent_rename"],
@@ -296,6 +297,8 @@ pub fn namespace(name: &str) -> Option<&'static str> {
         | "computer_apps"
         | "computer_control"
         | "computer_observe"
+        | "computer_query"
+        | "computer_await"
         | "computer_act"
         | "computer_open"
         | "computer_put"

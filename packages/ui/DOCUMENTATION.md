@@ -84,6 +84,12 @@ history item's original source through the Host before opening Documents; the se
 does not identify a task's working copy. Child rows follow Catalog execution admission order, while reports
 remain attached to their original execution. Context summary history is read through its parent-owned job.
 
+Computer tool views keep each observe/query/action/wait as one activity. Structured controls and their
+returned hierarchy replace duplicate tree text, with partial reads and paged output distinguished.
+Property displays preserve unknown, unavailable, mixed and false states; action receipts distinguish
+dispatched input from verified properties, not business-task completion. Waits retain their actual
+outcome and last read. Semantic feedback uses native bounds only, without inventing pointer motion.
+
 Model marks resolve the request model ID, saved ID and display name in that order, independently of the
 channel brand. Matching ignores case and recognizes family names after bracketed labels, namespaces and
 deployment separators. A complete family takes precedence over names inside its variant suffix; generic

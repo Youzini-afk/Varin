@@ -17,6 +17,8 @@ export const scriptToolLabels: Partial<Record<string, I18nKey>> = {
   file_read: 'chat.script.read', file_search: 'chat.script.search', file_list: 'chat.script.list',
   code_retrieval: 'chat.script.search', file_write: 'chat.script.edit', file_edit: 'chat.script.edit',
   process_spawn: 'chat.script.command',
+  computer_observe: 'chat.tools.observeComputer', computer_query: 'chat.tools.queryComputer',
+  computer_await: 'chat.tools.awaitComputer', computer_act: 'chat.tools.computer',
 };
 export function scriptTitleKey(call: ChatToolCall, calls: readonly OperationCallSummary[]): I18nKey {
   if (call.name !== 'script_run') return scriptToolLabels[call.name] ?? 'chat.script.run';

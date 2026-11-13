@@ -1,3 +1,4 @@
+import { outlineObservation, semanticBaseline, semanticCondition, waitForSemanticSample, semanticDeadline } from './semantic-wait.js';
 import { ComputerError } from './computer-error.js';
 import { parseComputerWorkRef, sameComputerWork, sameComputerExecution, type ComputerWorkRef, type ComputerExecutionRef, type ComputerWorkScope } from '@varin/protocol';
 import { decodeComputerRuntime, type ComputerPhysicalControl, type PendingComputerControlEvent, type PendingComputerControlCancellation, type ComputerInterrupted } from './computer-records.js';
@@ -44,6 +45,12 @@ import type {
   ComputerListResult,
   ComputerMachine,
   ComputerObservation,
+  ComputerObserveParams,
+  ComputerElementRef,
+  ComputerQueryParams,
+  ComputerQueryResult,
+  ComputerAwaitParams,
+  ComputerAwaitResult,
   ComputerOpenResult,
   ComputerBrowserParams,
   ComputerBrowserResult,
@@ -246,6 +253,17 @@ const elementOf = (value: unknown): ComputerElement | null => {
     element.path = value.path as number[];
   }
   if (Array.isArray(value.runtimeId)) element.runtimeId = value.runtimeId.filter((v): v is number => typeof v === "number");
+  for (const key of ['nativeElementId', 'targetId', 'role', 'platformRole'] as const) {
+    if (asString(value[key])) element[key] = value[key] as string;
+  }
+  if (Number.isSafeInteger(value.depth) && (value.depth as number) >= 0) element.depth = value.depth as number;
+  const ancestors = value.ancestorNames ?? value.ancestorLabels;
+  if (Array.isArray(ancestors)) element.ancestorNames = ancestors.filter((value): value is string => typeof value === 'string');
+  if (Number.isSafeInteger(value.parentIndex) && (value.parentIndex as number) >= 0) element.parentIndex = value.parentIndex as number;
+  for (const key of ['enabled', 'selected', 'expanded', 'hasMoreChildren'] as const) {
+    if (typeof value[key] === 'boolean') element[key] = value[key];
+  }
+  if (typeof value.checked === 'boolean' || value.checked === 'mixed') element.checked = value.checked;
   if (asString(value.automationId)) element.automationId = value.automationId as string;
   if (asString(value.name)) element.name = value.name as string;
   if (asString(value.controlType)) element.controlType = value.controlType as string;
@@ -284,6 +302,9 @@ const observationOf = (
       : [],
     capturedAt: asString(snapshot.capturedAt) ?? new Date().toISOString(),
   };
+  if (typeof snapshot.complete === 'boolean') observation.complete = snapshot.complete;
+  if (asString(snapshot.truncatedReason)) observation.truncatedReason = snapshot.truncatedReason as string;
+  if (snapshot.view === 'outline' || snapshot.view === 'tree') observation.view = snapshot.view;
   if (asString(snapshot.windowTitle)) observation.windowTitle = snapshot.windowTitle as string;
   const handle = asNumber(snapshot.windowHandle);
   // Linux AT-SPI uses a zero-based child index as the window handle.
@@ -425,6 +446,8 @@ export interface ComputerRemoteHost {
 
 export interface ComputerServiceOptions {
   localControlHolder?: string | undefined;
+  /** Provider-cost tuning for short semantic reads, never a polling sleep inside the input lane. */
+  semanticPollIntervalMs?: number;
   resolveActor?: (work: ComputerWorkRef) => Promise<ComputerActor | null>;
   resolveScope?: (work: ComputerWorkRef) => Promise<ComputerWorkScope | null>;
   onAutomationChange?: (state: ComputerAutomationState) => void;
@@ -551,20 +574,10 @@ export interface ComputerService {
   prewarm(desktopId?: string): Promise<void>;
   /** App inventory on a desktop. */
   listApps(desktopId?: string): Promise<ComputerAppDescriptor[]>;
-  observe(params: {
-    desktopId?: string;
-    app: string;
-    /** Select one of the app's windows: hwnd number or title (BC4.B). */
-    window?: number | string;
-    includeScreenshot?: boolean;
-    includeWindows?: boolean;
-    observationId?: string;
-    offset?: number;
-    textLimit?: number | "max";
-    maxTreeNodes?: number;
-    maxTreeDepth?: number;
-    signal?: AbortSignal;
-  }): Promise<ComputerObservation>;
+  desktopForObservation(observationId: string): string | undefined;
+  observe(params: ComputerObserveParams & { signal?: AbortSignal }): Promise<ComputerObservation>;
+  query(params: ComputerQueryParams & { signal?: AbortSignal }): Promise<ComputerQueryResult>;
+  awaitCondition(params: ComputerAwaitParams & { signal?: AbortSignal }): Promise<ComputerAwaitResult>;
   act(params: { desktopId?: string; action: ComputerAction; automationEpoch?: string; signal?: AbortSignal }): Promise<ComputerActionResult>;
   cancel(desktopId?: string): Promise<{ cancelled: number; released: boolean }>;
   release(desktopId?: string): Promise<{ released: boolean }>;
@@ -704,10 +717,13 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   const lanes = new Map<string, DesktopLane>();
   const controlEpoch = randomUUID();
   let disposed = false;
+  const serviceLifetime = new AbortController();
   let localReady: Promise<{ machine: ComputerMachine; desktop: ComputerDesktop }> | null = null;
   let localProbe: Promise<ComputerDesktop> | null = null;
-  /** Latest observation per desktop+app — the reference frame for element indexes. */
+  /** Retained semantic references; screenshot freshness is tracked independently below. */
   const observations = new Map<string, Map<string, ComputerObservation>>();
+  const coordinateObservations = new Map<string, string>();
+  const coordinateKey = (observation: ComputerObservation) => JSON.stringify([observation.desktopId, observation.app.pid, observation.windowHandle]);
   const observationOwners = new Map<string, { key: string; actor: ComputerActor }>();
   const remoteClaims = new Map<string, { lease: ComputerLease; target: NonNullable<Awaited<ReturnType<typeof remoteTargetFor>>>; token: string | undefined; ready: Promise<void> }>();
   const assignmentStreams = new Map<string, () => void>();
@@ -842,7 +858,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   const recordEvidence = evidenceJournal.record;
   const evidenceTarget = (target: string) => `sha256:${createHash('sha256').update(target).digest('hex')}`;
   const evidenceOps: Record<ComputerEvidenceEntry['tool'], readonly string[]> = {
-    observe: ['observe'], act: ['click', 'type', 'key', 'scroll', 'drag', 'set_value', 'secondary'],
+    observe: ['observe'], query: ['query'], await: ['present', 'absent', 'window_opened', 'window_closed', 'property', 'changed'],
+    act: ['click', 'type', 'key', 'scroll', 'drag', 'set_value', 'secondary', 'set_checked', 'set_expanded', 'select', 'scroll_into_view'],
     open: ['open'], fileWrite: ['fileWrite'], installSoftware: ['install'],
     browser: ['status', 'launch', 'tabs', 'snapshot', 'act'],
     office: ['status', 'launch', 'docs', 'open', 'act'],
@@ -1204,11 +1221,15 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return response;
   };
 
-  const remoteJson = async <T>(connection: ComputerRemoteHost, method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> => {
+  const remoteJson = async <T>(connection: ComputerRemoteHost, method: string, path: string, body?: unknown, signal?: AbortSignal, readOnly = false): Promise<T> => {
     const response = await remoteFetch(connection, method, path, body, signal);
+    if (readOnly && response.status === 404) {
+      await response.body?.cancel();
+      throw new HarnessServiceError('unavailable', 'The target Host does not support semantic query or waiting; its existing computer operations remain available');
+    }
     let payload: (T & { code?: string; error?: string; computerExecution?: unknown }) | null;
     try { payload = await response.json() as typeof payload; }
-    catch { throw new RemoteTransportError("Remote Host response was lost or malformed; submitted input may have executed"); }
+    catch { throw new RemoteTransportError(readOnly ? "Remote Host read response was lost or malformed; no condition was verified" : "Remote Host response was lost or malformed; submitted input may have executed"); }
     if (!isObject(payload)) throw new RemoteTransportError("Remote Host returned no usable response");
     if (!response.ok) {
       const code = payload && typeof payload.code === "string" && ["invalid-params", "not-found", "forbidden", "denied", "unavailable"].includes(payload.code)
@@ -1317,7 +1338,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   };
   const clearObservations = (id: string) => {
     for (const key of observations.get(id)?.keys() ?? []) observationOwners.delete(key);
+    const removed = [...(observations.get(id)?.values() ?? [])];
     observations.delete(id);
+    for (const observation of removed) coordinateObservations.delete(coordinateKey(observation));
+    releaseObservationElements(id, removed);
   };
 
   /**
@@ -1505,18 +1529,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     admission?.assert();
     if (admission) signal = signal ? AbortSignal.any([signal, admission.signal]) : admission.signal;
     signal?.throwIfAborted();
-    const pending = driver.request(op, { ...onGesture, beforeDispatch() {
+    const pending = driver.request(op, { ...onGesture, ...(interruptOnAbort && signal ? { signal } : {}), beforeDispatch() {
       admission?.assert(); signal?.throwIfAborted(); onGesture?.beforeDispatch?.();
     } });
-    if (!signal) return pending;
-    // The bridge/router aborts its wait on script timeout or client cancel.
-    // Interrupt the native operation too; otherwise it could keep typing after
-    // the caller has already received a cancellation result.
-    const onAbort = () => { if (interruptOnAbort) driver.cancel(); };
-    signal.addEventListener("abort", onAbort, { once: true });
-    if (signal.aborted) onAbort();
-    try { return await pending; }
-    finally { signal.removeEventListener("abort", onAbort); }
+    return pending;
   };
 
   const resolveDriver = async (desktopId: string): Promise<{ spec: DriverSpawnSpec; desktop: ComputerDesktop }> => {
@@ -1850,19 +1866,31 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       : [];
   };
 
+  const nativeElementKey = (element: ComputerElement): string | undefined => element.nativeElementId ?? element.targetId ?? element.automationId;
+  const releaseObservationElements = (desktopId: string, removed: ComputerObservation[], protectedObservations: ComputerObservation[] = []) => {
+    const driver = drivers.get(desktopId);
+    if (!driver?.alive()) return;
+    // Enqueue directly on the original helper. New reads cannot overtake this
+    // release; references retained by another execution are never disposed.
+    const retained = new Set([...(observations.get(desktopId)?.values() ?? []), ...protectedObservations].flatMap(observation => observation.elements.flatMap(element => nativeElementKey(element) ?? [])));
+    const elements = [...new Map(removed.flatMap(observation => observation.elements).flatMap(element => {
+      const key = nativeElementKey(element); return key && !retained.has(key) ? [[key, element] as const] : [];
+    })).values()];
+    if (elements.length) void driver.request({ tool: 'release_elements', elements }).catch(() => undefined);
+  };
+  const desktopForObservation = (observationId: string) => {
+    for (const [desktopId, map] of observations) if (map.has(observationId)) return desktopId;
+    return undefined;
+  };
   const rememberObservation = (observation: ComputerObservation) => {
     const admission = automation.context.getStore();
     const map = observations.get(observation.desktopId) ?? new Map<string, ComputerObservation>();
-    const liveWindows = observation.windows?.length ? new Set(observation.windows.map(window => window.handle)) : undefined;
-    for (const [key, previous] of map) {
-      if (previous.app.pid !== observation.app.pid) continue;
-      if (observationOwners.get(previous.id)?.key !== admission?.key) continue;
-      if (liveWindows && previous.windowHandle !== undefined && !liveWindows.has(previous.windowHandle)
-        || previous.windowHandle === observation.windowHandle && (observation.screenshot || !previous.screenshot)) map.delete(key);
-    }
+    // Reading another region does not revoke existing native identities. The
+    // original driver validates its window/process instance at every use.
     map.set(observation.id, observation);
     if (admission) observationOwners.set(observation.id, { key: admission.key, actor: admission.actor });
     observations.set(observation.desktopId, map);
+    if (observation.screenshot) coordinateObservations.set(coordinateKey(observation), observation.id);
   };
 
   const elementRecordFor = (observation: ComputerObservation, index: number): Record<string, unknown> => {
@@ -1902,6 +1930,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const id = await resolveDesktopId(params.desktopId);
     const remote = await remoteTargetFor(id);
     params.signal?.throwIfAborted();
+    if (!params.app && !params.within && !params.observationId) throw new HarnessServiceError('invalid-params', 'Observe requires an app or original region');
+    if (params.within && params.observationId) throw new HarnessServiceError('invalid-params', 'Choose a fresh region read or a retained observation page, not both');
     if (params.observationId) {
       const observation = observations.get(id)?.get(params.observationId);
       if (observation && observationOwners.get(observation.id)?.key !== automation.context.getStore()?.key) {
@@ -1918,10 +1948,11 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     }
     if (remote) {
       await recordUsage(id).catch(() => undefined);
-      const finish = beginActivity(id, params.app, "observe");
+      const finish = beginActivity(id, params.app ?? 'Observed region', "observe");
       const result = await remoteJson<{ observation?: ComputerObservation }>(
         remote.connection, "POST", `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/observe`, {
           app: params.app,
+          ...(params.within ? { within: params.within } : {}), ...(params.view ? { view: params.view } : {}),
           ...(params.window !== undefined ? { window: params.window } : {}),
           includeScreenshot: params.includeScreenshot === true,
           // Retain the complete remote snapshot just as for a local driver. Public
@@ -1937,6 +1968,10 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         finish(false);
         throw new HarnessServiceError("unavailable", "Remote Host returned no observation");
       }
+      if (params.within && (result.observation.within?.observationId !== params.within.observationId || result.observation.within?.elementIndex !== params.within.elementIndex)) {
+        finish(false);
+        throw new HarnessServiceError('unavailable', 'The target Host did not confirm a scoped observation; update that Host before reading this region');
+      }
       finish(true, result.observation.app.name);
       // Keep the remote observation id — a later remote act must reference
       // the remote service's own freshness record. Only the desktop/machine
@@ -1951,9 +1986,14 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       const { driver, desktop } = await driverFor(id);
       await recordUsage(id).catch(() => undefined);
       params.signal?.throwIfAborted();
-      const finish = beginActivity(id, params.app, "observe");
+      const finish = beginActivity(id, params.app ?? 'Observed region', "observe");
+      const within = referenceOp(params.within);
+      if (params.within && !observations.get(id)?.has(params.within.observationId)) throw new HarnessServiceError('not-found', 'Original native session ended; observe again');
       const response = await requestWithAbort(driver, {
         tool: "get_app_state",
+        ...(within.element ? { within: within.element } : {}),
+        ...(within.observation?.nativeTarget ? { platform_target: within.observation.nativeTarget } : {}),
+        ...(params.view ? { view: params.view } : {}),
         ...(id === LOCAL_DESKTOP_ID ? { control_windows: options.controlWindows?.() ?? [] } : {}),
         app: params.app,
         screenshot: params.includeScreenshot === true,
@@ -1966,7 +2006,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       finish(response.ok && Boolean(response.snapshot), isObject(response.snapshot?.app) ? asString(response.snapshot.app.name) : undefined);
       params.signal?.throwIfAborted();
       if (!response.ok || !response.snapshot) throw new HarnessServiceError("unavailable", response.error ?? "Observe failed");
-      const observation = { ...observationOf(response.snapshot, desktop), automationEpoch: observedEpoch };
+      const observation = outlineObservation({ ...observationOf(response.snapshot, desktop), automationEpoch: observedEpoch, ...(params.within ? { within: params.within } : {}) }, params.view);
       if (generation === laneGeneration(id) && !laneFor(id).transitioning) {
         rememberObservation(observation);
         if (laneFor(id).control.owner === "agent" && automation.isController(id)) laneFor(id).needsObservation = false;
@@ -1975,9 +2015,189 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     });
   };
 
+  /** References select their original desktop before assignment admission, not the current default. */
+  const referencedParams = <P extends { desktopId?: string; app?: string; window?: number | string }>(params: P, ref?: ComputerElementRef, observationId?: string): P => {
+    const id = ref?.observationId ?? observationId;
+    if (!id) return params;
+    const desktopId = desktopForObservation(id);
+    if (!desktopId) throw new HarnessServiceError('not-found', 'Observation is no longer retained; observe the original desktop again');
+    if (params.desktopId !== undefined && params.desktopId !== desktopId) throw new HarnessServiceError('invalid-params', 'Desktop conflicts with the original observation');
+    const observation = observations.get(desktopId)!.get(id)!;
+    if (observationOwners.get(id)?.key !== automation.context.getStore()?.key) throw new HarnessServiceError('forbidden', 'This observation belongs to another execution');
+    if (params.app !== undefined && ![observation.app.name, String(observation.app.pid), observation.app.windowTitle, observation.windowTitle].some(value => value?.toLowerCase() === params.app?.toLowerCase())) {
+      throw new HarnessServiceError('invalid-params', 'App conflicts with the original observation');
+    }
+    if (params.window !== undefined && (typeof params.window === 'number' ? params.window !== observation.windowHandle
+      : params.window.toLowerCase() !== (observation.windowTitle ?? observation.app.windowTitle)?.toLowerCase())) {
+      throw new HarnessServiceError('invalid-params', 'Window conflicts with the original observation');
+    }
+    if (ref) elementRecordFor(observation, ref.elementIndex);
+    return { ...params, desktopId, app: String(observation.app.pid), ...(observation.windowHandle !== undefined ? { window: observation.windowHandle } : {}) };
+  };
+  const referenceOp = (ref?: ComputerElementRef): { observation?: ComputerObservation; element?: Record<string, unknown> } => {
+    if (!ref) return {};
+    const desktopId = desktopForObservation(ref.observationId);
+    const observation = desktopId ? observations.get(desktopId)?.get(ref.observationId) : undefined;
+    if (!observation) throw new HarnessServiceError('not-found', 'Original observation is no longer retained');
+    if (observationOwners.get(observation.id)?.key !== automation.context.getStore()?.key) throw new HarnessServiceError('forbidden', 'This observation belongs to another execution');
+    return { observation, element: elementRecordFor(observation, ref.elementIndex) };
+  };
+
+  const validateSemanticQuery = (params: ComputerQueryParams) => {
+    if (params.target && (params.within || params.match)) throw new HarnessServiceError('invalid-params', 'Choose exact target properties or a scoped match query');
+    if (params.properties && !params.target) throw new HarnessServiceError('invalid-params', 'Property reads require an exact target');
+    if (!params.target && !params.within && !params.app) throw new HarnessServiceError('invalid-params', 'Query requires an app or original element reference');
+  };
+
+  type QuerySample = { result: ComputerQueryResult; code?: string; inputOwnerId?: string };
+  const readQuery = async (params: ComputerQueryParams & { signal?: AbortSignal }, pinned?: ComputerObservation, windowOnly = false, inputOwnerId?: string): Promise<QuerySample> => {
+    const id = params.desktopId!;
+    const target = referenceOp(params.target), within = referenceOp(params.within);
+    const original = target.observation ?? within.observation ?? pinned;
+    const generation = laneGeneration(id), epoch = modelEpoch(id);
+    return enqueue(id, 'observe', async () => {
+      const admission = automation.context.getStore();
+      const signals = [params.signal, admission?.signal, serviceLifetime.signal].filter((signal): signal is AbortSignal => Boolean(signal));
+      const signal = AbortSignal.any(signals);
+      signal.throwIfAborted();
+      const { driver, desktop } = await driverFor(id);
+      signal.throwIfAborted();
+      if (inputOwnerId && inputOwnerId !== driverPool.inputOwnerId(driver)) return { result: { status: 'target_lost', complete: false, reason: 'The original native session ended' }, code: 'target_lost' };
+      // Helper restart invalidates all native objects, even if a former target
+      // was copied into this closure before the old helper died.
+      if ((params.target || params.within) && !observations.get(id)?.has((params.target ?? params.within)!.observationId)) {
+        return { result: { status: 'target_lost', complete: false, reason: 'The original native session ended; observe again' }, code: 'target_lost' };
+      }
+      const response = await driver.request({
+        tool: 'query_elements', app: original ? String(original.app.pid) : params.app,
+        ...(id === LOCAL_DESKTOP_ID ? { control_windows: options.controlWindows?.() ?? [] } : {}),
+        ...(original?.windowHandle !== undefined ? { window: original.windowHandle } : params.window !== undefined ? { window: params.window } : {}),
+        ...(original?.nativeTarget ? { platform_target: original.nativeTarget } : {}),
+        ...(!windowOnly && target.element ? { element: target.element } : {}), ...(!windowOnly && within.element ? { within: within.element } : {}),
+        ...(!windowOnly && params.match ? { match: params.match } : {}), ...(!windowOnly && params.properties ? { properties: params.properties } : {}),
+        ...(params.offset !== undefined ? { offset: params.offset } : {}), ...(params.limit !== undefined ? { limit: params.limit } : {}),
+        ...(params.maxTreeNodes !== undefined ? { max_tree_nodes: params.maxTreeNodes } : {}),
+        ...(params.maxTreeDepth !== undefined ? { max_tree_depth: params.maxTreeDepth } : {}),
+        ...(windowOnly ? { window_only: true } : {}),
+      }, { signal, beforeDispatch: () => { admission?.assert(); signal.throwIfAborted(); } });
+      signal.throwIfAborted();
+      if (generation !== laneGeneration(id)) throw new CancelledActionError();
+      if (!response.ok) return { result: { status: response.code === 'target_lost' || response.code === 'window_lost' ? 'target_lost' : 'unavailable',
+        complete: false, reason: response.error ?? response.reason ?? 'Semantic query is unavailable on this desktop' }, ...(response.code ? { code: response.code } : {}) };
+      const observation = response.snapshot ? { ...observationOf(response.snapshot, desktop), automationEpoch: epoch } : undefined;
+      const reason = response.reason ?? observation?.truncatedReason;
+      return { ...(driverPool.inputOwnerId(driver) ? { inputOwnerId: driverPool.inputOwnerId(driver)! } : {}), result: { status: 'ok', complete: response.complete ?? observation?.complete ?? false,
+        ...(observation ? { observation } : {}), ...(response.properties ? { properties: response.properties } : {}),
+        ...(response.unavailableProperties ? { unavailableProperties: response.unavailableProperties } : {}),
+        ...(typeof response.nextOffset === 'number' ? { nextOffset: response.nextOffset } : {}),
+        ...(reason ? { reason } : {}) } };
+    });
+  };
+  const publishQuery = (result: ComputerQueryResult) => {
+    if (result.observation) rememberObservation(result.observation);
+    return result;
+  };
+  const queryImpl: ComputerService['query'] = async params => {
+    params.signal?.throwIfAborted();
+    const id = params.desktopId!, remote = await remoteTargetFor(id);
+    await recordUsage(id).catch(() => undefined);
+    const finish = beginActivity(id, params.app ?? 'Observed target', 'query');
+    try {
+      let result: ComputerQueryResult;
+      if (remote) {
+        const { signal, desktopId: _desktopId, ...body } = params;
+        const payload = await remoteJson<{ result: ComputerQueryResult }>(remote.connection, 'POST', `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/query`, body, signal, true);
+        if (!payload.result || typeof payload.result.complete !== 'boolean') throw new RemoteTransportError('Remote Host returned no semantic query result');
+        result = payload.result;
+        if (result.observation) result = { ...result, observation: { ...result.observation, desktopId: id, machineId: remote.desktop.machineId } };
+      } else result = (await readQuery(params)).result;
+      finish(result.status !== 'unavailable' && result.status !== 'target_lost', result.observation?.app.name);
+      return publishQuery(result);
+    } catch (error) {
+      finish(false);
+      if (params.signal?.aborted || error instanceof HarnessServiceError && ['forbidden', 'denied', 'invalid-params'].includes(error.harnessCode)) throw error;
+      return { status: 'unavailable', complete: false, reason: error instanceof Error ? error.message : String(error) };
+    }
+  };
+  const awaitImpl: ComputerService['awaitCondition'] = async params => {
+    const started = Date.now(), id = params.desktopId!;
+    const admission = automation.context.getStore();
+    const generation = laneGeneration(id);
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, serviceLifetime.signal, ...[params.signal, admission?.signal].filter((value): value is AbortSignal => Boolean(value))]);
+    let deadline: (() => void) | undefined;
+    let last: ComputerQueryResult | undefined;
+    const done = (status: ComputerAwaitResult['status'], reason?: string): ComputerAwaitResult => {
+      finish(status === 'satisfied');
+      // Publication happens only once the read-only wait has settled. Property
+      // probes and intermediate samples never replace a usable observation.
+      const retained = last && status !== 'cancelled' && status !== 'target_lost' ? publishQuery(last) : last ? (() => { const { observation: _observation, ...read } = last; return read; })() : undefined;
+      return { status, condition: params.condition, elapsedMs: Date.now() - started, ...(retained ? { last: retained } : {}), ...(reason ? { reason } : {}) };
+    };
+    const finish = beginActivity(id, params.app ?? 'Observed target', 'await');
+    try {
+      const remote = await remoteTargetFor(id);
+      await recordUsage(id).catch(() => undefined);
+      if (remote) {
+        const { signal: _signal, desktopId: _desktopId, ...body } = params;
+        // No client polling and no desktop-wide cancel on timeout. The owning
+        // Host holds the complete waiting lifecycle and its exact native reads.
+        const payload = await remoteJson<{ result: ComputerAwaitResult }>(remote.connection, 'POST', `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/await`, body,
+          AbortSignal.any([serviceLifetime.signal, ...[params.signal, admission?.signal].filter((value): value is AbortSignal => Boolean(value))]), true);
+        if (!payload.result || !['satisfied', 'timed_out', 'cancelled', 'target_lost', 'unavailable'].includes(payload.result.status)) throw new RemoteTransportError('Remote Host returned no semantic wait result');
+        const result = payload.result;
+        if (result.last?.observation) {
+          result.last.observation = { ...result.last.observation, desktopId: id, machineId: remote.desktop.machineId };
+          if (result.status !== 'cancelled' && result.status !== 'target_lost') rememberObservation(result.last.observation);
+        }
+        finish(result.status === 'satisfied'); return result;
+      }
+      if (params.timeoutMs !== undefined && params.timeoutMs > 0) deadline = semanticDeadline(Math.max(0, params.timeoutMs - (Date.now() - started)),
+        () => controller.abort(new Error('Semantic wait deadline reached')));
+      let pinned = referenceOp(params.target ?? params.within).observation;
+      let baseline: string | undefined;
+      let inputOwnerId: string | undefined;
+      const properties = params.property ? [...new Set([...(params.properties ?? []), params.property])] : params.properties;
+      for (;;) {
+        signal.throwIfAborted(); admission?.assert();
+        if (generation !== laneGeneration(id)) return done('cancelled', 'Desktop control changed');
+        const sample = await readQuery({ ...params, ...(properties ? { properties } : {}), signal }, pinned,
+          params.condition === 'window_opened' || params.condition === 'window_closed', inputOwnerId);
+        inputOwnerId ??= sample.inputOwnerId;
+        const previous = last?.observation;
+        last = sample.result;
+        if (previous) releaseObservationElements(id, [previous], last.observation ? [last.observation] : []);
+        if (sample.code === 'window_lost') return done(params.condition === 'window_closed' ? 'satisfied' : 'target_lost', last.reason);
+        if (sample.code === 'window_not_found' && params.condition === 'window_opened' && !pinned) { /* still waiting for its first instance */ }
+        else if (last.status === 'target_lost') return done('target_lost', last.reason);
+        else if (last.status === 'unavailable') return done('unavailable', last.reason);
+        else {
+          pinned ??= last.observation;
+          if (params.property && last.unavailableProperties?.includes(params.property)) return done('unavailable', `The target does not expose ${params.property}`);
+          if (semanticCondition(params, last, baseline)) return done('satisfied');
+          if (params.condition === 'changed' && baseline === undefined) baseline = semanticBaseline(params, last);
+          if (!pinned?.nativeTarget) return done('unavailable', 'The driver did not bind a stable original window instance for this wait');
+        }
+        if (params.timeoutMs === 0) return done('timed_out');
+        const interval = options.semanticPollIntervalMs ?? 400;
+        // Sleep and deadline wait are deliberately outside the desktop queue.
+        await waitForSemanticSample(interval, signal);
+      }
+    } catch (error) {
+      if (signal.aborted || error instanceof CancelledActionError) return done(controller.signal.aborted && !params.signal?.aborted && !admission?.signal.aborted && !serviceLifetime.signal.aborted ? 'timed_out' : 'cancelled');
+      if (error instanceof HarnessServiceError && ['forbidden', 'denied'].includes(error.harnessCode)) throw error;
+      return done('unavailable', error instanceof Error ? error.message : String(error));
+    } finally {
+      deadline?.();
+      finish(false);
+      if (last?.observation && !observations.get(id)?.has(last.observation.id)) releaseObservationElements(id, [last.observation]);
+    }
+  };
+
   /**
-   * Element-targeted actions must reference the desktop's newest observation
-   * for that app — indexes and frames from a stale read would click blind.
+   * Native semantic identities survive unrelated reads. Legacy path-only
+   * elements remain latest-only; raster coordinates require the latest image.
+   * The native owner still verifies the original window and target at dispatch.
    */
   const assertObservationFresh = (desktopId: string, action: ComputerAction) => {
     const requiresObservation = action.elementIndex !== undefined || action.x !== undefined || action.kind === "drag";
@@ -1991,13 +2211,19 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     }
     if (observationOwners.get(observation.id)?.key !== automation.context.getStore()?.key) throw new HarnessServiceError('forbidden', 'This observation belongs to another execution; observe the assigned desktop from this thread');
     if (action.elementIndex !== undefined) {
-      const newest = [...(observations.get(desktopId)?.values() ?? [])]
-        .filter(item => item.app.pid === observation.app.pid && item.windowHandle === observation.windowHandle
-          && observationOwners.get(item.id)?.key === observationOwners.get(observation.id)?.key).at(-1);
-      if (newest?.id !== observation.id) throw new HarnessServiceError("invalid-params", "Element index belongs to an older tree; use the latest observed elements");
+      const element = observation.elements.find(element => element.index === action.elementIndex);
+      if (!element?.nativeElementId && !element?.targetId && !element?.automationId && !element?.runtimeId?.length) {
+        const newest = [...(observations.get(desktopId)?.values() ?? [])].filter(item => item.app.pid === observation.app.pid
+          && item.windowHandle === observation.windowHandle && observationOwners.get(item.id)?.key === observationOwners.get(observation.id)?.key).at(-1);
+        if (newest?.id !== observation.id) throw new HarnessServiceError('invalid-params', 'This driver cannot retain the older element identity; use the latest observed elements');
+      }
     }
-    if (![observation.app.name.toLowerCase(), String(observation.app.pid), observation.app.windowTitle?.toLowerCase(), observation.windowTitle?.toLowerCase()]
-      .some((selector) => selector === action.app.toLowerCase())) {
+    const coordinates = action.kind === 'drag' || action.elementIndex === undefined && (action.x !== undefined || action.y !== undefined);
+    if (coordinates && coordinateObservations.get(coordinateKey(observation)) !== observation.id) {
+      throw new HarnessServiceError('invalid-params', 'Coordinates require the latest screenshot of this window; observe with includeScreenshot:true');
+    }
+    if (action.app && ![observation.app.name.toLowerCase(), String(observation.app.pid), observation.app.windowTitle?.toLowerCase(), observation.windowTitle?.toLowerCase()]
+      .some((selector) => selector === action.app?.toLowerCase())) {
       throw new HarnessServiceError("invalid-params", "Action app does not match its observation target; use the observed PID");
     }
     if (action.window !== undefined) {
@@ -2089,12 +2315,16 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         };
       case "set_value":
         return { ...base, tool: "set_value" as const, value: action.value ?? "" };
+      case 'set_checked': return { ...base, tool: 'set_checked', checked: action.checked };
+      case 'set_expanded': return { ...base, tool: 'set_expanded', expanded: action.expanded };
+      case 'select': return { ...base, tool: 'select', selection: action.selection ?? 'replace' };
+      case 'scroll_into_view': return { ...base, tool: 'scroll_into_view' };
     }
   };
 
   const validateAction = (action: ComputerAction) => {
-    if (!isObject(action) || !asString(action.app)) {
-      throw new HarnessServiceError("invalid-params", "computer.act requires action.app");
+    if (!isObject(action) || !asString(action.app) && !asString(action.observationId)) {
+      throw new HarnessServiceError("invalid-params", "computer.act requires action.app or an observed target");
     }
     for (const key of ["x", "y", "fromX", "fromY", "toX", "toY", "pages", "elementIndex", "clickCount"] as const) {
       if (action[key] !== undefined && asNumber(action[key]) === undefined) throw new HarnessServiceError("invalid-params", `${key} must be a finite number`);
@@ -2134,6 +2364,15 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           throw new HarnessServiceError("invalid-params", "set_value requires elementIndex and value");
         }
         break;
+      case 'set_checked':
+      case 'set_expanded':
+      case 'select':
+      case 'scroll_into_view':
+        if (action.elementIndex === undefined || !action.observationId) throw new HarnessServiceError('invalid-params', `${action.kind} requires an observed element`);
+        if (action.kind === 'set_checked' && typeof action.checked !== 'boolean') throw new HarnessServiceError('invalid-params', 'set_checked requires checked');
+        if (action.kind === 'set_expanded' && typeof action.expanded !== 'boolean') throw new HarnessServiceError('invalid-params', 'set_expanded requires expanded');
+        if (action.selection !== undefined && !['replace', 'add', 'remove'].includes(action.selection)) throw new HarnessServiceError('invalid-params', 'Unknown selection mode');
+        break;
       case "secondary":
         if (action.elementIndex === undefined || !action.action) {
           throw new HarnessServiceError("invalid-params", "secondary requires elementIndex and action");
@@ -2155,7 +2394,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       // The remote Host owns its lane and control state — forward the action
       // verbatim; element indexes resolve against its own observation record.
       const observed = action.observationId ? observations.get(id)?.get(action.observationId) : undefined;
-      const finish = beginActivity(id, observed?.app.name ?? action.app, action.kind);
+      const finish = beginActivity(id, observed?.app.name ?? action.app ?? 'Observed target', action.kind);
       try {
         await recordUsage(id).catch(() => undefined);
         const payload = await remoteJson<{ result?: ComputerActionResult }>(
@@ -2208,14 +2447,14 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         assertAdmission();
         submitted = true;
         const observed = action.observationId ? observations.get(id)?.get(action.observationId) : undefined;
-        const finish = beginActivity(id, observed?.app.name ?? action.app, action.kind);
+        const finish = beginActivity(id, observed?.app.name ?? action.app ?? 'Observed target', action.kind);
         const admission = automation.context.getStore();
         const gestureId = randomUUID();
         let nativeMechanism: ComputerGesture['mechanism'];
         const sendGesture = (event: Pick<ComputerGesture, 'phase' | 'point' | 'to' | 'target' | 'mechanism'>) => {
           if (generation !== laneGeneration(id)) return;
           try { admission?.assert(); } catch { return; }
-          const mechanism = action.kind === 'set_value' || action.kind === 'secondary' || action.clickMethod === 'accessibility' || action.clickMethod === 'app_post' ? 'semantic'
+          const mechanism = ['set_value', 'secondary', 'set_checked', 'set_expanded', 'select', 'scroll_into_view'].includes(action.kind) || action.clickMethod === 'accessibility' || action.clickMethod === 'app_post' ? 'semantic'
             : action.kind === 'type' || action.kind === 'key' ? 'keyboard' : 'pointer';
           nativeMechanism = event.mechanism ?? nativeMechanism;
           const gesture: ComputerGesture = { mechanism: nativeMechanism ?? mechanism, ...event, id: gestureId, desktopId: id, kind: action.kind, at: new Date().toISOString(),
@@ -3765,8 +4004,27 @@ export function createComputerService(options: ComputerServiceOptions): Computer
 
   // EE6 (§10): best-effort durable steps beside execution, identifiers only.
   // Remote desktops are journaled by their owning Host; queries forward there.
-  const observe: ComputerService["observe"] = (params) =>
-    journaledOp(params, { lane: "observe", tool: "observe", op: "observe", target: params.app }, observeImpl);
+  const observe: ComputerService["observe"] = async (params) => {
+    const selected = referencedParams(params, params.within, params.observationId);
+    return journaledOp(selected, { lane: "observe", tool: "observe", op: "observe", target: selected.app }, observeImpl);
+  };
+  const query: ComputerService['query'] = async params => {
+    validateSemanticQuery(params);
+    const selected = referencedParams(params, params.target ?? params.within);
+    return journaledOp(selected, { lane: 'observe', tool: 'query', op: 'query', target: selected.app }, queryImpl);
+  };
+  const awaitCondition: ComputerService['awaitCondition'] = async params => {
+    validateSemanticQuery(params);
+    if ((params.condition === 'property' || params.condition === 'changed' && params.property) && (!params.target || !params.property)) throw new HarnessServiceError('invalid-params', 'Property waiting requires a target and property');
+    if (params.condition === 'changed' && params.target && !params.property) throw new HarnessServiceError('invalid-params', 'A target change requires a specific property');
+    if ((params.condition === 'window_opened' || params.condition === 'window_closed') && (params.match || params.properties || params.property)) throw new HarnessServiceError('invalid-params', 'Window waiting uses the window selector or original reference, not element conditions');
+    if (params.condition === 'property' && params.equals === undefined) throw new HarnessServiceError('invalid-params', 'Property waiting requires equals');
+    if ((params.condition === 'present' || params.condition === 'absent') && params.target) throw new HarnessServiceError('invalid-params', 'Presence waiting requires a match query, not a property target');
+    if (params.offset !== undefined && params.offset !== 0) throw new HarnessServiceError('invalid-params', 'A wait evaluates the original query range, not a later result page');
+    if (params.timeoutMs !== undefined && (!Number.isFinite(params.timeoutMs) || params.timeoutMs < 0)) throw new HarnessServiceError('invalid-params', 'timeoutMs must be nonnegative');
+    const selected = referencedParams(params, params.target ?? params.within);
+    return journaledOp(selected, { lane: 'observe', tool: 'await', op: params.condition, target: selected.app }, awaitImpl);
+  };
   // Join only the original lane's input receipt. A replacement helper or a resolved
   // HTTP observer cannot establish that a previously submitted writer stopped.
   const joinInputLifetime = async <P extends { desktopId?: string; signal?: AbortSignal }, R extends { inputWriterStopped: boolean }>(
@@ -3791,9 +4049,20 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       return result;
     } finally { selected.signal?.removeEventListener('abort', onAbort); await stopping?.catch(() => undefined); }
   };
-  const act: ComputerService["act"] = (params) =>
-    journaledOp(params, { lane: "action", tool: "act", op: params.action.kind, target: params.action.app },
-      selected => joinInputLifetime(selected, actImpl));
+  const act: ComputerService["act"] = async (params) => {
+    let bound: { desktopId?: string; app?: string; window?: number | string };
+    try {
+      bound = referencedParams({ ...(params.desktopId !== undefined ? { desktopId: params.desktopId } : {}),
+        ...(params.action.app !== undefined ? { app: params.action.app } : {}),
+        ...(params.action.window !== undefined ? { window: params.action.window } : {}) }, undefined, params.action.observationId);
+    } catch (error) {
+      return { accepted: false, inputWriterStopped: true, receipt: { effect: 'none', reason: {
+        code: error instanceof HarnessServiceError && error.harnessCode === 'forbidden' ? 'control-changed' : 'target-changed',
+        message: error instanceof Error ? error.message : String(error) }, recovery: 'observe' } };
+    }
+    return journaledOp({ ...params, ...(bound.desktopId ? { desktopId: bound.desktopId } : {}), action: { ...params.action, ...(bound.app ? { app: bound.app } : {}) } },
+      { lane: 'action', tool: 'act', op: params.action.kind, target: bound.app }, selected => joinInputLifetime(selected, actImpl));
+  };
   const open: ComputerService["open"] = (params) =>
     journaledOp(params, { lane: "action", tool: "open", op: "open",
       target: params.path ?? urlEvidenceTarget(params.url) ?? params.command }, selected => joinInputLifetime(selected, openImpl)).catch(applicationFailure);
@@ -3839,7 +4108,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   };
 
   return {
-    automation, controlOwnerEpoch: origin, resolveDesktop: resolveDesktopId,
+    automation, controlOwnerEpoch: origin, resolveDesktop: resolveDesktopId, desktopForObservation,
     async stopDesktop({ desktopId, automationEpoch }) {
       if (!automationEpoch?.trim()) throw new ComputerError('computer-request-invalid', 'Use the control generation shown by this desktop view');
       const bound = boundLocalDesktop(desktopId);
@@ -3872,9 +4141,13 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         if (matches(lane.lastController)) delete lane.lastController;
         broadcastControl(id);
       }
-      for (const [id, owner] of observationOwners) if (matches(owner.actor)) {
-        for (const map of observations.values()) map.delete(id);
-        observationOwners.delete(id);
+      for (const [desktopId, map] of observations) {
+        const removed: ComputerObservation[] = [];
+        for (const [id, observation] of map) if (matches(observationOwners.get(id)?.actor)) {
+          removed.push(observation); map.delete(id); observationOwners.delete(id);
+          if (coordinateObservations.get(coordinateKey(observation)) === id) coordinateObservations.delete(coordinateKey(observation));
+        }
+        releaseObservationElements(desktopId, removed);
       }
     },
     async claimDesktop(origin, assignmentId, actor, desktopId, access) {
@@ -3884,7 +4157,15 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     },
     async dropDesktopClaim(origin, assignmentId, actor, desktopId, access) {
       await desktopRecord(desktopId);
-      await automation.dropClaim(origin, assignmentId, actor, desktopId, access);
+      const revokedActor = await automation.dropClaim(origin, assignmentId, actor, desktopId, access);
+      if (revokedActor) {
+        const removed: ComputerObservation[] = [];
+        for (const [id, observation] of observations.get(desktopId) ?? []) if (observationOwners.get(id)?.actor === revokedActor) {
+          observations.get(desktopId)!.delete(id); observationOwners.delete(id); removed.push(observation);
+          if (coordinateObservations.get(coordinateKey(observation)) === id) coordinateObservations.delete(coordinateKey(observation));
+        }
+        releaseObservationElements(desktopId, removed);
+      }
       const held = laneFor(desktopId).physicalControl?.holder;
       if (access === 'control' && held?.kind === 'assignment' && held.origin === origin && held.assignmentId === assignmentId) {
         if (!sameComputerExecution(held.actor.execution, actor.execution)) throw new HarnessServiceError('forbidden', 'Original desktop claim identity changed');
@@ -3899,7 +4180,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     ensureLocal,
     probe,
     listApps,
-    observe,
+    observe, query, awaitCondition,
     act,
     cancel,
     release,
@@ -3925,6 +4206,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     dispose: async () => {
       if (disposed) return;
       disposed = true;
+      serviceLifetime.abort(new Error('Computer service closed'));
       for (const close of assignmentStreams.values()) close();
       assignmentStreams.clear();
       if (guestReconcileTimer) clearInterval(guestReconcileTimer);

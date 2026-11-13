@@ -19,7 +19,7 @@ export function buildMacComputerHelper({ destination = source, architecture = pr
   try {
     const sdk = run('xcrun', ['--sdk', 'macosx', '--show-sdk-path'], { encoding: 'utf8' }).trim();
     run('xcrun', ['--sdk', 'macosx', 'swiftc', '-swift-version', '5', '-O', '-target', `${arch}-apple-macosx13.0`, '-sdk', sdk,
-      ...['Native.swift', 'Capture.swift', 'Driver.swift', 'main.swift'].map(name => join(source, name)),
+      ...['Native.swift', 'Accessibility.swift', 'SemanticActions.swift', 'Capture.swift', 'Driver.swift', 'main.swift'].map(name => join(source, name)),
       '-framework', 'AppKit', '-framework', 'ApplicationServices', '-framework', 'ScreenCaptureKit', '-framework', 'CoreImage',
       '-framework', 'CoreMedia', '-framework', 'Carbon', '-o', executable], { stdio: 'inherit' });
     copyFileSync(join(source, 'Info.plist'), join(candidate, 'Contents', 'Info.plist'));

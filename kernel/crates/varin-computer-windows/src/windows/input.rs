@@ -1,6 +1,6 @@
 //! One ordered input owner. Only short, nonblocking input sends hold the gate.
 //! UIA, synchronous window messages and capture must NEVER execute under it.
-use crate::protocol::{normalize_pointer, Failure, Point, RequestState, Result};
+use crate::protocol::{Failure, Point, RequestState, Result, normalize_pointer};
 use serde_json::Value;
 use std::{collections::BTreeMap, mem::size_of, sync::Mutex};
 use windows::Win32::{
@@ -23,6 +23,7 @@ enum ReleaseEvent {
 struct State {
     request: RequestState,
     recent: Option<String>,
+    read_only: bool,
     held: BTreeMap<String, ReleaseEvent>,
     window: isize,
     target: isize,
@@ -43,12 +44,16 @@ impl InputOwner {
             .unwrap_or_else(|poison| poison.into_inner())
     }
     pub fn begin(&self, id: &str) -> Result<()> {
+        self.begin_request(id, false)
+    }
+    pub fn begin_request(&self, id: &str, read_only: bool) -> Result<()> {
         let mut state = self.lock();
         state.window = 0;
         state.target = 0;
         state.pid = 0;
         state.focus = 0;
         state.recent = Some(id.to_owned());
+        state.read_only = read_only;
         state.request.begin(id)
     }
     pub fn end(&self) {
@@ -66,6 +71,12 @@ impl InputOwner {
         let mut state = self.lock();
         assert_target(&state)?;
         state.request.attempt_semantic()
+    }
+    pub fn mechanism(&self, mechanism: &str) {
+        self.lock().request.mechanism(mechanism);
+    }
+    pub fn observed_state(&self, state: Value) {
+        self.lock().request.observed_state(state);
     }
     pub fn verify(&self) {
         self.lock().request.verify();
@@ -276,10 +287,10 @@ impl InputOwner {
         // The Host can cancel after the native response was written but before
         // it observed that response. Preserve the just-finished input identity.
         if state.recent.as_deref() == Some(request) && !state.request.is_active(request) {
-            return release_held(&mut state);
+            return state.read_only || release_held(&mut state);
         }
         state.request.cancel(request);
-        if state.request.is_active(request) {
+        if state.request.is_active(request) && !state.read_only {
             release_held(&mut state)
         } else {
             true
@@ -420,7 +431,14 @@ fn send_locked(state: &mut State, events: &[INPUT]) -> Result<()> {
     }
     state.request.accept(sent as u64);
     if sent != events.len() {
-        return Err(Failure::new("input-rejected",format!("Windows accepted {sent} of {} input events (error {}). OS acceptance does not confirm target application completion",events.len(),unsafe{GetLastError().0})));
+        return Err(Failure::new(
+            "input-rejected",
+            format!(
+                "Windows accepted {sent} of {} input events (error {}). OS acceptance does not confirm target application completion",
+                events.len(),
+                unsafe { GetLastError().0 }
+            ),
+        ));
     }
     Ok(())
 }
@@ -476,5 +494,37 @@ pub fn mouse_event(flags: MOUSE_EVENT_FLAGS, data: u32) -> INPUT {
                 ..Default::default()
             },
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn cancelling_read_does_not_release_another_requests_held_input() {
+        let owner = InputOwner::default();
+        // An internal held-event sentinel, not a sent key. No native dispatch
+        // should be attempted by either active or just-finished read cancellation.
+        owner.lock().held.insert(
+            "sentinel".into(),
+            ReleaseEvent::Posted {
+                hwnd: 0,
+                message: WM_NULL,
+                wparam: 0,
+                lparam: 0,
+            },
+        );
+        owner.begin_request("read", true).unwrap();
+        assert!(owner.cancel("read"));
+        assert_eq!(owner.lock().held.len(), 1);
+        assert_eq!(owner.checkpoint().unwrap_err().code, "cancelled");
+        owner.end();
+        assert!(owner.cancel("read"));
+        assert_eq!(owner.lock().held.len(), 1);
+        owner.begin_request("other-read", true).unwrap();
+        assert!(owner.checkpoint().is_ok());
+        assert!(owner.cancel("unrelated"));
+        assert!(owner.checkpoint().is_ok());
+        assert_eq!(owner.lock().held.len(), 1);
     }
 }

@@ -19,7 +19,7 @@ not an unknown Host effect. Driver startup failures retain their original cause 
 does not establish that the native observation/input driver can start.
 
 Native calls use the shipped `varin.builtin.computer` ordinary extension. Its single declaration
-owns `computer_list/apps/observe/act/cancel/release/request/access/grant/deny/wait`,
+owns `computer_list/apps/observe/query/await/act/cancel/release/request/access/grant/deny/wait`,
 `computer_control/open/put/install`, `computer_browser_read/browser`, `computer_office_read/office`,
 `computer_evidence`, `computer_environment`, `computer_prepare`, `computer_desktop_lifecycle` and
 `computer_artifact`,
@@ -32,6 +32,36 @@ sidebar selection or default. Explicit desktop selection and actual assignments 
 An invalid captured Computer default makes that service candidate unavailable through the existing
 tool-preparation projection. Unrelated tools can still prepare, even when the Computer provider was
 already active. Required saved Computer bindings remain exact; errors do not become a null default.
+
+### Desktop semantic reads and actions
+
+`computer_observe` offers a compact outline (model default), a tree, or a fresh read of an
+observed region through `within`. Pagination with `observationId` reads the same retained result;
+it does not update the scene. Optional images use the existing media parts. `computer_query`
+finds role/name/value/state matches or reads specified properties of one observed target.
+Names match exactly unless containment is requested. Unknown attributes are not false.
+Results distinguish truncated or otherwise incomplete native scope; virtualized content not
+exposed by the provider is not a searched business object.
+
+An element reference combines an observation with its element index. The same Catalog reference
+owner projects `obs:…` aliases and compact fields for the model; the UI keeps the original
+observation and native dispatch retains its own identity evidence. A new semantic read does not
+refresh screenshot geometry or invalidate every earlier semantic target. The owning driver must
+still confirm the original window and element; handback, release, and owner loss can invalidate a
+reference. Explicit pointer coordinates continue to use the captured image and live input checks.
+
+`computer_act` distinguishes setting checked or expanded state, selecting an item (replace/add/remove),
+and scrolling it into view. For a supported ordinary element click, auto prefers the native semantic
+primary operation. Coordinate clicks, drags, explicit global input and insertion by `type` keep
+their previous meaning. Fallback is only for a mechanism known not to have sent input. Receipts
+separate no effect, dispatch and verified property readback from completion of the application task.
+
+`computer_await` reads the target Host until a condition is met or the call stops. The desktop lane
+is held only for a short sample, not between samples; cancellation is scoped to the read request
+and is not desktop release. An incomplete read cannot prove absence, and loss of the source
+window is not successful element disappearance. This tool is distinct from the assignment decision
+tool `computer_wait`. Older remote owners and providers without semantic capabilities still
+support their existing observations and inputs.
 
 Application adaptation uses the original ComputerService, driver and remote assignment token.
 Browser status/tabs/snapshot/screenshot and Office status/docs/read have read-only schemas;
@@ -133,7 +163,7 @@ same Catalog request and physical assignment owners described above.
 
 There is one controller per physical desktop, including the main agent. Observers coexist with it.
 Separate windows on one desktop share control; separate desktops/VMs can run in parallel. Observation
-IDs are owned by Thread/branch and Run, so another observer does not replace a controller's current tree.
+IDs are owned by Thread/branch and Run; an observation by another actor does not replace the controller's references.
 Control epochs include the execution identity, invalidating cached application objects across rounds.
 
 Remote assignments are reserved at the owning Host before a source Host confirms a grant. Automatic

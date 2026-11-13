@@ -154,3 +154,163 @@ it('includes the requested computer action, document range and MCP query in thei
   expect(headings[2]).toContain('varin/desktop'); expect(headings[2]).toContain('is:open label:bug');
   expect(headings[2]).not.toContain('never-promote-secrets');
 });
+
+const observeControls: Record<string, JsonValue> = {
+  id: 'original-observation', desktopId: 'original-desktop', machineId: 'original-host',
+  app: { name: 'Preferences', pid: 12 }, windowTitle: 'Preferences', capturedAt: '2026-11-14T01:00:00Z',
+  treeLines: ['Duplicate text projection must not be rendered beside structured controls'],
+  elements: [
+    { index: 4, role: 'group', name: 'Autosave options', hasMoreChildren: true },
+    { index: 12, parentIndex: 4, role: 'checkbox', name: 'Autosave', checked: 'mixed', enabled: true },
+    { index: 19, parentIndex: 4, role: 'listitem', name: 'Daily', selected: false },
+  ],
+};
+async function openComputerObservation() {
+  const disclosure = container.querySelector<HTMLDetailsElement>('[data-conversation-tool-disclosure^="computer-observation:"]')!;
+  expect(disclosure).not.toBeNull();
+  await act(async () => { disclosure.open = true; disclosure.dispatchEvent(new window.Event('toggle')); });
+  return disclosure;
+}
+
+it('folds a partial control query, keeps actual state and hierarchy, and never duplicates the tree projection', async () => {
+  await render(call('query', 'computer_query', { app: 'Preferences', match: { name: 'Autosave' } }, {
+    observation: observeControls, complete: false, nextOffset: 3,
+  }), 'semantic-query');
+  expect(container.querySelectorAll('.tool-computer-event')).toHaveLength(1);
+  expect(container.querySelector('.tool-heading-receipt')?.textContent).toBe('3 matches returned · Search incomplete');
+  expect(container.textContent).toContain(dict['chat.tools.computer.incomplete']);
+  expect(container.querySelector('[data-computer-element]')).toBeNull();
+  expect(container.querySelector('img')).toBeNull();
+  const detail = await openComputerObservation();
+  expect(detail.querySelectorAll('[data-computer-element]')).toHaveLength(3);
+  expect(detail.querySelector('[data-computer-element="12"]')?.getAttribute('style')).toContain('padding-inline-start:1rem');
+  expect(detail.querySelector('[data-computer-element="12"]')?.textContent).toContain('Checked: Mixed');
+  expect(detail.querySelector('[data-computer-element="19"]')?.textContent).toContain('Selected: No');
+  expect(detail.textContent).toContain(dict['chat.tools.computer.moreChildren']);
+  expect(detail.textContent).not.toContain('Duplicate text projection');
+  await act(async () => { detail.open = false; detail.dispatchEvent(new window.Event('toggle')); });
+  await render(call('query', 'computer_query', { app: 'Preferences', match: { name: 'Autosave' } }, {
+    complete: false, status: 'unavailable', reason: 'Application no longer exposes controls',
+  }), 'semantic-query');
+  expect(container.querySelector('.tool-heading-receipt')?.textContent).toBe(dict['chat.tools.computer.unavailable']);
+  expect(container.querySelector('[data-computer-element]')).toBeNull();
+  expect(container.textContent).not.toContain('3 matches');
+});
+
+it('does not turn missing or unavailable control properties into false', async () => {
+  await render(call('properties', 'computer_query', {
+    target: { observationId: 'obs:retained', elementIndex: 12 }, properties: ['checked', 'selected', 'enabled', 'expanded'],
+  }, { properties: { checked: 'mixed', selected: false }, unavailableProperties: ['enabled'], complete: true }), 'semantic-properties');
+  expect(container.querySelector('.tool-heading-receipt')?.textContent).toContain('Checked: Mixed');
+  const detail = await openComputerObservation();
+  expect(detail.querySelector('[data-computer-property="selected"]')?.textContent).toBe('Selected: No');
+  expect(detail.querySelector('[data-computer-property="enabled"]')?.textContent).toBe('Enabled: Unavailable');
+  expect(detail.querySelector('[data-computer-property="expanded"]')?.textContent).toBe('Expanded: Unknown');
+});
+
+it('uses observed selection rather than requested selection and keeps input mechanism secondary', async () => {
+  await render(call('select', 'computer_act', { action: { kind: 'select', elementIndex: 19, selection: 'add' } }, {
+    result: { accepted: true, inputWriterStopped: true,
+      receipt: { effect: 'dispatched', mechanism: 'accessibility', observedState: { name: 'Daily', selected: false } } },
+  }), 'semantic-selection');
+  const heading = container.querySelector('.tool-artifact-heading')!.textContent!;
+  expect(heading).toContain('Add to selection'); expect(heading).toContain('Daily');
+  expect(heading).toContain(dict['chat.tools.computer.dispatched']); expect(heading).toContain('Selected: No');
+  expect(heading).not.toContain('Selected: Yes'); expect(heading).not.toContain('accessibility');
+  const mechanism = container.querySelector<HTMLDetailsElement>('[data-conversation-tool-disclosure^="computer-mechanism:"]')!;
+  expect(mechanism.hasAttribute('open')).toBe(false);
+  await act(async () => { mechanism.open = true; mechanism.dispatchEvent(new window.Event('toggle')); });
+  expect(mechanism.textContent).toContain('Control action');
+  expect(container.querySelectorAll('.tool-computer-event')).toHaveLength(1);
+});
+
+it('distinguishes an already-satisfied state from an unconfirmed input outcome without offering replay', async () => {
+  const args = { action: { kind: 'set_checked', checked: true, elementIndex: 12 } };
+  await render(call('check', 'computer_act', args, { result: { accepted: true, inputWriterStopped: true,
+    receipt: { effect: 'none', observedState: { checked: true } } } }), 'semantic-check');
+  expect(container.querySelector('.tool-heading-receipt')?.textContent).toContain(dict['chat.tools.computer.alreadySet']);
+  await render(call('check', 'computer_act', args, { result: { accepted: false, inputWriterStopped: false,
+    receipt: { effect: 'unknown', reason: { code: 'connection-lost', message: 'Reply lost after input submission' } } } }), 'semantic-check');
+  expect(container.querySelector('.tool-heading-receipt')?.textContent).toBe(dict['chat.tools.computer.unknown']);
+  expect(container.textContent).toContain(dict['chat.tools.computer.writerUnconfirmed']);
+  expect(container.textContent).toContain('Reply lost after input submission');
+  expect(container.textContent).not.toContain(dict['chat.tools.computer.alreadySet']);
+  expect([...container.querySelectorAll('button')].some(button => /retry|repeat/i.test(button.textContent!))).toBe(false);
+});
+
+it.each([
+  ['satisfied', 'chat.tools.computer.satisfied'], ['timed_out', 'chat.tools.computer.timedOut'],
+  ['cancelled', 'chat.tools.computer.cancelled'], ['target_lost', 'chat.tools.computer.targetLost'],
+  ['unavailable', 'chat.tools.computer.unavailable'],
+] as const)('shows the actual %s wait outcome even when the tool call completed normally', async (status, key) => {
+  await render(call('await', 'computer_await', {
+    app: 'Preferences', target: { observationId: 'obs:retained', elementIndex: 12 }, condition: 'property', property: 'checked', equals: true,
+  }, { status, condition: 'property', elapsedMs: 1250, last: { properties: { checked: false }, complete: true } }), 'semantic-await-' + status);
+  expect(container.querySelector('.tool-heading-receipt')?.textContent).toBe(dict[key]);
+  expect(container.textContent).toContain('1.25 s elapsed');
+  const last = await openComputerObservation();
+  expect(last.querySelector('summary')?.textContent).toBe(dict['chat.tools.computer.lastObserved']);
+  expect(last.querySelector('[data-computer-property="checked"]')?.textContent).toBe('Checked: No');
+  expect(container.querySelectorAll('.tool-computer-event')).toHaveLength(1);
+});
+
+it('keeps an incomplete observation warning visible before opening its structured tree', async () => {
+  await render(call('observe', 'computer_observe', { app: 'Preferences', view: 'outline' }, {
+    observation: { ...observeControls, complete: false, truncatedReason: 'Provider reached its requested traversal depth' },
+  }), 'semantic-observe');
+  expect(container.textContent).toContain(dict['chat.tools.computer.incomplete']);
+  expect(container.textContent).toContain('Provider reached its requested traversal depth');
+  expect(container.querySelector('[data-computer-element]')).toBeNull();
+});
+
+it('keeps the last actual computer outcome in the sorted compact activity', async () => {
+  useUIStore.setState({ chatRenderMode: 'sorted', activityRenderMode: 'summary' });
+  await render([
+    ...call('query', 'computer_query', { app: 'Preferences', match: { name: 'Save complete' } }, {
+      complete: true, observation: { ...observeControls, elements: [] },
+    }),
+    ...call('await', 'computer_await', { app: 'Preferences', match: { name: 'Save complete' }, condition: 'present' }, {
+      status: 'timed_out', condition: 'present', elapsedMs: 1000,
+    }),
+  ], 'semantic-sorted');
+  const summary = container.querySelector('[data-conversation-sorted-activity] > button')!;
+  expect(summary.textContent).toContain(dict['chat.tools.computer.timedOut']);
+  expect(summary.textContent).toContain('Save complete');
+});
+
+it('does not identify an action target by reusing its old index in a new observation', async () => {
+  await render(call('act', 'computer_act', {
+    action: { kind: 'set_checked', observationId: 'old-observation', elementIndex: 12, checked: true },
+  }, { result: { accepted: true, inputWriterStopped: true, receipt: { effect: 'dispatched' },
+    observation: { ...observeControls, id: 'new-observation', elements: [{ index: 12, name: 'Different control', role: 'checkbox' }] },
+  } }), 'semantic-renumber');
+  const subject = container.querySelector('.tool-heading-subject')!.textContent!;
+  expect(subject).toContain('#12');
+  expect(subject).not.toContain('Different control');
+});
+
+it('distinguishes a returned result page from an incomplete native search', async () => {
+  await render(call('page', 'computer_query', { app: 'Preferences', match: { role: 'checkbox' }, offset: 3 }, {
+    complete: true, nextOffset: 6, observation: observeControls,
+  }), 'semantic-query-page');
+  expect(container.querySelector('.tool-heading-receipt')?.textContent).toBe('3 matches in this result page');
+  expect(container.textContent).toContain(dict['chat.tools.partialResult']);
+  expect(container.textContent).not.toContain(dict['chat.tools.computer.incomplete']);
+});
+
+it('does not infer exclusive replacement from one selected option', async () => {
+  await render(call('replace-selection', 'computer_act', { action: { kind: 'select', elementIndex: 19, selection: 'replace' } }, {
+    result: { accepted: true, inputWriterStopped: true, receipt: { effect: 'none', observedState: { name: 'Daily', selected: true } } },
+  }), 'semantic-exclusive-selection');
+  expect(container.querySelector('.tool-heading-receipt')?.textContent).toContain(dict['chat.tools.computer.noInput']);
+  expect(container.querySelector('.tool-heading-receipt')?.textContent).toContain('Selected: Yes');
+  expect(container.textContent).not.toContain(dict['chat.tools.computer.alreadySet']);
+});
+
+it('does not render requested properties as an observation before the read returns', async () => {
+  await render(call('pending-properties', 'computer_query', {
+    target: { observationId: 'obs:retained', elementIndex: 12 }, properties: ['checked', 'selected'],
+  }), 'semantic-pending-properties');
+  expect(container.querySelector('[data-conversation-tool-disclosure^="computer-observation:"]')).toBeNull();
+  expect(container.querySelector('.tool-heading-receipt')).toBeNull();
+});

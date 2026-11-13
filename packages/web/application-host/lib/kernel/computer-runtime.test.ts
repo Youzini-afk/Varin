@@ -237,6 +237,28 @@ test('both original tool origins dispatch through Computer owner without a file 
   }
 });
 
+test('scoped Computer reads use the original desktop and stay on the read operation', async () => {
+  const f = await fixture();
+  try {
+    const observed = await f.invoke('observe', { desktopId: 'local-console', app: 'editor' });
+    assert.equal(observed.receipt.completion.kind, 'result');
+    if (observed.receipt.completion.kind !== 'result') throw new Error('Expected a retained observation');
+    const data = observed.receipt.completion.content?.data as { observation: { id: string } };
+    const target = { observationId: data.observation.id, elementIndex: 0 };
+    const queried = await f.invoke('query', { target, properties: ['enabled'] });
+    assert.equal(queried.receipt.completion.kind, 'result');
+    if (queried.receipt.completion.kind !== 'result') throw new Error('Expected a read result');
+    assert.equal(queried.receipt.completion.effect, 'none');
+    assert.equal(f.requests.findLast(request => request.tool === 'query_elements')?.app, '3');
+    assert.equal(f.calls.filter(call => call === 'get_app_state').length, 1);
+    const waited = await f.invoke('await', { target, condition: 'property', property: 'enabled', equals: true, timeoutMs: 0 });
+    assert.equal(waited.receipt.completion.kind, 'result');
+    if (waited.receipt.completion.kind !== 'result') throw new Error('Expected a condition result');
+    assert.equal(waited.receipt.completion.effect, 'none');
+    assert.equal(f.releases(), 0);
+  } finally { await f.cleanup(); }
+});
+
 test('apps shows foreground windows by default and can explicitly search hidden windows', async () => {
   const f = await fixture();
   try {

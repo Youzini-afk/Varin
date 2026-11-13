@@ -1,14 +1,14 @@
 use super::{
-    capture,
-    input::{coordinate, key_event, mouse_event, InputOwner},
+    Output, capture,
+    input::{InputOwner, coordinate, key_event, mouse_event},
     uia::Automation,
-    window, Output,
+    window,
 };
 use crate::{
-    protocol::{handshake, limit_text, text_limit, Failure, Point, Rect, Request, Result},
-    targeting::{check_geometry, ElementRecord},
+    protocol::{Failure, Point, Rect, Request, Result, handshake, limit_text, text_limit},
+    targeting::{ElementRecord, check_geometry},
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     mem::size_of,
@@ -17,10 +17,9 @@ use std::{
     time::{Duration, Instant},
 };
 use windows::{
-    core::{BSTR, PCWSTR},
     Win32::{
         Foundation::{
-            CloseHandle, GetLastError, SetLastError, ERROR_ACCESS_DENIED, HWND, LPARAM, POINT,
+            CloseHandle, ERROR_ACCESS_DENIED, GetLastError, HWND, LPARAM, POINT, SetLastError,
             WIN32_ERROR, WPARAM,
         },
         Graphics::Gdi::ScreenToClient,
@@ -28,10 +27,11 @@ use windows::{
         UI::{
             Accessibility::*,
             Input::KeyboardAndMouse::*,
-            Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW},
+            Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW},
             WindowsAndMessaging::*,
         },
     },
+    core::{BSTR, PCWSTR},
 };
 
 pub struct Runtime {
@@ -58,6 +58,20 @@ impl Runtime {
         Ok(self.automation.as_ref().unwrap())
     }
     pub fn execute(&mut self, request: &Request) -> Result<Value> {
+        let retained = self
+            .automation
+            .as_ref()
+            .map(Automation::retained_checkpoint)
+            .unwrap_or_default();
+        let result = self.execute_inner(request);
+        if result.is_err() {
+            if let Some(automation) = &self.automation {
+                automation.rollback_retained(&retained);
+            }
+        }
+        result
+    }
+    fn execute_inner(&mut self, request: &Request) -> Result<Value> {
         self.owner.checkpoint()?;
         if matches!(request.tool.as_str(), "ping" | "capabilities") {
             let mut response = handshake();
@@ -66,7 +80,9 @@ impl Runtime {
                 let available = window::desktop_available();
                 response["capabilities"] = json!({"platform":"windows","driver":"windows-uia","driverVersion":env!("VARIN_COMPUTER_VERSION"),
                     "applicationTools":{"browser":false,"office":false},"observeTree":available&&!self.capture_only,"screenshot":available,
-                    "elementAction":available&&!self.capture_only,"coordinateInput":available&&!self.capture_only,"textInput":available&&!self.capture_only,
+                    "elementAction":available&&!self.capture_only,
+                    "semanticQuery":available&&!self.capture_only,"scopedObservation":available&&!self.capture_only,
+                    "semanticActions":if available&&!self.capture_only {json!(["set_checked","set_expanded","select","scroll_into_view"])} else {json!([])},"semanticEvents":"polling","coordinateInput":available&&!self.capture_only,"textInput":available&&!self.capture_only,
                     "drag":available&&!self.capture_only,"dpiAware":true,"displays":window::displays(),"multiWindow":true,"occludedCapture":true,
                     "interruptibleInput":!self.capture_only,"sessionType":"windows-console","status":if available {"ready"} else {"unavailable"}});
                 if !available {
@@ -92,6 +108,19 @@ impl Runtime {
                 Ok(json!({"ok":true,"released":true}))
             }
             "list_apps" => window::list_apps(request),
+            "query_elements" => self.query(request),
+            "release_elements" => {
+                if let Some(automation) = &self.automation {
+                    automation.release(
+                        request
+                            .value("elements")
+                            .as_array()
+                            .map(Vec::as_slice)
+                            .unwrap_or(&[]),
+                    );
+                }
+                Ok(json!({"ok":true}))
+            }
             "get_app_state" => Ok(json!({"ok":true,"snapshot":self.snapshot(request)?})),
             "inject_input" => {
                 self.human_input(request)?;
@@ -104,7 +133,11 @@ impl Runtime {
             | "drag"
             | "type_text"
             | "press_key"
-            | "set_value" => self.action(request),
+            | "set_value"
+            | "set_checked"
+            | "set_expanded"
+            | "select"
+            | "scroll_into_view" => self.action(request),
             _ => Err(Failure::new(
                 "unsupported",
                 "This Computer operation is not implemented by the Windows driver",
@@ -116,6 +149,9 @@ impl Runtime {
             Ok(target) => Ok(target),
             Err(error)
                 if error.code == "target-unavailable"
+                    && request.value("element").is_null()
+                    && request.value("within").is_null()
+                    && request.value("platform_target").is_null()
                     && env_flag("VARIN_COMPUTER_ALLOW_APP_LAUNCH")
                     && !window::application_exists(request)? =>
             {
@@ -142,6 +178,84 @@ impl Runtime {
             Err(error) => Err(error),
         }
     }
+    fn query(&mut self, request: &Request) -> Result<Value> {
+        if !request.value("platform_target").is_null() {
+            self.automation()?
+                .validate_target(request.value("platform_target"))?;
+        }
+        let target = window::resolve(request).map_err(|error| {
+            if matches!(error.code, "target-unavailable" | "target-changed") {
+                Failure::new(
+                    if request
+                        .value("platform_target")
+                        .get("uiaWindowId")
+                        .is_some()
+                    {
+                        "window_lost"
+                    } else {
+                        "window_not_found"
+                    },
+                    error.message,
+                )
+            } else {
+                error
+            }
+        })?;
+        let owner = self.owner.clone();
+        let automation = self.automation()?;
+        let root = automation.root(target.hwnd, request.value("platform_target"))?;
+        let native_target = automation.native_target(&root)?;
+        if !request.value("element").is_null() {
+            let record = parse_element(request.value("element"))?;
+            let element = automation
+                .relocate(&root, &record, || owner.checkpoint())?
+                .ok_or_else(|| {
+                    Failure::new(
+                        "target_lost",
+                        "The requested control is no longer available",
+                    )
+                })?;
+            let result = automation.properties(&element, request, || owner.checkpoint())?;
+            automation.validate_window(&root)?;
+            window::validate_identity(&target)?;
+            owner.checkpoint()?;
+            return Ok(result);
+        }
+        let rendered = if request.boolean("window_only") {
+            super::uia::Rendered {
+                records: vec![],
+                lines: vec![],
+                complete: true,
+                reason: None,
+                next_offset: None,
+            }
+        } else {
+            let region = if request.value("within").is_null() {
+                root.clone()
+            } else {
+                automation
+                    .relocate(&root, &parse_element(request.value("within"))?, || {
+                        owner.checkpoint()
+                    })?
+                    .ok_or_else(|| {
+                        Failure::new("target_lost", "The requested region is no longer available")
+                    })?
+            };
+            automation.query(&root, &region, &target.bounds, request, || {
+                owner.checkpoint()
+            })?
+        };
+        automation.validate_window(&root)?;
+        window::validate_identity(&target)?;
+        owner.checkpoint()?;
+        Ok(
+            json!({"ok":true,"complete":rendered.complete,"nextOffset":rendered.next_offset,"reason":rendered.reason,
+            "snapshot":{"app":{"name":target.name,"bundleIdentifier":target.name,"pid":target.pid},
+                "windowTitle":target.title,"windowHandle":target.hwnd.0 as isize,"windowBounds":target.bounds,"dpiScale":target.dpi,
+                "nativeTarget":native_target,"treeLines":rendered.lines,"elements":rendered.records,
+                "complete":rendered.complete,"truncatedReason":rendered.reason,"screenshotPngBase64":null,"screenshotSource":null}}),
+        )
+    }
     fn snapshot(&mut self, request: &Request) -> Result<Value> {
         let target = self.target(request)?;
         if let Some(last) = self.last_input.remove(&target.pid) {
@@ -152,9 +266,22 @@ impl Runtime {
         self.owner.checkpoint()?;
         let owner = self.owner.clone();
         let automation = self.automation()?;
-        let root = automation.root(target.hwnd)?;
-        let (records, lines) =
-            automation.render(&root, &target.bounds, request, || owner.checkpoint())?;
+        let root = automation.root(target.hwnd, request.value("platform_target"))?;
+        let region = if request.value("within").is_null() {
+            root.clone()
+        } else {
+            automation
+                .relocate(&root, &parse_element(request.value("within"))?, || {
+                    owner.checkpoint()
+                })?
+                .ok_or_else(|| {
+                    Failure::new("target_lost", "The requested region is no longer available")
+                })?
+        };
+        let rendered = automation.render(&root, &region, &target.bounds, request, || {
+            owner.checkpoint()
+        })?;
+        let native_target = automation.native_target(&root)?;
         owner.checkpoint()?;
         let (focused, selected) = automation
             .focused(
@@ -165,7 +292,7 @@ impl Runtime {
             .unwrap_or((None, None));
         let mut snapshot = json!({"app":{"name":target.name,"bundleIdentifier":target.name,"pid":target.pid},"windowTitle":limit_text(&target.title,text_limit(request.value("text_limit"))),
             "windowHandle":target.hwnd.0 as isize,"windowBounds":target.bounds,"dpiScale":target.dpi,"windows":target.windows,
-            "treeLines":lines,"elements":records,"focusedSummary":focused,"selectedText":selected,
+            "treeLines":rendered.lines,"elements":rendered.records,"complete":rendered.complete,"truncatedReason":rendered.reason,"view":request.text("view"),"nativeTarget":native_target,"focusedSummary":focused,"selectedText":selected,
             "screenshotPngBase64":null,"screenshotSource":null});
         if request.boolean("screenshot") {
             owner.checkpoint()?;
@@ -173,6 +300,7 @@ impl Runtime {
             snapshot["screenshotPngBase64"] = raster["screenshotPngBase64"].clone();
             snapshot["screenshotSource"] = raster["screenshotSource"].clone();
         }
+        automation.validate_window(&root)?;
         window::validate(&target)?;
         owner.checkpoint()?;
         Ok(snapshot)
@@ -181,20 +309,30 @@ impl Runtime {
         let target = self.target(request)?;
         let owner = self.owner.clone();
         owner.bind_window(target.hwnd, target.pid)?;
-        let expected = optional_rect(request.value("expected_bounds"))?;
-        check_geometry(
-            target.bounds,
-            expected,
-            target.dpi,
-            request.value("expected_dpi").as_f64(),
-        )?;
+        let coordinate_bound = request.value("element").is_null()
+            || matches!(request.tool.as_str(), "drag" | "type_text" | "press_key")
+            || (request.tool == "click"
+                && (!matches!(request.text("click_method"), "" | "auto" | "accessibility")
+                    || request.positive("click_count", 1) != 1
+                    || matches!(request.text("mouse_button"), "right" | "middle")))
+            || (request.tool == "scroll");
+        let expected = if coordinate_bound {
+            optional_rect(request.value("expected_bounds"))?
+        } else {
+            None
+        };
+        let expected_dpi = if coordinate_bound {
+            request.value("expected_dpi").as_f64()
+        } else {
+            None
+        };
+        check_geometry(target.bounds, expected, target.dpi, expected_dpi)?;
         let automation = self.automation()?;
-        let root = automation.root(target.hwnd)?;
+        let root = automation.root(target.hwnd, request.value("platform_target"))?;
         let element = if request.value("element").is_null() {
             None
         } else {
-            let record: ElementRecord = serde_json::from_value(request.value("element").clone())
-                .map_err(|_| Failure::new("invalid-request", "Invalid observed element record"))?;
+            let record = parse_element(request.value("element"))?;
             Some(
                 automation
                     .relocate(&root, &record, || owner.checkpoint())?
@@ -215,14 +353,10 @@ impl Runtime {
                 ));
             }
         }
-        window::validate(&target)?;
+        automation.validate_window(&root)?;
+        window::validate_identity(&target)?;
         let bounds = window::bounds(target.hwnd)?;
-        check_geometry(
-            bounds,
-            expected,
-            window::dpi(target.hwnd),
-            request.value("expected_dpi").as_f64(),
-        )?;
+        check_geometry(bounds, expected, window::dpi(target.hwnd), expected_dpi)?;
         if request.text("capture_source") == "screen" && expected.is_some() && element.is_none() {
             let points = if request.tool == "drag" {
                 vec![
@@ -238,7 +372,13 @@ impl Runtime {
                 ensure_point_owner(target.hwnd, point)?;
             }
         }
-        let frame = element.as_ref().map(element_rect).transpose()?.flatten();
+        let frame = if coordinate_bound {
+            element.as_ref().map(element_rect).transpose()?.flatten()
+        } else {
+            element
+                .as_ref()
+                .and_then(|element| element_rect(element).ok().flatten())
+        };
         let post_hwnd = match element.as_ref() {
             Some(element) => unsafe { element.CurrentNativeWindowHandle().unwrap_or_default() },
             None => target.hwnd,
@@ -261,10 +401,24 @@ impl Runtime {
         });
         let semantic = matches!(
             request.tool.as_str(),
-            "set_value" | "perform_secondary_action"
+            "set_value"
+                | "perform_secondary_action"
+                | "set_checked"
+                | "set_expanded"
+                | "select"
+                | "scroll_into_view"
         ) || matches!(request.text("click_method"), "accessibility" | "app_post")
             || request.text("input") == "app_post"
             || (request.tool == "scroll" && scroll_pattern.is_some());
+        owner.mechanism(
+            if request.text("input") == "app_post" || request.text("click_method") == "app_post" {
+                "app_post"
+            } else if semantic {
+                "accessibility"
+            } else {
+                "global"
+            },
+        );
         let mechanism = if semantic {
             "semantic"
         } else if matches!(request.tool.as_str(), "type_text" | "press_key") {
@@ -302,10 +456,43 @@ impl Runtime {
             match request.tool.as_str() {
                 "click" => {
                     let method = match request.text("click_method") {
+                        "" | "auto"
+                            if element.is_some()
+                                && request.positive("click_count", 1) == 1
+                                && matches!(request.text("mouse_button"), "" | "left") =>
+                        {
+                            "auto"
+                        }
                         "" | "auto" => "global",
                         other => other,
                     };
                     match method {
+                        "auto" => {
+                            let selected = element.as_ref().unwrap();
+                            ensure_enabled(selected)?;
+                            owner.mechanism("accessibility");
+                            if !preferred_click(&owner, selected)? {
+                                // This branch is reachable only before any native
+                                // semantic method was called, never after timeout/error.
+                                owner.mechanism("global");
+                                let expected = optional_rect(request.value("expected_bounds"))?;
+                                activate(&owner, target.hwnd, target.pid, request, expected)?;
+                                let at = action_point(
+                                    element.as_ref(),
+                                    request,
+                                    window::bounds(target.hwnd)?,
+                                )?;
+                                self.output.gesture(
+                                    request,
+                                    "target",
+                                    "pointer",
+                                    Some(at),
+                                    None,
+                                    None,
+                                );
+                                click(&owner, at, request.text("mouse_button"), 1)?;
+                            }
+                        }
                         "accessibility" => {
                             let element = element.as_ref().ok_or_else(|| {
                                 Failure::new(
@@ -319,7 +506,19 @@ impl Runtime {
                                     "Accessibility click does not support secondary mouse buttons",
                                 ));
                             }
-                            preferred_click(&owner, element)?;
+                            ensure_enabled(element)?;
+                            if request.positive("click_count", 1) != 1 {
+                                return Err(Failure::new(
+                                    "unsupported",
+                                    "Accessibility click represents one primary action, not a multi-click",
+                                ));
+                            }
+                            if !preferred_click(&owner, element)? {
+                                return Err(Failure::new(
+                                    "unsupported",
+                                    "The control has no supported accessibility click action",
+                                ));
+                            }
                         }
                         "global" => {
                             activate(&owner, target.hwnd, target.pid, request, expected)?;
@@ -345,7 +544,10 @@ impl Runtime {
                             request.positive("click_count", 1),
                         )?,
                         _ => {
-                            return Err(Failure::new("invalid-request", "Unsupported click method"))
+                            return Err(Failure::new(
+                                "invalid-request",
+                                "Unsupported click method",
+                            ));
                         }
                     }
                 }
@@ -450,6 +652,16 @@ impl Runtime {
                         press_key(&owner, request.text("key"))?;
                     }
                 }
+                "set_checked" | "set_expanded" | "select" | "scroll_into_view" => state_action(
+                    &owner,
+                    element.as_ref().ok_or_else(|| {
+                        Failure::new(
+                            "invalid-request",
+                            "State action requires an observed element",
+                        )
+                    })?,
+                    request,
+                )?,
                 "set_value" => set_value(
                     &owner,
                     element.as_ref().ok_or_else(|| {
@@ -460,8 +672,18 @@ impl Runtime {
                 _ => unreachable!(),
             }
             owner.checkpoint()?;
-            self.output
-                .gesture(request, "dispatched", mechanism, None, None, None);
+            let receipt = owner.receipt(None);
+            if receipt["effect"] != "none" {
+                let actual = if receipt["mechanism"] == "accessibility"
+                    || receipt["mechanism"] == "app_post"
+                {
+                    "semantic"
+                } else {
+                    mechanism
+                };
+                self.output
+                    .gesture(request, "dispatched", actual, None, None, None);
+            }
             Ok(())
         })();
         // Always release automatic held input, including app_post keys/buttons.
@@ -469,7 +691,9 @@ impl Runtime {
         let released = owner.release(false);
         result?;
         released?;
-        self.last_input.insert(target.pid, Instant::now());
+        if owner.receipt(None)["effect"] != "none" {
+            self.last_input.insert(target.pid, Instant::now());
+        }
         if matches!(request.text("return_state"), "" | "none") {
             return Ok(json!({"ok":true}));
         }
@@ -668,7 +892,7 @@ fn wheel(direction: &str, pages: f64) -> Result<(MOUSE_EVENT_FLAGS, u32)> {
             return Err(Failure::new(
                 "invalid-request",
                 "Unsupported scroll direction",
-            ))
+            ));
         }
     };
     let delta = coordinate(120.0 * pages * sign)?;
@@ -850,7 +1074,10 @@ fn post_text(
     text: &str,
 ) -> Result<()> {
     let unsupported = || {
-        Failure::new("unsupported","This control does not support background text insertion; use a focused input target or set_value")
+        Failure::new(
+            "unsupported",
+            "This control does not support background text insertion; use a focused input target or set_value",
+        )
     };
     let element = element.ok_or_else(unsupported)?;
     let hwnd = unsafe { element.CurrentNativeWindowHandle()? };
@@ -884,30 +1111,216 @@ fn post_text(
     }
     Ok(())
 }
-fn preferred_click(owner: &InputOwner, element: &IUIAutomationElement) -> Result<()> {
+fn ensure_enabled(element: &IUIAutomationElement) -> Result<()> {
+    if !unsafe { element.CurrentIsEnabled()? }.as_bool() {
+        return Err(Failure::new(
+            "input-rejected",
+            "The observed control is disabled",
+        ));
+    }
+    Ok(())
+}
+fn state_action(
+    owner: &InputOwner,
+    element: &IUIAutomationElement,
+    request: &Request,
+) -> Result<()> {
+    ensure_enabled(element)?;
+    owner.mechanism("accessibility");
     unsafe {
-        if let Ok(pattern) =
-            element.GetCurrentPatternAs::<IUIAutomationInvokePattern>(UIA_InvokePatternId)
-        {
+        match request.tool.as_str() {
+            "set_checked" => {
+                let desired = request.value("checked").as_bool().ok_or_else(|| Failure::new("unsupported", "Windows supports setting checked to true or false, not an arbitrary mixed state"))?;
+                let pattern = element
+                    .GetCurrentPatternAs::<IUIAutomationTogglePattern>(UIA_TogglePatternId)
+                    .map_err(|_| {
+                        Failure::new("unsupported", "The control has no Toggle pattern")
+                    })?;
+                let current = pattern.CurrentToggleState()?;
+                let requested = if desired {
+                    ToggleState_On
+                } else {
+                    ToggleState_Off
+                };
+                if current == requested {
+                    owner.observed_state(json!({"checked":desired}));
+                    return Ok(());
+                }
+                if current != ToggleState_On
+                    && current != ToggleState_Off
+                    && current != ToggleState_Indeterminate
+                {
+                    return Err(Failure::new(
+                        "unsupported",
+                        "The control's current checked state is unavailable",
+                    ));
+                }
+                owner.semantic()?;
+                pattern.Toggle()?;
+                owner.checkpoint()?;
+                let observed = pattern.CurrentToggleState()?;
+                owner.observed_state(json!({"checked":if observed == ToggleState_Indeterminate {json!("mixed")} else {json!(observed == ToggleState_On)}}));
+                if observed != requested {
+                    return Err(Failure::new(
+                        "verification-failed",
+                        "One native toggle did not reach the requested checked state; no second toggle was sent",
+                    ));
+                }
+                owner.verify();
+            }
+            "set_expanded" => {
+                let desired = request
+                    .value("expanded")
+                    .as_bool()
+                    .ok_or_else(|| Failure::new("invalid-request", "Expanded must be a boolean"))?;
+                let pattern = element
+                    .GetCurrentPatternAs::<IUIAutomationExpandCollapsePattern>(
+                        UIA_ExpandCollapsePatternId,
+                    )
+                    .map_err(|_| {
+                        Failure::new("unsupported", "The control has no ExpandCollapse pattern")
+                    })?;
+                let requested = if desired {
+                    ExpandCollapseState_Expanded
+                } else {
+                    ExpandCollapseState_Collapsed
+                };
+                let current = pattern.CurrentExpandCollapseState()?;
+                if current == requested {
+                    owner.observed_state(json!({"expanded":desired}));
+                    return Ok(());
+                }
+                if current == ExpandCollapseState_LeafNode {
+                    return Err(Failure::new(
+                        "unsupported",
+                        "A leaf control cannot be expanded or collapsed",
+                    ));
+                }
+                owner.semantic()?;
+                if desired {
+                    pattern.Expand()?;
+                } else {
+                    pattern.Collapse()?;
+                }
+                owner.checkpoint()?;
+                let observed = pattern.CurrentExpandCollapseState()?;
+                if observed == ExpandCollapseState_Collapsed
+                    || observed == ExpandCollapseState_Expanded
+                {
+                    owner.observed_state(
+                        json!({"expanded":observed == ExpandCollapseState_Expanded}),
+                    );
+                }
+                if observed != requested {
+                    return Err(Failure::new(
+                        "verification-failed",
+                        "The control has not reached the requested expanded state",
+                    ));
+                }
+                owner.verify();
+            }
+            "select" => {
+                let mode = request.text("selection");
+                if !matches!(mode, "" | "replace" | "add" | "remove") {
+                    return Err(Failure::new(
+                        "invalid-request",
+                        "Selection must be replace, add or remove",
+                    ));
+                }
+                let pattern = element
+                    .GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(
+                        UIA_SelectionItemPatternId,
+                    )
+                    .map_err(|_| {
+                        Failure::new("unsupported", "The control has no SelectionItem pattern")
+                    })?;
+                let selected = pattern.CurrentIsSelected()?.as_bool();
+                let only_selected = if selected && matches!(mode, "" | "replace") {
+                    pattern
+                        .CurrentSelectionContainer()
+                        .ok()
+                        .and_then(|container| {
+                            container
+                                .GetCurrentPatternAs::<IUIAutomationSelectionPattern>(
+                                    UIA_SelectionPatternId,
+                                )
+                                .ok()
+                        })
+                        .and_then(|selection| selection.GetCurrentSelection().ok())
+                        .and_then(|selection| selection.Length().ok())
+                        == Some(1)
+                } else {
+                    false
+                };
+                if (mode == "add" && selected) || (mode == "remove" && !selected) || only_selected {
+                    owner.observed_state(json!({"selected":selected}));
+                    return Ok(());
+                }
+                owner.semantic()?;
+                match mode {
+                    "add" => pattern.AddToSelection()?,
+                    "remove" => pattern.RemoveFromSelection()?,
+                    _ => pattern.Select()?,
+                }
+                owner.checkpoint()?;
+                let observed = pattern.CurrentIsSelected()?.as_bool();
+                owner.observed_state(json!({"selected":observed}));
+                if observed != (mode != "remove") {
+                    return Err(Failure::new(
+                        "verification-failed",
+                        "The control has not reached the requested selection state",
+                    ));
+                }
+                owner.verify();
+            }
+            "scroll_into_view" => {
+                let pattern = element
+                    .GetCurrentPatternAs::<IUIAutomationScrollItemPattern>(UIA_ScrollItemPatternId)
+                    .map_err(|_| {
+                        Failure::new("unsupported", "The control has no ScrollItem pattern")
+                    })?;
+                owner.semantic()?;
+                pattern.ScrollIntoView()?;
+            }
+            _ => unreachable!(),
+        }
+    }
+    Ok(())
+}
+fn pattern_available(element: &IUIAutomationElement, property: UIA_PROPERTY_ID) -> Result<bool> {
+    let value = unsafe { element.GetCurrentPropertyValueEx(property, true)? };
+    // Do not coerce NotSupported, missing or provider failures to false. Only
+    // an actual Boolean false proves no dispatch-capable semantic mechanism.
+    if value.vt() != windows::Win32::System::Variant::VT_BOOL {
+        return Err(Failure::new(
+            "driver-error",
+            "The provider did not report pattern availability",
+        ));
+    }
+    Ok(bool::try_from(&value)?)
+}
+fn preferred_click(owner: &InputOwner, element: &IUIAutomationElement) -> Result<bool> {
+    unsafe {
+        if pattern_available(element, UIA_IsInvokePatternAvailablePropertyId)? {
+            let pattern =
+                element.GetCurrentPatternAs::<IUIAutomationInvokePattern>(UIA_InvokePatternId)?;
             owner.semantic()?;
             pattern.Invoke()?;
-        } else if let Ok(pattern) = element
-            .GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(UIA_SelectionItemPatternId)
-        {
+        } else if pattern_available(element, UIA_IsSelectionItemPatternAvailablePropertyId)? {
+            let pattern = element.GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(
+                UIA_SelectionItemPatternId,
+            )?;
             owner.semantic()?;
             pattern.Select()?;
-        } else if let Ok(pattern) =
-            element.GetCurrentPatternAs::<IUIAutomationTogglePattern>(UIA_TogglePatternId)
-        {
+        } else if pattern_available(element, UIA_IsTogglePatternAvailablePropertyId)? {
+            let pattern =
+                element.GetCurrentPatternAs::<IUIAutomationTogglePattern>(UIA_TogglePatternId)?;
             owner.semantic()?;
             pattern.Toggle()?;
         } else {
-            return Err(Failure::new(
-                "unsupported",
-                "The control has no supported accessibility click action",
-            ));
+            return Ok(false);
         }
-        Ok(())
+        Ok(true)
     }
 }
 fn secondary(owner: &InputOwner, element: &IUIAutomationElement, action: &str) -> Result<()> {
@@ -958,7 +1371,7 @@ fn secondary(owner: &InputOwner, element: &IUIAutomationElement, action: &str) -
                 return Err(Failure::new(
                     "unsupported",
                     "Unsupported accessibility secondary action",
-                ))
+                ));
             }
         }
         Ok(())
@@ -984,6 +1397,7 @@ fn repeat_pages(request: &Request) -> Result<usize> {
     Ok(pages.ceil().max(1.0) as usize)
 }
 fn set_value(owner: &InputOwner, element: &IUIAutomationElement, value: &str) -> Result<()> {
+    ensure_enabled(element)?;
     unsafe {
         let pattern = element
             .GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
@@ -1009,6 +1423,7 @@ fn set_value(owner: &InputOwner, element: &IUIAutomationElement, value: &str) ->
                         "The field value did not match the requested value",
                     ));
                 }
+                owner.observed_state(json!({"value":observed.to_string()}));
                 owner.verify();
             }
         }
@@ -1041,7 +1456,7 @@ fn open(owner: &InputOwner, request: &Request) -> Result<Value> {
                 return Err(Failure::new(
                     "invalid-request",
                     "Command arguments must be an array",
-                ))
+                ));
             }
         };
         owner.semantic()?;
@@ -1085,5 +1500,222 @@ fn open(owner: &InputOwner, request: &Request) -> Result<Value> {
             0
         };
         Ok(json!({"ok":true,"pid":pid}))
+    }
+}
+
+fn parse_element(value: &Value) -> Result<ElementRecord> {
+    serde_json::from_value(value.clone())
+        .map_err(|_| Failure::new("invalid-request", "Invalid observed element record"))
+}
+
+#[cfg(test)]
+mod semantic_tests {
+    use super::*;
+    use windows::{
+        Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize},
+        core::w,
+    };
+
+    struct Com;
+    impl Drop for Com {
+        fn drop(&mut self) {
+            unsafe {
+                CoUninitialize();
+            }
+        }
+    }
+    struct Fixture {
+        hwnd: isize,
+        worker: Option<thread::JoinHandle<()>>,
+    }
+    impl Fixture {
+        fn new() -> Self {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let worker = thread::spawn(move || unsafe {
+                // Only test-owned standard controls, with no synthetic physical
+                // input, unrelated apps, screenshots or focus acquisition.
+                let hwnd = CreateWindowExW(
+                    WS_EX_NOACTIVATE,
+                    w!("STATIC"),
+                    w!("Varin semantic test"),
+                    WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                    20,
+                    20,
+                    420,
+                    240,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+                CreateWindowExW(
+                    WINDOW_EX_STYLE::default(),
+                    w!("BUTTON"),
+                    w!("Auto save"),
+                    WS_CHILD | WS_VISIBLE | WINDOW_STYLE(BS_AUTOCHECKBOX as u32),
+                    20,
+                    20,
+                    160,
+                    24,
+                    Some(hwnd),
+                    Some(HMENU(101 as *mut _)),
+                    None,
+                    None,
+                )
+                .unwrap();
+                for (id, y) in [(102, 60), (103, 100)] {
+                    CreateWindowExW(
+                        WINDOW_EX_STYLE::default(),
+                        w!("BUTTON"),
+                        w!("Save"),
+                        WS_CHILD | WS_VISIBLE,
+                        20,
+                        y,
+                        160,
+                        24,
+                        Some(hwnd),
+                        Some(HMENU(id as *mut _)),
+                        None,
+                        None,
+                    )
+                    .unwrap();
+                }
+                sender.send(hwnd.0 as isize).unwrap();
+                let mut message = MSG::default();
+                while GetMessageW(&mut message, None, 0, 0).as_bool() {
+                    let _ = TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                    if !IsWindow(Some(hwnd)).as_bool() {
+                        break;
+                    }
+                }
+                if IsWindow(Some(hwnd)).as_bool() {
+                    let _ = DestroyWindow(hwnd);
+                }
+            });
+            Self {
+                hwnd: receiver.recv_timeout(Duration::from_secs(5)).unwrap(),
+                worker: Some(worker),
+            }
+        }
+        fn hwnd(&self) -> HWND {
+            HWND(self.hwnd as *mut _)
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = PostMessageW(Some(self.hwnd()), WM_CLOSE, WPARAM(0), LPARAM(0));
+            }
+            if let Some(worker) = self.worker.take() {
+                worker.join().unwrap();
+            }
+        }
+    }
+    fn request(value: Value) -> Request {
+        Request::parse(&value.to_string()).unwrap()
+    }
+
+    #[test]
+    #[ignore = "requires interactive Windows desktop; creates only test-owned controls"]
+    fn retained_native_queries_state_actions_and_window_lifetime() {
+        unsafe {
+            CoInitializeEx(None, COINIT_MULTITHREADED).ok().unwrap();
+        }
+        let _com = Com;
+        let fixture = Fixture::new();
+        let automation = Automation::new().unwrap();
+        let root = automation.root(fixture.hwnd(), &Value::Null).unwrap();
+        let window_identity = automation.native_target(&root).unwrap();
+        let bounds = window::bounds(fixture.hwnd()).unwrap();
+        let find_checkbox = request(
+            json!({"id":"q","tool":"query_elements","match":{"role":"checkbox","name":"Auto save"}}),
+        );
+        let found = automation
+            .query(&root, &root, &bounds, &find_checkbox, || Ok(()))
+            .unwrap();
+        assert!(found.complete);
+        assert_eq!(found.records.len(), 1);
+        let observed = found.records[0].clone();
+        assert_eq!(observed.checked, Some(json!(false)));
+        let selected = automation
+            .relocate(&root, &observed, || Ok(()))
+            .unwrap()
+            .unwrap();
+        let property_query = request(
+            json!({"id":"p","tool":"query_elements","properties":["checked","enabled","expanded"]}),
+        );
+        let properties = automation
+            .properties(&selected, &property_query, || Ok(()))
+            .unwrap();
+        assert_eq!(properties["properties"]["checked"], false);
+        assert_eq!(properties["unavailableProperties"], json!(["expanded"]));
+
+        let owner = InputOwner::default();
+        let set = request(json!({"id":"set","tool":"set_checked","checked":true}));
+        owner.begin("set").unwrap();
+        owner
+            .bind_window(fixture.hwnd(), std::process::id())
+            .unwrap();
+        state_action(&owner, &selected, &set).unwrap();
+        assert_eq!(owner.receipt(None)["effect"], "verified");
+        assert_eq!(owner.receipt(None)["observedState"]["checked"], true);
+        owner.end();
+        owner.begin("already-set").unwrap();
+        owner
+            .bind_window(fixture.hwnd(), std::process::id())
+            .unwrap();
+        state_action(&owner, &selected, &set).unwrap();
+        assert_eq!(owner.receipt(None)["effect"], "none");
+        owner.end();
+
+        let duplicates = automation
+            .query(
+                &root,
+                &root,
+                &bounds,
+                &request(
+                    json!({"id":"duplicates","tool":"query_elements","match":{"name":"Save"}}),
+                ),
+                || Ok(()),
+            )
+            .unwrap();
+        assert!(duplicates.complete);
+        assert_eq!(duplicates.records.len(), 2);
+        // Reading another region does not retire the first reference.
+        assert!(
+            automation
+                .relocate(&root, &observed, || Ok(()))
+                .unwrap()
+                .is_some()
+        );
+        let outline = automation
+            .render(
+                &root,
+                &root,
+                &bounds,
+                &request(json!({"id":"outline","tool":"get_app_state","max_tree_depth":0})),
+                || Ok(()),
+            )
+            .unwrap();
+        assert!(!outline.complete);
+        assert!(outline.records[0].has_more_children);
+        automation.release(&[json!(observed)]);
+        assert_eq!(
+            automation
+                .relocate(&root, &observed, || Ok(()))
+                .unwrap_err()
+                .code,
+            "target_lost"
+        );
+        let hwnd = fixture.hwnd();
+        drop(fixture);
+        // Destroy notifications invalidate tokens independently of title/PID,
+        // including when the OS subsequently recycles the numeric HWND.
+        assert_eq!(
+            automation.root(hwnd, &window_identity).unwrap_err().code,
+            "window_lost"
+        );
     }
 }

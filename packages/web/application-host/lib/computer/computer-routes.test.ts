@@ -362,3 +362,25 @@ describe("computer routes (EE open + file write)", () => {
     });
   });
 });
+
+describe('semantic read routes', () => {
+  it('requires the existing observe assignment for query and await, and validates their shared schemas', async () => {
+    const { app, computers } = fixture();
+    computers.query = vi.fn(async () => ({ status: 'ok', complete: true, properties: { checked: 'mixed' } }));
+    computers.awaitCondition = vi.fn(async () => ({ status: 'timed_out', condition: 'present', elapsedMs: 1 }));
+    for (const operation of ['query', 'await']) {
+      expect((await request(app).post(`/api/computers/desktops/local-console/${operation}`).send({ app: 'editor' })).status).toBe(409);
+    }
+    expect(computers.query).not.toHaveBeenCalled(); expect(computers.awaitCondition).not.toHaveBeenCalled();
+    const query = await request(app).post('/api/computers/desktops/local-console/query').set('X-Varin-Computer-Lease', 'lease')
+      .send({ target: { observationId: 'original', elementIndex: 1 }, properties: ['checked'] });
+    expect(query.status).toBe(200);
+    expect(computers.query).toHaveBeenCalledWith(expect.objectContaining({ desktopId: 'local-console', target: { observationId: 'original', elementIndex: 1 }, properties: ['checked'], signal: expect.any(AbortSignal) }));
+    const invalid = await request(app).post('/api/computers/desktops/local-console/await').set('X-Varin-Computer-Lease', 'lease')
+      .send({ app: 'editor', condition: 'absent', match: { checked: 'unknown' } });
+    expect(invalid.status).toBe(400); expect(computers.awaitCondition).not.toHaveBeenCalled();
+    const waiting = await request(app).post('/api/computers/desktops/local-console/await').set('X-Varin-Computer-Lease', 'lease')
+      .send({ app: 'editor', condition: 'present', timeoutMs: 1 });
+    expect(waiting.status).toBe(200); expect(waiting.body.result.status).toBe('timed_out');
+  });
+});

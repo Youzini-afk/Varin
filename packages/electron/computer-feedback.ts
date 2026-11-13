@@ -55,7 +55,7 @@ export function createComputerFeedback() {
           if (view.window.isDestroyed() || admitted !== generation) return;
           view.window.setBounds(bounds);
           const configuration = { type: 'configure', bounds: { x: 0, y: 0, width: bounds.width, height: bounds.height }, fit: false,
-            labels: { type: '⌨', set_value: '⌨', scroll: '↕', failed: '×' } };
+            labels: { type: '⌨', set_value: '⌨', scroll: '↕', set_checked: '☑', set_expanded: '▾', select: '✓', scroll_into_view: '↕', failed: '×' } };
           view.window.showInactive();
           // Let the target paint before a fast dispatched/completed pair, and
           // start hiding only after the actual renderer has shown the event.

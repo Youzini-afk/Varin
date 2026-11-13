@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 
 PENDING_BROWSER_RELEASE = None
 LAST_INPUT_TIMES = {}
+SEMANTIC_TARGETS = None
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -53,6 +54,14 @@ DEFAULT_TEXT_LIMIT = 500
 CANCEL_DIR = os.environ.get("VARIN_DRIVER_CANCEL_DIR") or None
 ACTIVE_REQUEST_ID = None
 GESTURE_OPERATION = {}
+
+
+def semantic_targets():
+    global SEMANTIC_TARGETS
+    if SEMANTIC_TARGETS is None:
+        from semantic import AtspiTargets
+        SEMANTIC_TARGETS = AtspiTargets(sys.modules[__name__])
+    return SEMANTIC_TARGETS
 
 
 def emit_gesture(phase, point=None, to=None, target=None):
@@ -207,10 +216,15 @@ def relative_frame(node, window_bounds):
 
 def iter_apps():
     root = desktop()
+    if root is None:
+        raise RuntimeError("The AT-SPI desktop is unavailable")
     apps = []
-    for index in range(child_count(root)):
-        app = child_at(root, index)
-        if app is not None and node_name(app):
+    for index in range(root.get_child_count()):
+        check_cancel("reading the accessibility application inventory")
+        app = root.get_child_at_index(index)
+        if app is None:
+            raise RuntimeError("The AT-SPI application inventory is incomplete")
+        if app.get_name():
             apps.append(app)
     return apps
 
@@ -356,7 +370,16 @@ def numeric_value(node):
     return str(current)
 
 
+def protected_value(node):
+    if node_role(node).lower() == "password text":
+        return True
+    protected = getattr(Atspi.StateType, "PROTECTED", None)
+    return protected is not None and state_contains(node, protected)
+
+
 def element_value(node, text_limit=DEFAULT_TEXT_LIMIT):
+    if protected_value(node):
+        return ""
     return text_value(node, text_limit=text_limit) or numeric_value(node)
 
 
@@ -394,51 +417,6 @@ def record_for(node, index, path, window_bounds, text_limit=DEFAULT_TEXT_LIMIT):
         "frame": bounds,
         "actions": action_names(node),
     }
-
-
-def render_tree(root, window_bounds, root_path, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEMENTS, max_tree_depth=MAX_DEPTH):
-    records = []
-    lines = []
-
-    def visit(node, depth, path):
-        if len(records) >= max_tree_nodes or depth > max_tree_depth or node is None:
-            return
-        check_cancel("walked {} of up to {} tree nodes".format(len(records), max_tree_nodes))
-        index = len(records)
-        record = record_for(node, index, path, window_bounds, text_limit=text_limit)
-        records.append(record)
-
-        role = record["localizedControlType"] or record["controlType"] or "element"
-        title = record["name"] or record["automationId"] or ""
-        value_segment = ""
-        if record["value"] and record["value"] != title:
-            safe_value = record["value"].replace("\r", "\\r").replace("\n", "\\n")
-            value_segment = " Value: " + safe_value
-        actions_segment = ""
-        if record["actions"]:
-            actions_segment = " Secondary Actions: " + ", ".join(record["actions"])
-        frame_segment = ""
-        if record["frame"] is not None:
-            f = record["frame"]
-            frame_segment = " Frame: {{x: {0}, y: {1}, width: {2}, height: {3}}}".format(
-                round(f["x"]),
-                round(f["y"]),
-                round(f["width"]),
-                round(f["height"]),
-            )
-        lines.append(
-            ("\t" * (depth + 1))
-            + "{} {} {}{}{}{}".format(
-                index, role, title, value_segment, actions_segment, frame_segment
-            ).rstrip()
-        )
-
-        for child_index in range(child_count(node)):
-            child = child_at(node, child_index)
-            visit(child, depth + 1, path + [child_index])
-
-    visit(root, 0, root_path)
-    return records, lines
 
 
 def capture_window_png(bounds):
@@ -502,95 +480,19 @@ def pixbuf_looks_black(pixbuf):
         return False
 
 
-def focused_summary(app_pid, text_limit=DEFAULT_TEXT_LIMIT):
-    try:
-        root = desktop()
-        for app in iter_apps():
-            if node_pid(app) != app_pid:
-                continue
-            _, win = main_window(app)
-            focused = find_first(
-                win, lambda node: state_contains(node, Atspi.StateType.FOCUSED)
-            )
-            if focused is None:
-                return None
-            role = node_role(focused)
-            name = limit_text(node_name(focused), text_limit=text_limit)
-            return (role + " " + name).strip()
-    except CancelledError:
-        raise
-    except Exception:
-        return None
-
-
-def selected_text(app_pid, text_limit=DEFAULT_TEXT_LIMIT):
-    try:
-        for app in iter_apps():
-            if node_pid(app) != app_pid:
-                continue
-            _, win = main_window(app)
-            focused = find_first(
-                win, lambda node: state_contains(node, Atspi.StateType.FOCUSED)
-            )
-            if focused is None or not supports_interface(focused, "Text"):
-                return None
-            text_iface = safe(focused.get_text_iface)
-            selections = safe(lambda: Atspi.Text.get_text_selections(text_iface), [])
-            if selections:
-                selection = selections[0]
-                end_offset = selection.end_offset
-                if text_limit is not None:
-                    end_offset = min(end_offset, selection.start_offset + text_limit + 1)
-                value = Atspi.Text.get_text(
-                    text_iface, selection.start_offset, end_offset
-                )
-                return limit_text(value, text_limit=text_limit)
-    except CancelledError:
-        raise
-    except Exception:
-        return None
-    return None
-
-
-def build_snapshot(query, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEMENTS, max_tree_depth=MAX_DEPTH, screenshot=True, window=None):
-    app = resolve_app(query)
+def build_snapshot(query, text_limit=DEFAULT_TEXT_LIMIT, max_tree_nodes=MAX_ELEMENTS, max_tree_depth=MAX_DEPTH,
+                   screenshot=True, window=None, within=None, platform_target=None, view=None):
+    operation = {"app": query, "window": window, "text_limit": "max" if text_limit is None else text_limit,
+                 "max_tree_nodes": max_tree_nodes, "max_tree_depth": max_tree_depth,
+                 "screenshot": screenshot, "within": within, "platform_target": platform_target, "view": view}
+    app, _index, _window, _token = semantic_targets().window(operation)
     previous_input = LAST_INPUT_TIMES.pop(node_pid(app), None)
     if previous_input is not None:
         remaining = 0.12 - (time.monotonic() - previous_input)
         if remaining > 0:
             time.sleep(remaining)
-    window_index, window_node = select_window(app, window)
-    check_cancel("resolved the target window")
-    bounds = extents(window_node)
-    records, lines = render_tree(
-        window_node,
-        bounds,
-        [window_index],
-        text_limit=text_limit,
-        max_tree_nodes=max_tree_nodes,
-        max_tree_depth=max_tree_depth,
-    )
-    check_cancel("rendered the accessibility tree")
-    pid = node_pid(app)
-    return {
-        "app": {
-            "name": node_name(app),
-            "bundleIdentifier": node_name(app),
-            "pid": pid,
-        },
-        "windowTitle": limit_text(node_name(window_node), text_limit=text_limit),
-        # The AT-SPI child index is this platform's window handle (no stable
-        # cross-process id exists); it is valid until the window set changes.
-        "windowHandle": int(window_index),
-        "windows": window_descriptors(app, window_index),
-        "windowBounds": bounds,
-        "screenshotPngBase64": capture_window_png(bounds) if screenshot else None,
-        "screenshotSource": "screen" if screenshot else None,
-        "treeLines": lines,
-        "focusedSummary": focused_summary(pid, text_limit=text_limit),
-        "selectedText": selected_text(pid, text_limit=text_limit),
-        "elements": records,
-    }
+    operation["platform_target"] = _token
+    return semantic_targets().snapshot(operation, resolved=(app, _index, _window, _token))["snapshot"]
 
 
 def list_apps_text():
@@ -607,76 +509,6 @@ def list_apps_text():
             )
         )
     return "\n".join(lines)
-
-
-def find_first(root, predicate):
-    if root is None:
-        return None
-    if predicate(root):
-        return root
-    for index in range(child_count(root)):
-        found = find_first(child_at(root, index), predicate)
-        if found is not None:
-            return found
-    return None
-
-
-def iter_all(root):
-    items = []
-
-    def visit(node):
-        if node is None or len(items) >= MAX_ELEMENTS:
-            return
-        check_cancel("walked {} tree nodes".format(len(items)))
-        items.append(node)
-        for index in range(child_count(node)):
-            visit(child_at(node, index))
-
-    visit(root)
-    return items
-
-
-def resolve_path(app, path):
-    if not path:
-        return None
-    node = app
-    for index in path:
-        node = child_at(node, int(index))
-        if node is None:
-            return None
-    return node
-
-
-def same_frame(record_frame, node_frame):
-    if record_frame is None or node_frame is None:
-        return False
-    for key in ("x", "y", "width", "height"):
-        if abs(float(record_frame.get(key, 0)) - float(node_frame.get(key, 0))) > 3:
-            return False
-    return True
-
-
-def find_element(app, record, window_selector=None):
-    if not record:
-        return None
-    node = resolve_path(app, record.get("runtimeId") or [])
-    if node is not None and node_role(node) == record.get("controlType") and (
-        accessible_id(node) == record.get("automationId") if record.get("automationId") else node_name(node) == record.get("name")
-    ):
-        return node
-
-    _, window = select_window(app, window_selector)
-    target_name = str(record.get("name") or "")
-    target_id = str(record.get("automationId") or "")
-    target_role = str(record.get("controlType") or "")
-    window_bounds = extents(window)
-    matches = []
-    for candidate in iter_all(window):
-        if target_id and accessible_id(candidate) == target_id:
-            matches.append(candidate)
-        elif target_name and node_name(candidate) == target_name and node_role(candidate) == target_role:
-            matches.append(candidate)
-    return matches[0] if len(matches) == 1 else None
 
 
 def preferred_action_index(node):
@@ -703,12 +535,6 @@ def preferred_action_index(node):
         ):
             fallback = index
     return fallback
-
-
-def do_action_by_index(node, index):
-    if index is None:
-        return False
-    return bool(safe(lambda: node.do_action(int(index)), False))
 
 
 def screen_point(window_bounds, element=None, x=None, y=None):
@@ -831,40 +657,6 @@ def send_text(text):
     emit_key(0, str(text), Atspi.KeySynthType.STRING)
 
 
-def set_element_value(node, value):
-    if node is not None and supports_interface(node, "EditableText"):
-        editable = safe(node.get_editable_text_iface)
-        if editable is not None:
-            return bool(
-                safe(
-                    lambda: Atspi.EditableText.set_text_contents(editable, str(value)),
-                    False,
-                )
-            )
-    value_iface = safe(node.get_value_iface) if node is not None else None
-    if value_iface is not None:
-        try:
-            return bool(Atspi.Value.set_current_value(value_iface, float(value)))
-        except Exception:
-            pass
-    return False
-
-
-def invoke_secondary_action(node, action):
-    if node is None:
-        raise RuntimeError("unknown element_index")
-    normalized = str(action).lower()
-    count = int(safe(node.get_n_actions, 0) or 0)
-    for index in range(count):
-        name = str(safe(lambda i=index: node.get_action_name(i), "") or "")
-        description = str(safe(lambda i=index: node.get_action_description(i), "") or "")
-        if normalized in {name.lower(), description.lower()}:
-            if do_action_by_index(node, index):
-                return
-            break
-    raise RuntimeError("{} is not a valid secondary action for element".format(action))
-
-
 def scroll_element(direction, pages):
     key = "Page_Down"
     if direction == "up":
@@ -949,6 +741,9 @@ def driver_capabilities():
         "observeTree": True,
         "screenshot": not wayland and Gdk is not None,
         "elementAction": True,
+        "semanticQuery": True,
+        "semanticActions": ["set_checked", "set_expanded", "select", "scroll_into_view", "set_value"],
+        "semanticEvents": "polling",
         "coordinateInput": not wayland,
         "textInput": True,
         "drag": not wayland,
@@ -1090,6 +885,14 @@ def open_target(operation):
 
 
 def perform_operation(operation):
+    from semantic import SemanticError
+    try:
+        return _perform_operation(operation)
+    except SemanticError as error:
+        return error.response()
+
+
+def _perform_operation(operation):
     global GESTURE_OPERATION
     GESTURE_OPERATION = operation
     global PENDING_BROWSER_RELEASE
@@ -1143,6 +946,11 @@ def perform_operation(operation):
                 "windows": window_descriptors(app),
             })
         return {"ok": True, "apps": apps}
+    if tool == "release_elements":
+        semantic_targets().release(operation.get("elements") or [])
+        return {"ok": True}
+    if tool == "query_elements":
+        return semantic_targets().query(operation)
     if tool == "get_app_state":
         return {
             "ok": True,
@@ -1153,22 +961,48 @@ def perform_operation(operation):
                 max_tree_depth=positive_int(operation.get("max_tree_depth"), MAX_DEPTH),
                 screenshot=bool(operation.get("screenshot", True)),
                 window=operation.get("window"),
+                within=operation.get("within"),
+                platform_target=operation.get("platform_target"),
+                view=operation.get("view"),
             ),
         }
 
-    app = resolve_app(operation.get("app", ""))
-    window_index, window = select_window(app, operation.get("window"))
+    from semantic import SemanticError
+    targets = semantic_targets()
+    app, window_index, window, window_token = targets.window(operation)
     check_cancel("resolved the target window")
     bounds = extents(window)
-    if operation.get("expected_bounds") and any(bounds[key] != operation["expected_bounds"][key] for key in ("x", "y", "width", "height")):
-        return {"ok": False, "rejected": True, "error": "Window geometry changed since the screenshot; observe again"}
     element_record = operation.get("element")
-    element = find_element(app, element_record, operation.get("window"))
-    if element_record and element is None:
-        raise RuntimeError("Observed element no longer exists or is ambiguous; observe again")
+    element = targets.element(element_record, window, window_token)
     if element is not None:
         element_record = {**element_record, "frame": relative_frame(element, bounds)}
-
+    if operation.get("input") == "app_post":
+        raise SemanticError("unsupported", "Background window messages are not supported on Linux")
+    click_method = (operation.get("click_method") or "auto").lower()
+    ordinary_click = operation.get("mouse_button", "left") == "left" and operation.get("click_count", 1) == 1
+    use_semantic = tool in ("set_checked", "set_expanded", "select", "scroll_into_view", "set_value", "perform_secondary_action")
+    if tool == "click":
+        if click_method == "accessibility" and not ordinary_click:
+            raise SemanticError("unsupported", "Accessibility click supports only a single primary-button action")
+        use_semantic = click_method == "accessibility" or (click_method == "auto" and ordinary_click
+            and element is not None and preferred_action_index(element) is not None)
+    if use_semantic:
+        GESTURE_OPERATION = dict(operation, click_method="accessibility")
+        emit_gesture("target", target=extents(element) if element is not None else None)
+        receipt = targets.perform(element, operation)
+        if receipt["effect"] != "none":
+            LAST_INPUT_TIMES[node_pid(app)] = time.monotonic()
+            emit_gesture("dispatched")
+        result = {"ok": True, "receipt": receipt}
+        if operation.get("return_state", "none") != "none":
+            try:
+                result["snapshot"] = build_snapshot(operation.get("app", ""),
+                    screenshot=operation["return_state"] == "screenshot", platform_target=window_token)
+            except Exception:
+                result["text"] = "The semantic action completed; post-action observation failed."
+        return result
+    if operation.get("expected_bounds") and (bounds is None or any(bounds[key] != operation["expected_bounds"][key] for key in ("x", "y", "width", "height"))):
+        return {"ok": False, "rejected": True, "error": "Window geometry changed since the screenshot; observe again"}
     if operation.get('visual_feedback'):
         target = extents(element) if element is not None and tool != 'scroll' else bounds
         point, to = None, None
@@ -1180,26 +1014,11 @@ def perform_operation(operation):
             tx, ty = screen_point(bounds, None, operation.get('to_x'), operation.get('to_y'))
             point, to = {'x': x, 'y': y}, {'x': tx, 'y': ty}
         emit_gesture('target', point, to, target)
-    if operation.get("input") == "app_post":
-        return {"ok": False, "rejected": True, "error": "Background window messages are not supported on Linux",
-                "receipt": {"effect": "none", "reason": {"code": "unsupported", "message": "Background window messages are not supported on Linux"}}}
-
     if tool == "click":
-        click_method = (operation.get("click_method") or "global").lower()
+        click_method = (operation.get("click_method") or "auto").lower()
         if click_method == "auto":
             click_method = "global"
-        if click_method == "accessibility":
-            if element is None:
-                raise RuntimeError("click_method 'accessibility' requires element_index")
-            if operation.get("mouse_button", "left") != "left":
-                raise RuntimeError(
-                    "click_method 'accessibility' only supports mouse_button 'left'"
-                )
-            if not do_action_by_index(element, preferred_action_index(element)):
-                raise RuntimeError(
-                    "click_method 'accessibility' could not click the requested element"
-                )
-        elif click_method == "app_post":
+        if click_method == "app_post":
             raise RuntimeError("click_method 'app_post' is not supported on Linux")
         elif click_method == "sky_click":
             raise RuntimeError("click_method 'sky_click' is not supported on Linux")
@@ -1216,8 +1035,6 @@ def perform_operation(operation):
             )
         else:
             raise RuntimeError("Invalid click_method '{}'".format(click_method))
-    elif tool == "perform_secondary_action":
-        invoke_secondary_action(element, operation.get("action", ""))
     elif tool == "scroll":
         focus_window(window)
         scroll_element(operation.get("direction", "down"), operation.get("pages", 1))
@@ -1242,11 +1059,6 @@ def perform_operation(operation):
             if not component or not component.grab_focus() or not state_contains(element, Atspi.StateType.FOCUSED):
                 return {"ok": False, "rejected": True, "receipt": {"effect": "none", "reason": {"code": "focus-changed", "message": "The selected control did not obtain keyboard focus"}, "recovery": "observe"}}
         send_key(operation.get("key", ""))
-    elif tool == "set_value":
-        if element is None:
-            raise RuntimeError("unknown element_index")
-        if not set_element_value(element, operation.get("value", "")):
-            raise RuntimeError("Cannot set a value for an element that is not settable")
     else:
         raise RuntimeError('unsupportedTool("{}")'.format(tool))
 
@@ -1261,6 +1073,9 @@ def perform_operation(operation):
                 operation.get("app", ""),
                 screenshot=operation.get("return_state") == "screenshot",
                 window=operation.get("window"),
+                within=operation.get("within"),
+                platform_target=window_token,
+                view=operation.get("view"),
             ),
         }
     except Exception:

@@ -140,17 +140,17 @@ const createComputerService = (options: ComputerServiceOptions) => {
     const actor = await resolveActor(work); return actor ? { work, rootWork: actor.rootWork, currentExecution: actor.execution, currentRootExecution: actor.rootExecution } : null;
   });
   const service = createOwner({ ...options, resolveActor, resolveScope,
-    ...(options.createDriver && options.platform === "windows" && !options.driverDir ? { driverDir: computerDriverFixture(newDataDir()) } : {}) }) as ReturnType<typeof createOwner> & { [K in 'observe' | 'act' | 'open' | 'browser' | 'office']: (params: Parameters<ReturnType<typeof createOwner>[K]>[0] & { fixtureThreadId?: string }) => ReturnType<ReturnType<typeof createOwner>[K]> };
+    ...(options.createDriver && options.platform === "windows" && !options.driverDir ? { driverDir: computerDriverFixture(newDataDir()) } : {}) }) as ReturnType<typeof createOwner> & { [K in 'observe' | 'query' | 'awaitCondition' | 'act' | 'open' | 'browser' | 'office']: (params: Parameters<ReturnType<typeof createOwner>[K]>[0] & { fixtureThreadId?: string }) => ReturnType<ReturnType<typeof createOwner>[K]> };
   directActions.set(service, service.act);
   // Direct owner tests enter through the same real assignment admission as product tools.
-  for (const name of ['observe', 'act', 'open', 'browser', 'office'] as const) {
+  for (const name of ['observe', 'query', 'awaitCondition', 'act', 'open', 'browser', 'office'] as const) {
     const original = service[name].bind(service) as (params: { desktopId?: string; fixtureThreadId?: string }) => Promise<unknown>;
     Object.assign(service, { [name]: async (params: { desktopId?: string; fixtureThreadId?: string }) => {
       if (service.automation.context.getStore() || options.remoteHosts && !options.resolveActor) return original(params);
       const desktop = await service.resolveDesktop(params.desktopId);
       const work = nativeWork(params.fixtureThreadId ?? 'main');
       const { fixtureThreadId: _fixture, ...input } = params;
-      return service.automation.authorize(work, name === 'observe' || name === 'browser' && ['status', 'tabs', 'snapshot'].includes((params as { op?: string }).op ?? '') || name === 'office' && ['status', 'docs'].includes((params as { op?: string }).op ?? '') ? 'observe' : 'control', desktop, () => original(input));
+      return service.automation.authorize(work, ['observe', 'query', 'awaitCondition'].includes(name) || name === 'browser' && ['status', 'tabs', 'snapshot'].includes((params as { op?: string }).op ?? '') || name === 'office' && ['status', 'docs'].includes((params as { op?: string }).op ?? '') ? 'observe' : 'control', desktop, () => original(input));
     } });
   }
   return service;
@@ -1164,6 +1164,226 @@ describe("computer service (BC6 remote hosts)", () => {
     await service.list();
     for (let index = 0; index < 2; index++) expect(await service.act({ desktopId: 'remote:r1:remote-h:d0', action: { kind: 'key', app: 'term', key: 'enter' } })).toMatchObject({ outcome: 'unknown', accepted: false });
     await service.dispose();
+  });
+  it('runs query and an entire wait on the remote Host without local sampling', async () => {
+    const requests: string[] = []; const localDriver = vi.fn(() => makeDriver(async () => okResponse()));
+    const observation = { id: 'remote-semantic', desktopId: 'd0', machineId: 'local', app: { name: 'term', pid: 7 },
+      nativeTarget: 'remote-window', elements: [{ index: 3, targetId: 'remote-save', name: 'Saved' }], treeLines: ['3 text Saved'], capturedAt: 't' };
+    const service = createComputerService({ client: fakeKernel().client as never, hostId: 'host-1', platform: 'windows', dataDir: newDataDir(),
+      createDriver: localDriver, remoteHosts: async () => [remoteHost], fetch: remoteFetch((url, init) => {
+        requests.push(url);
+        if (url.endsWith('/api/computers?local=1')) return jsonResponse(remoteCatalog);
+        if (url.endsWith('/query')) return jsonResponse({ result: { status: 'ok', complete: true, observation } });
+        if (url.endsWith('/await')) {
+          expect(JSON.parse(String(init.body))).toMatchObject({ target: { observationId: 'remote-semantic', elementIndex: 3 }, condition: 'property' });
+          return jsonResponse({ result: { status: 'satisfied', condition: 'property', elapsedMs: 125,
+            last: { complete: true, properties: { enabled: true } } } });
+        }
+        return jsonResponse({ error: 'unexpected' }, 404);
+      }) });
+    try {
+      await service.list();
+      localDriver.mockClear();
+      const query = await service.query({ desktopId: 'remote:r1:remote-h:d0', app: 'term', match: { name: 'Saved' } });
+      expect(query.observation?.desktopId).toBe('remote:r1:remote-h:d0');
+      expect(await service.awaitCondition({ target: { observationId: query.observation!.id, elementIndex: 3 }, condition: 'property', property: 'enabled', equals: true, timeoutMs: 1000 }))
+        .toMatchObject({ status: 'satisfied', elapsedMs: 125 });
+      expect(requests.filter(url => url.endsWith('/query'))).toHaveLength(1);
+      expect(requests.filter(url => url.endsWith('/await'))).toHaveLength(1);
+      expect(localDriver).not.toHaveBeenCalled();
+    } finally { await service.dispose(); }
+  });
+
+  it('reports unsupported old remote reads and never labels an ignored region as scoped', async () => {
+    const service = createComputerService({ client: fakeKernel().client as never, hostId: 'host-1', platform: 'windows', dataDir: newDataDir(),
+      remoteHosts: async () => [remoteHost], fetch: remoteFetch(url => {
+        if (url.endsWith('/api/computers?local=1')) return jsonResponse(remoteCatalog);
+        if (url.endsWith('/observe')) return jsonResponse({ observation: { id: 'legacy-remote', desktopId: 'd0', machineId: 'local',
+          app: { name: 'term', pid: 7 }, elements: [{ index: 0, name: 'Region' }], treeLines: ['0 group Region'], capturedAt: 't' } });
+        return new Response('<html>not found</html>', { status: 404, headers: { 'X-Varin-Computer-Host': 'remote-h' } });
+      }) });
+    try {
+      await service.list();
+      const desktopId = 'remote:r1:remote-h:d0';
+      expect(await service.query({ desktopId, app: 'term', match: { name: 'Save' } })).toMatchObject({ status: 'unavailable', reason: expect.stringContaining('does not support') });
+      expect(await service.awaitCondition({ desktopId, app: 'term', condition: 'present', timeoutMs: 1 })).toMatchObject({ status: 'unavailable', reason: expect.stringContaining('does not support') });
+      const observation = await service.observe({ desktopId, app: 'term' });
+      await expect(service.observe({ within: { observationId: observation.id, elementIndex: 0 } })).rejects.toThrow('did not confirm a scoped observation');
+    } finally { await service.dispose(); }
+  });
+
+});
+
+
+describe('semantic query and wait ownership', () => {
+  const semanticSnapshot = () => ({ ...appSnapshot(), windowHandle: 73, nativeTarget: 'original-window', complete: true,
+    elements: [{ index: 0, nativeElementId: 'region', role: 'group', name: 'Preferences', hasMoreChildren: true },
+      { index: 1, parentIndex: 0, nativeElementId: 'autosave', role: 'checkbox', name: 'Auto save', checked: false, enabled: true }],
+    treeLines: ['0 group Preferences', '  1 checkbox Auto save'] });
+
+  it('retains semantic refs across local observation and exact property reads without scanning a tree', async () => {
+    const driver = makeDriver(async op => op.tool === 'get_app_state' ? okResponse({ snapshot: semanticSnapshot() })
+      : op.tool === 'query_elements' ? okResponse({ complete: true, properties: { checked: 'mixed' }, unavailableProperties: ['expanded'] })
+      : op.tool === 'set_checked' ? okResponse({ receipt: { effect: 'verified', mechanism: 'accessibility', observedState: { checked: true } } }) : okResponse());
+    const { service } = makeService(driver);
+    try {
+      const first = await service.observe({ app: 'notepad' });
+      const target = { observationId: first.id, elementIndex: 1 };
+      await service.observe({ within: { observationId: first.id, elementIndex: 0 }, view: 'outline' });
+      const properties = await service.query({ target, properties: ['checked', 'expanded'] });
+      expect(properties).toEqual({ status: 'ok', complete: true, properties: { checked: 'mixed' }, unavailableProperties: ['expanded'] });
+      expect(driver.calls.filter(op => op.tool === 'get_app_state')).toHaveLength(2);
+      expect(driver.calls.find(op => op.tool === 'query_elements')).toMatchObject({ app: '42', window: 73,
+        platform_target: 'original-window', element: { nativeElementId: 'autosave' }, properties: ['checked', 'expanded'] });
+      expect(driver.calls.filter(op => op.tool === 'get_app_state')[1]).toMatchObject({ within: { nativeElementId: 'region' }, platform_target: 'original-window' });
+      expect(await service.act({ action: { kind: 'set_checked', ...target, checked: true } })).toMatchObject({ accepted: true, receipt: { effect: 'verified', observedState: { checked: true } } });
+      expect(driver.calls.find(op => op.tool === 'set_checked')).toMatchObject({ app: '42', element: { nativeElementId: 'autosave' }, checked: true });
+    } finally { await service.dispose(); }
+  });
+
+  it('releases native elements only after the final execution reference is gone', async () => {
+    const driver = makeDriver(async op => op.tool === 'get_app_state' ? okResponse({ snapshot: semanticSnapshot() }) : okResponse());
+    const { service } = makeService(driver);
+    try {
+      const first = await service.observe({ app: 'notepad', fixtureThreadId: 'observer-a' });
+      const second = await service.observe({ app: 'notepad', fixtureThreadId: 'observer-b' });
+      await service.finishExecution(nativeActor('observer-a').execution);
+      expect(service.desktopForObservation(first.id)).toBeUndefined();
+      expect(service.desktopForObservation(second.id)).toBe('local-console');
+      expect(driver.calls.filter(op => op.tool === 'release_elements')).toHaveLength(0);
+      await service.finishExecution(nativeActor('observer-b').execution);
+      expect(driver.calls.filter(op => op.tool === 'release_elements')).toHaveLength(1);
+      expect(driver.calls.find(op => op.tool === 'release_elements')).toMatchObject({ elements: [
+        { nativeElementId: 'region' }, { nativeElementId: 'autosave' },
+      ] });
+    } finally { await service.dispose(); }
+  });
+
+  it('retires only the revoked peer assignment references on their target Host', async () => {
+    const driver = makeDriver(async op => op.tool === 'get_app_state' ? okResponse({ snapshot: semanticSnapshot() }) : okResponse());
+    const { service } = makeService(driver);
+    try {
+      await service.ensureLocal();
+      const actor = nativeActor('remote-thread');
+      const first = await service.claimDesktop('peer-a', 'assignment-a', actor, 'local-console', 'observe');
+      const second = await service.claimDesktop('peer-b', 'assignment-b', actor, 'local-console', 'observe');
+      const a = await service.automation.delegated(first, 'local-console', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
+      const b = await service.automation.delegated(second, 'local-console', 'observe', () => service.observe({ desktopId: 'local-console', app: 'notepad' }));
+      await service.dropDesktopClaim('peer-a', 'assignment-a', actor, 'local-console', 'observe');
+      expect(service.desktopForObservation(a.id)).toBeUndefined();
+      expect(service.desktopForObservation(b.id)).toBe('local-console');
+      expect(driver.calls.some(op => op.tool === 'release_elements')).toBe(false);
+      await service.dropDesktopClaim('peer-b', 'assignment-b', actor, 'local-console', 'observe');
+      expect(driver.calls.filter(op => op.tool === 'release_elements')).toHaveLength(1);
+    } finally { await service.dispose(); }
+  });
+
+  it('keeps native hierarchy, ambiguity context and incomplete range facts in query results', async () => {
+    const driver = makeDriver(async op => op.tool === 'query_elements' ? okResponse({ complete: false, nextOffset: 2, reason: 'node_limit',
+      snapshot: { ...semanticSnapshot(), complete: false, truncatedReason: 'node_limit', elements: [
+        { index: 4, parentIndex: 1, depth: 2, targetId: 'first', name: 'Save', role: 'button', ancestorLabels: ['First document'] },
+        { index: 5, parentIndex: 2, depth: 2, targetId: 'second', name: 'Save', role: 'button', ancestorNames: ['Second document'] },
+      ], treeLines: ['4 button Save', '5 button Save'] } }) : okResponse());
+    const { service } = makeService(driver);
+    try {
+      const result = await service.query({ app: 'notepad', match: { name: 'Save', role: 'button' }, limit: 2 });
+      expect(result).toMatchObject({ complete: false, nextOffset: 2, reason: 'node_limit', observation: { complete: false, elements: [
+        { index: 4, parentIndex: 1, depth: 2, ancestorNames: ['First document'] }, { index: 5, ancestorNames: ['Second document'] },
+      ] } });
+      expect(driver.calls.find(op => op.tool === 'query_elements')).toMatchObject({ match: { name: 'Save', role: 'button' }, limit: 2 });
+      expect(driver.calls.some(op => op.tool === 'get_app_state')).toBe(false);
+    } finally { await service.dispose(); }
+  });
+
+  it('lets input use the same lane while waiting, then publishes only the final sample', async () => {
+    const sampled = deferred(); let saved = false;
+    const driver = makeDriver(async op => {
+      if (op.tool === 'press_key') saved = true;
+      if (op.tool === 'query_elements') { sampled.resolve(); return okResponse({ complete: true, snapshot: {
+        ...semanticSnapshot(), elements: saved ? [{ index: 2, nativeElementId: 'saved', name: 'Saved', role: 'text' }] : [], treeLines: saved ? ['2 text Saved'] : [],
+      } }); }
+      return okResponse();
+    });
+    const { service } = makeService(driver, { semanticPollIntervalMs: 5 });
+    try {
+      const waiting = service.awaitCondition({ app: 'notepad', match: { name: 'Saved' }, condition: 'present', timeoutMs: 1000 });
+      await sampled.promise;
+      const input = await service.act({ action: { kind: 'key', app: 'notepad', key: 'ctrl+s' } });
+      expect(input.accepted).toBe(true);
+      const result = await waiting;
+      expect(result).toMatchObject({ status: 'satisfied', last: { observation: { elements: [{ name: 'Saved' }] } } });
+      expect(service.desktopForObservation(result.last!.observation!.id)).toBe('local-console');
+      expect(driver.calls.filter(op => op.tool === 'query_elements').length).toBeGreaterThan(1);
+    } finally { await service.dispose(); }
+  });
+
+  it('distinguishes an existing state from a new change and preserves the original target', async () => {
+    let reads = 0;
+    const driver = makeDriver(async op => op.tool === 'get_app_state' ? okResponse({ snapshot: semanticSnapshot() })
+      : op.tool === 'query_elements' ? okResponse({ complete: true, properties: { checked: ++reads < 3 } }) : okResponse());
+    const { service } = makeService(driver, { semanticPollIntervalMs: 1 });
+    try {
+      const observation = await service.observe({ app: 'notepad' });
+      const target = { observationId: observation.id, elementIndex: 1 };
+      expect(await service.awaitCondition({ target, property: 'checked', equals: true, condition: 'property', timeoutMs: 0 })).toMatchObject({ status: 'satisfied' });
+      expect(reads).toBe(1);
+      expect(await service.awaitCondition({ target, property: 'checked', condition: 'changed', timeoutMs: 1000 })).toMatchObject({ status: 'satisfied', last: { properties: { checked: false } } });
+      expect(reads).toBe(3);
+      expect(service.desktopForObservation(observation.id)).toBe('local-console');
+    } finally { await service.dispose(); }
+  });
+
+  it('does not turn unknown properties, partial reads or later pages into absence', async () => {
+    const driver = makeDriver(async op => op.tool === 'query_elements' ? okResponse({ complete: false,
+      snapshot: { ...semanticSnapshot(), elements: [], treeLines: [], complete: false, truncatedReason: 'virtualized' } }) : okResponse());
+    const { service } = makeService(driver);
+    try {
+      expect(await service.awaitCondition({ app: 'notepad', match: { name: 'Missing' }, condition: 'absent', timeoutMs: 0 }))
+        .toMatchObject({ status: 'timed_out', last: { complete: false } });
+      await expect(service.awaitCondition({ app: 'notepad', condition: 'absent', offset: 2 })).rejects.toThrow('original query range');
+    } finally { await service.dispose(); }
+  });
+
+  it('pins window closure to its discovered native instance and does not accept a generic read error', async () => {
+    let reads = 0;
+    const driver = makeDriver(async op => {
+      if (op.tool !== 'query_elements') return okResponse();
+      return ++reads === 1 ? okResponse({ complete: true, snapshot: { ...semanticSnapshot(), elements: [], treeLines: [] } })
+        : { id: 'x', ok: false, code: 'window_lost', error: 'Original window closed' };
+    });
+    const { service } = makeService(driver, { semanticPollIntervalMs: 1 });
+    try {
+      expect(await service.awaitCondition({ app: 'notepad', condition: 'window_closed', timeoutMs: 1000 })).toMatchObject({ status: 'satisfied' });
+      expect(driver.calls.filter(op => op.tool === 'query_elements')[1]).toMatchObject({ platform_target: 'original-window', window_only: true });
+      driver.handler = async () => ({ id: 'x', ok: false, error: 'Accessibility connection failed' });
+      expect(await service.awaitCondition({ app: 'notepad', condition: 'window_closed', timeoutMs: 0 })).toMatchObject({ status: 'unavailable' });
+    } finally { await service.dispose(); }
+  });
+
+  it('cancels only its active read and waits for the native read to settle', async () => {
+    const entered = deferred(), observedAbort = deferred(), nativeStopped = deferred();
+    const driver = makeDriver(async () => okResponse());
+    const request = driver.request.bind(driver);
+    driver.cancel = vi.fn(() => true);
+    driver.request = async (op, options) => {
+      if (op.tool !== 'query_elements') return request(op, options);
+      entered.resolve();
+      options?.signal?.addEventListener('abort', () => observedAbort.resolve(), { once: true });
+      await nativeStopped.promise;
+      return { id: 'x', ok: false, cancelled: true };
+    };
+    const { service } = makeService(driver);
+    const controller = new AbortController();
+    try {
+      let settled = false;
+      const waiting = service.awaitCondition({ app: 'notepad', condition: 'present', signal: controller.signal }).then(value => { settled = true; return value; });
+      await entered.promise; controller.abort(); await observedAbort.promise;
+      expect(settled).toBe(false); expect(driver.cancel).not.toHaveBeenCalled();
+      nativeStopped.resolve();
+      expect(await waiting).toMatchObject({ status: 'cancelled' });
+      expect(driver.calls.filter(op => op.tool === 'release_input')).toHaveLength(0);
+      expect((await service.act({ action: { kind: 'key', app: 'notepad', key: 'enter' } })).accepted).toBe(true);
+    } finally { nativeStopped.resolve(); await service.dispose(); }
   });
 });
 

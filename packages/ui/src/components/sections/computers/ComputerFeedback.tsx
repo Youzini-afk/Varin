@@ -18,6 +18,8 @@ export const ComputerFeedback = React.forwardRef<ComputerFeedbackHandle, { bound
   } }), [clear]);
   const configuration = React.useMemo(() => ({ type: 'configure', bounds, upscale, labels: {
     type: t('computer.feedback.type'), set_value: t('computer.feedback.value'), scroll: t('computer.feedback.scroll'),
+    set_checked: t('computer.operation.set_checked'), set_expanded: t('computer.operation.set_expanded'),
+    select: t('computer.operation.select'), scroll_into_view: t('computer.operation.scroll_into_view'),
   } }), [bounds, t, upscale]);
   React.useEffect(() => {
     if (disabled) { clear(); return; }
