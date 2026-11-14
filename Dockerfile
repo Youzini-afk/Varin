@@ -63,6 +63,7 @@ COPY package.json bun.lock ./
 COPY bun-patches ./bun-patches
 COPY scripts/fix-deprecation.js ./scripts/fix-deprecation.js
 COPY packages/application-client/package.json ./packages/application-client/package.json
+COPY packages/browser-connector/package.json ./packages/browser-connector/package.json
 COPY packages/electron/package.json ./packages/electron/package.json
 COPY packages/extension-builtins/package.json ./packages/extension-builtins/package.json
 COPY packages/extension-cli/package.json ./packages/extension-cli/package.json

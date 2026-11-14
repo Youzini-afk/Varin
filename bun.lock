@@ -43,6 +43,10 @@
         "@varin/protocol": "0.1.0",
       },
     },
+    "packages/browser-connector": {
+      "name": "@varin/browser-connector",
+      "version": "0.9.46",
+    },
     "packages/electron": {
       "name": "@varin/electron",
       "version": "0.9.46",
@@ -1547,6 +1551,8 @@
     "@ungap/structured-clone": ["@ungap/structured-clone@1.3.0", "", {}, "sha512-WmoN8qaIAo7WTYWbAZuG8PYEhn5fkz7dZrqTBZ7dtt//lL2Gwms1IcnQ5yHqjDfX8Ft5j4YzDM23f87zBfDe9g=="],
 
     "@varin/application-client": ["@varin/application-client@workspace:packages/application-client"],
+
+    "@varin/browser-connector": ["@varin/browser-connector@workspace:packages/browser-connector"],
 
     "@varin/electron": ["@varin/electron@workspace:packages/electron"],
 

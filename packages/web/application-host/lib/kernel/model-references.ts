@@ -138,12 +138,12 @@ export async function resolveHostToolArguments(refs: HostModelReferences, call: 
     }
   }
   if (builtin(declaration,'browser')) {
-    // An observation in pageId binds both values; the original page is not looked
-    // up again and the browser owner still rejects stale screenshot epochs.
+    // A page or observation pins its resource, live instance and original page.
+    // Reconnection must not reinterpret a short reference in a new browser.
     for (const field of ['pageId','observationId']) if (isModelReference(args[field])) {
       const kind = isModelReference(args[field],'observation') ? 'observation' : 'page';
       const target = await resolve(kind,args[field] as string,owner.browser);
-      for (const key of call.name === 'browser_act' ? ['pageId','observationId'] : ['pageId']) if (target[key] !== undefined) put(args,key,target[key],field);
+      for (const key of call.name === 'browser_act' ? ['browserId','instanceId','pageId','observationId'] : ['browserId','instanceId','pageId']) if (target[key] !== undefined) put(args,key,target[key],field);
       if (field === 'observationId' && target.observationId === undefined) throw new Error('Coordinate input requires an observation, not only a page');
     }
   }
@@ -226,17 +226,29 @@ export async function projectHostToolData(refs: HostModelReferences, call: HostT
     delete output.revision; delete output.revisions; delete output.referenceTarget;
   }
   if (builtin(declaration,'browser')) {
+    const binding = object(raw.binding) ? raw.binding : {};
+    const identity = typeof binding.browserId === 'string' && typeof binding.instanceId === 'string'
+      ? { browserId: binding.browserId, instanceId: binding.instanceId } : {};
+    const pageRefs = new Map<string, string>();
+    const pageReference = async (pageId: string) => {
+      let reference = pageRefs.get(pageId);
+      if (!reference) { reference = await register('page',owner.browser,{...identity,pageId}); pageRefs.set(pageId,reference); }
+      return reference;
+    };
     const pages = Array.isArray(raw.pages) ? raw.pages.filter(object) : object(raw.page) ? [raw.page] : [];
     const visible = Array.isArray(output.pages) ? output.pages.filter(object) : object(output.page) ? [output.page] : [];
     for (const [index,page] of pages.entries()) if (typeof page.pageId === 'string') {
-      visible[index]!.pageId = await register('page',owner.browser,{pageId:page.pageId}); delete visible[index]!.browserId;
+      visible[index]!.pageId = await pageReference(page.pageId);
+      delete visible[index]!.browserId; delete visible[index]!.instanceId;
     }
     if (typeof raw.observationId === 'string' && object(raw.page) && typeof raw.page.pageId === 'string') {
-      const ref = await register('observation',owner.browser,{pageId:raw.page.pageId,observationId:raw.observationId});
-      output.observationId = ref;
+      output.observationId = await register('observation',owner.browser,{...identity,pageId:raw.page.pageId,observationId:raw.observationId});
     }
-    if (typeof raw.pageId === 'string') output.pageId = await register('page',owner.browser,{pageId:raw.pageId});
-    delete output.browserId;
+    if (typeof raw.pageId === 'string') output.pageId = await pageReference(raw.pageId);
+    if (Array.isArray(output.downloads)) for (const download of output.downloads.filter(object)) {
+      if (typeof download.pageId === 'string') download.pageId = await pageReference(download.pageId);
+    }
+    delete output.browserId; delete output.instanceId; delete output.binding;
   }
   if (builtin(declaration,'computer')) {
     // Register the original observation in Catalog; only compact, human-scale

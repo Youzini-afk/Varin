@@ -277,7 +277,7 @@ def perform_operation(operation, emit=lambda *_args: None):
         import bridge_worker
         act = operation.get("act") or {}
         if tool == "browser" and act.get("kind") == "click":
-            PENDING_BROWSER_RELEASE = {key: operation[key] for key in ("tab", "profile", "cdp_port") if key in operation}
+            PENDING_BROWSER_RELEASE = {key: operation[key] for key in ("tab", "profile", "cdp_port", "expectedInstanceId") if key in operation}
             PENDING_BROWSER_RELEASE.update({"op": "act", "act": {"kind": "release", "x": act.get("x", 0), "y": act.get("y", 0)}})
         result = bridge_worker.run(tool, operation, lambda _progress: check_cancel())
         if tool == "browser" and result.get("ok") and act.get("kind") == "click":

@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
+import * as browserPages from '@/lib/browser-page';
 import { getContextRailMode, sortContextSurfaces } from '../lib/surfaces/registry';
 import { useUIStore } from './useUIStore';
 
@@ -315,4 +316,31 @@ describe('useUIStore contextRailOrder', () => {
     expect(ids).toContain('editor');
     expect(ids.filter((id) => id === 'git')).toHaveLength(1);
   });
+});
+
+test('retains an exact connected-browser binding across layout restore and clears it only on explicit preview selection', () => {
+  const browserBinding = { browserId: 'remote-browser', instanceId: 'original-instance', pageId: 'original-tab' };
+  const store = useUIStore.getState();
+  store.openContextPanelTab('/workspace', { mode: 'browser', browserBinding, dedupeKey: 'resource:original', targetPath: 'https://original.test' });
+  const current = useUIStore.getState();
+  const panel = current.contextPanelByDirectory['/workspace']!;
+  const restored = useUIStore.persist.getOptions().merge!({ contextPanelByDirectory: { '/workspace': panel } }, current);
+  expect(restored.contextPanelByDirectory['/workspace']!.tabs[0]!.browserBinding).toEqual(browserBinding);
+  store.setContextBrowserBinding('/workspace', panel.activeTabId!, undefined);
+  expect(useUIStore.getState().contextPanelByDirectory['/workspace']!.tabs[0]!.browserBinding).toBeUndefined();
+});
+
+
+test('closing a connected-browser context tab does not close or release its owner page', () => {
+  const close = vi.spyOn(browserPages, 'closeEmbeddedBrowserPage').mockImplementation(() => {});
+  try {
+    const store = useUIStore.getState();
+    store.openContextPanelTab('/workspace', { mode: 'browser', dedupeKey: 'resource:bound',
+      browserBinding: { browserId: 'office', instanceId: 'session', pageId: 'real-tab' } });
+    store.closeContextPanelTab('/workspace', useUIStore.getState().contextPanelByDirectory['/workspace']!.activeTabId!);
+    expect(close).not.toHaveBeenCalled();
+    store.openContextBrowser('/workspace', 'https://local-preview.test');
+    store.closeContextPanelTab('/workspace', useUIStore.getState().contextPanelByDirectory['/workspace']!.activeTabId!);
+    expect(close).toHaveBeenCalledOnce();
+  } finally { close.mockRestore(); }
 });

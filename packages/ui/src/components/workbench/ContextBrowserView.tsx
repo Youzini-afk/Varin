@@ -3,6 +3,7 @@ import React from 'react';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { useEditorWorkbench } from '@/lib/workbench/editors/hooks';
+import { patchEditorViewState } from '@/lib/workbench/editors/session';
 import { listEditorGroups } from '@/lib/workbench/editors/groups';
 import { useI18n } from '@/lib/i18n';
 
@@ -32,6 +33,8 @@ export function ContextBrowserView({ directory, tabID, initialUrl, editorViewId 
   return <div className="flex h-full min-h-0 flex-col">
     {resolution?.error ? <div role="alert" className="px-3 py-2 typography-meta text-status-error">{resolution.error}</div> : null}
     <div className="min-h-0 flex-1"><BrowserResourceView key={`${generation}:${directory}:${tabID}`} directory={directory} tabID={tabID} initialUrl={initialUrl}
+      browserBinding={tab?.viewState.browserBinding}
+      onBindingChange={tab && workspaceId ? browserBinding => patchEditorViewState(workspaceId, tab.viewId, { browserBinding }, { notify: true }) : undefined}
       initialPosition={tab?.viewState.browserPosition} /></div>
   </div>;
 }

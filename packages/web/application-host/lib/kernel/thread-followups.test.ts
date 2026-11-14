@@ -72,7 +72,7 @@ function fixture() {
       }
       case 'runtime.followup.registration.cancel': return { followup: null };
       case 'runtime.followup.get': return { followup: facts.list.find(value => value.id === params.followupId), instruction };
-      case 'runtime.followup.control': {
+      case 'runtime.followup.update': case 'runtime.followup.control': {
         if (facts.conflict) throw new KernelClientError({ code: 'operation-error', message: 'operation error: conflict: follow-up revision changed' });
         return facts.reply;
       }
@@ -154,6 +154,21 @@ it('the public management client preserves registration keys, revisions and orig
   expect(f.facts.source.waiting_on).toBe('policy-pause:source');
 });
 
+it('the public management client forwards same-owner updates with exact instruction, revision and optional conditions', async () => {
+  const f = fixture();
+  f.facts.principalId = 'alice';
+  f.facts.reply = { ...definition, revision: 2 };
+  const update = { followupId: definition.id, expectedRevision: 1, instruction };
+  for (const patch of [{}, { atMs: 0 }, { fileCondition: 'ready' as const }]) {
+    const params = { ...update, ...patch };
+    const result = await withRequestPrincipal('alice', () => f.api.followups.update({ ...identity, ...params }));
+    expect(result).toEqual(f.facts.reply);
+    const [method, forwarded, signal] = f.requests.mock.calls.at(-1)!;
+    expect([method, forwarded]).toEqual(['runtime.followup.update', params]);
+    expect(signal).toBeInstanceOf(AbortSignal);
+  }
+});
+
 it('list and snapshot expose only the selected branch and controls reject another branch or source Run', async () => {
   const f = fixture();
   const other = { ...definition, id: 'followup:other', branch_id: 'branch:other' };
@@ -164,10 +179,11 @@ it('list and snapshot expose only the selected branch and controls reject anothe
   expect((await f.api.snapshot(identity)).followups).toEqual([definition]);
   expect(await f.api.followups.list({ ...identity, branchId: 'branch:other' })).toEqual([other]);
   await expect(f.api.followups.control({ ...identity, followupId: other.id, expectedRevision: 1, action: 'cancel' })).rejects.toMatchObject({ status: 400 });
+  await expect(f.api.followups.update({ ...identity, followupId: other.id, expectedRevision: 1, instruction })).rejects.toMatchObject({ status: 400 });
   f.facts.source.branch_id = 'branch:other';
   await expect(f.api.followups.register({ ...identity, key: 'foreign', runId: run.id, trigger, instruction })).rejects.toMatchObject({ status: 400 });
   await expect(f.api.followups.list({ ...identity, branchId: 'branch:unknown' })).rejects.toMatchObject({ status: 400 });
-  expect(f.requests.mock.calls.some(([method]) => ['runtime.followup.register', 'runtime.followup.control'].includes(method))).toBe(false);
+  expect(f.requests.mock.calls.some(([method]) => ['runtime.followup.register', 'runtime.followup.update', 'runtime.followup.control'].includes(method))).toBe(false);
   f.facts.source.branch_id = identity.branchId; f.facts.registerError = true;
   await expect(f.api.followups.register({ ...identity, key: 'foreign-operation', runId: run.id, trigger: { kind: 'process_stopped', operationId: 'operation:other' }, instruction }))
     .rejects.toMatchObject({ status: 400, code: 'operation-error' });
@@ -179,7 +195,7 @@ it('list and snapshot expose only the selected branch and controls reject anothe
 it('management routes enforce authentication, exact fields and revision conflict without exposing private errors', async () => {
   const f = fixture();
   const register = { ...identity, key: 'register', runId: run.id, trigger, instruction };
-  for (const method of ['register', 'list', 'get', 'occurrence', 'occurrences', 'control', 'registrations/pending', 'registration/cancel']) {
+  for (const method of ['register', 'list', 'get', 'occurrence', 'occurrences', 'update', 'control', 'registrations/pending', 'registration/cancel']) {
     expect((await f.request(`/api/threads/followup/${method}`, identity, false)).status).toBe(401);
   }
   expect(f.requests).not.toHaveBeenCalled();
@@ -197,12 +213,18 @@ it('management routes enforce authentication, exact fields and revision conflict
     { ...control, expectedRevision: -1 }, { ...control, expectedRevision: 1.5 },
     { ...control, action: 'restart' }, { ...control, runId: 'run:continued' },
   ]) expect((await f.request('/api/threads/followup/control', body)).status).toBe(400);
+  const update = { ...identity, followupId: definition.id, expectedRevision: 1, instruction };
+  for (const patch of [
+    { expectedRevision: -1 }, { expectedRevision: 1.5 }, { instruction: '' },
+    { atMs: -1 }, { atMs: 1.5 }, { fileCondition: 'unknown' }, { runId: 'run:continued' },
+  ]) expect((await f.request('/api/threads/followup/update', { ...update, ...patch })).status).toBe(400);
   expect(f.requests).not.toHaveBeenCalled();
   f.facts.conflict = true;
   await expect(f.api.followups.control({ ...identity, followupId: definition.id, expectedRevision: 0, action: 'pause' }))
     .rejects.toMatchObject({ status: 409, code: 'thread-conflict' });
   const response = await f.request('/api/threads/followup/control', control);
   expect(await response.json()).toEqual({ code: 'thread-conflict', error: 'Thread request could not be completed' });
+  await expect(f.api.followups.update(update)).rejects.toMatchObject({ status: 409, code: 'thread-conflict' });
 });
 
 it('public log registration preserves literal bytes, stream, offset and the original key after a lost HTTP reply', async () => {

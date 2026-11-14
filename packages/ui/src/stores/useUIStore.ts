@@ -13,7 +13,8 @@ import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobi
 import { getRuntimeKey } from '@varin/application-client';
 import { closeEmbeddedBrowserPage } from '@/lib/browser-page';
 import type { TerminalShell } from '@varin/application-client';
-import type { RecoveryPreference } from '@varin/protocol';
+import type { RecoveryPreference, BrowserResourceBinding } from '@varin/protocol';
+import { restoreBrowserResourceBinding } from '@/lib/browser-resource-binding';
 import {
   DEFAULT_FILE_EDITOR_SETTINGS,
   normalizeFileEditorSettings,
@@ -50,6 +51,7 @@ type ContextPanelTab = {
   id: string;
   editorViewId?: string;
   editorWorkspaceId?: string;
+  browserBinding?: BrowserResourceBinding;
   mode: ContextPanelMode;
   targetPath: string | null;
   targetDirectory: string | null;
@@ -70,6 +72,7 @@ type ContextPanelTabDescriptor = {
   mode: ContextPanelMode;
   editorViewId?: string;
   editorWorkspaceId?: string;
+  browserBinding?: BrowserResourceBinding;
   targetPath?: string | null;
   targetDirectory?: string | null;
   dedupeKey?: string | null;
@@ -240,6 +243,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     ...(Number.isSafeInteger(descriptor.materialLine) && descriptor.materialLine! >= 1 ? { materialLine: descriptor.materialLine } : {}),
     ...(descriptor.editorViewId ? { editorViewId: descriptor.editorViewId } : {}),
     ...(descriptor.editorWorkspaceId ? { editorWorkspaceId: descriptor.editorWorkspaceId } : {}),
+    ...(descriptor.browserBinding ? { browserBinding: descriptor.browserBinding } : {}),
     targetPath: normalizedTargetPath,
     targetDirectory: normalizeDirectoryPath(descriptor.targetDirectory?.trim() ?? '') || null,
     dedupeKey,
@@ -289,6 +293,7 @@ const sanitizeContextPanelTabs = (tabs: unknown, restoringLayout = false): Conte
       contentRef?: unknown;
       editorViewId?: unknown;
       editorWorkspaceId?: unknown;
+      browserBinding?: unknown;
       targetPath?: unknown;
       targetDirectory?: unknown;
       dedupeKey?: unknown;
@@ -318,6 +323,7 @@ const sanitizeContextPanelTabs = (tabs: unknown, restoringLayout = false): Conte
 
     seen.add(id);
     const restoreRoom = restoringLayout && candidate.mode === 'threads';
+    const browserBinding = restoreBrowserResourceBinding(candidate.browserBinding);
     result.push({
       id,
       mode: candidate.mode,
@@ -327,6 +333,7 @@ const sanitizeContextPanelTabs = (tabs: unknown, restoringLayout = false): Conte
       ...(typeof candidate.materialLine === 'number' && Number.isSafeInteger(candidate.materialLine) && candidate.materialLine >= 1 ? { materialLine: candidate.materialLine } : {}),
       ...(typeof candidate.editorViewId === 'string' && candidate.editorViewId ? { editorViewId: candidate.editorViewId } : {}),
       ...(typeof candidate.editorWorkspaceId === 'string' && candidate.editorWorkspaceId ? { editorWorkspaceId: candidate.editorWorkspaceId } : {}),
+      ...(browserBinding ? { browserBinding } : {}),
       targetPath,
       dedupeKey,
       targetDirectory: normalizeDirectoryPath(typeof candidate.targetDirectory === 'string' ? candidate.targetDirectory.trim() : '') || null,
@@ -394,6 +401,7 @@ const upsertContextPanelTab = (
       ? {
           ...tab,
           mode: nextTab.mode,
+          ...(nextTab.browserBinding ? { browserBinding: nextTab.browserBinding } : {}),
           targetPath: nextTab.targetPath || tab.targetPath,
           ...(nextTab.editorViewId ? { editorViewId: nextTab.editorViewId } : {}),
           ...(nextTab.editorWorkspaceId ? { editorWorkspaceId: nextTab.editorWorkspaceId } : {}),
@@ -673,6 +681,7 @@ interface UIStore {
   openContextOverview: (directory: string) => void;
   openContextPlan: (directory: string) => void;
   openContextBrowser: (directory: string, url?: string, pageId?: string) => void;
+  setContextBrowserBinding: (directory: string, tabID: string, binding?: BrowserResourceBinding) => void;
   setContextPanelTabTargetPath: (directory: string, tabID: string, targetPath: string) => void;
   setActiveContextPanelTab: (directory: string, tabID: string) => void;
   reorderContextPanelTabs: (directory: string, activeTabID: string, overTabID: string) => void;
@@ -1198,6 +1207,17 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        setContextBrowserBinding: (directory, tabID, binding) => {
+          const key = normalizeDirectoryPath((directory || '').trim());
+          set(state => {
+            const current = state.contextPanelByDirectory[key];
+            if (!current) return state;
+            return { contextPanelByDirectory: { ...state.contextPanelByDirectory, [key]: {
+              ...current, tabs: current.tabs.map(tab => tab.id === tabID ? { ...tab, browserBinding: binding } : tab),
+            } } };
+          });
+        },
+
         setContextPanelTabTargetPath: (directory, tabID, targetPath) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedTabID = (tabID || '').trim();
@@ -1315,7 +1335,7 @@ export const useUIStore = create<UIStore>()(
           }
 
           const closing = get().contextPanelByDirectory[normalizedDirectory]?.tabs.find(tab => tab.id === normalizedTabID);
-          if (closing?.mode === 'browser') closeEmbeddedBrowserPage(normalizedDirectory, normalizedTabID);
+          if (closing?.mode === 'browser' && !closing.browserBinding) closeEmbeddedBrowserPage(normalizedDirectory, normalizedTabID);
 
           set((state) => {
             const prev = state.contextPanelByDirectory[normalizedDirectory];

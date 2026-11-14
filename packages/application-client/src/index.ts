@@ -86,3 +86,5 @@ export * from './git-integration.js';
 export * from './github-http.js';
 
 export * from './thread-observation.js';
+
+export * from "./browser-resources-http.js";

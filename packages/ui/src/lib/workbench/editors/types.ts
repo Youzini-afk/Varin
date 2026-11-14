@@ -1,3 +1,4 @@
+import type { BrowserResourceBinding } from '@varin/protocol';
 import type { JsonValue } from '@varin/extension-contract';
 
 export type EditorProviderViewState = {
@@ -9,6 +10,7 @@ export type EditorProviderViewState = {
 export type EditorViewState = {
   diffLayout?: 'auto' | 'inline' | 'split';
   browserTabId?: string;
+  browserBinding?: BrowserResourceBinding;
   browserPageId?: string;
   browserUrl?: string;
   browserPosition?: { x: number; y: number };

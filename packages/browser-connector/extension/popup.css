@@ -1,0 +1,8 @@
+:root { color-scheme: light dark; font: 14px/1.45 system-ui,sans-serif; }
+body { margin: 18px; width: 360px; }
+h1 { font-size: 18px; }
+button { padding: 8px 10px; margin: 4px 6px 4px 0; cursor: pointer; }
+#status { font-weight: 600; }
+ul { list-style: none; padding: 0; }
+li { border-top: 1px solid #8886; padding: 10px 0; overflow-wrap: anywhere; }
+.hint { opacity: .8; font-size: 12px; }

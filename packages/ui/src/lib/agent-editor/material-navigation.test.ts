@@ -42,3 +42,15 @@ it('does not finalize a material action after the runtime changes during profile
   await continueMaterialInIde({ workspaceId, viewId: tab.viewId, fromProfileId: VARIN_WORKBENCH_DEFAULT_PROFILE_ID });
   expect(activeEditorTab(peekEditorWorkbench(workspaceId)!)?.preview).toBe(true);
 });
+
+it('returns a connected browser from IDE with its original binding rather than recreating its URL', async () => {
+  const browserBinding = { browserId: 'office-browser', instanceId: 'office-session', pageId: 'office-page' };
+  const tab = activeEditorTab(openWorkbenchEditor('browser-workspace', 'browser:original', 'varin.builtin.browser', {
+    viewState: { browserTabId: 'browser:original', browserBinding, browserUrl: 'https://original.test' },
+  }))!;
+  await returnMaterialToConversation('browser-workspace', '/workspace');
+  const panel = useUIStore.getState().contextPanelByDirectory[normalizeContextPanelDirectoryKey('/workspace')];
+  expect(panel?.tabs.find(candidate => candidate.id === panel.activeTabId)).toMatchObject({
+    mode: 'browser', browserBinding, editorViewId: tab.viewId,
+  });
+});

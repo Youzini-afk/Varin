@@ -3060,17 +3060,18 @@ it('moves exhausted logs into history only after pending deliveries finish, with
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   await openOverview('followups');
   expect(container.querySelector('[aria-label="Pending follow-up"]')).not.toBeNull();
-  expect(container.textContent).toContain('Log ended without satisfying the condition');
+  expect(container.querySelector('[aria-label="Pending follow-up"]')?.textContent).toContain('Waiting to deliver the observation result · Once');
   expect(container.textContent).toContain('Stream ended without a literal match');
   expect(container.textContent).toContain('ended without triggering · result awaiting delivery');
   expect(container.querySelector('[aria-label="Latest follow-up occurrence"]')).toBeNull();
-  expect(container.textContent).not.toContain('Waiting for the original trigger');
+  expect(container.textContent).not.toContain('Waiting for the condition');
   followup.observation.delivered = true; followup.observation.delivery_pending = false;
   await act(async () => f.emit({ cursor: 12, subject: followup.id, revision: 2, kind: 'followup.changed', data: {} }));
   expect(container.querySelector('[aria-label="Pending follow-up"]')).toBeNull();
   expect(button('Past follow-ups (1)')).toBeDefined();
   await act(async () => button('Past follow-ups (1)').click());
-  expect(container.querySelector('[aria-label="Past follow-up"]')?.textContent).toContain('Log ended without satisfying the condition');
+  expect(container.querySelector('[aria-label="Past follow-up"]')?.textContent).toContain('Ended · Once');
+  expect(container.querySelector('[aria-label="Past follow-up"]')?.textContent).toContain('Stream ended without a literal match');
   expect(button('Pause follow-up')).toBeUndefined(); expect(button('Cancel follow-up')).toBeUndefined();
   expect(container.textContent).toContain('ended without triggering · result delivered');
   // Real Catalog probe: failed original Run -> terminal Wait cleanup -> no-match EOF.

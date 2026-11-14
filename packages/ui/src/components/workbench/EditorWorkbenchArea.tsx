@@ -66,7 +66,7 @@ export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPan
       return;
     }
     closeWorkbenchEditor(workspaceId, tabId);
-    if (tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser) closeEmbeddedBrowserPage(root, tab.viewState.browserTabId ?? tab.viewId);
+    if (tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser && !tab.viewState.browserBinding) closeEmbeddedBrowserPage(root, tab.viewState.browserTabId ?? tab.viewId);
   }, [workspaceId, root, registry, documentWorkspaceId]);
   const closePending = React.useCallback((): void => {
     if (!workspaceId || !closingTab) return;
