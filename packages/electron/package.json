@@ -1,6 +1,6 @@
 {
   "name": "@varin/electron",
-  "version": "0.9.46",
+  "version": "0.9.47",
   "license": "AGPL-3.0-only",
   "private": true,
   "description": "Varin desktop runtime",

@@ -58,7 +58,7 @@
     },
     "packages/web": {
       "name": "@varin/web",
-      "version": "0.9.46",
+      "version": "0.9.47",
       "bin": {
         "varin": "./bin/cli.js",
       },
