@@ -64,7 +64,9 @@ pub struct OnceAcceptance {
 pub struct ModelSelection {
     pub provider_id: String,
     pub model_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f64>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -874,6 +876,7 @@ impl SyncPreparation {
         }
         let mut seen = std::collections::BTreeSet::new();
         let mut definitions = Vec::new();
+        let mut snapshot = Vec::with_capacity(self.inputs.len());
         for input in &self.inputs {
             if input.task_id.trim().is_empty()
                 || input.asset_revision.trim().is_empty()
@@ -942,10 +945,18 @@ impl SyncPreparation {
                 _ => (),
             }
             let instruction_ref = self.content.save(&json!(input.instruction))?;
-            let input_ref = self.content.save(&serde_json::to_value(input)?)?;
+            let mut stored_input = serde_json::to_value(input)?;
+            if let Target::NewWork { model, .. } = &input.target {
+                // Public optional fields are omitted, but stored content identities must
+                // retain their original nulls so an unchanged sync never replaces work.
+                stored_input["target"]["model"]["thinkingLevel"] = json!(model.thinking_level);
+                stored_input["target"]["model"]["temperature"] = json!(model.temperature);
+            }
+            let input_ref = self.content.save(&stored_input)?;
             let semantic_ref = crate::content::ContentStore::reference(
-                &json!({"timezone":input.timezone,"rule":input.rule,"missed_policy":input.missed_policy,"target":input.target,"instruction":instruction_ref}),
+                &json!({"timezone":input.timezone,"rule":input.rule,"missed_policy":input.missed_policy,"target":stored_input["target"],"instruction":instruction_ref}),
             )?;
+            snapshot.push(stored_input);
             definitions.push(PreparedDefinition {
                 input: input.clone(),
                 input_ref,
@@ -953,7 +964,7 @@ impl SyncPreparation {
                 semantic_ref,
             });
         }
-        let snapshot_ref = self.content.save(&serde_json::to_value(&self.inputs)?)?;
+        let snapshot_ref = self.content.save(&serde_json::to_value(snapshot)?)?;
         Ok(PreparedSync {
             capture: self,
             snapshot_ref,

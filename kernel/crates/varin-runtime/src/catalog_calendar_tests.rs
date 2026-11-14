@@ -354,6 +354,75 @@ fn registered_native_views_bind_original_selection_and_prepared_calendar_source(
 }
 
 #[test]
+fn preparation_wire_omits_unset_model_options_and_preserves_explicit_values() {
+    for model in [
+        json!({"providerId":"fixture","modelId":"fixture"}),
+        json!({"providerId":"fixture","modelId":"fixture","thinkingLevel":"xhigh"}),
+        json!({"providerId":"fixture","modelId":"fixture","thinkingLevel":"xhigh","temperature":0.0}),
+    ] {
+        let mut f = Fixture::new();
+        let mut input = serde_json::to_value(definition(false)).unwrap();
+        input["target"]["model"] = model.clone();
+        let input = serde_json::from_value(input).unwrap();
+        let d = sync(&mut f.db, &input);
+        let occurrence = f.db.run_calendar_now(&d.id, d.revision, "model-options").unwrap();
+        drop(f.db);
+        let db = Catalog::open(&f.path).unwrap();
+        // The kernel's calendar.prepare handler serializes this loaded view directly.
+        let preparation = db.capture_calendar_preparation(&occurrence.id).unwrap().load().unwrap();
+        let wire = serde_json::to_value(preparation).unwrap();
+        assert_eq!(wire["definition"]["target"]["model"], model);
+        drop(db);
+        std::fs::remove_dir_all(f.path).unwrap();
+    }
+}
+
+#[test]
+fn preparation_wire_reads_legacy_null_model_options_without_replacing_work() {
+    let mut f = Fixture::new();
+    let input = definition(false);
+    let d = sync(&mut f.db, &input);
+    let occurrence = due(&mut f.db, &d, 0);
+    let previous = f.db.calendar_project("project").unwrap();
+    // Restore the original persisted shape, including the content identities used to
+    // distinguish a harmless re-sync from a new generation that cancels old work.
+    let mut stored_input = serde_json::to_value(&input).unwrap();
+    stored_input["target"]["model"]["thinkingLevel"] = Value::Null;
+    stored_input["target"]["model"]["temperature"] = Value::Null;
+    let mut stored_definition: Value = record(&f.db.db, "calendar_definitions", &d.id).unwrap();
+    stored_definition["view"]["target"] = stored_input["target"].clone();
+    stored_definition["input_ref"] = f.db.content.save(&stored_input).unwrap();
+    stored_definition["semantic_ref"] = crate::content::ContentStore::reference(&json!({
+        "timezone":input.timezone,"rule":input.rule,"missed_policy":input.missed_policy,
+        "target":stored_input["target"],"instruction":stored_definition["instruction_ref"],
+    })).unwrap();
+    let mut project: Project = record(&f.db.db, "calendar_projects", "project").unwrap();
+    project.snapshot_ref = f.db.content.save(&json!([stored_input])).unwrap();
+    let tx = f.db.db.transaction().unwrap();
+    put(&tx, "calendar_definitions", &d.id, &stored_definition).unwrap();
+    put(&tx, "calendar_projects", "project", &project).unwrap();
+    tx.commit().unwrap();
+    f.db.db.execute(
+        "UPDATE calendar_occurrences SET body=json_set(body, '$.target.model.thinkingLevel', NULL, '$.target.model.temperature', NULL) WHERE id=?1",
+        [&occurrence.id],
+    ).unwrap();
+    drop(f.db);
+    let mut db = Catalog::open(&f.path).unwrap();
+    let preparation = db.capture_calendar_preparation(&occurrence.id).unwrap().load().unwrap();
+    assert_eq!(preparation.definition.target, input.target);
+    let wire = serde_json::to_value(preparation).unwrap();
+    assert_eq!(wire["definition"]["target"]["model"], json!({"providerId":"fixture","modelId":"fixture"}));
+    let current = sync(&mut db, &input);
+    assert_eq!(current.generation, previous.definitions[0].generation);
+    assert_eq!(current.revision, previous.definitions[0].revision);
+    assert_eq!(db.calendar_project("project").unwrap().revision, previous.revision);
+    assert_eq!(db.calendar_occurrence(&occurrence.id).unwrap().state, OccurrenceState::Preparing);
+    assert!(db.calendar_pending().unwrap().calculations.is_empty());
+    drop(db);
+    std::fs::remove_dir_all(f.path).unwrap();
+}
+
+#[test]
 fn cold_model_uses_catalog_identity_while_preserving_upstream_alias() {
     let mut f = Fixture::new();
     let d = sync(&mut f.db, &definition(false));
