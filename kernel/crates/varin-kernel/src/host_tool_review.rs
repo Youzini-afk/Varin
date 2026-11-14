@@ -520,6 +520,20 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
 
 #[test]
 fn rejected_newer_candidate_can_restore_the_prior_ready_directory_before_next_request() {
+    ready_directory_across_rebind(false, false);
+}
+
+#[test]
+fn ready_candidate_rebases_after_launch_refresh() {
+    ready_directory_across_rebind(true, false);
+}
+
+#[test]
+fn ready_candidate_can_arrive_between_launch_refresh_and_directory_install() {
+    ready_directory_across_rebind(true, true);
+}
+
+fn ready_directory_across_rebind(rebind: bool, ready_after_bind: bool) {
     let root = std::env::temp_dir().join(format!("varin-ready-restore-{}", uuid::Uuid::new_v4()));
     let mut catalog = Catalog::open(&root).unwrap();
     catalog.create_thread("thread", "main").unwrap();
@@ -541,7 +555,12 @@ fn rejected_newer_candidate_can_restore_the_prior_ready_directory_before_next_re
         .admit_submission(preparation.load(None, false).unwrap())
         .unwrap();
     let run = submitted.run_id.clone();
-    let binding = RequestBinding { pricing: None, tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+    let binding = RequestBinding {
+        pricing: None,
+        tool_output_visible_bytes: None,
+        mcp_tools: Vec::new(),
+        execution_environment: None,
+        direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,
@@ -586,7 +605,7 @@ fn rejected_newer_candidate_can_restore_the_prior_ready_directory_before_next_re
     bridge.initialize("transport");
     let tools = crate::run_tools::RunTools::new(db.clone(), bridge);
     let prepared = tools.prepare_scope(&run, vec![], None, vec![]).unwrap();
-    let executor = tools.install(&run, 1, prepared).unwrap();
+    let mut executor = tools.install(&run, 1, prepared).unwrap();
     let extension = |id: &str| {
         crate::agent_runtime::live_extension_binding(serde_json::from_value(json!({"ownerId":id,"generation":1,"binding":{
         "providerKey":format!("{id}:host:read@1"),"extensionId":id,"extensionVersion":"1.0.0","serviceId":"read","serviceVersion":1,
@@ -619,14 +638,79 @@ fn rejected_newer_candidate_can_restore_the_prior_ready_directory_before_next_re
     // The publication owner restores its valid snapshot immediately after the rejected selection.
     tools.desire(&run, "A-restored").unwrap();
     assert!(tools
-        .ready(&run, "A-restored", None, vec![a], || false)
+        .ready(&run, "A-restored", None, vec![a.clone()], || false)
         .unwrap());
+    if rebind {
+        if ready_after_bind {
+            tools.desire(&run, "A-after-bind").unwrap();
+        }
+        let c = extension("C");
+        let native = ToolSchema {
+            requirements: None,
+            name: "current_native".into(),
+            version: "2".into(),
+            description: "Current built-in".into(),
+            schema: json!({"type":"object"}),
+            output_schema: None,
+            metadata: None,
+        };
+        let generation = {
+            let mut catalog = db.lock().unwrap();
+            let mut launch = catalog.launch_intent(&run).unwrap().unwrap().selection;
+            launch.tools = vec![native.clone(), c.binding.tool.clone()];
+            launch.extension_bindings = vec![c.binding.clone()];
+            catalog
+                .bind_launch(&run, launch)
+                .unwrap()
+                .selection
+                .tool_schema_generation
+        };
+        assert_eq!(generation, 2);
+        if ready_after_bind {
+            assert!(tools
+                .ready(&run, "A-after-bind", None, vec![a], || false)
+                .unwrap());
+        }
+        let base = varin_runtime::composition::tools::ToolDeclaration::new(
+            native,
+            Arc::new(varin_runtime::composition::tools::ToolDirectory::assemble(vec![]).unwrap()),
+        );
+        let prepared = tools
+            .prepare_scope(&run, vec![base], None, vec![c])
+            .unwrap();
+        _frames.try_iter().for_each(drop);
+        executor = tools
+            .install(&run, generation, prepared)
+            .expect("A ready contribution must survive root directory refresh");
+        let handoff = _frames.try_iter().collect::<Vec<_>>();
+        assert!(
+            handoff.iter().all(|frame| frame["ownerId"] != "A"
+                || !matches!(
+                    frame["kind"].as_str(),
+                    Some("host-tool-binding-retain" | "host-tool-binding-release")
+                )),
+            "Rebasing must retain the ready service's original holder"
+        );
+    }
     let selected = executor
         .select_for_request(&run, epoch, &CancellationToken::default())
         .unwrap()
         .unwrap();
-    assert_eq!(selected.schemas.len(), 1);
-    assert_eq!(selected.schemas[0].description, "Read A");
+    assert_eq!(selected.schemas.len(), if rebind { 2 } else { 1 });
+    assert!(selected
+        .schemas
+        .iter()
+        .any(|tool| tool.description == "Read A"));
+    assert!(!selected
+        .schemas
+        .iter()
+        .any(|tool| tool.description == "Read C"));
+    if rebind {
+        assert!(selected
+            .schemas
+            .iter()
+            .any(|tool| tool.name == "current_native" && tool.version == "2"));
+    }
     assert_eq!(
         db.lock()
             .unwrap()

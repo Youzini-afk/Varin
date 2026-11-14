@@ -296,25 +296,38 @@ impl RunTools {
         generation: u64,
         prepared: PreparedRunTools,
     ) -> Result<Arc<dyn ToolExecutor>, ExecutionError> {
-        let agent = self.catalog.lock().map_err(failed)?
-            .launch_metadata(run).map_err(failed)?
+        let agent = self
+            .catalog
+            .lock()
+            .map_err(failed)?
+            .launch_metadata(run)
+            .map_err(failed)?
             .and_then(|launch| launch.selection.agent);
-        let work_focus = agent.as_ref().map(|agent| agent.work_focus.clone()).unwrap_or_else(|| "general".into());
+        let work_focus = agent
+            .as_ref()
+            .map(|agent| agent.work_focus.clone())
+            .unwrap_or_else(|| "general".into());
         let allowed_tools = agent.and_then(|agent| agent.tools);
         let slot = self.slot(run)?;
         for extension in &prepared.extensions {
             extension.generation.activate()?;
         }
-        {
+        let pending = {
             let mut state = slot.state.lock().map_err(failed)?;
             let selection_id = state
                 .active
                 .as_ref()
+                .filter(|active| active.generation == generation)
                 .and_then(|active| active.selection_id.clone());
+            let pending =
+                if state.candidate.as_ref().is_some_and(|candidate| {
+                    candidate.composition.previous_generation() != generation
+                }) {
+                    state.candidate.take()
+                } else {
+                    None
+                };
             if let Some(candidate) = state.candidate.as_mut() {
-                if candidate.composition.previous_generation() != generation {
-                    return Err(failed("ready composition differs from the rebound launch"));
-                }
                 candidate.directory = Some(prepared.directory.prepare_replacement(
                     prepared.directory.revision(),
                     declarations(
@@ -332,6 +345,10 @@ impl RunTools {
                 _mcp: prepared.mcp,
                 extensions: prepared.extensions,
             });
+            pending
+        };
+        if let Some(candidate) = pending {
+            self.rebase_candidate(run, &slot, candidate)?;
         }
         Ok(Arc::new(ScopedTools {
             owner: self.clone(),
@@ -340,6 +357,66 @@ impl RunTools {
             allowed_tools,
             work_focus,
         }))
+    }
+    fn prepare_composition(
+        &self,
+        run: &str,
+        mcp: Option<varin_runtime::catalog::launches::HostToolBinding>,
+        extensions: Vec<varin_runtime::catalog::launches::ExtensionToolBinding>,
+    ) -> Result<PreparedToolUpdate, ExecutionError> {
+        let capture = {
+            let catalog = self.catalog.lock().map_err(failed)?;
+            catalog
+                .capture_tool_update(run, catalog.epoch())
+                .map_err(failed)?
+        };
+        let preparation = capture.load_base().map_err(failed)?;
+        let mut schemas = preparation.base().to_vec();
+        if let Some(binding) = &mcp {
+            schemas.extend(binding.tools.iter().cloned());
+        }
+        schemas.extend(extensions.iter().map(|binding| binding.tool.clone()));
+        preparation.load(schemas, mcp, extensions).map_err(failed)
+    }
+    fn rebase_candidate(
+        &self,
+        run: &str,
+        slot: &Slot,
+        mut candidate: Candidate,
+    ) -> Result<(), ExecutionError> {
+        loop {
+            // Only the directory's base changed. Retain the ready services and their
+            // original holders; rebuilding a service owner could retire its accepted calls.
+            let snapshot = candidate.composition.composition();
+            let composition = self.prepare_composition(
+                run,
+                snapshot.mcp_binding.clone(),
+                snapshot.extension_bindings.clone(),
+            )?;
+            let mut state = slot.state.lock().map_err(failed)?;
+            if state.desired.as_deref() != Some(candidate.id.as_str()) || state.candidate.is_some()
+            {
+                return Ok(());
+            }
+            let active = state
+                .active
+                .as_ref()
+                .ok_or_else(|| failed("tool scope is not prepared"))?;
+            if active.generation > composition.previous_generation() {
+                continue;
+            }
+            candidate.directory = if active.generation == composition.previous_generation() {
+                Some(active.directory.prepare_replacement(
+                    active.directory.revision(),
+                    declarations(&active.base, candidate.mcp.as_ref(), &candidate.extensions),
+                )?)
+            } else {
+                None
+            };
+            candidate.composition = composition;
+            state.candidate = Some(candidate);
+            return Ok(());
+        }
     }
     pub fn desire(&self, run: &str, id: &str) -> Result<(), ExecutionError> {
         if id.is_empty() {
@@ -383,25 +460,11 @@ impl RunTools {
             if slot.state.lock().map_err(failed)?.desired.as_deref() != Some(id) {
                 return Ok(false);
             }
-            let preparation = {
-                let catalog = self.catalog.lock().map_err(failed)?;
-                catalog
-                    .capture_tool_update(run, catalog.epoch())
-                    .map_err(failed)?
-            };
-            let preparation = preparation.load_base().map_err(failed)?;
-            let mut schemas = preparation.base().to_vec();
-            if let Some(binding) = &binding {
-                schemas.extend(binding.binding.tools.iter().cloned());
-            }
-            schemas.extend(bindings.iter().map(|b| b.binding.tool.clone()));
-            let composition = preparation
-                .load(
-                    schemas,
-                    binding.as_ref().map(|live| live.binding.clone()),
-                    bindings.iter().map(|b| b.binding.clone()).collect(),
-                )
-                .map_err(failed)?;
+            let composition = self.prepare_composition(
+                run,
+                binding.as_ref().map(|live| live.binding.clone()),
+                bindings.iter().map(|live| live.binding.clone()).collect(),
+            )?;
             let mut state = slot.state.lock().map_err(failed)?;
             if cancelled() || state.desired.as_deref() != Some(id) {
                 return Ok(false);
@@ -410,13 +473,19 @@ impl RunTools {
                 return Ok(ready);
             }
             let directory = if let Some(active) = &state.active {
-                if active.generation != composition.previous_generation() {
+                if active.generation > composition.previous_generation() {
                     continue;
                 }
-                Some(active.directory.prepare_replacement(
-                    active.directory.revision(),
-                    declarations(&active.base, mcp.as_ref(), &extensions),
-                )?)
+                // A newer Catalog launch can precede installation of its live directory.
+                // Installation completes this candidate against the matching base.
+                if active.generation == composition.previous_generation() {
+                    Some(active.directory.prepare_replacement(
+                        active.directory.revision(),
+                        declarations(&active.base, mcp.as_ref(), &extensions),
+                    )?)
+                } else {
+                    None
+                }
             } else {
                 None
             };
