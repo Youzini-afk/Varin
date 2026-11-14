@@ -342,7 +342,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
       </form>
       <Departure present={!firstMessage.message && !draft.harnessId} exit="sink" stagger=".varin-draft-starters > *" className="conversation-starters"><DraftPresetChips cwd={sourcePath} className="varin-draft-starters" onSubmit={starter => {
         if (starter.ref.type === 'command' && starter.ref.name === 'craft-goal') patch({ goalArmed: true });
-        else if (starter.ref.type === 'command' && starter.ref.name === 'schedule-task') useUIStore.getState().setScheduledTasksDialogOpen(true);
+        else if (starter.ref.type === 'command' && starter.ref.name === 'schedule-task') useUIStore.getState().setScheduledTasksDialogOpen(true, { model });
         else patch(current => ({ text: [current.text.trimEnd(), starter.submitText].filter(Boolean).join('\n\n') }));
         editor.current?.focus();
       }} /></Departure>

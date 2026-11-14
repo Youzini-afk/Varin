@@ -4,7 +4,9 @@ import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ThreadSummary } from '@varin/protocol';
 import { ConversationSidebar } from './ConversationSidebar';
-import { useThreadStore } from '@/stores/useThreadStore';
+import { selectedComposerKey, threadHostKey, useThreadStore } from '@/stores/useThreadStore';
+import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { useExternalAgentStore } from '@/stores/useExternalAgentStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -291,4 +293,25 @@ it('omits direct Bot conversations while keeping delegated work visible', async 
   expect(delegated).toBeDefined();
   expect(delegated.querySelector('[aria-label="bot.sidebar.delegated"]')).not.toBeNull();
   expect(titleButton('Child task').querySelector('[aria-label="bot.sidebar.delegated"]')).toBeNull();
+});
+
+it('opens calendar with the selected native conversation model and branch', async () => {
+  const identity = { runtime: 'agent' as const, threadId: 'parent', branchId: 'selected-branch' };
+  const model = { providerId: 'channel', modelId: 'registered-model', thinkingLevel: 'xhigh' as const };
+  await act(async () => {
+    useExternalAgentStore.setState({ selectedId: null });
+    useThreadStore.setState({ hostKey: threadHostKey(), selectedIdentity: identity, selectedDraftKey: null });
+    useThreadDraftStore.getState().patch(selectedComposerKey(useThreadStore.getState())!, { model });
+  });
+  const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === 'tasksHub.title')!;
+  await act(async () => button.click());
+  expect(useUIStore.getState().scheduledTasksConversation).toEqual({ identity, model });
+});
+
+it('does not use a stale native selection while viewing an external conversation', async () => {
+  await act(async () => { useExternalAgentStore.setState({ selectedId: 'external-current' }); });
+  const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === 'tasksHub.title')!;
+  await act(async () => button.click());
+  expect(useUIStore.getState().scheduledTasksConversation).toBeNull();
+  await act(async () => { useExternalAgentStore.setState({ selectedId: null }); });
 });

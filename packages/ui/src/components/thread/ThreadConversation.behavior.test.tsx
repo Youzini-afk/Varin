@@ -137,7 +137,7 @@ vi.mock('./ThreadComposer', () => ({ ThreadComposer: (props: React.ComponentProp
   {props.value === '/' && <CommandAutocomplete api={props.api} identity={props.identity} source={props.source} searchQuery="" onClose={() => props.onChange('')}
     onCommandSelect={command => props.onChange(`/${command.name} `)} />}
 </div> }));
-vi.mock('@/components/chat/DraftPresetChips', () => ({ DraftPresetChips: () => null }));
+vi.mock('@/components/chat/DraftPresetChips', () => ({ DraftPresetChips: ({ onSubmit }: React.ComponentProps<typeof import('@/components/chat/DraftPresetChips').DraftPresetChips>) => <button type="button" onClick={() => onSubmit?.({ ref: { type: 'command', name: 'schedule-task' }, submitText: '/schedule-task' } as Parameters<NonNullable<typeof onSubmit>>[0])}>Schedule starter</button> }));
 vi.mock('@/components/ui/VarinLogo', () => ({ VarinLogo: () => null }));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={onChange as React.FormEventHandler<HTMLInputElement>} /> }));
 vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...props} onInput={onChange as React.FormEventHandler<HTMLTextAreaElement>} /> }));
@@ -257,7 +257,7 @@ beforeEach(() => {
   recoveryService.api = undefined;
   // Recovery assertions count individual messages independently of the default
   // dialogue grouping. Presentation-specific cases choose their mode below.
-  useUIStore.setState({ recoveryPreference: 'conversation', chatRenderMode: 'live', contextPanelByDirectory: {} });
+  useUIStore.setState({ isScheduledTasksDialogOpen: false, scheduledTasksConversation: null, recoveryPreference: 'conversation', chatRenderMode: 'live', contextPanelByDirectory: {} });
   runtimeState.api = undefined; vi.mocked(attachProcessTerminal).mockClear();
   const documents: Pick<DocumentsAPI, 'resolveWorkspace'> = { resolveWorkspace: async () => ({ workspaceId: 'canonical-source-workspace', hostId: 'fixture-host', epoch: 1 }) };
   registerRuntimeAPIs({ documents } as RuntimeAPIs);
@@ -4874,4 +4874,37 @@ it('coalesces token frames and redraws only the streaming tail, not the composer
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')?.value).toBe('Typing during output');
   await act(async () => button('Stop run').click());
   expect(f.cancelRun).toHaveBeenCalledWith('ui-run');
+});
+
+it('opens calendar from the conversation starter with its selected registered model, effort, and exact branch', async () => {
+  const f = fixture();
+  const model: ThreadModel = { providerId: 'fixture-provider', modelId: 'registered-model', thinkingLevel: 'xhigh' };
+  f.api.listModels = async () => [{ ...model, thinkingLevels: ['off', 'high', 'xhigh'] }];
+  useThreadDraftStore.getState().patch(threadComposerKey(threadHostKey(), identity), { model });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Schedule starter').click());
+  expect(useUIStore.getState().scheduledTasksConversation).toEqual({ identity, model });
+  expect(useUIStore.getState().isScheduledTasksDialogOpen).toBe(true);
+  useUIStore.getState().setScheduledTasksDialogOpen(false);
+  useUIStore.getState().setScheduledTasksDialogOpen(true);
+  expect(useUIStore.getState().scheduledTasksConversation).toBeNull();
+});
+
+it('opens calendar from an unsubmitted native draft with its displayed model and effort without creating a Thread', async () => {
+  const f = fixture(); const create = vi.fn(f.api.create); f.api.create = create; runtimeState.api = f.api;
+  const model: ThreadModel = { providerId: 'fixture-provider', modelId: 'registered-model', thinkingLevel: 'xhigh' };
+  f.api.listModels = async () => [{ ...model, thinkingLevels: ['off', 'high', 'xhigh'] }];
+  let unbind: (() => void) | undefined;
+  try {
+    await act(async () => { unbind = bindThreadStore(f.api); });
+    await act(async () => {
+      const draftKey = useThreadStore.getState().openDraft();
+      useThreadDraftStore.getState().patch(draftKey, { model });
+      root.render(<ChatView />);
+    });
+    await act(async () => button('Schedule starter').click());
+    expect(useUIStore.getState().scheduledTasksConversation).toEqual({ model });
+    expect(useUIStore.getState().isScheduledTasksDialogOpen).toBe(true);
+    expect(create).not.toHaveBeenCalled();
+  } finally { unbind?.(); }
 });

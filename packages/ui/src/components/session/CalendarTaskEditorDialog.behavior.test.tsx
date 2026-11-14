@@ -10,9 +10,10 @@ import { I18nProvider, useI18nStore } from '@/lib/i18n';
 const api = vi.hoisted(() => ({
   schedules: { listSources: vi.fn<ScheduledTasksAPI['listSources']>(), resolveSource: vi.fn<ScheduledTasksAPI['resolveSource']>() },
   threads: { listModels: vi.fn() },
+  readSettings: vi.fn(),
   hostGeneration: 1,
 }));
-vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(), createScheduledTasksHttpAPI: () => api.schedules, getRuntimeEndpointGeneration: () => api.hostGeneration }));
+vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(), createScheduledTasksHttpAPI: () => api.schedules, createModelConnectionsHttpAPI: () => ({ readSettings: api.readSettings }), getRuntimeEndpointGeneration: () => api.hostGeneration }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ threads: api.threads }) }));
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ open, children, onOpenChange }: React.PropsWithChildren<{ open: boolean; onOpenChange(value: boolean): void }>) => open ? <div role="dialog">{children}<button onClick={() => onOpenChange(false)}>Close editor</button></div> : null,
@@ -73,7 +74,8 @@ beforeEach(async () => {
   vi.clearAllMocks(); api.hostGeneration = 1;
   api.schedules.listSources.mockReset().mockResolvedValue(targets);
   api.schedules.resolveSource.mockReset().mockResolvedValue({ resourceOwner: remote, workspaceId: 'documents-workspace', path: '/canonical/remote/repo' });
-  api.threads.listModels.mockReset().mockResolvedValue([{ providerId: 'provider', modelId: 'model' }]);
+  api.threads.listModels.mockReset().mockResolvedValue([{ providerId: 'provider', modelId: 'model', thinkingLevels: ['off', 'high', 'xhigh'] }, { providerId: 'other', modelId: 'registered-other', thinkingLevels: ['off', 'high'] }]);
+  api.readSettings.mockReset().mockResolvedValue({ global: { defaultProvider: 'provider', defaultModel: 'model', defaultThinkingLevel: 'high' }, project: {}, projectTrusted: false });
   save.mockReset().mockResolvedValue(undefined);
   props = { open: true, projectId: 'project', task: existing(), onSave: save, onOpenChange: close };
 });
@@ -276,4 +278,101 @@ it.each([
   expect(container.textContent).toContain('did not return the requested workspace identity');
   expect(button('Save definition').disabled).toBe(true);
   expect(save).not.toHaveBeenCalled();
+});
+
+const fillNewTask = async () => {
+  await editField('Name', 'Daily results'); await editField('Instruction', 'Review the results');
+};
+const thinkingValue = () => [...container.querySelectorAll('label')].find(field => field.firstChild?.textContent === 'Thinking level')!.querySelector('input')!.value;
+
+it('inherits the conversation registered model and xhigh effort without requiring a new model choice', async () => {
+  await render({ task: null, conversation: { identity: { runtime: 'agent', threadId: 'source', branchId: 'branch-selected' }, model: { providerId: 'provider', modelId: 'model', thinkingLevel: 'xhigh' } } });
+  expect(control('Calendar model').value).toBe(JSON.stringify(['provider', 'model']));
+  expect(thinkingValue()).toBe('xhigh');
+  await fillNewTask(); await click('Save definition');
+  expect(save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ target: expect.objectContaining({ kind: 'new_work', model: { providerId: 'provider', modelId: 'model', thinkingLevel: 'xhigh' } }) }));
+  expect(api.readSettings).not.toHaveBeenCalled();
+});
+
+it('lets a new schedule override inherited model and effort without changing the conversation selection', async () => {
+  const conversation = { model: { providerId: 'provider', modelId: 'model', thinkingLevel: 'xhigh' as const } };
+  await render({ task: null, conversation }); await fillNewTask();
+  await edit('Calendar model', JSON.stringify(['other', 'registered-other'])); await editField('Thinking level', 'high');
+  await click('Save definition');
+  expect(save.mock.calls[0]![0].target).toMatchObject({ model: { providerId: 'other', modelId: 'registered-other', thinkingLevel: 'high' } });
+  expect(conversation.model).toEqual({ providerId: 'provider', modelId: 'model', thinkingLevel: 'xhigh' });
+});
+
+it('uses the opening conversation branch for existing work without requiring or saving a model', async () => {
+  await render({ task: null, conversation: { identity: { runtime: 'agent', threadId: 'source', branchId: 'branch-selected' }, model: { providerId: 'removed', modelId: 'unavailable', thinkingLevel: 'xhigh' } } });
+  await fillNewTask(); await edit('Calendar target', 'existing_work'); await click('Save definition');
+  expect(control('Calendar model')).toBeNull();
+  expect(save.mock.calls[0]![0].target).toEqual({ kind: 'existing_work', threadId: 'source', branchId: 'branch-selected' });
+});
+
+it('does not replace a saved model or effort with the current conversation selection', async () => {
+  const task = existing();
+  if (task.target?.kind === 'new_work') task.target.model = { providerId: 'other', modelId: 'registered-other', thinkingLevel: 'high', temperature: 0.25 };
+  await render({ task, conversation: { model: { providerId: 'provider', modelId: 'model', thinkingLevel: 'xhigh' } } });
+  expect(control('Calendar model').value).toBe(JSON.stringify(['other', 'registered-other']));
+  expect(thinkingValue()).toBe('high'); await click('Save definition');
+  expect(save.mock.calls[0]![0].target).toMatchObject({ model: { providerId: 'other', modelId: 'registered-other', thinkingLevel: 'high', temperature: 0.25 } });
+  expect(api.readSettings).not.toHaveBeenCalled();
+});
+
+it.each(['conversation', 'saved'] as const)('keeps an unavailable %s model visible and rejects save rather than silently falling back', async source => {
+  const unavailable = { providerId: 'removed', modelId: 'registered-missing', thinkingLevel: 'xhigh' as const };
+  const task = source === 'saved' ? existing() : null;
+  if (task?.target?.kind === 'new_work') task.target.model = unavailable;
+  await render({ task, conversation: { model: unavailable } }); await fillNewTask();
+  expect(control('Calendar model').value).toBe(JSON.stringify(['removed', 'registered-missing']));
+  expect(control('Calendar model').textContent).toContain('removed / registered-missing (unavailable)');
+  await click('Save definition'); expect(save).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('Select an available registered model');
+  expect(api.readSettings).not.toHaveBeenCalled();
+});
+
+it('reuses trusted project conversation defaults when opened without a conversation', async () => {
+  api.readSettings.mockResolvedValueOnce({ global: { defaultProvider: 'other', defaultModel: 'registered-other' }, projectTrusted: true,
+    project: { defaultProvider: 'provider', defaultModel: 'model', defaultThinkingLevel: 'xhigh' } });
+  await render({ task: null, project: { id: 'project', path: '/project' } }); await fillNewTask(); await click('Save definition');
+  expect(api.readSettings).toHaveBeenCalledWith('/project', expect.any(AbortSignal), undefined);
+  expect(save.mock.calls[0]![0].target).toMatchObject({ model: { providerId: 'provider', modelId: 'model', thinkingLevel: 'xhigh' } });
+});
+
+it('does not replace an explicit selection when delayed defaults arrive', async () => {
+  const pending = gate<Awaited<ReturnType<typeof api.readSettings>>>(); api.readSettings.mockReturnValueOnce(pending.promise);
+  await render({ task: null }); await fillNewTask();
+  await edit('Calendar model', JSON.stringify(['other', 'registered-other'])); await editField('Thinking level', 'high');
+  await act(async () => pending.resolve({ global: { defaultProvider: 'provider', defaultModel: 'model', defaultThinkingLevel: 'xhigh' }, projectTrusted: false }));
+  await click('Save definition');
+  expect(save.mock.calls[0]![0].target).toMatchObject({ model: { providerId: 'other', modelId: 'registered-other', thinkingLevel: 'high' } });
+});
+
+it('starts a fresh inherited selection after closing an unsaved editor', async () => {
+  await render({ task: null, conversation: { model: { providerId: 'provider', modelId: 'model', thinkingLevel: 'xhigh' } } });
+  await edit('Calendar model', JSON.stringify(['other', 'registered-other']));
+  await render({ open: false });
+  await render({ open: true, conversation: { model: { providerId: 'provider', modelId: 'model', thinkingLevel: 'high' } } });
+  expect(control('Calendar model').value).toBe(JSON.stringify(['provider', 'model'])); expect(thinkingValue()).toBe('high');
+});
+
+it('reads a managed project default by registration ID without treating its remote path as a local directory', async () => {
+  await render({ task: null, project: { id: 'project', path: '/remote/project', source: { resourceOwner: remote, workspaceId: 'remote-workspace' } } });
+  expect(api.readSettings).toHaveBeenCalledWith(undefined, expect.any(AbortSignal), 'project');
+  expect(control('Calendar model').value).toBe(JSON.stringify(['provider', 'model']));
+});
+
+it('does not use untrusted project defaults when no conversation selection is available', async () => {
+  api.readSettings.mockResolvedValueOnce({ global: { defaultProvider: 'provider', defaultModel: 'model', defaultThinkingLevel: 'high' }, projectTrusted: false,
+    project: { defaultProvider: 'other', defaultModel: 'registered-other', defaultThinkingLevel: 'xhigh' } });
+  await render({ task: null });
+  expect(control('Calendar model').value).toBe(JSON.stringify(['provider', 'model'])); expect(thinkingValue()).toBe('high');
+});
+
+it('preserves a manually entered effort while delayed defaults fill only the unselected model', async () => {
+  const pending = gate<Awaited<ReturnType<typeof api.readSettings>>>(); api.readSettings.mockReturnValueOnce(pending.promise);
+  await render({ task: null }); await editField('Thinking level', 'xhigh');
+  await act(async () => pending.resolve({ global: { defaultProvider: 'provider', defaultModel: 'model', defaultThinkingLevel: 'high' }, projectTrusted: false }));
+  expect(control('Calendar model').value).toBe(JSON.stringify(['provider', 'model'])); expect(thinkingValue()).toBe('xhigh');
 });
