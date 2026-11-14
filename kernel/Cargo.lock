@@ -2735,9 +2735,9 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter"
-version = "0.27.1"
+version = "0.27.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5129de2ccc97808c4583d48f1fb44576d015cf241e432800572bda11ef30c3b"
+checksum = "37b2bed8f39a73439f3b0b7ed8f452be5d2911b5e9da69d352ef113bb7448fb8"
 dependencies = [
  "cc",
  "regex",
@@ -3123,9 +3123,9 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-c-api-impl"
-version = "48.0.2"
+version = "48.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6370be157f3760b18a99d555b45daab8c41897ed95d4fc78c433dee8ceb63000"
+checksum = "8dfcfe09bf02aa65ff67dd14322408dfba2d63bd09e43df5bfc4ada75e6ebd2f"
 dependencies = [
  "log",
  "tracing",
@@ -3166,9 +3166,9 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-c-api-macros"
-version = "48.0.2"
+version = "48.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55369bc113313ec8161b0f54debbcb7f1b75903d81795a1486c44bd18d117632"
+checksum = "ae53ea5422dd9a198582eff26d49250525c045f6eefd45ca50d9d9788f73f6aa"
 dependencies = [
  "proc-macro2",
  "quote",
