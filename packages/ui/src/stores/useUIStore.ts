@@ -567,6 +567,8 @@ interface UIStore {
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
   showReasoningTraces: boolean;
+  showGenerationSpeed: boolean;
+  setShowGenerationSpeed: (value: boolean) => void;
   sessionGoalEnabled: boolean;
   sessionGoalDefaultBudgetEnabled: boolean;
   sessionGoalDefaultBudget: number;
@@ -896,6 +898,8 @@ export const useUIStore = create<UIStore>()(
         eventStreamStatus: 'idle',
         eventStreamHint: null,
         showReasoningTraces: true,
+        showGenerationSpeed: true,
+        setShowGenerationSpeed: value => set({ showGenerationSpeed: value }),
         sessionGoalEnabled: true,
         sessionGoalDefaultBudgetEnabled: false,
         sessionGoalDefaultBudget: 200_000,
@@ -2326,6 +2330,7 @@ export const useUIStore = create<UIStore>()(
           isSessionCreateDialogOpen: state.isSessionCreateDialogOpen,
           // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,
+          showGenerationSpeed: state.showGenerationSpeed,
           sessionGoalEnabled: state.sessionGoalEnabled,
           sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
           sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,

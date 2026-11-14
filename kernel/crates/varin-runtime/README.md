@@ -134,6 +134,12 @@ execution paths and derived parser caches remain with their original resource ow
 
 ## Request and context cost model
 
+`generation_metrics.rs` observes the original model callback with a monotonic request clock.
+Incremental output batches use the existing tokenizer for display estimates; final provider usage
+supersedes those counts. Live samples travel through the original progress stream, while one final
+measurement is retained on its ModelStep and exposed by model presentations. These metrics are not
+prompt material, billing receipts or execution authority, and do not add per-delta database writes.
+
 `ConversationHistory` shares immutable item `Arc`s across policy views and prepared requests. A Run
 worker retains only its latest compiled prefix under exact epoch/Run/branch/checkpoint/ancestry identity;
 new steps hydrate the new suffix, while current memory/Goal/policy evidence is freshly projected.

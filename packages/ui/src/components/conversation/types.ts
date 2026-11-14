@@ -2,6 +2,7 @@ import type { JsonValue, Operation, ChildTask, DelegatedExecution, StoredMedia }
 
 /** Read-only conversation presentation. Native history remains authoritative. */
 export interface ChatUsage {
+  generation?: import('@varin/protocol').GenerationMetrics;
   requestId?: string;
   measurement: 'actual' | 'estimated' | 'missing';
   unknownReceipts: number;

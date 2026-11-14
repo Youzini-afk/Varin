@@ -79,13 +79,26 @@ async function startProjection(snapshot: ThreadsAPI['snapshot']) {
     listener = next;
     await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
   };
-  const progress = vi.fn(); const parts = vi.fn(); const report = vi.fn(); const publish = vi.fn(); const tools = vi.fn();
+  const progress = vi.fn(); const parts = vi.fn(); const report = vi.fn(); const publish = vi.fn(); const tools = vi.fn(); const activity = vi.fn();
   const toolProgress = vi.fn();
-  const projection = new ThreadProjection({ snapshot, observe } as ThreadsAPI, identity, publish, report, value => { parts(value); progress(textOf(value)); }, tools, toolProgress);
+  const projection = new ThreadProjection({ snapshot, observe } as ThreadsAPI, identity, publish, report, (value, context) => { parts(value); progress(textOf(value)); activity(context); }, tools, toolProgress);
   projection.start();
   await vi.advanceTimersByTimeAsync(0);
-  return { projection, listener, progress, parts, report, publish, tools, toolProgress };
+  return { projection, listener, progress, parts, report, publish, tools, toolProgress, activity };
 }
+
+it('uses execution-side generation timing and clears it when a new request starts', async () => {
+  const h = await startProjection(async () => snapshotView());
+  const frame = delta(1, 'Hello');
+  const generation = { startedAtMs: 1000, elapsedMs: 5000, firstOutputMs: 800, lastOutputMs: 5000,
+    outputTokens: 80, measurement: 'estimated', recentTokens: 30, recentMs: 2000, finished: false };
+  try {
+    h.listener({ ...frame, event: { kind: 'batch', events: [{ kind: 'generation', data: generation }, { kind: 'provider', data: { kind: 'text_delta', item_id: 'answer', text: 'Hello' } }] } });
+    expect(h.activity).toHaveBeenLastCalledWith(expect.objectContaining({ generation }));
+    h.listener({ ...frame, sequence: 2, requestId: 'next-request', event: { kind: 'batch', events: [{ kind: 'provider', data: { kind: 'text_delta', item_id: 'answer', text: 'Next' } }] } });
+    expect(h.activity.mock.lastCall![0].generation).toBeUndefined();
+  } finally { h.projection.close(); }
+});
 
 it('shows retry waiting separately and replaces it when the next attempt starts', async () => {
   const view = snapshotView();

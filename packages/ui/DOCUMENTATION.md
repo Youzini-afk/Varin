@@ -489,6 +489,12 @@ They need `PLAYWRIGHT_PATH` and `LAB_BROWSER` when Playwright and its browser ar
 
 ## Conversation and resource projections
 
+Generation speed stays in the existing turn footer. Live metrics use the execution owner's elapsed
+clock and recent output counts; completed metrics are retained on original model requests and sum
+tokens over summed model time, once per request. Tool/user waits are excluded. The compact label is
+only `tok/s`; its tooltip explains estimates, first-output latency and the time basis. A local chat
+preference controls visibility. Only this indicator ticks while awaiting more output.
+
 Tool headings summarize the requested action and its subject before disclosure, then add returned
 facts where useful (process state, confirmed input, output size, matches or restored paths). Each
 purpose-specific renderer keeps its interaction model; `ToolHeadingText` shares typography only.
@@ -709,6 +715,11 @@ measured rows keep long lines within the viewport, and the inner scroll follows 
 content until the user scrolls up. Explicit navigation resumes following or jumps between edits.
 
 ## Settings and authoring conventions
+
+Model capacity fields share the original draft/autosave and catalog-override owner. Context presets
+are 128K/256K/512K/1M; output presets are 8K/16K/32K/64K/128K/256K. K/M use decimal token counts shown
+in the menu. Direct numeric or suffixed input, empty values and exact non-preset values are retained;
+clearing a field remains distinct from restoring its catalog default.
 
 Settings UI consumes shared catalog identities and the original domain APIs. Device-local entries use
 `client-settings-bridge.ts` and acknowledge what the target Surface actually applied. Forms preserve

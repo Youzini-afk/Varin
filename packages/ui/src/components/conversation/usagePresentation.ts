@@ -88,32 +88,12 @@ export const assistantMessagesForTurn = (
   return messages;
 };
 
-export const assistantMessageKey = (message: Pick<ChatAssistantMessage, 'model' | 'provider' | 'timestamp'>): string => (
-  `${message.timestamp}:${message.provider}:${message.model}`
-);
-
 export const aggregateAssistantUsage = (
   entries: readonly ChatSessionEntry[],
   liveAssistant?: ChatAssistantMessage,
 ): ChatUsage | undefined => aggregateChatUsage(
   assistantMessagesForTurn(entries, liveAssistant).flatMap((message) => message.usage ? [message.usage] : []),
 );
-
-export const assistantTokensPerSecond = (
-  entries: readonly ChatSessionEntry[],
-  liveAssistant?: ChatAssistantMessage,
-  outputDurationsMs?: Readonly<Record<string, number>>,
-): number | undefined => {
-  const assistants = assistantMessagesForTurn(entries, liveAssistant);
-  if (!outputDurationsMs) return undefined;
-  const rates = assistants.flatMap((message) => {
-    const outputTokens = positive(message.usage?.output);
-    const durationMs = outputDurationsMs[assistantMessageKey(message)];
-    if (outputTokens <= 0 || !Number.isFinite(durationMs) || durationMs <= 0) return [];
-    return [outputTokens / (durationMs / 1000)];
-  });
-  return rates.length > 0 ? rates.reduce((total, rate) => total + rate, 0) / rates.length : undefined;
-};
 
 export const latestAssistantTurnUsage = (
   entries: readonly ChatSessionEntry[],

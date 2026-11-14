@@ -51,7 +51,7 @@ export class HistoryRunUsageReader {
     return [...requests].map(([runId, ids]) => ({ runId, throughId: through.get(runId)!, requests: [...ids].map(requestId => {
       const view = metadata.get(requestId);
       if (!view) throw new Error('Original history usage is unavailable');
-      return { requestId, usage: view.usage, ...(view.completeInputTokens !== undefined ? { completeInputTokens: view.completeInputTokens } : {}) };
+      return { requestId, usage: view.usage, ...(view.generation ? { generation: view.generation } : {}), ...(view.completeInputTokens !== undefined ? { completeInputTokens: view.completeInputTokens } : {}) };
     }) }));
   }
 

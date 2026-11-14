@@ -8,6 +8,7 @@ pub use catalog::{Catalog, RuntimeError};
 pub use types::*;
 
 pub mod execution;
+pub mod generation_metrics;
 pub mod driver;
 pub mod request_body;
 pub mod nested_tools;

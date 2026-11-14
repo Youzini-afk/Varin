@@ -779,6 +779,13 @@ const CATALOG_ENTRIES: readonly SettingsCatalogEntry[] = [
       keywords: ['thinking', 'reasoning'] },
   },
   {
+    id: 'chat.generation-speed', category: 'chat', owner: 'app',
+    field: { path: 'showGenerationSpeed', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.chat.generationSpeed',
+      keywords: ['generation', 'speed', 'tokens/s', 'tok/s', 'latency', '生成速度'] },
+  },
+  {
     id: 'chat.reasoning', category: 'chat', owner: 'app',
     field: { path: 'collapsibleThinkingBlocks', kind: 'boolean',
       note: 'true starts thinking in a one-line preview; false automatically expands its reading window. Manual expansion and collapse remain available.' },

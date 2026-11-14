@@ -7,12 +7,34 @@ import { HistoryPresentation } from './historyPresentation';
 import { projectChatTimeline } from './chatTimelineProjection';
 import { projectChatTimelineBlocks } from './chatTimelineBlocks';
 import { ChatTimelineEntryList } from './ChatTimelineEntries';
+import { ChatTurnUsageFooter } from './ChatTurnUsageFooter';
 import { useUIStore } from '@/stores/useUIStore';
 
 vi.mock('@/lib/i18n', () => ({ getCurrentIntlLocale: () => 'en-US', useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
+vi.mock('@/components/motion/CountUp', () => ({ CountUp: ({ value, format }: { value: number; format(value: number): string }) => <>{format(value)}</> }));
 vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock('@/lib/extensions/workbench-registry', () => ({ useWorkbenchMatchRenderers: () => [], renderFirstWorkbenchMatch: () => undefined }));
+
+it('shows live speed before a usage receipt and honors the display preference', async () => {
+  const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
+  for (const [name, value] of Object.entries({ document, window, HTMLElement: window.HTMLElement, Element: window.Element, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true })) vi.stubGlobal(name, value);
+  const container = document.createElement('div'); document.body.append(container);
+  const root = createRoot(container);
+  try {
+    useUIStore.setState({ showGenerationSpeed: true });
+    await act(async () => root.render(<ChatTurnUsageFooter turnActive liveGeneration={{ runId: 'run', requestId: 'request', generation: {
+      startedAtMs: 1000, elapsedMs: 4000, firstOutputMs: 800, lastOutputMs: 4000, outputTokens: 160,
+      measurement: 'estimated', recentTokens: 80, recentMs: 2000, finished: false,
+    } }} />));
+    expect(container.querySelector('[aria-label="chat.speed.title"]')?.textContent).toBe('40.0tok/s');
+    expect(container.textContent).not.toContain('≈');
+    await act(async () => useUIStore.setState({ showGenerationSpeed: false }));
+    expect(container.querySelector('[aria-label="chat.speed.title"]')).toBeNull();
+  } finally {
+    act(() => root.unmount()); container.remove(); useUIStore.setState({ showGenerationSpeed: true }); vi.restoreAllMocks(); vi.unstubAllGlobals();
+  }
+});
 
 it('shows one summed footer after an ended Run even when every paginated message is a separate row', async () => {
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
@@ -22,6 +44,8 @@ it('shows one summed footer after an ended Run even when every paginated message
   const request = (requestId: string, inputTokens: number, outputTokens: number) => ({ requestId,
     usage: { measurement: 'actual' as const, inputTokens, outputTokens, cachedInputTokens: null, cacheWriteTokens: null, reasoningTokens: null, pricingVersion: null } });
   const first = request('first', 100, 10), second = request('second', 200, 20);
+  const timed = (value: typeof first, elapsedMs: number) => ({ ...value, generation: { startedAtMs: 1000, elapsedMs, firstOutputMs: 100, lastOutputMs: elapsedMs,
+    outputTokens: value.usage.outputTokens, measurement: 'actual' as const, recentTokens: 0, recentMs: 0, finished: true } });
   const history: ThreadHistoryItem[] = [first, first, second].map((metadata, index) => ({ id: `item:${index}`, parent: index ? `item:${index - 1}` : 'earlier-page',
     thread_id: 'thread', run_id: 'run', source: 'assistant', provider: null,
     content: { content: { kind: 'text', text: `Answer part ${index}` } }, modelRequest: { ...metadata, modelId: 'model', providerFamily: 'openai-completions' } }));
@@ -36,11 +60,12 @@ it('shows one summed footer after an ended Run even when every paginated message
     useUIStore.setState({ chatRenderMode: 'live' });
     await render([]);
     expect(container.querySelectorAll('[data-conversation-turn-usage]')).toHaveLength(0);
-    await render([{ runId: 'run', throughId: 'item:2', requests: [first, first, second] }]);
+    await render([{ runId: 'run', throughId: 'item:2', requests: [timed(first, 1000), timed(first, 1000), timed(second, 4000)] }]);
     const footers = container.querySelectorAll('[data-conversation-turn-usage]');
     expect(footers).toHaveLength(1);
     expect(footers[0].textContent).toContain('contextSidebar.tokens.input 300');
     expect(footers[0].textContent).toContain('contextSidebar.tokens.output 30');
+    expect(container.querySelector('[aria-label="chat.speed.title"]')?.textContent).toBe('6.0tok/s');
     expect(container.textContent!.indexOf('Answer part 2')).toBeLessThan(container.textContent!.indexOf('contextSidebar.tokens.input 300'));
     useUIStore.setState({ chatRenderMode: 'sorted' });
     await render([{ runId: 'run', throughId: 'item:2', requests: [first, second] }]);

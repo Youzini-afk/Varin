@@ -7,6 +7,7 @@ import { PartialJson } from '@/lib/interactive-ui/partial-json';
 import { useThreadContextUsageStore } from '@/stores/useThreadContextUsageStore';
 
 interface ProgressView {
+  generation?: import('@varin/protocol').GenerationMetrics;
   stream: string;
   requestId: string;
   sequence: number;
@@ -26,6 +27,7 @@ export interface StreamingToolCall {
 export interface ToolExecutionProgress { runId: string; operationId: string; toolName: string; details: unknown }
 export type StreamingTextPart = { type: 'text'; text: string; id?: string; order?: number } | { type: 'thinking'; thinking: string; id?: string; order?: number } | { type: 'retry'; attempt: number; retryAt: number };
 interface ProviderProgress { kind?: string; data?: { kind?: string; item_id?: string; text?: string; call_id?: string; name?: string; request_id?: string; delta?: string; attempt?: number; delay_ms?: number } }
+export interface ProgressActivity { runId: string; requestId?: string; activity?: 'text' | 'thinking' | 'retry' | 'provider'; generation?: import('@varin/protocol').GenerationMetrics }
 
 /** Rebuildable view only. No model history or running state is written by the UI. */
 export class ThreadProjection {
@@ -52,7 +54,7 @@ export class ThreadProjection {
   constructor(private readonly api: ThreadsAPI, private readonly identity: ThreadIdentity,
     private readonly publish: (snapshot: ThreadSnapshot) => void,
     private readonly report: (error: unknown) => void,
-    private readonly publishProgress: (parts: StreamingTextPart[], context?: { runId: string; requestId?: string; activity?: 'text' | 'thinking' | 'retry' | 'provider' }) => void = () => {},
+    private readonly publishProgress: (parts: StreamingTextPart[], context?: ProgressActivity) => void = () => {},
     private readonly publishTools: (calls: StreamingToolCall[]) => void = () => {},
     private readonly publishToolProgress: (progress: ToolExecutionProgress[]) => void = () => {},
     private readonly options: { contextInspection?: boolean } = {}) {}
@@ -175,7 +177,7 @@ export class ThreadProjection {
 
   private publishCurrentProgress(activity?: 'text' | 'thinking' | 'retry' | 'provider'): void {
     const current = this.activeRunId ? this.progress.get(this.activeRunId) : undefined;
-    this.publishProgress(current ? [...current.items.values(), ...(current.retry ? [current.retry] : [])] : [], this.activeRunId ? { runId: this.activeRunId, ...(current ? { requestId: current.requestId } : {}), ...(activity ? { activity } : {}) } : undefined);
+    this.publishProgress(current ? [...current.items.values(), ...(current.retry ? [current.retry] : [])] : [], this.activeRunId ? { runId: this.activeRunId, ...(current ? { requestId: current.requestId, generation: current.generation } : {}), ...(activity ? { activity } : {}) } : undefined);
     this.publishTools(current ? [...current.calls.values()] : this.interruptedTools);
   }
 
@@ -236,6 +238,7 @@ export class ThreadProjection {
       let activity: 'text' | 'thinking' | 'retry' | 'provider' | undefined;
       for (const payload of batch.events) {
         const data = payload?.data;
+        if (payload.kind === 'generation' && data) progress.generation = data as unknown as import('@varin/protocol').GenerationMetrics;
         if (payload.kind === 'provider') activity = 'provider';
         if (payload.kind === 'retry_scheduled' && typeof data?.attempt === 'number' && typeof data.delay_ms === 'number') {
           progress.retry = { type: 'retry', attempt: data.attempt, retryAt: Date.now() + data.delay_ms };

@@ -38,6 +38,15 @@ fn last_phase(db: &Connection, run_id: &str) -> Result<Option<(u64, PhaseFact)>>
 }
 
 impl Catalog {
+    pub(crate) fn record_generation_metrics(&mut self, run_id: &str, epoch: u64, request_id: &str, metrics: crate::generation_metrics::GenerationMetrics) -> Result<()> {
+        let mut step: ModelStep = record(&self.db, "model_steps", request_id)?;
+        if step.run_id != run_id || step.epoch != epoch || epoch != self.epoch() {
+            return Err(RuntimeError::ObservationEpochChanged);
+        }
+        step.generation = Some(metrics);
+        put(&self.db, "model_steps", request_id, &step)
+    }
+
     pub(crate) fn record_generation_phase(&mut self, run_id: &str, epoch: u64, request_id: &str, phase: Option<GenerationPhase>) -> Result<()> {
         let tx = self.db.transaction()?;
         let run: Run = record(&tx, "runs", run_id)?;

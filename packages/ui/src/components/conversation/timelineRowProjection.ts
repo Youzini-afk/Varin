@@ -72,6 +72,7 @@ export function projectTimelineRow(block: ChatTimelineBlock, source: ChatTimelin
   const projection = previous?.projection.liveAssistant === liveAssistant && previous?.projection.resultByCallId === resultByCallId
     ? previous.projection : { liveAssistant, resultByCallId };
   const next = { ...context,
+    liveGeneration: group?.runId === context.liveGeneration?.runId ? context.liveGeneration : undefined,
     uiEmbeds: sameRecord(previous?.presentation.uiEmbeds, uiEmbeds) ? previous!.presentation.uiEmbeds : uiEmbeds,
     toolExecutions: sameRecord(previous?.presentation.toolExecutions, toolExecutions) ? previous!.presentation.toolExecutions : toolExecutions,
     uiCards: sameRecord(previous?.presentation.uiCards, uiCards) ? previous!.presentation.uiCards : uiCards,

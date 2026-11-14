@@ -61,7 +61,7 @@ const TimelineRow = React.memo(({ block, projection, sorted, expanded, activityT
       part={block.kind === 'activity-header' ? 'header' : 'body'} expanded={block.kind === 'activity' || expanded}
       onExpandedChange={value => onExpandedChange(group.id, value)} />;
   } else {
-    content = <ChatTimelineEntryList {...props} toolExecutions={toolExecutions} outputDurationsMs={presentation.outputDurationsMs}
+    content = <ChatTimelineEntryList {...props} toolExecutions={toolExecutions} liveGeneration={block.kind === 'footer' ? presentation.liveGeneration : undefined}
       entries={block.kind === 'entry' ? [block.entry] : block.kind === 'footer' ? group.entries : []}
       liveAssistant={block.kind === 'footer' || block.kind === 'live-assistant' ? liveAssistant : undefined}
       turnActive={props.activeRunId === group.runId || assistantWaiting !== undefined || liveAssistant?.stopReason === 'pending'}

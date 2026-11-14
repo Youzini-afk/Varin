@@ -111,6 +111,9 @@ impl Catalog {
 }
 
 impl Persistence for Mutex<Catalog> {
+    fn observe_generation_metrics(&self, run: &str, epoch: u64, request: &str, metrics: crate::generation_metrics::GenerationMetrics) {
+        if let Ok(mut catalog) = self.lock() { let _ = catalog.record_generation_metrics(run, epoch, request, metrics); }
+    }
     fn observe_retry(&self, run: &str, epoch: u64, request: &str, schedule: Option<(u64, u64)>) {
         if let Ok(mut catalog) = self.lock() { let _ = catalog.record_retry_schedule(run, epoch, request, schedule); }
     }
@@ -1531,6 +1534,7 @@ impl Catalog {
                     require_ancestor(&tx, &run.branch_id, anchor)?;
                 }
                 let step = ModelStep {
+                    generation: None,
                     goal: None,
                     superseded_by_input: None,
                     id: snapshot.view.request_id.clone(),

@@ -6,7 +6,7 @@ export interface ThreadStreamingSnapshot {
   progress: StreamingTextPart[];
   streamingTools: StreamingToolCall[];
   toolProgress: ToolExecutionProgress[];
-  progressActivity: { runId: string; requestId?: string; activity?: 'text' | 'thinking' | 'retry' | 'provider' } | null;
+  progressActivity: import('./thread-projection').ProgressActivity | null;
 }
 const empty = (): ThreadStreamingSnapshot => ({ progress: [], streamingTools: [], toolProgress: [], progressActivity: null });
 

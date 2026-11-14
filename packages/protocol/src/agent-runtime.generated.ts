@@ -231,7 +231,9 @@ export interface ModelPresentationParams {
   includeContext?: boolean;
 }
 
-export interface ModelPresentation { requestId: string; providerFamily: string; modelId: string; contextTokens?: number | null; completeInputTokens?: number | null; usage: InferenceUsage; context?: ModelContextComposition; mcpTools?: string[]; }
+export interface ModelPresentation { requestId: string; providerFamily: string; modelId: string; contextTokens?: number | null; completeInputTokens?: number | null; usage: InferenceUsage; context?: ModelContextComposition; mcpTools?: string[]; generation?: GenerationMetrics; }
+
+export interface GenerationMetrics { startedAtMs:number; elapsedMs:number; firstOutputMs:number|null; lastOutputMs:number|null; outputTokens:number; measurement:'missing'|'estimated'|'actual'; recentTokens:number; recentMs:number; finished:boolean; }
 
 export interface ModelContextComposition { checkpointId: string | null; summaryId: string | null; totalTokens: number; categories: Record<string, number>; parts: Record<string, Record<string, number>>; method: string; unmeasuredMedia: number; unmeasuredProviderItems: number; }
 

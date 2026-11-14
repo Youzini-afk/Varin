@@ -52,6 +52,8 @@ pub struct ModelPresentationParams { pub request_ids: Vec<String>, pub include_c
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelPresentation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generation: Option<crate::generation_metrics::GenerationMetrics>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_tools: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -85,7 +87,7 @@ impl ModelPresentationRead {
             let usage: UsageReceipt = step.usage.map(serde_json::from_value).transpose()?.unwrap_or_default();
             let context_tokens = crate::providers::reported_context_tokens(&metadata.view.binding.provider_family, &usage);
             let complete_input_tokens = crate::providers::reported_input_tokens(&metadata.view.binding.provider_family, &usage);
-            Ok(ModelPresentation { context, mcp_tools: metadata.view.binding.mcp_tools, request_id: step.id, provider_family: metadata.view.binding.provider_family,
+            Ok(ModelPresentation { generation: step.generation, context, mcp_tools: metadata.view.binding.mcp_tools, request_id: step.id, provider_family: metadata.view.binding.provider_family,
                 model_id: metadata.view.binding.model, context_tokens, complete_input_tokens, usage: crate::catalog::inference::InferenceUsage {
                     measurement: usage.measurement, input_tokens: usage.input_tokens, output_tokens: usage.output_tokens,
                     cached_input_tokens: usage.cached_input_tokens, cache_write_tokens: usage.cache_write_tokens,

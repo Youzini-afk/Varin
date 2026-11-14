@@ -1427,6 +1427,7 @@ pub enum ToolResume {
 }
 
 pub trait Persistence: Send + Sync + 'static {
+    fn observe_generation_metrics(&self, _run: &str, _epoch: u64, _request: &str, _metrics: crate::generation_metrics::GenerationMetrics) {}
     /// Optional presentation metadata; failure must not alter execution or provider delivery.
     fn observe_generation(&self, _run: &str, _epoch: u64, _request: &str, _phase: Option<GenerationPhase>) {}
     fn observe_retry(&self, _run: &str, _epoch: u64, _request: &str, _schedule: Option<(u64, u64)>) {}
@@ -1690,6 +1691,7 @@ pub struct InputBatch {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ExecutionEvent {
+    Generation(crate::generation_metrics::GenerationMetrics),
     Provider(ProviderEvent),
     ToolCompleted(ToolResult),
     RetryScheduled { attempt: u64, delay_ms: u64 },
@@ -3524,6 +3526,8 @@ pub(crate) fn generate_model<P: Persistence + ?Sized, M: ModelProvider + ?Sized>
         let mut deltas = Vec::new();
         let mut usage = UsageReceipt::default();
         let mut phase = None;
+        let mut meter = crate::generation_metrics::GenerationMeter::new(crate::token_count::TokenCounter::for_binding(
+            &snapshot.view.binding.model, snapshot.view.binding.tokenizer.as_ref()));
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut emit = |event| {
                 if cancel.is_cancelled() && !matches!(event, ProviderEvent::Usage { .. }) {
@@ -3531,6 +3535,9 @@ pub(crate) fn generate_model<P: Persistence + ?Sized, M: ModelProvider + ?Sized>
                         "cancelled",
                         "model generation cancelled",
                     ));
+                }
+                if let Some(metrics) = meter.observe(&event) {
+                    progress.emit(run_id, &snapshot.view.request_id, ExecutionEvent::Generation(metrics));
                 }
                 let observed = match &event {
                     ProviderEvent::ReasoningDelta { text, .. } if !text.is_empty() => Some(Some(GenerationPhase::Reasoning)),
@@ -3574,5 +3581,8 @@ pub(crate) fn generate_model<P: Persistence + ?Sized, M: ModelProvider + ?Sized>
         if phase.is_some() {
             persistence.observe_generation(run_id, owner_generation, &snapshot.view.request_id, None);
         }
+        let metrics = meter.finish(&usage);
+        persistence.observe_generation_metrics(run_id, owner_generation, &snapshot.view.request_id, metrics.clone());
+        progress.emit(run_id, &snapshot.view.request_id, ExecutionEvent::Generation(metrics));
         (items, deltas, usage, result)
 }

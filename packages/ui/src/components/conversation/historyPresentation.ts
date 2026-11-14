@@ -277,7 +277,7 @@ export class HistoryPresentation {
       const after = lastByRun.get(run.runId);
       if (!after || cutByRun.get(run.runId) !== run.throughId || !run.requests.length) return [];
       const footer: ChatSessionEntry = { id: `run-usage:${run.runId}`, parentId: after, timestamp: '', type: 'run_usage', runId: run.runId,
-        usages: run.requests.map(({ requestId, usage, completeInputTokens }) => ({ requestId, measurement: usage.measurement,
+        usages: run.requests.map(({ requestId, usage, completeInputTokens, generation }) => ({ requestId, measurement: usage.measurement, generation,
           unknownReceipts: usage.measurement === 'missing' || usage.inputTokens === null || usage.outputTokens === null ? 1 : 0,
           ...(completeInputTokens == null ? usage.inputTokens === null ? {} : { input: usage.inputTokens } : { input: completeInputTokens, completeInput: completeInputTokens }),
           ...(usage.outputTokens === null ? {} : { output: usage.outputTokens }),

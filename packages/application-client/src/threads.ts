@@ -257,7 +257,7 @@ export interface ThreadRunUsage {
   runId: string;
   /** Last original item included in this Run's summary. */
   throughId: string;
-  requests: Array<Pick<import('@varin/protocol').ModelPresentation, 'requestId' | 'usage' | 'completeInputTokens'>>;
+  requests: Array<Pick<import('@varin/protocol').ModelPresentation, 'requestId' | 'usage' | 'completeInputTokens' | 'generation'>>;
 }
 /** Current file in the historical operation's original source, never the navigation project. */
 export type ThreadFileTarget = { kind: 'document'; workspaceId: string; root: string; resourceId: string }

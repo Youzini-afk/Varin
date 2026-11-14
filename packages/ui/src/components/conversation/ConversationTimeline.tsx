@@ -31,7 +31,7 @@ import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import type { StreamingToolCall, StreamingTextPart, ToolExecutionProgress } from '@/lib/agent-runtime/thread-projection';
 
-function Timeline({ api, identity, snapshot, history, runUsage, historyReady, historyReset = 0, earlierHistory, navigation, progress, streamingTools = [], toolProgress = [], cwd, working, readOnly, onQuote, onFork, onRecover, onQuestion, onOpenSection, memory, header, footer, liveUser, liveUserStatus, viewId, onScrollContainerChange }: {
+function Timeline({ api, identity, snapshot, history, runUsage, historyReady, historyReset = 0, earlierHistory, navigation, progress, streamingTools = [], toolProgress = [], liveGeneration, cwd, working, readOnly, onQuote, onFork, onRecover, onQuestion, onOpenSection, memory, header, footer, liveUser, liveUserStatus, viewId, onScrollContainerChange }: {
   api: ThreadsAPI; identity: ThreadIdentity; snapshot?: ThreadSnapshot; history: readonly HistoryItem[];
   runUsage?: readonly import('@varin/application-client').ThreadRunUsage[];
   historyReady?: boolean; historyReset?: number; earlierHistory?: ChatTimelineProps['earlierHistory'];
@@ -39,6 +39,7 @@ function Timeline({ api, identity, snapshot, history, runUsage, historyReady, hi
   progress: StreamingTextPart[]; cwd: string; working: boolean; readOnly?: boolean; onQuote(text: string): void;
   streamingTools?: StreamingToolCall[];
   toolProgress?: ToolExecutionProgress[];
+  liveGeneration?: import('@/lib/agent-runtime/thread-projection').ProgressActivity;
   liveUser?: ChatUserMessage; liveUserStatus?: ChatSessionSubmissionStatus;
   onFork?(id: string): void; onRecover?(id: string): void; memory?: ThreadMemoryAPI;
   onQuestion?(operationId: string): void;
@@ -207,8 +208,8 @@ function Timeline({ api, identity, snapshot, history, runUsage, historyReady, hi
   }, [fileTarget, identity]);
   const forkEntry = React.useCallback<NonNullable<ChatTimelineProps['onFork']>>(entry => onFork?.(entry.id), [onFork]);
   const recoverEntry = React.useCallback<NonNullable<ChatTimelineProps['onRecover']>>(entry => onRecover?.(entry.id), [onRecover]);
-  const context = React.useMemo(() => ({ api, identity, head, fileDirectory: cwd, readOnly, quote: onQuote, revealQuestion: onQuestion, openFile, fileTarget, openContext, memory, followups: snapshot?.followups, snapshot, openSection: onOpenSection, toolExecutions: view.toolExecutions, uiCards, uiInlineViews: true, uiEmbeds: uiPlacement.embeds, sourceEntry, renderExtras }),
-    [api, identity, head, cwd, readOnly, onQuote, onQuestion, openFile, fileTarget, openContext, memory, view.toolExecutions, uiCards, uiPlacement, snapshot, onOpenSection, sourceEntry, renderExtras]);
+  const context = React.useMemo(() => ({ api, identity, head, fileDirectory: cwd, readOnly, quote: onQuote, revealQuestion: onQuestion, openFile, fileTarget, openContext, memory, followups: snapshot?.followups, snapshot, openSection: onOpenSection, toolExecutions: view.toolExecutions, uiCards, uiInlineViews: true, uiEmbeds: uiPlacement.embeds, sourceEntry, renderExtras, liveGeneration }),
+    [api, identity, head, cwd, readOnly, onQuote, onQuestion, openFile, fileTarget, openContext, memory, view.toolExecutions, uiCards, uiPlacement, snapshot, onOpenSection, sourceEntry, renderExtras, liveGeneration]);
   return <ConversationContext.Provider value={context}>{preparedEntry === entryKey && <ChatTimeline key={entryKey} sessionId={timelineKey} cwd={cwd} earlierHistory={earlierHistory} navigation={navigation}
     onScrollContainerChange={onScrollContainerChange}
     entries={entries} toolExecutions={view.toolExecutions} liveAssistant={liveAssistant} liveUser={liveUser} liveUserStatus={liveUserStatus} leafId={head}
@@ -229,5 +230,5 @@ export function ConversationTimeline(props: Omit<TimelineProps, 'progress'> & { 
 }
 function StreamingTimeline({ store, streamingEnabled = true, ...props }: Omit<TimelineProps, 'progress'> & { progress?: StreamingTextPart[]; store: ThreadStreamingStore; streamingEnabled?: boolean }) {
   const state = React.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-  return <Timeline {...props} progress={streamingEnabled ? state.progress : []} streamingTools={streamingEnabled ? state.streamingTools : []} toolProgress={state.toolProgress} />;
+  return <Timeline {...props} progress={streamingEnabled ? state.progress : []} streamingTools={streamingEnabled ? state.streamingTools : []} toolProgress={state.toolProgress} liveGeneration={streamingEnabled ? state.progressActivity ?? undefined : undefined} />;
 }

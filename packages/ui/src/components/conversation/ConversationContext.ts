@@ -18,7 +18,7 @@ export interface ConversationPresentation {
   uiEmbeds?: Record<string, import('@/lib/interactive-ui/embed-projection').UiEmbedPlacement>;
   uiCards?: Record<string, UiCardProjection>;
   sourceEntry?(callId: string): string | undefined;
-  outputDurationsMs?: Record<string, number>;
+  liveGeneration?: import('@/lib/agent-runtime/thread-projection').ProgressActivity;
   quote(text: string): void;
   revealQuestion?(operationId: string): void;
   openContext?(jobRunId?: string): void;

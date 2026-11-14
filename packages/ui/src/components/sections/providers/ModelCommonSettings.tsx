@@ -3,11 +3,18 @@ import { MODEL_THINKING_EFFORTS, modelThinkingConfiguration, type ChannelModel }
 import { isModelThinkingConfiguration } from '@varin/protocol';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, getCurrentIntlLocale } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { ModelAutoSaveField } from './ModelAutoSaveField';
 import { ModelFieldLabel } from './ModelFieldStatus';
 import { SettingsFieldRow } from '../shared/SettingsSection';
+
+const CAPACITY_PRESETS = { contextWindow: [128000, 256000, 512000, 1000000], maxOutputTokens: [8000, 16000, 32000, 64000, 128000, 256000] };
+const capacity = (value: string): number | undefined => {
+  if (!value.trim()) return undefined;
+  const match = /^(.*?)\s*([km])$/i.exec(value.trim());
+  return match ? Number(match[1]) * (match[2]!.toLowerCase() === 'm' ? 1000000 : 1000) : Number(value);
+};
 
 export function ModelCommonSettings({ model, disabled, onChange, group, children }: {
   model: ChannelModel; disabled: boolean; onChange(patch: Partial<ChannelModel>): void;
@@ -18,9 +25,10 @@ export function ModelCommonSettings({ model, disabled, onChange, group, children
   const thinking = modelThinkingConfiguration(model);
   if (group === 'capacity') return <div className="space-y-3">
     {(['contextWindow', ...(chat ? ['maxOutputTokens' as const] : [])] as const).map(field => <SettingsFieldRow key={field} label={<ModelFieldLabel field={field}>{t(field === 'contextWindow' ? 'settings.models.context' : 'settings.models.output')}</ModelFieldLabel>}>
-      <ModelAutoSaveField catalogField={field} type="number" min="1" step="1" aria-label={t(field === 'contextWindow' ? 'settings.models.context' : 'settings.models.output')} placeholder={t('settings.models.unspecified')} value={String(model[field] ?? '')} disabled={disabled}
-        validate={value => value === '' || Number.isSafeInteger(Number(value)) && Number(value) > 0 ? null : t('settings.models.invalidCapacity')}
-        onCommit={value => onChange({ [field]: value === '' ? undefined : Number(value) })} />
+      <ModelAutoSaveField catalogField={field} aria-label={t(field === 'contextWindow' ? 'settings.models.context' : 'settings.models.output')} placeholder={t('settings.models.unspecified')} value={String(model[field] ?? '')} disabled={disabled}
+        presets={[{ value: '', label: t('settings.models.unspecified') }, ...CAPACITY_PRESETS[field].map(tokens => ({ value: String(tokens), label: tokens >= 1000000 ? `${tokens / 1000000}M` : `${tokens / 1000}K`, detail: tokens.toLocaleString(getCurrentIntlLocale()) }))]}
+        validate={value => capacity(value) === undefined || Number.isSafeInteger(capacity(value)) && capacity(value)! > 0 ? null : t('settings.models.invalidCapacity')}
+        onCommit={value => onChange({ [field]: capacity(value) })} />
     </SettingsFieldRow>)}
   </div>;
   if (!chat) return null;

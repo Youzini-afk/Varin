@@ -17,7 +17,7 @@ vi.mock('@/stores/useUIStore', () => {
   const state = { get settingsModelFocus() { return fixtures.focus; }, setSettingsModelFocus: (focus: typeof fixtures.focus) => { fixtures.focus = focus; }, setSettingsPage: vi.fn() };
   return { useUIStore: Object.assign((selector: (value: typeof state) => unknown) => selector(state), { getState: () => state }) };
 });
-vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/lib/i18n', () => ({ getCurrentIntlLocale: () => 'en-US', useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/lib/settings/drafts', () => ({ requestSettingsNavigation: (proceed: () => void) => proceed(), notifySettingsDraftChanged() {} }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('../shared/SettingsPageLayout', () => ({ SettingsPageLayout: ({ children, headerEnd, titleLeading }: React.PropsWithChildren<{ headerEnd?: React.ReactNode; titleLeading?: React.ReactNode }>) => <div>{titleLeading}{headerEnd}{children}</div> }));
@@ -40,7 +40,7 @@ vi.mock('@/components/ui/dropdown-menu', () => ({
   DropdownMenu: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   DropdownMenuTrigger: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   DropdownMenuContent: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
-  DropdownMenuItem: ({ children, onClick, disabled }: React.ComponentProps<'button'>) => <button disabled={disabled} onClick={onClick}>{children}</button>,
+  DropdownMenuItem: ({ children, onClick, onSelect, disabled }: Omit<React.ComponentProps<'button'>, 'onSelect'> & { onSelect?(): void }) => <button disabled={disabled} onClick={event => { onClick?.(event); onSelect?.(); }}>{children}</button>,
 }));
 vi.mock('@/components/ui/dialog', () => {
   const Open = React.createContext(false);
@@ -186,6 +186,23 @@ test('concurrent model changes queue against latest revisions and survive a conn
 test('failed model saves reload persisted models without erasing connection drafts', async () => {
   snapshot.channels[0]!.models = [model()]; await open(); await edit('settings.models.endpoint', 'http://localhost/draft'); await click('Model'); fixtures.api.save.mockRejectedValueOnce(new Error('Revision conflict')); await commit('settings.models.context', '12345');
   expect(container.textContent).toContain('Revision conflict'); expect(field('settings.models.context').value).toBe(''); expect(field('settings.models.endpoint').value).toBe('http://localhost/draft'); expect(fixtures.api.read).toHaveBeenCalledTimes(2);
+});
+
+test('capacity presets, custom suffixes and clearing preserve the selected model and directory overrides', async () => {
+  const original = { ...model(), contextWindow: 65536, maxOutputTokens: 32768, catalog: { overrides: [] } };
+  snapshot.channels[0]!.models = [original, model('other', 'Other')]; snapshot.types[0]!.catalog = [original];
+  await open(); await click('Model');
+  expect(field('settings.models.context').value).toBe('65536');
+  await click('1M1,000,000');
+  expect(lastSaved().models[0]).toMatchObject({ contextWindow: 1000000, maxOutputTokens: 32768, catalog: { overrides: ['contextWindow'] } });
+  await commit('settings.models.output', '64K');
+  expect(lastSaved().models[0].maxOutputTokens).toBe(64000);
+  await commit('settings.models.output', '');
+  expect(lastSaved().models[0].maxOutputTokens).toBeUndefined();
+  expect(lastSaved().models[0].catalog?.overrides).toContain('maxOutputTokens');
+  expect(lastSaved().models[1]).toEqual(model('other', 'Other'));
+  await commit('settings.models.context', '123456');
+  expect(lastSaved().models[0].contextWindow).toBe(123456);
 });
 test('descriptions persist as overrides, including explicit empty text, and restore per field', async () => {
   const described = { ...model('described', 'Described'), description: 'Directory text', catalog: { overrides: [] } }; snapshot.channels[0]!.models = [described]; snapshot.types[0]!.catalog = [described];

@@ -48,7 +48,7 @@ const UsageMetric: React.FC<{
 };
 
 /** `animate`: the turn just finished here, so the numbers roll into place. */
-export const ChatAssistantUsageFooter: React.FC<{ tokensPerSecond?: number; usage: ChatUsage; animate?: boolean }> = ({ tokensPerSecond, usage, animate = false }) => {
+export const ChatAssistantUsageFooter: React.FC<{ usage: ChatUsage; animate?: boolean }> = ({ usage, animate = false }) => {
   const { t } = useI18n();
   const presentation = projectChatUsagePresentation(usage);
   if (!presentation) return null;
@@ -81,15 +81,6 @@ export const ChatAssistantUsageFooter: React.FC<{ tokensPerSecond?: number; usag
           value={presentation.total}
           animate={animate}
         />
-      ) : null}
-      {tokensPerSecond !== undefined && Number.isFinite(tokensPerSecond) && tokensPerSecond > 0 ? (
-        <span
-          className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap tabular-nums"
-          title={`Output token rate: ${tokensPerSecond.toFixed(1)} Tok/s`}
-        >
-          <span aria-hidden="true">{tokensPerSecond.toFixed(1)} Tok/s</span>
-          <span className="sr-only">Output token rate {tokensPerSecond.toFixed(1)} tokens per second</span>
-        </span>
       ) : null}
     </footer>
   );

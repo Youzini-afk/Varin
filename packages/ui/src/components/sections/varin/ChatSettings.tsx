@@ -35,6 +35,7 @@ export const ChatSettings: React.FC = () => {
     userMessageRenderingMode: s.userMessageRenderingMode, collapsibleUserMessages: s.collapsibleUserMessages,
     stickyUserHeader: s.stickyUserHeader, promptNavigatorEnabled: s.promptNavigatorEnabled,
     showReasoningTraces: s.showReasoningTraces, collapsibleThinkingBlocks: s.collapsibleThinkingBlocks,
+    showGenerationSpeed: s.showGenerationSpeed,
     showExpandedBashTools: s.showExpandedBashTools, showExpandedEditTools: s.showExpandedEditTools,
     codeBlockLineWrap: s.codeBlockLineWrap, diffLayoutPreference: s.diffLayoutPreference,
     mermaidRenderingMode: s.mermaidRenderingMode, showToolFileIcons: s.showToolFileIcons,
@@ -81,6 +82,7 @@ export const ChatSettings: React.FC = () => {
           options={[{ value: 'collapsed', label: t('settings.chat.collapsed') }, { value: 'summary', label: t('settings.chat.expanded') }]} />
       </SettingsFieldRow> : null}
       <div data-settings-item="chat.reasoning" className="divide-y divide-border/40">
+        <Toggle item="chat.generation-speed" label={t('settings.chat.generationSpeed')} checked={state.showGenerationSpeed} onChange={actions.setShowGenerationSpeed} />
         <Toggle label={t('settings.chat.thinking')} item="chat.reasoning-traces" checked={state.showReasoningTraces}
           onChange={actions.setShowReasoningTraces} />
         {state.showReasoningTraces ? <div className="pl-5"><Toggle label={t('settings.chat.autoExpandThinking')}

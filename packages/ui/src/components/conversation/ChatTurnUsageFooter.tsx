@@ -3,19 +3,19 @@ import type { ChatAssistantMessage, ChatSessionEntry, ChatUsage } from './types'
 import {
   aggregateChatUsage,
   assistantMessagesForTurn,
-  assistantTokensPerSecond,
 } from './usagePresentation';
 import { ChatAssistantUsageFooter } from './ChatAssistantUsageFooter';
+import { ChatGenerationSpeed } from './ChatGenerationSpeed';
 
 export const ChatTurnUsageFooter: React.FC<{
   actions?: React.ReactNode;
   entries?: readonly ChatSessionEntry[];
   usages?: readonly ChatUsage[];
   liveAssistant?: ChatAssistantMessage;
-  outputDurationsMs?: Readonly<Record<string, number>>;
+  liveGeneration?: import('@/lib/agent-runtime/thread-projection').ProgressActivity;
   /** The turn is running; a footer that saw it run arrives with motion when it ends. */
   turnActive?: boolean;
-}> = ({ actions, entries = [], usages: providedUsages, liveAssistant, outputDurationsMs, turnActive = false }) => {
+}> = ({ actions, entries = [], usages: providedUsages, liveAssistant, liveGeneration, turnActive = false }) => {
   // History footers are static. Only a turn that finished while this footer
   // was mounted staggers its actions in and rolls its numbers.
   const sawActive = React.useRef(turnActive);
@@ -26,7 +26,7 @@ export const ChatTurnUsageFooter: React.FC<{
     const usage = aggregateChatUsage(usages.filter(usage => usage.measurement === measurement));
     return usage ? [usage] : [];
   });
-  if (!groups.length && !actions) return null;
+  if (!groups.length && !actions && !liveGeneration?.generation) return null;
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5" data-conversation-turn-footer data-arriving={arriving || undefined}>
       {actions}
@@ -34,11 +34,11 @@ export const ChatTurnUsageFooter: React.FC<{
       {groups.map(usage => (
         <ChatAssistantUsageFooter
           key={usage.measurement}
-          tokensPerSecond={assistantTokensPerSecond(entries, liveAssistant, outputDurationsMs)}
           usage={usage}
           animate={arriving}
         />
       ))}
+      <ChatGenerationSpeed usages={usages} live={liveGeneration} active={turnActive} />
       </div>
     </div>
   );

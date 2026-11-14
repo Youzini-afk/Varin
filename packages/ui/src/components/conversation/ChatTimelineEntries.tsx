@@ -1018,7 +1018,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
   ChatTimelineProps,
   'assistantWaiting' | 'liveUser' | 'liveUserStatus'
 > & {
-  outputDurationsMs?: Readonly<Record<string, number>>;
+  liveGeneration?: import('@/lib/agent-runtime/thread-projection').ProgressActivity;
   projectedResultByCallId?: ReadonlyMap<string, ChatToolResultMessage>;
   part?: 'body' | 'footer';
   turnActive?: boolean;
@@ -1037,7 +1037,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
   onFork,
   onOpenThread,
   onRecover,
-  outputDurationsMs,
+  liveGeneration,
   projectedResultByCallId,
   recoveryBusyEntryId,
   sessionId,
@@ -1351,7 +1351,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
           entries={entries}
           usages={footerUsage?.usages}
           liveAssistant={projection.liveAssistant}
-          outputDurationsMs={outputDurationsMs}
+          liveGeneration={liveGeneration}
           turnActive={Boolean(turnActive)}
           actions={turnText && !turnActive ? (
             <div className="flex h-6 shrink-0 items-center">

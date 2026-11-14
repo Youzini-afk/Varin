@@ -9,6 +9,7 @@ it('reads an ended run through the anchored cut, deduplicates requests and refre
   const current = [item('recent:1', 'second'), item('recent:2', 'second')];
   const earlier = [item('boundary', 'unrelated', 'older-run'), item('first:1', '请求'), item('first:2', '请求')];
   const presentation = (requestId: string, outputTokens: number): ModelPresentation => ({ requestId, providerFamily: 'openai-completions', modelId: 'model',
+    generation: { startedAtMs: 1000, elapsedMs: 2000, firstOutputMs: 300, lastOutputMs: 1900, outputTokens: 2, measurement: 'estimated', recentTokens: 2, recentMs: 2000, finished: true },
     usage: { measurement: 'actual', inputTokens: 100, outputTokens, cachedInputTokens: null, cacheWriteTokens: null, reasoningTokens: null, pricingVersion: null } });
   let state = 'waiting', output = 3;
   const historyPage = vi.fn(async () => ({ head: 'view:cut', previous: null,
@@ -28,6 +29,7 @@ it('reads an ended run through the anchored cut, deduplicates requests and refre
   output = 7;
   const refreshed = await reader.read('branch', page, [presentation('second', 5)]);
   expect(refreshed[0]!.requests.find(value => value.requestId === '请求')?.usage.outputTokens).toBe(7);
+  expect(refreshed[0]!.requests.find(value => value.requestId === '请求')?.generation).toEqual(presentation('请求', 3).generation);
   expect(historyPage).toHaveBeenCalledTimes(1);
 });
 

@@ -397,6 +397,7 @@ fn actual_catalog_two_model_tool_exchange_survives_reopen_with_opaque_original()
     let f = Fixture::new();
     let db = f.catalog();
     let input = input(&db);
+    let epoch = input.owner_generation;
     let run_id = input.run_id.clone();
     let cancel = CancellationToken::default();
     let (progress, _never_consumed) = ProgressSink::channel();
@@ -420,6 +421,11 @@ fn actual_catalog_two_model_tool_exchange_survives_reopen_with_opaque_original()
             .is_some_and(|o| o.value == json!({"signature":[null,42,"unaltered"]}))
     }));
     assert!(matches!(&history.last().unwrap().content,Content::Text{text} if text=="done"));
+    let ids = [format!("{run_id}:{epoch}:1"), format!("{run_id}:{epoch}:2")];
+    let read = db.lock().unwrap().capture_model_presentations(&ids, false).unwrap();
+    let presentations = read.load(&|| false).unwrap();
+    assert_eq!(presentations.len(), 2);
+    assert!(presentations.iter().all(|value| value.generation.as_ref().is_some_and(|metrics| metrics.finished && metrics.started_at_ms > 0)));
 }
 #[test]
 fn interjections_during_model_and_tool_wait_for_the_next_request() {

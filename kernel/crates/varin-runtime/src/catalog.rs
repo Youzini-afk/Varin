@@ -1129,6 +1129,7 @@ impl Catalog {
             return Err(RuntimeError::Conflict("model step identity reused".into()));
         }
         let mut step = ModelStep {
+            generation: None,
             goal: None,
             superseded_by_input: None,
             id: key.into(),

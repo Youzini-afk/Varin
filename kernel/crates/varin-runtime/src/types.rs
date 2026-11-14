@@ -157,6 +157,8 @@ pub struct ProviderOriginal {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModelStep {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<crate::generation_metrics::GenerationMetrics>,
     #[serde(default)]
     pub goal: Option<crate::catalog::goals::FrozenGoal>,
     #[serde(default)]
