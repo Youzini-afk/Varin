@@ -34,7 +34,8 @@ impl Catalog {
             return Ok(vec![]);
         }
         let mut candidates = Vec::new();
-        let mut query = self.db.prepare("SELECT body FROM runs WHERE json_extract(body,'$.state') IN ('generating','executing') AND json_extract(body,'$.cancel_requested')=0")?;
+        // Standalone text and knowledge inference have their own branchless Run codec.
+        let mut query = self.db.prepare("SELECT body FROM runs WHERE branch_id IS NOT NULL AND json_extract(body,'$.state') IN ('generating','executing') AND json_extract(body,'$.cancel_requested')=0")?;
         for row in query.query_map([], |row| row.get::<_, String>(0))? {
             let run: Run = serde_json::from_str(&row?)?;
             if bot_work_events::targets(&self.db, &run.thread_id, &run.branch_id)?.is_empty() {

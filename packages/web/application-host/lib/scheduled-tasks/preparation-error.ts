@@ -11,7 +11,7 @@ const reasons = new Set([
   'workspace_backend_unavailable', 'credential-scope-changed', 'model-configuration-changed',
   'credential-resolution-failed', 'model-channel-unavailable', 'model-channel-disabled',
   'model-unavailable', 'model-disabled', 'model-operation-unavailable', 'invalid-params',
-  'operation-error', 'protocol-error', 'not-found', 'kernel-unavailable',
+  'operation-error', 'protocol-error', 'not-found', 'kernel-unavailable', 'kernel-grant-stale',
 ]);
 export class CalendarPreparationError extends Error {
   readonly code: string;

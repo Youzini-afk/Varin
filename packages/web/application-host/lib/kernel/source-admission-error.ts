@@ -16,7 +16,7 @@ export function sourceFailureCode(error: unknown): SourceFailureCode | undefined
   if (error instanceof DocumentWorkspaceUnregisteredError) return 'source_registration_missing';
   if (error instanceof DocumentUntrustedError) return 'source_authority_denied';
   if (error instanceof DocumentWorkspaceUnavailableError) return 'source_unavailable';
-  if (error instanceof KernelClientError && ['unauthorized', 'kernel-grant-stale'].includes(error.code)) return 'source_authority_denied';
+  if (error instanceof KernelClientError && error.code === 'unauthorized') return 'source_authority_denied';
   return undefined;
 }
 /** Called only around the original Storage source reader, never around unrelated preparation. */

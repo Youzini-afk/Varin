@@ -60,9 +60,17 @@ export function createAgentPersonalization(options: {
   onChanged?(): void;
 }) {
   let connection: Promise<KernelScopedClient> | undefined;
-  const client = () => connection ??= options.client.issueGrant({ grantId: `agent-personalization:${randomUUID()}`,
-    owningWorkspace: WORKSPACE, executionWorkspace: WORKSPACE, capabilities: ['storage.read', 'storage.write'], pathScopes: [''],
-  }).then(grant => options.client.scoped(grant)).catch(error => { connection = undefined; throw error; });
+  // This owner lives with the Host; scoped clients live with one kernel instance.
+  options.client.subscribeExit(() => { connection = undefined; });
+  const client = () => {
+    if (connection) return connection;
+    const creating = options.client.issueGrant({ grantId: `agent-personalization:${randomUUID()}`,
+      owningWorkspace: WORKSPACE, executionWorkspace: WORKSPACE, capabilities: ['storage.read', 'storage.write'], pathScopes: [''],
+    }).then(grant => options.client.scoped(grant));
+    connection = creating;
+    void creating.catch(() => { if (connection === creating) connection = undefined; });
+    return creating;
+  };
   const read = async () => {
     const record = await (await client()).getRecord(WORKSPACE, RECORD);
     if (!record) return { document: { memories: [], prompts: {}, nextId: 1 } as Document, revision: 0 };

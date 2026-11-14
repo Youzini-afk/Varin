@@ -587,7 +587,7 @@ fn native_followup_all_instants_deliver_original_wait_and_one_active_ingress_wit
                     .as_deref(),
                 Some(f.run.id.as_str())
             );
-            assert_eq!(db.nearest_wait_deadline().unwrap(), None);
+            assert_eq!(db.nearest_followup_deadline().unwrap(), None);
             break;
         }
     }
@@ -733,7 +733,7 @@ fn followup_get_list_and_control_consume_real_retained_user_instruction_from_bot
 }
 
 #[test]
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 fn native_calendar_deadline_observes_one_true_cold_thread_without_host_timer_or_model() {
     use varin_runtime::catalog::calendar::*;
     let f = Fixture::with_tools(
@@ -837,7 +837,7 @@ fn native_calendar_deadline_observes_one_true_cold_thread_without_host_timer_or_
                 db.calendar_pending().unwrap().preparations[0].id,
                 occurrence.id
             );
-            assert_eq!(db.nearest_wait_deadline().unwrap(), None);
+            assert_eq!(db.nearest_calendar_deadline().unwrap(), None);
             break;
         }
     }

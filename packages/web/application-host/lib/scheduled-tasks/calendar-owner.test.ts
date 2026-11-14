@@ -174,6 +174,8 @@ it('logs only safe owner codes even when an exception contains provider secrets 
   const { ModelConfigurationError } = await import('../models/configuration.js');
   const secret = 'Bearer private-provider-response';
   const model = calendarPreparationError(new ModelConfigurationError('model-disabled', secret), 'model');
+  const stale = calendarPreparationError(new KernelClientError({ code: 'kernel-grant-stale', message: secret, retryable: true }), 'context');
+  expect(calendarErrorCode(stale)).toBe('calendar_preparation:context:kernel-grant-stale');
   expect(model.code).toBe('calendar_preparation:model:model-disabled');
   expect(calendarErrorCode(model)).toBe(model.code);
   const unknown = calendarPreparationError(new KernelClientError({ code: secret, message: secret, details: { token: secret } }), 'admission');

@@ -103,6 +103,12 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 
 it('keeps the original cause when a source owner wraps a preparation failure', () => {
+  const stale = new KernelClientError({ code: 'kernel-grant-stale', message: 'The kernel grant handle belongs to an old epoch', retryable: true });
+  expect(preparationFailure(stale, 'Preparing agent execution')).toMatchObject({
+    code: 'preparation_failed', failure: { code: 'kernel-grant-stale', message: stale.message },
+  });
+  expect(preparationFailure(new KernelClientError({ code: 'unauthorized', message: 'Access denied' }), 'Preparing source'))
+    .toMatchObject({ code: 'source_authority_denied' });
   expect(preparationFailure(new SourceCaptureError('new-file.txt'), 'Preparing child source'))
     .toMatchObject({ code: 'source_changed', detail: expect.stringContaining('new-file.txt') });
   const failure = preparationFailure(new SourceAdmissionError('source_unavailable',

@@ -548,16 +548,15 @@ impl Sender {
             },
         );
         scheduler.order.push_back(id);
+        // Publish OPEN before another scheduler pass can give this stream to an encoder.
+        // Both OPEN and the worker's BEGIN use the same control queue.
+        let opened = shared.command(
+            "transport-stream-open",
+            id,
+            json!({"identity":meta,"arrivalSequence":sequence}),
+        );
         drop(scheduler);
-        if shared
-            .command(
-                "transport-stream-open",
-                id,
-                json!({"identity":meta,"arrivalSequence":sequence}),
-            )
-            .is_err()
-            || shared.start_streams().is_err()
-        {
+        if opened.is_err() || shared.start_streams().is_err() {
             shared.fail(None);
             // SendError is a disconnect indication; no caller replays the owned body.
             return Err(mpsc::SendError(Value::Null));

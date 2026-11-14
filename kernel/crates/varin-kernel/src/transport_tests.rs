@@ -149,6 +149,53 @@ fn saturated_response_streams_do_not_own_reverse_bridge_credit() {
 }
 
 #[test]
+fn concurrent_stream_admission_publishes_open_before_worker_begin() {
+    let (shared, _input, jobs, controls) = fixture();
+    const PER_SENDER: usize = 256;
+    let encoder = shared.clone();
+    let worker = thread::spawn(move || {
+        for _ in 0..PER_SENDER * 2 {
+            let job = jobs.recv_timeout(Duration::from_secs(5)).unwrap();
+            let BodyJob::Encode(id, _) = &job else { panic!("expected encoding") };
+            let id = *id;
+            run_body_job(job, &encoder).unwrap();
+            // Release the encoded fixture stream's credit so admissions continue racing
+            // with worker completion, as on a live peer settling earlier streams.
+            {
+                let mut scheduler = encoder.scheduled.lock().unwrap();
+                scheduler.streams.remove(&id);
+                scheduler.order.retain(|value| *value != id);
+            }
+            encoder.start_streams().unwrap();
+        }
+    });
+    let senders = (0..2).map(|source| {
+        let sender = sender(&shared);
+        thread::spawn(move || {
+            for index in 0..PER_SENDER {
+                sender.send(json!({"kind":"response","id":format!("{source}:{index}"),
+                    "result":"x".repeat(KERNEL_INLINE_MAX_BYTES + 1)})).unwrap();
+            }
+        })
+    }).collect::<Vec<_>>();
+    let mut opened = std::collections::HashSet::new();
+    for _ in 0..PER_SENDER * 4 {
+        let Control::Frame(frame) = controls.recv_timeout(Duration::from_secs(5)).unwrap() else {
+            panic!("expected stream control");
+        };
+        let id = frame["streamId"].as_str().unwrap().to_owned();
+        match frame["kind"].as_str().unwrap() {
+            "transport-stream-open" => assert!(opened.insert(id)),
+            "transport-stream-begin" => assert!(opened.remove(&id), "BEGIN arrived before OPEN"),
+            other => panic!("unexpected {other}"),
+        }
+    }
+    assert!(opened.is_empty());
+    for sender in senders { sender.join().unwrap(); }
+    worker.join().unwrap();
+}
+
+#[test]
 fn progress_waits_for_bounded_queue_space_not_remote_body_acknowledgements() {
     let (shared, _, jobs, controls) = fixture();
     shared.scheduled.lock().unwrap().inline_bytes = INLINE_QUEUE_BYTES;

@@ -630,6 +630,11 @@ mod tests {
         let context = db.model_request_context(&status.run_id).unwrap();
         assert_eq!(context.session_id, status.run_id);
         assert!(context.workspace_id.is_none());
+        // Default-enabled Bot inactivity must not decode this executing auxiliary Run
+        // as conversation work or break the shared continuation deadline reader.
+        assert_eq!(db.nearest_bot_inactivity_deadline().unwrap(), None);
+        db.reconcile_bot_inactivity_at(observations::wall_time_ms().unwrap()).unwrap();
+        assert!(!db.model_text_status(&id).unwrap().cancelled);
         drop(db);
         std::fs::remove_dir_all(path).unwrap();
     }

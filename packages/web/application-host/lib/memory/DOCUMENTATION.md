@@ -7,6 +7,11 @@ implicit import of historical sessions or knowledge records and no background ex
 New Agent notes append through the serialized mutation owner without a preliminary read. Updates and deletions
 require the observed revision; original operation receipts deduplicate retries for both paths.
 
+The personalization owner lives with the Host, while its scoped kernel client belongs to one
+kernel instance. Kernel exit invalidates that cached client; the next read or mutation obtains a
+fresh grant. An interrupted call retains its error and original operation receipt. A stale internal
+grant is reported as an execution-preparation failure, not a loss of the user's source authorization.
+
 `kernel/memory-owner.ts` routes native memory tools through the admitted Run, operation and scopes.
 The tool cannot read another project's or Thread's notes. Selected-message saves preserve chosen text
 for editing without calling the Bot organizer. Authenticated `/api/agent-personalization` routes expose

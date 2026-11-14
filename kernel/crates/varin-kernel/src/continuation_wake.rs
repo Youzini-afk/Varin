@@ -2,11 +2,34 @@
 //! wakeup hint; Catalog rechecks the persisted absolute deadline before committing any outcome.
 //! No timer wakes a suspended computer and no Wait receives its own worker.
 pub use platform::{channel, Sender};
+use std::collections::HashSet;
 use std::io;
+use varin_runtime::catalog::Catalog;
 pub struct StopGuard(pub Sender);
 impl Drop for StopGuard {
     fn drop(&mut self) {
         self.0.shutdown();
+    }
+}
+
+fn record_outcome<T, E: std::fmt::Display>(
+    catalog: &mut Catalog,
+    failed: &mut HashSet<&'static str>,
+    source: &'static str,
+    stage: &str,
+    result: Result<T, E>,
+) -> Option<T> {
+    match result {
+        Ok(value) => {
+            failed.remove(source);
+            Some(value)
+        }
+        Err(error) => {
+            if failed.insert(source) {
+                let _ = catalog.record_recovery_failure(source, &format!("{stage}: {error}"));
+            }
+            None
+        }
     }
 }
 
@@ -16,25 +39,39 @@ pub(crate) fn drive(
     owner: std::sync::Weak<varin_runtime::supervisor::RunSupervisor>,
     mut wakes: platform::Receiver,
 ) {
-    let mut failed = [false; 4];
+    let mut failed_deadlines = HashSet::new();
+    let mut failed_reconciliation = HashSet::new();
     loop {
         let Some(runtime) = owner.upgrade() else {
             break;
         };
         let catalog = runtime.catalog();
-        let deadline = match catalog
-            .lock()
-            .map_err(|_| ())
-            .and_then(|c| c.nearest_wait_deadline().map_err(|_| ()))
-        {
-            Ok(deadline) => deadline,
-            Err(()) => {
-                if let Ok(mut c) = catalog.lock() {
-                    let _ =
-                        c.record_recovery_failure("continuation-wake", "wait_deadline_read_failed");
-                }
-                break;
-            }
+        let deadline = {
+            let Ok(mut c) = catalog.lock() else { break };
+            // Each owner reads its own deadlines. A malformed record in one domain must
+            // not stop the shared waiter or disarm another owner's future deadline.
+            let deadlines = [
+                ("waits", c.nearest_wait_deadline()),
+                ("bot-inactivity", c.nearest_bot_inactivity_deadline()),
+                ("followups", c.nearest_followup_deadline()),
+                ("calendar", c.nearest_calendar_deadline()),
+            ];
+            deadlines
+                .into_iter()
+                .filter_map(|(source, result)| {
+                    let deadline = record_outcome(
+                        &mut c,
+                        &mut failed_deadlines,
+                        source,
+                        "deadline_read_failed",
+                        result,
+                    )
+                    .flatten();
+                    // Failed due facts retry on the next real wake, not on their already
+                    // elapsed timer. Delivery failures do not disarm future deadlines.
+                    deadline.filter(|_| !failed_reconciliation.contains(source))
+                })
+                .min()
         };
         drop(catalog);
         drop(runtime);
@@ -59,61 +96,73 @@ pub(crate) fn drive(
         // Resolve short Wait facts before any content/Goal/followup work. A committed trigger
         // is naturally excluded from the next deadline query, including when its consumer
         // subsequently fails. An unrelated owner failure cannot disarm other future deadlines.
-        let facts = runtime
-            .catalog()
-            .lock()
-            .map_err(|_| ())
-            .and_then(|mut c| c.reconcile_waits().map_err(|_| ()));
-        if facts.is_err() {
-            if let Ok(mut c) = runtime.catalog().lock() {
-                let _ = c.record_recovery_failure(
-                    "continuation-wake",
-                    "wait_fact_reconciliation_failed",
-                );
-            }
-            break;
-        }
         // Persist due instants before loading any follow-up content. A held/failed consumer
         // cannot leave an elapsed deadline armed and spin this native wake source.
-        let time_facts = runtime.catalog().lock().map_err(|_| ()).and_then(|mut c| {
-            varin_runtime::catalog::observations::wall_time_ms()
-                .and_then(|now| { c.reconcile_bot_inactivity_at(now)?; c.reconcile_followup_facts_at(now) })
-                .map_err(|_| ())
-        });
-        let calendar_facts = runtime.catalog().lock().map_err(|_| ()).and_then(|mut c| {
-            varin_runtime::catalog::observations::wall_time_ms()
-                .and_then(|now| c.reconcile_calendar_facts_at(now))
-                .map_err(|_| ())
-        });
+        let catalog = runtime.catalog();
+        let (wait_facts, inactivity_facts, followup_facts, calendar_facts) = {
+            let Ok(mut c) = catalog.lock() else { break };
+            (
+                c.reconcile_waits().map(|_| ()),
+                varin_runtime::catalog::observations::wall_time_ms()
+                    .and_then(|now| c.reconcile_bot_inactivity_at(now)),
+                varin_runtime::catalog::observations::wall_time_ms()
+                    .and_then(|now| c.reconcile_followup_facts_at(now))
+                    .map(|_| ()),
+                varin_runtime::catalog::observations::wall_time_ms()
+                    .and_then(|now| c.reconcile_calendar_facts_at(now))
+                    .map(|_| ()),
+            )
+        };
         // Each domain gets the committed-event pass independently; pure Host arithmetic never blocks it. Diagnostics
         // are edge-triggered per owner, so the error event itself cannot generate a retry loop.
         let results = [
+            ("waits", wait_facts.map_err(|error| error.to_string())),
             (
-                "messages",
-                runtime.reconcile_message_requests().map_err(|_| ()),
+                "bot-inactivity",
+                inactivity_facts.map_err(|error| error.to_string()),
             ),
-            ("goals", runtime.reconcile_goal_waits().map_err(|_| ())),
             (
                 "followups",
-                varin_runtime::catalog::followups::reconcile(&runtime.catalog())
-                    .map(|_| ())
-                    .map_err(|_| ())
-                    .and(time_facts.map(|_| ())),
+                followup_facts.map_err(|error| error.to_string()),
             ),
             (
                 "calendar",
+                calendar_facts.map_err(|error| error.to_string()),
+            ),
+            (
+                "messages",
+                runtime
+                    .reconcile_message_requests()
+                    .map_err(|error| error.to_string()),
+            ),
+            (
+                "goals",
+                runtime
+                    .reconcile_goal_waits()
+                    .map_err(|error| error.to_string()),
+            ),
+            (
+                "followup-delivery",
+                varin_runtime::catalog::followups::reconcile(&runtime.catalog())
+                    .map(|_| ())
+                    .map_err(|error| error.to_string()),
+            ),
+            (
+                "calendar-delivery",
                 varin_runtime::catalog::calendar::reconcile(&runtime.catalog())
-                    .map_err(|_| ())
-                    .and(calendar_facts.map(|_| ())),
+                    .map(|_| ())
+                    .map_err(|error| error.to_string()),
             ),
         ];
-        for (index, (source, result)) in results.into_iter().enumerate() {
-            if result.is_err() && !failed[index] {
-                if let Ok(mut c) = runtime.catalog().lock() {
-                    let _ = c.record_recovery_failure(source, "continuation_reconciliation_failed");
-                }
-            }
-            failed[index] = result.is_err();
+        let Ok(mut c) = catalog.lock() else { break };
+        for (source, result) in results {
+            record_outcome(
+                &mut c,
+                &mut failed_reconciliation,
+                source,
+                "continuation_reconciliation_failed",
+                result,
+            );
         }
     }
 }

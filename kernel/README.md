@@ -57,6 +57,8 @@ body work. The receiver registers cancellation and input ordering immediately at
 cancel that overtakes an inline frame waits only for that arrival, with no unbounded retired-ID cache.
 Stream offers reserve input ordering before encoding or waiting for a body credit; only those streams
 need the pre-body cancellation handshake.
+Registering an outgoing stream and enqueueing its OPEN share the scheduler lock. Encoders can only
+discover it after OPEN is queued, so concurrent scheduling cannot publish BEGIN ahead of OPEN.
 
 Queued cancellation, observer cancellation and domain completion differ. Returning transport credit
 cannot prove an accepted executor stopped. Client/worker shutdown retains original requests, owner locks

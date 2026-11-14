@@ -547,14 +547,15 @@ fn native_continuation_worker_expires_catalog_wait_without_host_or_model_polling
 }
 
 #[test]
-#[cfg(target_os = "linux")]
-fn native_deadline_survives_unrelated_followup_reconciliation_failure() {
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+fn native_deadline_survives_unrelated_owner_read_and_reconciliation_failures() {
     let f = fixture();
     waiting(&f, true, calls(vec![json!({"timeoutMs":1500})]));
     // Inject an unreadable followup definition in the independent original control owner.
     // All original Wait/Run/Operation/message facts remain valid and queryable.
     let fault = rusqlite::Connection::open(f.root.join("conversation.sqlite")).unwrap();
     fault.execute("INSERT INTO followups(id,thread_id,source_run_id,body) VALUES('broken-followup',?1,?2,?3)", rusqlite::params![f.run.thread_id, f.run.id, r#"{"wait":{"state":"waiting"}}"#]).unwrap();
+    fault.execute("INSERT INTO runs(id,branch_id,body) VALUES('broken-attention',?1,?2)", rusqlite::params![f.run.branch_id, r#"{"state":"executing","cancel_requested":false}"#]).unwrap();
     assert!(varin_runtime::catalog::followups::reconcile(&f.catalog()).is_err());
     let (signal, wakes) = crate::continuation_wake::channel().unwrap();
     let (events, event_rx) = mpsc::sync_channel(1);
@@ -601,12 +602,17 @@ fn native_deadline_survives_unrelated_followup_reconciliation_failure() {
         )
         .unwrap();
     assert_eq!(
-        diagnostics, 1,
-        "the same failed owner cannot produce a diagnostic/event retry loop"
+        diagnostics, 4,
+        "deadline read, due facts and delivery failures each report once without an event retry loop"
     );
     fault
         .execute("DELETE FROM followups WHERE id='broken-followup'", [])
         .unwrap();
+    let reasons: Vec<String> = fault.prepare("SELECT json_extract(data,'$.reason') FROM events WHERE kind='recovery.unavailable' AND subject='bot-inactivity'").unwrap()
+        .query_map([], |row| row.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
+    assert_eq!(reasons.len(), 2);
+    assert!(reasons.iter().all(|reason| reason.contains("missing field")));
+    fault.execute("DELETE FROM runs WHERE id='broken-attention'", []).unwrap();
     drop(fault);
     f.finish();
 }
