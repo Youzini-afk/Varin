@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import { browserDeviceLabel, browserResourceLabel } from '@/lib/browser-presentation';
 import { useUIStore } from '@/stores/useUIStore';
 import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { CdpConnectionDialog } from './CdpConnectionDialog';
@@ -54,7 +55,7 @@ function BrowserSettingsContent() {
     const resource = catalog?.resources.find(item => item.browserId === browserId);
     if (!resource?.instanceId) return;
     const viewBrowserId = catalog?.viewBrowserIds?.[browserId] ?? browserId, ui = useUIStore.getState();
-    ui.openContextPanelTab('', { mode: 'browser', label: resource.label,
+    ui.openContextPanelTab('', { mode: 'browser', label: browserResourceLabel(resource, t),
       dedupeKey: `browser-resource:${viewBrowserId}`, browserBinding: { browserId: viewBrowserId, instanceId: resource.instanceId } });
     ui.setSettingsDialogOpen(false);
   };
@@ -72,7 +73,7 @@ function BrowserSettingsContent() {
           <SelectTrigger size="settings" className="w-full max-w-72" aria-label={t('settings.browser.default')}><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="automatic">{t('settings.browser.automatic')}</SelectItem>
             {catalog.settings.defaultBrowserId && !catalog.resources.some(item => item.browserId === catalog.settings.defaultBrowserId) && <SelectItem value={catalog.settings.defaultBrowserId}>{t('browser.resource.offline')}</SelectItem>}
-            {catalog.resources.map(item => <SelectItem key={item.browserId} value={item.browserId}>{item.label} · {item.deviceName}</SelectItem>)}
+            {catalog.resources.map(item => <SelectItem key={item.browserId} value={item.browserId}>{browserResourceLabel(item, t)} · {browserDeviceLabel(item, t)}</SelectItem>)}
           </SelectContent>
         </Select>
       </SettingsFieldRow>}
@@ -88,11 +89,11 @@ function BrowserSettingsContent() {
         return <div key={resource.browserId} className="group py-4">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <Icon name="global" className="size-5 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 flex-1"><p className="typography-ui-label">{resource.label}</p><p className="mt-1 typography-meta text-muted-foreground">{resource.deviceName}{resource.source ? ` · ${t(`settings.browser.source.${resource.source}`)}` : ''}</p></div>
+            <div className="min-w-0 flex-1"><p className="typography-ui-label">{browserResourceLabel(resource, t)}</p><p className="mt-1 typography-meta text-muted-foreground">{browserDeviceLabel(resource, t)}{resource.source ? ` · ${t(`settings.browser.source.${resource.source}`)}` : ''}</p></div>
             <span className="typography-meta text-muted-foreground">{t(`browser.resource.state.${resource.state}`)}</span>
             <div className="flex items-center gap-1">
               <Button variant="ghost" size="sm" disabled={!resource.instanceId} onClick={() => openBrowser(resource.browserId)}>{t('settings.browser.view')}</Button>
-              {connection && <Button variant="ghost" size="sm" disabled={saving} onClick={() => setEditing(connection)} aria-label={t('settings.browser.edit', { name: resource.label })}><Icon name="edit" className="size-4" /></Button>}
+              {connection && <Button variant="ghost" size="sm" disabled={saving} onClick={() => setEditing(connection)} aria-label={t('settings.browser.edit', { name: browserResourceLabel(resource, t) })}><Icon name="edit" className="size-4" /></Button>}
             </div>
           </div>
           <details className="ml-9 mt-2 typography-meta text-muted-foreground"><summary className="w-fit cursor-pointer select-none">{t('settings.browser.details')}</summary>

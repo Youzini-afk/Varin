@@ -72,6 +72,8 @@ node --test packages/browser-connector/test/*.test.mjs
 
 Host builds include the extension as a small cross-platform asset; settings
 downloads an archive from the running Host. No browser-native binary is built.
+The popup and connection messages use Chrome's native `_locales` catalogs and
+follow the browser's UI language independently of the Varin frontend language.
 Tests cover the connector state machine, original device pairing over HTTP and
 the actual background module's share/command/receipt path without native
 messaging. An opt-in Chromium integration uses `VARIN_BROWSER_EXECUTABLE` in

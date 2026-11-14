@@ -1,8 +1,13 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { parseConnectionLink, redeemConnection } from '../extension/pairing.mjs';
+import { extensionI18n } from './localization.mjs';
+
+const originalChrome = globalThis.chrome;
+globalThis.chrome = { i18n: extensionI18n() };
+after(() => { globalThis.chrome = originalChrome; });
 
 test('device pairing uses the selected original mounted Host and saves only the redeemed credential', async () => {
   const requests = [];
@@ -18,7 +23,8 @@ test('device pairing uses the selected original mounted Host and saves only the 
   const link = `varin://connect?v=2&p=${Buffer.from(JSON.stringify(payload)).toString('base64url')}`;
   try {
     const parsed = parseConnectionLink(link);
-    await assert.rejects(redeemConnection(parsed, 'https://another-host.test'), /Choose an address/);
+    await assert.rejects(redeemConnection(parsed, 'https://another-host.test'), /device link is invalid/);
+    assert.equal(requests.length, 0);
     const connection = await redeemConnection(parsed, hostUrl);
     assert.deepEqual(connection, { hostUrl, clientToken: 'varin_client_existing_owner', label: 'My Varin' });
     assert.equal(requests[0].path, '/varin/api/client-auth/pairing/redeem');
@@ -53,6 +59,7 @@ test('the real extension background pairs, shares and exchanges commands without
   const storage = {}, event = () => ({ addListener() {} });
   const previous = globalThis.chrome;
   globalThis.chrome = {
+    i18n: extensionI18n('zh_CN'),
     storage: { local: { setAccessLevel: async () => {}, get: async () => ({ ...storage }), set: async values => Object.assign(storage, values), remove: async key => { delete storage[key]; } } },
     runtime: { id: 'test-extension', getURL: path => `chrome-extension://test-extension/${path}`, sendMessage: async () => {}, onMessage: { addListener: listener => { onMessage = listener; } } },
     tabs: { query: async () => [{ id: 7 }], get: async () => ({ id: 7, title: 'Signed in', url: 'https://signed-in.test', status: 'complete' }), onRemoved: event(), onUpdated: event() },
@@ -64,12 +71,14 @@ test('the real extension background pairs, shares and exchanges commands without
     await import(`../extension/background.mjs?test=${Date.now()}`);
     assert.equal(onMessage({ action: 'share' }, { id: 'another-extension' }, () => {}), false);
     const payload = { v: 2, pairingId: 'pair', secret: 'one-use', candidates: [{ type: 'lan', url: hostUrl }] };
-    await send({ action: 'pair', hostUrl, link: `varin://connect?v=2&p=${Buffer.from(JSON.stringify(payload)).toString('base64url')}` });
+    const paired = await send({ action: 'pair', hostUrl, link: `varin://connect?v=2&p=${Buffer.from(JSON.stringify(payload)).toString('base64url')}` });
+    assert.equal(paired.status, '已配对 · Varin');
     await send({ action: 'share' });
     const result = await received;
     assert.equal(result.id, 'list-original'); assert.equal(result.ok, true); assert.equal(result.value[0].url, 'https://signed-in.test');
     assert.equal(requests.find(item => item.url.endsWith('/connector/exchange')).auth, 'Bearer varin_client_browser');
     const state = await send({ action: 'state' }); assert.equal('clientToken' in state.connection, false);
+    assert.equal(state.status, '在线');
     await send({ action: 'disconnect' });
     assert.equal(requests.at(-1).body.disconnected, true);
   } finally {

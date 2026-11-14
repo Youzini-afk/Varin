@@ -1,5 +1,7 @@
 export const browserResourcesEn = {
   'settings.browser.title': 'Browser',
+  'settings.browser.builtinName': 'Varin Browser',
+  'settings.browser.pairedBrowser': 'Paired browser',
   'settings.browser.description': 'Connect browsers independently of the agent, workspace and desktop.',
   'settings.browser.device': 'Connection host',
   'settings.browser.deviceHint': 'Configure the service that connects to the browser. Addresses and file paths are resolved on that device.',
@@ -88,8 +90,11 @@ export const browserResourcesEn = {
   'browser.resource.state.interrupted': 'Connection interrupted',
   'browser.resource.state.ended': 'Instance ended',
 } as const;
+export type BrowserResourceMessages = Record<keyof typeof browserResourcesEn, string>;
 export const browserResourcesZhCN: Record<keyof typeof browserResourcesEn, string> = {
   'settings.browser.title': '浏览器',
+  'settings.browser.builtinName': 'Varin 浏览器',
+  'settings.browser.pairedBrowser': '已配对浏览器',
   'settings.browser.description': '独立连接浏览器，分别选择 Agent、工作区和桌面所在设备。',
   'settings.browser.device': '连接所在服务',
   'settings.browser.deviceHint': '选择由哪台设备连接浏览器。地址和文件路径均相对于该设备。',

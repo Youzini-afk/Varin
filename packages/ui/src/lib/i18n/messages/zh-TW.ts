@@ -1,4 +1,5 @@
 import { conversationOrganizationZhTW } from './conversation-organization';
+import { browserResourcesZhTW } from './browser-resources/zh-TW';
 import { dict as enDict, type I18nKey } from './en';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
@@ -10,6 +11,7 @@ import { companionLibraryMessages } from './companion-library';
 import { usageMessages } from './usage';
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  ...browserResourcesZhTW,
   'files.search.incomplete': '部分結果無法列舉，以下結果並不完整。',
   ...conversationOrganizationZhTW,
   'bot.groups.create': '新增分組',

@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { RemoteInstancesPage } from '@/components/sections/remote-instances/RemoteInstancesPage';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import { browserDeviceLabel, browserResourceLabel } from '@/lib/browser-presentation';
 import { isDesktopShell, isDesktopLocalOriginActive } from '@/lib/desktop';
 import { getClientPlatform } from '@/lib/platform';
 import { redactSensitiveUrl } from '@/lib/desktopHosts';
@@ -66,8 +67,9 @@ function WorkConnectionsContent() {
     : !snapshot ? t('common.loading') : sourceName;
   const desktopSummary = computerError ? t('settings.connections.resourceUnavailable') : !computers ? t('common.loading')
     : computers.defaultDesktopId ? defaultDesktop?.label ?? t('settings.connections.resourceUnavailable') : t('settings.connections.automaticDesktop');
+  const defaultBrowser = browsers?.resources.find(item => item.browserId === browsers.settings.defaultBrowserId);
   const browserSummary = browserError ? t('settings.connections.resourceUnavailable') : !browsers ? t('common.loading')
-    : browsers.settings.defaultBrowserId ? browsers.resources.find(item => item.browserId === browsers.settings.defaultBrowserId)?.label ?? t('browser.resource.offline') : t('settings.browser.automatic');
+    : browsers.settings.defaultBrowserId ? defaultBrowser ? browserResourceLabel(defaultBrowser, t) : t('browser.resource.offline') : t('settings.browser.automatic');
   return <SettingsPageLayout title={t('settings.page.connections.title')} description={t('settings.connections.description')}
     headerEnd={<Button variant="ghost" size="sm" onClick={() => requestSettingsNavigation(() => setEpoch(value => value + 1))}><Icon name="refresh" className="size-4" />{t('settings.common.actions.refresh')}</Button>}>
     <div className="settings-connection-origin flex flex-wrap items-center gap-x-5 gap-y-2 typography-meta text-muted-foreground">
@@ -104,7 +106,7 @@ function WorkConnectionsContent() {
       </SettingsSection>
       <SettingsSection title={t('settings.browser.title')} description={t('settings.browser.description')}>
         {browserError ? <p role="alert" className="typography-meta text-destructive">{browserError}</p>
-          : <p className="typography-meta text-muted-foreground">{browsers?.resources.map(browser => `${browser.label} · ${browser.deviceName}`).join(' / ') || t(browsers ? 'settings.browser.empty' : 'common.loading')}</p>}
+          : <p className="typography-meta text-muted-foreground">{browsers?.resources.map(browser => `${browserResourceLabel(browser, t)} · ${browserDeviceLabel(browser, t)}`).join(' / ') || t(browsers ? 'settings.browser.empty' : 'common.loading')}</p>}
         <SettingsPageLink page="browsers">{t('browser.resource.manage')}</SettingsPageLink>
       </SettingsSection>
     </>}

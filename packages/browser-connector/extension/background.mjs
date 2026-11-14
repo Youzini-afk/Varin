@@ -1,11 +1,12 @@
 import { TabConnector, CAPABILITIES } from './connector.mjs';
 import { ConnectorBridge } from './transport.mjs';
 import { parseConnectionLink, redeemConnection } from './pairing.mjs';
+import { message as translate } from './i18n.mjs';
 
 let connector;
 let transport;
 let connecting;
-let status = 'Not connected';
+let status = translate('notConnected');
 void chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
 const notify = () => { void chrome.runtime.sendMessage({ type: 'state-changed' }).catch(() => {}); };
 const report = value => { try { transport?.accept(value); } catch { void disconnect(); } };
@@ -14,7 +15,7 @@ async function connect() {
   if (connecting) return connecting;
   connecting = (async () => {
     const saved = await chrome.storage.local.get(['browserId', 'connection']);
-    if (!saved.connection?.clientToken) throw new Error('Connect to Varin with a device link first');
+    if (!saved.connection?.clientToken) throw new Error(translate('needsPairing'));
     const browserId = typeof saved.browserId === 'string' ? saved.browserId : `extension:${crypto.randomUUID()}`;
     if (!saved.browserId) await chrome.storage.local.set({ browserId });
     const instanceId = crypto.randomUUID();
@@ -22,15 +23,15 @@ async function connect() {
       emit: event => { if (connector === current) { report({ type: 'event', event }); notify(); } } });
     const bridge = new ConnectorBridge({ endpoint: saved.connection.hostUrl, clientToken: saved.connection.clientToken, send: message => {
       if (connector !== current) return;
-      if (message?.type === 'connected') { status = 'Connected'; notify(); }
+      if (message?.type === 'connected') { status = translate('connected'); notify(); }
       else if (message?.type === 'command') void current.execute(message.command).then(result => {
         if (connector === current) report({ type: 'result', result });
       });
-      else if (message?.type === 'disconnected') { status = 'Host connection interrupted. Reconnect and share tabs again.'; void disconnect(false); }
+      else if (message?.type === 'disconnected') { status = translate('interrupted'); void disconnect(false); }
     } });
     transport = bridge;
-    connector = current; status = 'Connecting to the paired Host';
-    report({ type: 'hello', browserId, instanceId, label: saved.connection.browserLabel || `${navigator.userAgent.includes('Edg/') ? 'Edge' : 'Chrome'} shared tabs`, capabilities: CAPABILITIES });
+    connector = current; status = translate('connecting');
+    report({ type: 'hello', browserId, instanceId, label: saved.connection.browserLabel || `${navigator.userAgent.includes('Edg/') ? 'Edge' : 'Chrome'} · ${translate('extensionType')}`, capabilities: CAPABILITIES });
     return current;
   })();
   try { return await connecting; } finally { connecting = undefined; }
@@ -41,7 +42,7 @@ async function disconnect(updateStatus = true) {
   await previous?.stop();
   if (updateStatus) await bridge?.closeGracefully();
   else bridge?.stop();
-  if (updateStatus) status = 'Disconnected. All shared tabs released.';
+  if (updateStatus) status = translate('disconnected');
   notify();
 }
 chrome.debugger.onDetach.addListener((source, reason) => connector?.detached(source.tabId, reason));
@@ -60,14 +61,14 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (message?.action === 'pair') {
       const parsed = parseConnectionLink(message.link);
       const connection = await redeemConnection(parsed, message.hostUrl);
-      await disconnect(); await chrome.storage.local.set({ connection }); status = `Paired with ${connection.label}`;
+      await disconnect(); await chrome.storage.local.set({ connection }); status = translate('paired', connection.label);
       return { status };
     }
     if (message?.action === 'forget') { await disconnect(); await chrome.storage.local.remove('connection'); return { status }; }
     if (message?.action === 'disconnect') { await disconnect(); return { status, pages: [] }; }
     if (message?.action === 'share') {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab?.id) throw new Error('Select a normal browser tab');
+      if (!tab?.id) throw new Error(translate('chooseTab'));
       const current = await connect();
       return { page: await current.share(tab.id), status };
     }
@@ -75,6 +76,6 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (message?.action === 'pause') { await connector?.pause(message.pageId, message.paused === true); return { status }; }
     throw new Error('Unknown connector control');
   };
-  void work().then(value => respond({ ok: true, ...value }), error => respond({ ok: false, error: error instanceof Error ? error.message : 'Connector failed' }));
+  void work().then(value => respond({ ok: true, ...value }), error => respond({ ok: false, error: error instanceof Error ? error.message : translate('unavailable') }));
   return true;
 });

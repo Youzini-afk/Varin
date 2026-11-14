@@ -4,6 +4,7 @@ import { browserResources, getRuntimeEndpointGeneration, subscribeRuntimeEndpoin
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import { browserDeviceLabel, browserResourceLabel } from '@/lib/browser-presentation';
 import { browserResourceBindingKey } from '@/lib/browser-resource-binding';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -54,7 +55,7 @@ export function ConnectedBrowserPage({ resource, binding, onObservedPage }: { re
   const observation = snapshot?.observation;
   return <div className="flex min-h-0 flex-1 flex-col">
     <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/50 px-3 py-2">
-      <div className="min-w-0 flex-1"><p className="truncate typography-meta">{page?.title || t('browser.resource.notObserved')}</p><p className="truncate typography-micro text-muted-foreground">{page?.url || resource.label}</p></div>
+      <div className="min-w-0 flex-1"><p className="truncate typography-meta">{page?.title || t('browser.resource.notObserved')}</p><p className="truncate typography-micro text-muted-foreground">{page?.url || browserResourceLabel(resource, t)}</p></div>
       <Button type="button" variant="ghost" size="sm" disabled={busy || !connected || !canRead} onClick={() => void perform()} aria-label={t('browser.resource.observe')}><Icon name="refresh" className={busy ? 'size-3.5 animate-spin' : 'size-3.5'} /></Button>
       {resource.capabilities.includes('read') && resource.capabilities.includes('screenshot') && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => setView(current => current === 'structure' ? 'screenshot' : 'structure')}>{t(view === 'structure' ? 'browser.resource.screenshot' : 'browser.resource.structure')}</Button>}
       {resource.capabilities.includes('act') && <Button type="button" variant="outline" size="sm" disabled={busy || !connected || !usage} onClick={() => void perform(usage?.controller === 'human' ? 'resume' : 'takeover')}>{t(usage?.controller === 'human' ? 'browser.resume' : 'browser.takeOver')}</Button>}
@@ -70,7 +71,7 @@ export function ConnectedBrowserPage({ resource, binding, onObservedPage }: { re
     </div>
     {error && <p role="alert" className="shrink-0 break-words px-3 py-2 typography-meta text-destructive">{error}{snapshot ? ` · ${t('browser.resource.lastObservation')}` : ''}</p>}
     <div className="min-h-0 flex-1 overflow-auto p-3">
-      {observation?.image && <img src={`data:${observation.image.mimeType};base64,${observation.image.base64}`} alt={page?.title || resource.label} className="mx-auto max-w-full" />}
+      {observation?.image && <img src={`data:${observation.image.mimeType};base64,${observation.image.base64}`} alt={page?.title || browserResourceLabel(resource, t)} className="mx-auto max-w-full" />}
       {observation?.text && <pre className="whitespace-pre-wrap break-words typography-meta">{observation.text}</pre>}
       {observation?.elements?.length ? <ul className="space-y-2 typography-meta">{observation.elements.map((element, index) => <li key={`${observation.observationId}:${element.ref ?? index}`} className="break-words"><span className="text-muted-foreground">{element.role}</span>{element.name ? ` · ${element.name}` : ''}{element.value ? ` · ${element.value}` : ''}{element.description ? <p className="typography-micro text-muted-foreground">{element.description}</p> : null}</li>)}</ul> : null}
       {!observation && <p className="typography-meta text-muted-foreground">{t(busy ? 'common.loading' : 'browser.resource.notObserved')}</p>}
@@ -98,6 +99,7 @@ export function ConnectedBrowserSurface({ binding, onBindingChange, onObservedPa
   const threadId = identity?.runtime === 'agent' ? identity.threadId : undefined;
   const [taskState, setTask] = React.useState<{ threadId: string; selection: BrowserTaskSelection }>();
   const task = taskState?.threadId === threadId ? taskState?.selection : undefined;
+  const taskResource = resources.find(item => item.browserId === (task?.preferredBrowserId ?? task?.binding?.browserId));
   const [selectingTask, setSelectingTask] = React.useState(false);
   React.useEffect(() => {
     setTask(undefined);
@@ -139,19 +141,19 @@ export function ConnectedBrowserSurface({ binding, onBindingChange, onObservedPa
         <SelectTrigger className="h-7 min-w-0 flex-1 typography-micro" aria-label={t('browser.resource.select')}><SelectValue /></SelectTrigger>
         <SelectContent><SelectItem value="preview">{t('browser.resource.separatePreview')}</SelectItem>
           {binding && !resource && <SelectItem value={binding.browserId}>{t('browser.resource.offline')}</SelectItem>}
-          {resources.map(item => <SelectItem key={item.browserId} value={item.browserId} disabled={!item.instanceId}>{item.deviceName} · {item.label} · {t(`browser.resource.state.${item.state}`)}</SelectItem>)}
+          {resources.map(item => <SelectItem key={item.browserId} value={item.browserId} disabled={!item.instanceId}>{browserDeviceLabel(item, t)} · {browserResourceLabel(item, t)} · {t(`browser.resource.state.${item.state}`)}</SelectItem>)}
         </SelectContent>
       </Select>
       <Button type="button" variant="ghost" size="sm" disabled={loading} onClick={() => setRefresh(value => value + 1)} aria-label={t('browser.resource.refresh')}><Icon name="refresh" className={loading ? 'size-3.5 animate-spin' : 'size-3.5'} /></Button>
       <Button type="button" variant="ghost" size="sm" aria-label={t('browser.resource.manage')} onClick={() => { const ui = useUIStore.getState(); ui.setSettingsPage('browsers'); ui.setSettingsDialogOpen(true); }}><Icon name="settings-3" className="size-3.5" /></Button>
     </div>
     {threadId && task && <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/50 px-3 py-1 typography-micro text-muted-foreground">
-      <span>{t('browser.resource.taskBrowser')} · {resources.find(item => item.browserId === (task.preferredBrowserId ?? task.binding?.browserId))?.label ?? t(task.preferredBrowserId ? 'browser.resource.offline' : 'browser.resource.taskDefault')}</span>
+      <span>{t('browser.resource.taskBrowser')} · {taskResource ? browserResourceLabel(taskResource, t) : t(task.preferredBrowserId ? 'browser.resource.offline' : 'browser.resource.taskDefault')}</span>
       {resource && <Button size="sm" variant="ghost" disabled={selectingTask || task.preferredBrowserId === resource.browserId} onClick={() => void chooseTask(resource.browserId)}>{t(task.preferredBrowserId === resource.browserId ? 'browser.resource.taskSelected' : 'browser.resource.useForTask')}</Button>}
       {task.preferredBrowserId && <Button size="sm" variant="ghost" disabled={selectingTask} onClick={() => void chooseTask(null)}>{t('browser.resource.taskDefault')}</Button>}
     </div>}
     {binding && <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/50 px-3 py-2">
-      <span className="typography-micro text-muted-foreground">{resource ? `${resource.deviceName} · ${resource.label} · ${t(`browser.resource.state.${resource.state}`)}` : t('browser.resource.offline')}</span>
+      <span className="typography-micro text-muted-foreground">{resource ? `${browserDeviceLabel(resource, t)} · ${browserResourceLabel(resource, t)} · ${t(`browser.resource.state.${resource.state}`)}` : t('browser.resource.offline')}</span>
       {resource?.instanceId && resource.instanceId !== binding.instanceId && resource.state === 'online' && <Button type="button" size="sm" variant="outline" onClick={() => onBindingChange({ browserId: resource.browserId, instanceId: resource.instanceId! })}>{t('browser.resource.useCurrentInstance')}</Button>}
       <Select value={binding.pageId ?? 'choose'} onValueChange={value => onBindingChange({ ...binding, pageId: value === 'choose' ? undefined : value })}>
         <SelectTrigger className="h-7 min-w-0 flex-1 typography-micro" aria-label={t('browser.resource.page')}><SelectValue /></SelectTrigger>

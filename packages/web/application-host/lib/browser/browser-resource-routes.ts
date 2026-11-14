@@ -11,6 +11,20 @@ import { join } from 'node:path';
 import { ZipFile } from 'yazl';
 import { pipeline } from 'node:stream/promises';
 
+export async function browserConnectorArchive(directory: string): Promise<ZipFile> {
+  const zip = new ZipFile();
+  const addDirectory = async (path: string, prefix: string) => {
+    for (const entry of await readdir(path, { withFileTypes: true })) {
+      const name = prefix + entry.name;
+      if (entry.isDirectory()) await addDirectory(join(path, entry.name), name + '/');
+      else if (entry.isFile()) zip.addFile(join(path, entry.name), name);
+    }
+  };
+  await addDirectory(directory, '');
+  zip.end();
+  return zip;
+}
+
 export function registerBrowserResourceRoutes(app: Express, resources: BrowserResources, requireAuth: RequestHandler,
   clientId: (request: Request) => Promise<string | undefined>, management?: {
     settings: BrowserSettingsOwner; peers: ManagedBrowserPeers;
@@ -76,10 +90,9 @@ export function registerBrowserResourceRoutes(app: Express, resources: BrowserRe
       res.json({ preferredBrowserId: browserId });
     }));
     if (management.connectorDirectory) app.get(prefix + '/connector/download', route(async (_req, res) => {
-      const zip = new ZipFile(), directory = management.connectorDirectory!;
-      for (const file of await readdir(directory, { withFileTypes: true })) if (file.isFile()) zip.addFile(join(directory, file.name), file.name);
+      const zip = await browserConnectorArchive(management.connectorDirectory!);
       res.attachment('varin-browser-connector.zip');
-      zip.end(); await pipeline(zip.outputStream, res);
+      await pipeline(zip.outputStream, res);
     }));
   }
   const pages = prefix + '/:browserId/:instanceId/pages';

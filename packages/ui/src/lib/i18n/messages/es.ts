@@ -1,4 +1,5 @@
 import { dict as enDict, type I18nKey } from './en';
+import { browserResourcesEs } from './browser-resources/es';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
 import { chatExperienceMessages } from './chat-experience';
@@ -9,6 +10,7 @@ import { companionLibraryMessages } from './companion-library';
 export const dict: Record<I18nKey, string> = {
   ...companionLibraryMessages('es'),
   ...enDict,
+  ...browserResourcesEs,
   ...toolHeadingMessages('es'),
   ...toolFailureMessages('es'),
   ...chatExperienceMessages('es'),

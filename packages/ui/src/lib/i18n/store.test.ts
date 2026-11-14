@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { DEFAULT_LOCALE, LOCALE_STORAGE_KEY } from './runtime';
-import { initializeLocale, resetI18nDictionaryCacheForTests, useI18nStore } from './store';
+import { DEFAULT_LOCALE, LOCALE_STORAGE_KEY, type Locale } from './runtime';
+import { formatMessage, initializeLocale, resetI18nDictionaryCacheForTests, useI18nStore } from './store';
 
 const defaultDictionary = useI18nStore.getState().dictionary;
 
@@ -15,6 +15,20 @@ const resetStore = () => {
 
 describe('i18n store', () => {
   beforeEach(resetStore);
+
+  test('loads browser settings translations after the English fallback', async () => {
+    for (const [locale, title] of Object.entries({ 'zh-CN': '浏览器', 'zh-TW': '瀏覽器', fr: 'Navigateur', ja: 'ブラウザー', es: 'Navegador', ko: '브라우저', pl: 'Przeglądarka', 'pt-BR': 'Navegador', uk: 'Браузер' })) {
+      await useI18nStore.getState().setLocale(locale as Locale);
+      const loaded = useI18nStore.getState().dictionary;
+      expect(loaded['settings.browser.title'], locale).toBe(title);
+      expect(formatMessage(loaded, 'settings.browser.edit', { name: '办公室' }), locale).toContain('办公室');
+    }
+    await useI18nStore.getState().setLocale('zh-CN');
+    const dictionary = useI18nStore.getState().dictionary;
+    expect(dictionary['settings.browser.title']).toBe('浏览器');
+    expect(dictionary['settings.browser.addCdp']).toBe('添加 CDP 连接');
+    expect(formatMessage(dictionary, 'settings.browser.edit', { name: '办公室' })).toBe('编辑 办公室');
+  });
 
   test('retries loading the active locale when it is not cached', async () => {
     useI18nStore.setState({

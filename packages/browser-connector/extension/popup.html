@@ -1,13 +1,13 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Varin Browser Connector</title><link rel="stylesheet" href="popup.css"></head>
-<body><header><h1>Varin Browser</h1><p id="connection-name">Connect to your Varin service</p></header>
-<section id="setup"><form id="pair-form"><label for="pair-link">Device pairing link</label><textarea id="pair-link" rows="3" placeholder="varin://connect?…" autocomplete="off" spellcheck="false"></textarea>
-<label for="host-address">Service address</label><select id="host-address"></select><button type="submit">Connect to Varin</button></form>
-<p class="hint">Create a link in Varin → Settings → Browser. Allow access to that service when your browser asks.</p></section>
-<section id="connected" hidden><p class="hint">Share tabs for tasks to read and operate using your existing sign-in state.</p>
-<div class="actions"><button id="share">Share current tab</button><button id="disconnect" class="quiet">Stop all sharing</button></div>
-<ul id="pages"></ul><button id="forget" class="quiet">Disconnect this service</button></section>
+<title data-i18n="name"></title><link rel="stylesheet" href="popup.css"></head>
+<body><header><h1 data-i18n="name"></h1><p id="connection-name" data-i18n="connect"></p></header>
+<section id="setup"><form id="pair-form"><label for="pair-link" data-i18n="pairLink"></label><textarea id="pair-link" rows="3" placeholder="varin://connect?…" autocomplete="off" spellcheck="false"></textarea>
+<label for="host-address" data-i18n="serviceAddress"></label><select id="host-address"></select><button type="submit" data-i18n="connect"></button></form>
+<p class="hint" data-i18n="setupHint"></p></section>
+<section id="connected" hidden><p class="hint" data-i18n="shareHint"></p>
+<div class="actions"><button id="share" data-i18n="share"></button><button id="disconnect" class="quiet" data-i18n="stopAll"></button></div>
+<ul id="pages"></ul><button id="forget" class="quiet" data-i18n="disconnect"></button></section>
 <p id="status" role="status"></p>
-<footer class="hint">Pausing blocks new task input; a submitted action may still finish. DevTools can detach a shared tab. Closing this popup keeps tasks connected.</footer>
+<footer class="hint" data-i18n="controlHint"></footer>
 <script type="module" src="popup.mjs"></script></body></html>

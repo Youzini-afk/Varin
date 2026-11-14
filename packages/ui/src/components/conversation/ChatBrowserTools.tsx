@@ -1,5 +1,6 @@
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import { browserDeviceLabel, browserResourceLabel } from '@/lib/browser-presentation';
 import { useUIStore } from '@/stores/useUIStore';
 import { restoreBrowserResourceBinding, browserResourceBindingKey } from '@/lib/browser-resource-binding';
 import { isDesktopLocalOriginActive } from '@/lib/desktop';
@@ -27,10 +28,14 @@ export function ChatBrowserTool({ call, cwd, execution, result, status, generati
       <ToolHeadingText label={label} subject={toolSubject(call, data, t)} /><ToolStatus status={status} generating={generating} />
       <Icon name="arrow-right-s" className="tool-disclosure-chevron size-3.5" /></summary>
     <div className="tool-file-results min-w-0">
-      {resources.map(resource => <button key={toolText(resource.browserId)} type="button" className="tool-file-link max-w-full" disabled={!resource.instanceId}
-        onClick={() => openResource({ browserId: toolText(resource.browserId), instanceId: toolText(resource.instanceId) }, undefined, toolText(resource.label))}>
-        <Icon name="global" className="size-3.5 shrink-0" /><span className="truncate">{subjectJoin(resource.deviceName, resource.label)}</span>
-      </button>)}
+      {resources.map(resource => {
+        const label = browserResourceLabel({ label: toolText(resource.label), source: toolText(resource.source) }, t);
+        const deviceName = browserDeviceLabel({ deviceName: toolText(resource.deviceName), source: toolText(resource.source) }, t);
+        return <button key={toolText(resource.browserId)} type="button" className="tool-file-link max-w-full" disabled={!resource.instanceId}
+          onClick={() => openResource({ browserId: toolText(resource.browserId), instanceId: toolText(resource.instanceId) }, undefined, label)}>
+          <Icon name="global" className="size-3.5 shrink-0" /><span className="truncate">{subjectJoin(deviceName, label)}</span>
+        </button>;
+      })}
       {pages.map(target => <button key={toolText(target.pageId)} type="button" className="tool-file-link max-w-full" disabled={!binding && (!cwd || !isDesktopLocalOriginActive())}
         title={t('browser.openPage')} onClick={() => binding ? openResource({ ...binding, pageId: toolText(target.pageId) }, toolText(target.url), toolText(target.title))
           : useUIStore.getState().openContextBrowser(cwd, toolText(target.url), toolText(target.pageId))}>
