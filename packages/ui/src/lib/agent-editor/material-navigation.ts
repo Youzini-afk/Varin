@@ -61,7 +61,7 @@ export async function returnMaterialToConversation(workspaceId: string, workspac
       mode: tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? 'browser' : 'file',
       targetPath: tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? tab.viewState.browserUrl ?? null : workspacePathFromResourceId(workspaceRoot, tab.resourceId),
       ...(tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? { dedupeKey: tab.viewState.browserTabId?.startsWith('browser:')
-        ? tab.viewState.browserTabId.slice('browser:'.length) : tab.viewState.browserTabId ?? 'browser' } : {}),
+        ? tab.viewState.browserTabId.slice('browser:'.length) : tab.viewState.browserTabId ?? 'browser', browserBinding: tab.viewState.browserBinding } : {}),
       targetDirectory: workspaceRoot, editorViewId: tab.viewId, editorWorkspaceId: workspaceId,
     });
   }
@@ -75,10 +75,11 @@ export async function continueBrowserInIde(input: { workspaceRoot: string; tabId
   if (!apis) throw new Error('Runtime APIs are not ready');
   const identity = await apis.documents.resolveWorkspace({ path: input.workspaceRoot });
   if (runtimeKey !== getRuntimeKey()) throw new Error('Runtime changed while opening the resource');
-  const browserPosition = await captureBrowserPosition(input.workspaceRoot, input.tabId);
+  const browserBinding = useUIStore.getState().contextPanelByDirectory[normalizeContextPanelDirectoryKey(input.workspaceRoot)]?.tabs.find(tab => tab.id === input.tabId)?.browserBinding;
+  const browserPosition = browserBinding ? undefined : await captureBrowserPosition(input.workspaceRoot, input.tabId);
   if (runtimeKey !== getRuntimeKey()) throw new Error('Runtime changed while opening the resource');
   const workbench = openWorkbenchEditor(identity.workspaceId, `browser:${input.tabId}`, BUILTIN_EDITOR_PROVIDER_IDS.browser,
-    { viewState: { browserTabId: input.tabId, browserPageId: embeddedBrowserPageId(input.workspaceRoot, input.tabId), browserUrl: input.url, ...(browserPosition ? { browserPosition } : {}) } });
+    { viewState: { browserTabId: input.tabId, ...(browserBinding ? { browserBinding } : { browserPageId: embeddedBrowserPageId(input.workspaceRoot, input.tabId) }), browserUrl: input.url, ...(browserPosition ? { browserPosition } : {}) } });
   const tab = activeEditorTab(workbench);
   if (tab) await continueMaterialInIde({ workspaceId: identity.workspaceId, viewId: tab.viewId, fromProfileId: input.fromProfileId });
 }

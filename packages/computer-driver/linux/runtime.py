@@ -924,7 +924,7 @@ def _perform_operation(operation):
         import bridge_worker
         act = operation.get("act") or {}
         if tool == "browser" and operation.get("op") == "act" and act.get("kind") == "click":
-            PENDING_BROWSER_RELEASE = {key: operation[key] for key in ("tab", "profile", "cdp_port") if key in operation}
+            PENDING_BROWSER_RELEASE = {key: operation[key] for key in ("tab", "profile", "cdp_port", "expectedInstanceId") if key in operation}
             PENDING_BROWSER_RELEASE.update({"op": "act", "act": {"kind": "release", "x": act.get("x", 0), "y": act.get("y", 0)}})
         try:
             result = bridge_worker.run(tool, operation, check_cancel)

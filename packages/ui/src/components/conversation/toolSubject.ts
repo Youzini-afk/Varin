@@ -35,6 +35,7 @@ export function toolSubject(call: Pick<ChatToolCall, 'name' | 'arguments'>, data
       const latest = toolRecord(data.latestAction), target = toolRecord(latest.arguments);
       return subjectJoin(target.path ?? target.query ?? latest.tool, toolValueLabel(data.state, t));
     }
+    case 'browser_resources': return count(data.resources, t);
     case 'browser_tabs': case 'browser_open': case 'browser_read': case 'browser_act': case 'browser_files': {
       const page = toolRecord(data.page);
       return subjectJoin(page.title || args.url || page.url, args.query, args.ref, args.key,

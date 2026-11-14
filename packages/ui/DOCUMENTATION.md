@@ -38,6 +38,18 @@ Lower framework-neutral `lib` owners do not import official `workbenches`. Narro
 adapters connect React/stores to those kernels. Extension code must not import product UI internals
 when the SDK's framework-neutral mount/controller contract provides the seam.
 
+## Connected browser resources
+
+The existing `BrowserResourceView` entry can select a connected browser and its real tab.
+`ConnectedBrowserPane` presents an owner observation (structure or screenshot), not an iframe
+at a copied URL. The resource/instance/page binding survives context-panel restore and IDE
+handoff independently of the last observed URL. A changed instance remains unavailable until
+an explicit new selection; neither reconnect nor closing this view replays input or releases a task.
+Takeover, resume and foreground activation use the application client's authenticated resource
+route. Unsupported activation has no local `openExternalUrl` fallback. The original iframe and
+Electron preview remain available as a separately labelled choice. Tool-result links carrying a
+binding open the same resource surface on web, desktop and mobile clients.
+
 ## State and lifecycle
 
 Shells own presentation. Documents, open groups, terminals, runtime identity, and domain facts remain

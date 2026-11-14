@@ -12,7 +12,7 @@ Ops (perform(operation) dispatch):
   launch    -> spawn chromium --remote-debugging-port on the profile dir
   tabs      -> [{id, title, url}]
   snapshot  -> compact accessibility tree of a tab (Accessibility.getFullAXTree)
-  act       -> kind: navigate | evaluate | click | type | screenshot
+  act       -> kind: new_tab | navigate | evaluate | click | type | screenshot
 """
 import base64
 import hashlib
@@ -198,18 +198,32 @@ def _browser_binary():
     return None
 
 
+class BeforeDispatchError(ValueError):
+    """The provider has proved no browser input was sent."""
+
+
+def _instance_id(version):
+    endpoint = version.get("webSocketDebuggerUrl")
+    if not isinstance(endpoint, str) or not endpoint:
+        raise BeforeDispatchError("Browser did not report its actual CDP instance identity")
+    return hashlib.sha256(endpoint.encode("utf-8")).hexdigest()
+
+
 def _endpoint(operation):
     port, browser_path = endpoint_for(operation)
     version = _http(port, "/json/version")
     if browser_path and not (version.get("webSocketDebuggerUrl") or "").endswith(browser_path):
-        raise RuntimeError("The profile's browser endpoint no longer identifies this session")
+        raise BeforeDispatchError("The profile's browser endpoint no longer identifies this session")
+    expected = operation.get("expectedInstanceId")
+    if expected is not None and expected != _instance_id(version):
+        raise BeforeDispatchError("The original browser instance ended; discover its current pages")
     return port, version
 
 
 def _status(operation):
     try:
         _, version = _endpoint(operation)
-        return {"running": True, "browser": version.get("Browser"), "wsUrl": version.get("webSocketDebuggerUrl")}
+        return {"running": True, "browser": version.get("Browser"), "wsUrl": version.get("webSocketDebuggerUrl"), "instanceId": _instance_id(version)}
     except Exception as exc:
         return {"running": False, "detail": str(exc)}
 
@@ -255,9 +269,32 @@ def _flatten_ax(nodes, limit=600):
     return lines, False
 
 
+def _document(ws):
+    tree = ws.command("Page.getFrameTree").get("frameTree") or {}
+    frame = tree.get("frame") or {}
+    if not frame.get("id") or not frame.get("loaderId"):
+        raise BeforeDispatchError("The browser did not report a live document identity")
+    identity = hashlib.sha256(json.dumps([frame["id"], frame["loaderId"], frame.get("url", "")], separators=(",", ":")).encode()).hexdigest()
+    frames = []
+    stack = [tree]
+    while stack:
+        current = stack.pop()
+        child = current.get("frame") or {}
+        if child.get("id"):
+            frames.append({"frameId": child["id"], "url": child.get("url", ""), "available": True,
+                           **({"parentId": child["parentId"]} if child.get("parentId") else {})})
+        stack.extend(reversed(current.get("childFrames", [])))
+    return identity, frames
+
+
 def perform(operation):
     try:
-        return _perform(operation)
+        result = _perform(operation)
+        if operation.get("_instanceId"):
+            result["instanceId"] = operation["_instanceId"]
+        return result
+    except BeforeDispatchError as exc:
+        return {"ok": False, "rejected": True, "error": str(exc)}
     except Exception as exc:
         writes = operation.get("op") == "launch" or (operation.get("op") == "act"
                  and (operation.get("act") or {}).get("kind") != "screenshot")
@@ -294,7 +331,8 @@ def _perform(operation):
             time.sleep(0.4)
         return {"ok": False, "error": "browser did not expose CDP within 20s"}
 
-    port, _ = _endpoint(operation)
+    port, version = _endpoint(operation)
+    operation["_instanceId"] = _instance_id(version)
 
     if op == "tabs":
         tabs = [{"id": t.get("id"), "title": t.get("title"), "url": t.get("url")}
@@ -305,16 +343,58 @@ def _perform(operation):
         tab = operation.get("tab") or _default_tab(port)
         ws = _target_ws(tab, port)
         ws.command("Accessibility.enable")
+        before = _document(ws) if operation.get("structured") else None
         result = ws.command("Accessibility.getFullAXTree")
-        lines, truncated = _flatten_ax(result.get("nodes", []), limit=int(operation.get("limit") or 600))
-        return {"ok": True, "tab": tab, "lines": lines, "truncated": truncated}
+        nodes = result.get("nodes", [])
+        limit = int(operation.get("limit") or 600)
+        lines, truncated = _flatten_ax(nodes, limit=limit)
+        response = {"ok": True, "tab": tab, "lines": lines, "truncated": truncated}
+        if operation.get("structured"):
+            metrics = ws.command("Page.getLayoutMetrics")
+            viewport = metrics.get("cssVisualViewport") or metrics.get("visualViewport") or {}
+            width, height = viewport.get("clientWidth"), viewport.get("clientHeight")
+            if not isinstance(width, (int, float)) or not isinstance(height, (int, float)) or width <= 0 or height <= 0:
+                raise BeforeDispatchError("The browser did not report a usable viewport")
+            observation = {"documentId": before[0], "frames": before[1],
+                           "viewport": {"width": width, "height": height, "scale": viewport.get("scale", 1)},
+                           "elements": [{"role": (node.get("role") or {}).get("value", "node"),
+                                         **{key: str(node[key].get("value", "")) for key in ("name", "value", "description") if node.get(key)}}
+                                        for node in nodes if not node.get("ignored")][:limit]}
+            if operation.get("screenshot"):
+                image = ws.command("Page.captureScreenshot", {"format": "png"}).get("data")
+                if not image:
+                    raise BeforeDispatchError("The browser did not return its screenshot")
+                # PNG IHDR is the actual raster size, not CSS viewport dimensions.
+                raster = base64.b64decode(image, validate=True)
+                if raster[:8] != b"\x89PNG\r\n\x1a\n" or len(raster) < 24:
+                    raise BeforeDispatchError("The browser returned an invalid PNG")
+                image_width, image_height = struct.unpack(">II", raster[16:24])
+                observation["image"] = {"mimeType": "image/png", "base64": image, "width": image_width, "height": image_height}
+            if _document(ws)[0] != before[0]:
+                raise BeforeDispatchError("The page navigated during observation; read it again")
+            response["observation"] = observation
+        return response
 
     if op == "act":
+        act = operation.get("act") or {}
+        if act.get("kind") == "new_tab":
+            url = act.get("url")
+            if not isinstance(url, str) or not url:
+                raise BeforeDispatchError("new_tab requires url")
+            ws = _CdpSocket(version["webSocketDebuggerUrl"])
+            try:
+                target = ws.command("Target.createTarget", {"url": url})
+                return {"ok": True, "tab": target["targetId"]}
+            finally:
+                ws.close()
         tab = operation.get("tab") or _default_tab(port)
         ws = _target_ws(tab, port)
         ws.command("Page.enable")
         act = operation.get("act") or {}
         kind = act.get("kind")
+        expected_document = operation.get("expectedDocumentId")
+        if expected_document is not None and _document(ws)[0] != expected_document:
+            raise BeforeDispatchError("The page changed since observation; read it again before input")
         if kind == "release":
             ws.command("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": act.get("x", 0), "y": act.get("y", 0), "button": "left", "clickCount": 1})
             return {"ok": True, "tab": tab}

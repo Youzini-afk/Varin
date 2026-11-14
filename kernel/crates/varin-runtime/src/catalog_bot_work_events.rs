@@ -12,7 +12,14 @@ pub(super) fn targets(tx: &Connection, thread_id: &str, branch_id: &str) -> Resu
         let entry = super::bot_work::entry(tx, &bot)?;
         targets.insert(bot, entry);
     }
-    if let Some(owner) = super::bot::thread_owner(tx, thread_id)? {
+    // Legacy creation evidence can be unavailable. That still fences execution,
+    // but must not block recovery of already accepted work. Keep independently
+    // recorded followers without inventing a Bot owner for its notifications.
+    let owner = match super::bot::thread_owner(tx, thread_id) {
+        Err(RuntimeError::IdentityUnavailable(_)) => None,
+        owner => owner?,
+    };
+    if let Some(owner) = owner {
         let session = match owner.session_thread_id {
             Some(session) => session,
             None => super::bot_work::entry(tx, &owner.bot_id)?,

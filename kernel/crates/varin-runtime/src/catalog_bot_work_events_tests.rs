@@ -130,3 +130,34 @@ fn bot_attention_restart_reports_interruption_without_completing_the_original_wo
     let db=owner.into_inner().unwrap();
     let count:i64=db.db.query_row("SELECT count(*) FROM input_queue q JOIN events e ON q.id='bot-work-event:'||e.cursor WHERE json_extract(e.data,'$.reason')='interrupted'",[],|row|row.get(0)).unwrap(); assert_eq!(count,1);
 }
+
+#[test]
+fn bot_attention_restart_keeps_followers_when_source_creation_identity_is_unknown() {
+    let fixture = Fixture::new();
+    let mut db = fixture.open();
+    follow(&mut db);
+    let _bot = start(&mut db, "bot", "bot-main");
+    let work = start(&mut db, "work", "work-main");
+    for state in [RunState::Runnable, RunState::Generating] {
+        db.commit_execution(&work.run_id, db.epoch(), &crate::execution::ExecutionRecord::StateChanged {
+            state, waiting_on: None,
+        }).unwrap();
+    }
+    // A retained follower relation is independent of missing legacy creation facts.
+    db.db.execute("UPDATE thread_creations SET identity_known=0 WHERE thread_id='work'", []).unwrap();
+    drop(db);
+
+    let db = fixture.open();
+    assert_eq!(db.run(&work.run_id).unwrap().state, RunState::Waiting);
+    assert!(matches!(bot::thread_permitted(&db.db, "work", db.epoch()), Err(RuntimeError::IdentityUnavailable(_))));
+    let owner = std::sync::Mutex::new(db);
+    deliver(&owner).unwrap();
+    deliver(&owner).unwrap();
+    let db = owner.into_inner().unwrap();
+    let count: i64 = db.db.query_row(
+        "SELECT count(*) FROM input_queue q JOIN events e ON q.id='bot-work-event:'||e.cursor WHERE json_extract(e.data,'$.reason')='interrupted' AND json_extract(e.data,'$.sourceThreadId')='work' AND json_extract(e.data,'$.targetThreadId')='bot'",
+        [], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(count, 1);
+    assert_eq!(db.inspect_thread("work").unwrap()["creation_identity_known"], false);
+}

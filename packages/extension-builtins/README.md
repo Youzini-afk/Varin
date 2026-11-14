@@ -38,11 +38,15 @@ child tasks with or without a file source. Resource assignment does not expand t
 tools. Trusted handback continuation and persistent Computer scripts retain their original lifecycle
 owners; actual desktop/platform acceptance remains separate. See the [Computer owner](../web/application-host/lib/computer/DOCUMENTATION.md).
 
-`varin.builtin.browser` exposes `browser_tabs`, `browser_open`, `browser_read`, `browser_act`, and
-`browser_files` through the injected `browser.use` owner. Electron uses its existing persistent profile,
-native input and a page-scoped CDP transport with Puppeteer Core; no second Chromium download or
-remote-debugging server is required. Hidden/reparented UI views retain the same page identity.
-The owner's availability and accepted tool settings determine disclosure.
+`varin.builtin.browser` exposes resource discovery, page management, observations, input and file transfer
+through `browser.use`. The Application Host routes each operation to the selected browser resource and
+its actual instance independently of the file workspace and frontend. Page and screenshot references
+retain that complete binding; stale instances, unavailable capabilities and unknown action outcomes
+are not redirected or replayed. Browser downloads and uploads transfer bytes through the original
+browser and file/material owners, rather than interpreting one device's paths on another.
+Electron continues to use its persistent profile, native input and page-scoped CDP transport with
+Puppeteer Core; hidden/reparented UI views retain the same page identity. Other connections advertise
+their actual capabilities. Host-principal authorization and accepted tool settings apply before access.
 
 `varin.builtin.office` exposes `office_environment`, `office_read`, `office_write`, `office_render`, and
 `office_export` through `office.files`. Format engines create editable documents and patch selected

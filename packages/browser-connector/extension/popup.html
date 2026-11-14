@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Varin Browser Connector</title><link rel="stylesheet" href="popup.css"></head>
+<body><h1>Share this tab with Varin</h1>
+<p>Only tabs you explicitly share are visible to your paired Varin Host. It can read, navigate and interact with them, including signed-in pages. Your browser keeps its own login data.</p>
+<p>No other tabs are shared. New tabs, private tabs, uploads and downloads are not supported. Closing this popup does not stop a task.</p>
+<button id="share">Share current tab</button><button id="disconnect">Disconnect all tabs</button>
+<p id="status" role="status"></p><ul id="pages"></ul>
+<p class="hint">Pause blocks new task input. An action already sent may still finish. Resume requires a fresh page observation. Stopping Chrome's debugging banner or opening DevTools may disconnect the shared tab.</p>
+<script type="module" src="popup.mjs"></script></body></html>

@@ -31,7 +31,7 @@ const actions: Record<string, I18nKey> = {
   script_run: 'chat.dialogue.script', script_open: 'chat.dialogue.scriptOpen', script_close: 'chat.dialogue.scriptClose',
   websearch: 'chat.dialogue.webSearch', webfetch: 'chat.dialogue.webRead', document_read: 'chat.dialogue.document',
   office_read: 'chat.dialogue.document', office_render: 'office.reader.preview', office_write: 'chat.dialogue.edit', office_export: 'chat.toolAction.export',
-  browser_tabs: 'chat.toolAction.list', browser_open: 'chat.toolAction.open', browser_read: 'chat.dialogue.webRead', browser_act: 'chat.toolAction.navigate', browser_files: 'chat.toolAction.save',
+  browser_resources: 'chat.toolAction.list', browser_tabs: 'chat.toolAction.list', browser_open: 'chat.toolAction.open', browser_read: 'chat.dialogue.webRead', browser_act: 'chat.toolAction.navigate', browser_files: 'chat.toolAction.save',
   todo: 'chat.dialogue.plan', memory: 'chat.dialogue.memory', render_ui: 'chat.dialogue.render',
   recovery_points: 'chat.dialogue.recovery', file_restore: 'chat.dialogue.restore',
   image_generate: 'chat.dialogue.image', image_edit: 'chat.dialogue.image',

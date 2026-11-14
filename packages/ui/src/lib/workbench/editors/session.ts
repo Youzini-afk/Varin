@@ -111,7 +111,7 @@ export const replaceEditorWorkbench = (
     const retainedPages = new Set(listEditorGroups(state.tree).flatMap(group => group.tabs.map(tab => tab.viewState.browserPageId)));
     for (const tab of listEditorGroups(previous.tree).flatMap(group => group.tabs)) {
       const pageId = tab.viewState.browserPageId;
-      if (pageId && !retainedPages.has(pageId)) closeEmbeddedBrowserPageId(pageId);
+      if (pageId && !tab.viewState.browserBinding && !retainedPages.has(pageId)) closeEmbeddedBrowserPageId(pageId);
     }
   }
   session.byWorkspace.set(state.workspaceId, state);

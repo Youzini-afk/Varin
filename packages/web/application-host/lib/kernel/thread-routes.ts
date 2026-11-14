@@ -239,6 +239,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'followup/occurrences': ['runtime', 'threadId', 'branchId', 'followupId', 'after'],
     'followup/get': ['runtime', 'threadId', 'branchId', 'followupId'],
     'followup/list': ['runtime', 'threadId', 'branchId'],
+    'followup/update': ['runtime', 'threadId', 'branchId', 'followupId', 'expectedRevision', 'instruction', 'atMs', 'fileCondition'],
     'followup/control': ['runtime', 'threadId', 'branchId', 'followupId', 'expectedRevision', 'action'],
     'goal/start': ['runtime', 'threadId', 'branchId', 'key', 'runId', 'objective', 'budget'],
     'goal/update': ['runtime', 'threadId', 'branchId', 'goalId', 'expectedRevision', 'objective', 'budget'],

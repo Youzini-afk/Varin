@@ -16,9 +16,10 @@ REAL_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 
 class FakeCdpWs:
-    def __init__(self, sock, requests):
+    def __init__(self, sock, server):
         self.sock = sock
-        self.requests = requests
+        self.server = server
+        self.requests = server.requests
 
     def recv_frame(self):
         first, second = self._exact(2)
@@ -76,8 +77,15 @@ class FakeCdpWs:
                 result = {}
             elif request["method"] == "Page.navigate":
                 result = {"frameId": "f1"}
+            elif request["method"] == "Page.getFrameTree":
+                result = {"frameTree": {"frame": {"id": "frame-1", "loaderId": self.server.loader, "url": self.server.page_url}}}
+            elif request["method"] == "Page.getLayoutMetrics":
+                result = {"cssVisualViewport": {"clientWidth": 800, "clientHeight": 600, "scale": 1}}
+            elif request["method"] == "Target.createTarget":
+                result = {"targetId": "new-real-target"}
             elif request["method"] == "Page.captureScreenshot":
-                result = {"data": base64.b64encode(b"img").decode()}
+                data = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\x0dIHDR" + struct.pack(">II", 1600, 1200)
+                result = {"data": base64.b64encode(data).decode()}
             else:
                 result = {}
             self.send_text(json.dumps({"id": request["id"], "result": result}))
@@ -88,7 +96,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ws_url = f"ws://127.0.0.1:{self.server.server_port}/devtools"
         if self.path.startswith("/devtools/"):
             try:
-                FakeCdpWs(self.connection, self.server.requests).serve(self.headers["Sec-WebSocket-Key"])
+                FakeCdpWs(self.connection, self.server).serve(self.headers["Sec-WebSocket-Key"])
             except (EOFError, OSError):
                 pass
             return
@@ -118,6 +126,8 @@ class BrowserBridge(unittest.TestCase):
     def setUp(self):
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.requests = []
+        self.server.loader = "loader-1"
+        self.server.page_url = "https://example.com/"
         self.thread = threading.Thread(target=self.server.serve_forever)
         self.thread.start()
         self.addCleanup(self.stop_server)
@@ -169,6 +179,41 @@ class BrowserBridge(unittest.TestCase):
         self.assertIn("expression", bad["error"])
         missing = self.perform({"op": "snapshot", "tab": "nope"})
         self.assertFalse(missing["ok"])
+
+    def test_actual_instance_identity_and_owner_side_restart_fence(self):
+        identity = self.perform({"op": "status"})["status"]["instanceId"]
+        self.assertEqual(len(identity), 64)
+        result = self.perform({"op": "act", "expectedInstanceId": identity, "act": {"kind": "new_tab", "url": "https://new/"}})
+        self.assertEqual(result["instanceId"], identity)
+        self.assertEqual(result["tab"], "new-real-target")
+        self.server.requests.clear()
+        rejected = self.perform({"op": "act", "expectedInstanceId": "previous-browser", "tab": "tab-1", "act": {"kind": "type", "text": "must not send"}})
+        self.assertFalse(rejected["ok"])
+        self.assertTrue(rejected["rejected"])
+        self.assertNotIn("outcome", rejected)
+        self.assertEqual(self.server.requests, [])
+
+    def test_structured_observation_and_stale_document_rejection(self):
+        observed = self.perform({"op": "snapshot", "tab": "tab-1", "structured": True, "screenshot": True})
+        self.assertTrue(observed["ok"])
+        observation = observed["observation"]
+        self.assertEqual(observation["viewport"], {"width": 800, "height": 600, "scale": 1})
+        self.assertEqual(observation["image"]["width"], 1600)
+        self.assertEqual(observation["elements"][1], {"role": "button", "name": "OK"})
+        self.assertNotIn("ref", observation["elements"][1])
+        for change in ("loader", "same-document"):
+            self.server.requests.clear()
+            if change == "loader":
+                self.server.loader = "new-loader"
+            else:
+                self.server.loader = "loader-1"
+                self.server.page_url += "#changed"
+            rejected = self.perform({"op": "act", "tab": "tab-1", "expectedDocumentId": observation["documentId"],
+                                     "act": {"kind": "click", "x": 20, "y": 30}})
+            self.assertFalse(rejected["ok"])
+            self.assertTrue(rejected["rejected"])
+            self.assertNotIn("outcome", rejected)
+            self.assertFalse(any(command["method"].startswith("Input.") for command in self.server.requests))
 
 
 if __name__ == "__main__":

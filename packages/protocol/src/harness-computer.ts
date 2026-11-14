@@ -740,7 +740,7 @@ export interface ComputerInstallSoftwareResult {
 export type ComputerBrowserOp = "status" | "launch" | "tabs" | "snapshot" | "act";
 
 export interface ComputerBrowserAct {
-  kind: "navigate" | "evaluate" | "click" | "type" | "screenshot";
+  kind: "navigate" | "evaluate" | "click" | "type" | "screenshot" | "new_tab";
   url?: string;
   expression?: string;
   x?: number;
@@ -754,6 +754,13 @@ export interface ComputerBrowserParams {
   automationEpoch?: string;
   /** Tab to attach for snapshot/act; optional only when exactly one page is open. */
   tabId?: string;
+  /** Owner-verified CDP browser generation; never a user-supplied endpoint. */
+  expectedInstanceId?: string;
+  /** Snapshot document generation required for coordinate input. */
+  expectedDocumentId?: string;
+  /** Return structured observation from the same target and document. */
+  structured?: boolean;
+  screenshot?: boolean;
   /** launch: explicit browser binary on the target machine. */
   binary?: string;
   /** launch: profile directory on the target machine (persistent session). */
@@ -771,7 +778,15 @@ export interface ComputerBrowserResult {
   outcome?: "unknown" | "partial";
   cancelled?: boolean;
   automationEpoch?: string;
-  status?: { running: boolean; browser?: string; wsUrl?: string; detail?: string };
+  status?: { running: boolean; browser?: string; wsUrl?: string; instanceId?: string; detail?: string };
+  instanceId?: string;
+  observation?: {
+    documentId: string;
+    viewport: { width: number; height: number; scale: number };
+    frames: { frameId: string; parentId?: string; url: string; available: boolean }[];
+    elements: { role: string; name?: string; value?: string; description?: string }[];
+    image?: { mimeType: 'image/png'; base64: string; width: number; height: number };
+  };
   alreadyRunning?: boolean;
   tabs?: Array<{ id: string; title?: string; url?: string }>;
   tab?: string;

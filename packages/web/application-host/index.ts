@@ -66,6 +66,11 @@ import { createWebRetrievalAssistance } from './lib/kernel/web-retrieval-assista
 import { createWebRuntime, WEB_CAPABILITY } from './lib/kernel/web-runtime.js';
 import { createOfficeRuntime, OFFICE_CAPABILITY } from './lib/kernel/office-runtime.js';
 import { createBrowserRuntime, BROWSER_CAPABILITY } from './lib/kernel/browser-runtime.js';
+import { BrowserResources } from './lib/browser/browser-resources.js';
+import { registerBrowserResourceRoutes } from './lib/browser/browser-resource-routes.js';
+import { createCdpBrowserOwner } from './lib/browser/cdp-owner.js';
+import { createLinuxBrowserResources } from './lib/browser/linux-browser-owner.js';
+import { ManagedBrowserPeers, registerManagedBrowserRoutes } from './lib/browser/browser-managed.js';
 import { createOfficeReader } from './lib/office/reader.js';
 import { createOfficeRenderer } from './lib/office/renderer.js';
 import { createBinaryFileOwner } from './lib/kernel/binary-file-owner.js';
@@ -2114,7 +2119,23 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const documentSources = createDocumentSources({ kernel: kernelClient, runtime: agentRuntime,
     resolveLiveSource: liveSources.validate, experiments: experimentService });
   const binaryFiles = createBinaryFileOwner({ kernel: kernelClient, runtime: agentRuntime, resolveLiveSource: liveSources.validate });
-  browserRuntimeOwner.current = createBrowserRuntime({ browser: options.browser, runtime: agentRuntime, sources: documentSources,
+  const browserResources = new BrowserResources();
+  if (options.browser) browserResources.register(options.browser, 'Varin Browser', 'This Host', { dispose: false });
+  const cdpEndpoint = process.env.VARIN_BROWSER_CDP_ENDPOINT;
+  if (cdpEndpoint) {
+    const cdpBrowser = createCdpBrowserOwner({ browserId: 'configured-cdp', endpoint: cdpEndpoint,
+      ...(process.env.VARIN_BROWSER_CDP_SCRATCH_DIRECTORY ? { scratchDirectory: process.env.VARIN_BROWSER_CDP_SCRATCH_DIRECTORY } : {}) });
+    browserResources.register(cdpBrowser, 'Chromium (CDP)', 'Configured browser');
+    void cdpBrowser.connect().catch(() => undefined);
+  }
+  const linuxBrowsers = createLinuxBrowserResources({ computers: computerService, runtime: agentRuntime });
+  const browserPeers = new ManagedBrowserPeers(hostId, browserResources, managedRemoteTargets);
+  browserResources.setRefresh(() => browserPeers.refresh(), async () => {
+    for (const { owner, label, deviceName } of await linuxBrowsers.discover()) {
+      if (!browserResources.has(owner.browserId)) browserResources.register(owner, label, deviceName);
+    }
+  });
+  browserRuntimeOwner.current = createBrowserRuntime({ resources: browserResources, runtime: agentRuntime, sources: documentSources,
     files: binaryFiles, materials: webMaterials, documents: documentReader, office: officeReader,
     settings: async source => {
       const root = source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
@@ -2192,7 +2213,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     releaseAttachmentSources: (plan, signal) => releaseDeletedAttachmentSources(kernelClient, agentRuntime, plan, signal),
     releaseSource:(source,id,signal)=>nativeWorkspaces!.retireSource(source,id,signal),
     releasePreparations:threads=>releaseSourcePreparations(threads),
-    ...(options.browser ? { releaseBrowser: (threadId: string) => options.browser!.releaseThread(threadId) } : {}) });
+    releaseBrowser: (threadId: string) => browserResources.releaseThread(threadId) });
   const contentMaintenance = createContentMaintenance({ runtime: agentRuntime,
     releaseDeletedResources: signal => threadMaterialLifetime.releaseDeleted(signal),
     releaseCollectedResources: signal => interactiveUi.releaseDeleted(signal),
@@ -2755,6 +2776,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hostId,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
+  if (uiAuthController) {
+    const authController = uiAuthController;
+    const browserPeerClient = async (request: Request) => {
+      if (!/^Bearer /i.test(request.get('Authorization') ?? '')) return undefined;
+      const auth = await authController.resolveAuthContext(request, null, { allowUrlToken: false });
+      if (auth?.type !== 'client' || !('clientId' in auth) || typeof auth.clientId !== 'string') return undefined;
+      return await agentRuntime.principalCanUseHostResources?.(auth.principalId ?? null) ? auth.clientId : undefined;
+    };
+    registerBrowserResourceRoutes(app, browserResources, authController.requireAuth, browserPeerClient);
+    registerManagedBrowserRoutes(app, { hostId, resources: browserResources, requireAuth: authController.requireAuth, clientId: browserPeerClient });
+  }
   const desktopMedia = attachDesktopMedia({ isDraining: () => isShuttingDown, server, hostId, computers: computerService,
     authenticate: async (request) => Boolean(await uiAuthController?.ensureSessionToken(request, { setHeader: () => undefined })),
     originAllowed: isRequestOriginAllowed,
@@ -3477,6 +3509,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         await shutdown.run('webRuntime.close', () => webRuntimeOwner.current?.close());
         await shutdown.run('webRetrievalAssistance.close', () => webRetrievalAssistance.close());
         await shutdown.run('webFetch.dispose', () => webFetchService.dispose());
+        await shutdown.run('browserResources.dispose', () => browserResources.dispose());
         await shutdown.run('semanticInference.close', () => semanticInference.close());
         // Stop producers and drain their receipts while process grants are valid.
         // One refused exit must not prevent the other domains from shutting down.
