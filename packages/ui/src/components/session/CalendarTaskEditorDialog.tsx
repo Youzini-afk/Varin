@@ -1,12 +1,13 @@
 import React from 'react';
-import { createScheduledTasksHttpAPI, getRuntimeEndpointGeneration } from '@varin/application-client';
-import type { ScheduledTask, ThreadModelInfo, ThreadSourceTargets } from '@varin/application-client';
+import { createScheduledTasksHttpAPI, createModelConnectionsHttpAPI, defaultConversationModel, getRuntimeEndpointGeneration } from '@varin/application-client';
+import type { ProjectEntry, ScheduledTask, ThreadModelInfo, ThreadSourceTargets } from '@varin/application-client';
 import type { CalendarSource, SourceResourceOwner } from '@varin/protocol';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import type { CalendarConversationContext } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 
 const schedules = createScheduledTasksHttpAPI();
@@ -14,7 +15,9 @@ const sourceOwnerKey = (owner: SourceResourceOwner) => owner.kind === 'local'
   ? 'local' : JSON.stringify([owner.connectionId, owner.endpointIdentity, owner.hostId]);
 
 /** Edits external definitions only. Preview/admission and every occurrence stay with the Host. */
-export function CalendarTaskEditorDialog({ open, projectId, task, initialTarget, onOpenChange, onSave }: {
+export function CalendarTaskEditorDialog({ open, projectId, project, task, initialTarget, conversation, onOpenChange, onSave }: {
+  project?: ProjectEntry;
+  conversation?: CalendarConversationContext;
   initialTarget?: import('@varin/application-client').ThreadIdentity | undefined;
   open: boolean; projectId: string; task: ScheduledTask | null; onOpenChange(open: boolean): void; onSave(task: Partial<ScheduledTask>): Promise<void>;
 }) {
@@ -41,6 +44,7 @@ export function CalendarTaskEditorDialog({ open, projectId, task, initialTarget,
   const [models, setModels] = React.useState<ThreadModelInfo[]>([]), [model, setModel] = React.useState(''), [thinking, setThinking] = React.useState('off');
   const [goal, setGoal] = React.useState(false), [budget, setBudget] = React.useState('');
   const [error, setError] = React.useState(''), [saving, setSaving] = React.useState(false);
+  const modelEdited = React.useRef(false), thinkingEdited = React.useRef(false);
   const creationKey = React.useRef<string | undefined>(undefined);
   const editorHostGeneration = React.useRef<number | null>(null);
   const editorGeneration = React.useRef(0);
@@ -73,13 +77,14 @@ export function CalendarTaskEditorDialog({ open, projectId, task, initialTarget,
     const isCurrent = () => !controller.signal.aborted && editorGeneration.current === generation && host === getRuntimeEndpointGeneration();
     retireResolution(); setResolving(false); setSourceError('');
     setSourceTargets({ targets: [], unavailable: [] }); setDirectoryError(''); setLoadingSources(true);
+    modelEdited.current = false; thinkingEdited.current = false;
     creationKey.current = task?.id ?? `task:${crypto.randomUUID()}`;
     setName(task?.name ?? ''); setInstruction(task?.execution.prompt ?? ''); setKind(task?.schedule.kind ?? 'daily');
     setTimezone(task?.schedule.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC');
     setTimes(task?.schedule.times?.join(', ') ?? task?.schedule.time ?? '09:00'); setDate(task?.schedule.date ?? '');
     setWeekdays(task?.schedule.weekdays?.join(', ') ?? '1'); setCron(task?.schedule.cron ?? '0 9 * * *');
     setEnabled(task?.enabled ?? false); setMissed(task?.missedPolicy ?? (task?.schedule.kind === 'once' ? 'coalesce_once' : 'skip'));
-    setTarget(task?.target?.kind ?? (initialTarget ? 'existing_work' : 'new_work')); setError(''); setSaving(false);
+    setTarget(task?.target?.kind ?? (initialTarget?.threadId ? 'existing_work' : 'new_work')); setError(''); setSaving(false);
     const selection = task?.target;
     const selectedSource: CalendarSource = selection?.kind === 'new_work' ? selection.source : { kind: 'project' };
     setSourceKind(selectedSource.kind); setSource(selectedSource);
@@ -87,17 +92,30 @@ export function CalendarTaskEditorDialog({ open, projectId, task, initialTarget,
     if (selection?.kind === 'new_work') {
       setModel(JSON.stringify([selection.model.providerId, selection.model.modelId])); setThinking(selection.model.thinkingLevel ?? 'off');
       setSourceMode(selection.sourceMode === 'native_workspace' ? 'live_root' : selection.sourceMode); setGoal(selection.goal !== null); setBudget(selection.goal?.budget ? String(selection.goal.budget.maxOutputTokens) : '');
-    } else { setModel(''); setThinking('off'); setSourceMode('materialized'); setGoal(false); setBudget(''); }
-    setThreadId(selection?.kind === 'existing_work' ? selection.threadId : initialTarget?.threadId ?? ''); setBranchId(selection?.kind === 'existing_work' ? selection.branchId : initialTarget?.branchId ?? '');
+    } else { setModel(!task && (conversation?.model?.providerId || conversation?.model?.modelId) ? JSON.stringify([conversation.model.providerId, conversation.model.modelId]) : ''); setThinking(!task ? conversation?.model?.thinkingLevel ?? 'off' : 'off'); setSourceMode('materialized'); setGoal(false); setBudget(''); }
+    setThreadId(selection?.kind === 'existing_work' ? selection.threadId : initialTarget?.threadId ?? conversation?.identity?.threadId ?? ''); setBranchId(selection?.kind === 'existing_work' ? selection.branchId : initialTarget?.branchId ?? conversation?.identity?.branchId ?? '');
     setModels([]);
-    void threads?.listModels().then(value => { if (isCurrent()) setModels(value); }, value => { if (isCurrent()) setError(value instanceof Error ? value.message : effectText('calendar.error.models')); });
+    void threads?.listModels().then(async value => {
+      if (!isCurrent()) return;
+      setModels(value);
+      // Explicit conversation/saved selections never fall back to another registered model.
+      if (task || initialTarget?.threadId || conversation?.model?.providerId || conversation?.model?.modelId) return;
+      const settings = await createModelConnectionsHttpAPI(host).readSettings(project?.source?.resourceOwner.kind === 'managed_host' ? undefined : project?.path, controller.signal,
+        project?.source?.resourceOwner.kind === 'managed_host' ? projectId : undefined);
+      if (!isCurrent() || modelEdited.current) return;
+      const selection = defaultConversationModel({ ...settings.global, ...(settings.projectTrusted ? settings.project : {}) }, value);
+      if (selection) {
+        setModel(JSON.stringify([selection.providerId, selection.modelId]));
+        if (!thinkingEdited.current) setThinking(selection.thinkingLevel ?? 'off');
+      }
+    }).catch(value => { if (isCurrent()) setError(value instanceof Error ? value.message : effectText('calendar.error.models')); });
     void schedules.listSources(projectId, controller.signal).then(value => {
       if (isCurrent()) setSourceTargets(value);
     }, value => {
       if (isCurrent()) setDirectoryError(value instanceof Error ? value.message : effectText('calendar.error.hosts'));
     }).finally(() => { if (isCurrent()) setLoadingSources(false); });
     return () => { controller.abort(); editorGeneration.current += 1; retireResolution(); };
-  }, [open, projectId, task, threads, retireResolution, initialTarget?.threadId, initialTarget?.branchId]);
+  }, [open, projectId, task, threads, retireResolution, initialTarget?.threadId, initialTarget?.branchId, conversation, project?.path, project?.source?.resourceOwner.kind]);
   const selectedHost = resourceOwner ? sourceTargets.targets.find(value => sourceOwnerKey(value.resourceOwner) === sourceOwnerKey(resourceOwner)) : undefined;
   const resolveSource = async () => {
     if (saving || resolving || !resourceOwner || !selectedHost || !path.trim()) return;
@@ -162,8 +180,8 @@ export function CalendarTaskEditorDialog({ open, projectId, task, initialTarget,
     <label className="text-sm">{t('calendar.missed')} <select aria-label={t('calendar.missedLabel')} value={missed} onChange={event => setMissed(event.target.value as typeof missed)}><option value="skip">{t('calendar.missed.skip')}</option><option value="coalesce_once">{t('calendar.missed.once')}</option></select></label>
     <label className="text-sm">{t('calendar.target')} <select aria-label={t('calendar.targetLabel')} value={target} onChange={event => { retireResolution(); setResolving(false); setSourceError(''); setTarget(event.target.value as typeof target); }}><option value="new_work">{t('calendar.target.new')}</option><option value="existing_work">{t('calendar.target.existing')}</option></select></label>
     {target === 'existing_work' ? <>{field(t('calendar.threadId'), threadId, setThreadId)}{field(t('calendar.branchId'), branchId, setBranchId)}<p className="text-sm text-muted-foreground">{t('calendar.existingHint')}</p></> : <>
-      <label className="text-sm">{t('calendar.model')} <select aria-label={t('calendar.modelLabel')} value={model} onChange={event => setModel(event.target.value)}><option value="">{t('calendar.selectModel')}</option>{models.map(value => <option key={JSON.stringify([value.providerId, value.modelId])} value={JSON.stringify([value.providerId, value.modelId])}>{value.providerId} / {value.name ?? value.modelId}</option>)}</select></label>
-      {field(t('calendar.thinking'), thinking, setThinking)}
+      <label className="text-sm">{t('calendar.model')} <select aria-label={t('calendar.modelLabel')} value={model} onChange={event => { modelEdited.current = true; setModel(event.target.value); }}><option value="">{t('calendar.selectModel')}</option>{model && !models.some(value => JSON.stringify([value.providerId, value.modelId]) === model) && <option value={model} disabled>{JSON.parse(model).join(' / ')} ({t('calendar.unavailable')})</option>}{models.map(value => <option key={JSON.stringify([value.providerId, value.modelId])} value={JSON.stringify([value.providerId, value.modelId])}>{value.providerId} / {value.name ?? value.modelId}</option>)}</select></label>
+      {field(t('calendar.thinking'), thinking, value => { thinkingEdited.current = true; setThinking(value); })}
       <label className="text-sm">{t('calendar.source')} <select aria-label={t('calendar.sourceLabel')} disabled={saving} value={sourceKind} onChange={event => {
         invalidateSource(); const kind = event.target.value as CalendarSource['kind']; setSourceKind(kind);
         setSource(kind === 'project' ? { kind: 'project' } : null); setResourceOwner(null); setPath('');

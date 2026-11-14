@@ -57,9 +57,10 @@ export function ScheduledTasksDialog() {
   const replacementRef = React.useRef<RunReplacement | null>(null);
   const runContextGeneration = React.useRef(0);
   const dismissRunReplacement = React.useCallback(() => { replacementRef.current = null; setRunReplacement(null); }, []);
-  React.useEffect(() => subscribeRuntimeEndpointWillChange(() => { replacementRef.current = null; setRunReplacement(null); setCalendarWork(null); setCalendarEditorOpen(false); setCalendarEditorTask(null); }), []);
+  React.useEffect(() => subscribeRuntimeEndpointWillChange(() => { replacementRef.current = null; setRunReplacement(null); setCalendarWork(null); setCalendarEditorOpen(false); setCalendarEditorTask(null); useUIStore.setState({ scheduledTasksConversation: null }); }), []);
   const open = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const setOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
+  const conversation = useUIStore(state => state.scheduledTasksConversation);
   const isMobile = useUIStore((state) => state.isMobile);
   const projectEntries = useProjectsStore((state) => state.projects);
   const [botEntries, setBotEntries] = React.useState<BotSummary[]>([]);
@@ -557,7 +558,7 @@ export function ScheduledTasksDialog() {
         </div>
       </DialogContent></Dialog>
 
-      <CalendarTaskEditorDialog open={calendarEditorOpen} projectId={selectedProjectID} task={calendarEditorTask} initialTarget={botEntries.find(bot => `bot:${bot.id}` === selectedProjectID)?.entry} onOpenChange={setCalendarEditorOpen} onSave={handleSaveTask} />
+      <CalendarTaskEditorDialog open={calendarEditorOpen} projectId={selectedProjectID} task={calendarEditorTask} conversation={conversation ?? undefined} project={selectedProject ?? undefined} initialTarget={botEntries.find(bot => `bot:${bot.id}` === selectedProjectID)?.entry} onOpenChange={setCalendarEditorOpen} onSave={handleSaveTask} />
       <Dialog open={calendarWork !== null} onOpenChange={value => { if (!value) setCalendarWork(null); }}><DialogContent className="h-[85vh] max-w-5xl overflow-hidden"><DialogTitle>{t('calendar.work')}</DialogTitle>
         {calendarWork && threads && <ThreadConversation api={threads} identity={calendarWork} onBranchCreated={setCalendarWork} />}
       </DialogContent></Dialog>

@@ -29,6 +29,12 @@ A definition supports once/daily/weekly/cron, an explicit IANA timezone and the 
 New work selects a registered `providerId`/`modelId`, optional thinking/temperature, a source mode
 (`fixed_branch`, `materialized`, `live_root`) and an explicit nullable Goal budget. Existing work
 selects only its exact `threadId`/`branchId`, inheriting that work's actual model/source/Goal.
+When opened from a native conversation, a new GUI definition starts with that conversation's
+selected registered model and thinking level; both remain editable. Switching to existing work
+uses the opening conversation's exact branch instead of copying a model. Without a conversation
+selection, the editor reuses the ordinary trusted project/global conversation-default resolver.
+Editing saved definitions preserves their selections, including unavailable model identities; an
+unavailable explicit model requires a new user selection rather than a silent fallback.
 The selected catalog model ID can differ from the provider's upstream request model ID. The
 source owner may resolve materialized or live access to `native_workspace`; this does not change
 the selected resource owner or relax fixed-snapshot semantics. Admission freezes the actual

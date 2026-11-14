@@ -1,4 +1,4 @@
-import type { ThreadIdentity } from '@varin/application-client';
+import type { ThreadIdentity, ThreadModel } from '@varin/application-client';
 import { DEFAULT_CHAT_CONTENT_WIDTH, isChatContentWidth } from '@varin/application-client';
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
@@ -24,6 +24,7 @@ import { isMotionPreference, type MotionPreference } from '@/lib/motion/preferen
 import { captureDialogOrigin } from '@/lib/motion/dialogOrigin';
 
 export type { MotionPreference } from '@/lib/motion/preference';
+export type CalendarConversationContext = { identity?: ThreadIdentity; model?: ThreadModel };
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged';
 export type ContextPanelMode = 'tree' | 'threads' | 'diff' | 'file' | 'context' | 'recovery' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal' | 'computer' | 'ui' | 'material';
@@ -539,6 +540,8 @@ interface UIStore {
   /** Explicit full-page selections supersede pending conversation navigation. Not persisted. */
   mainSurfaceSelectionRevision: number;
   isScheduledTasksDialogOpen: boolean;
+  /** Opening context only; never a saved schedule or a global model preference. */
+  scheduledTasksConversation: CalendarConversationContext | null;
   scheduledTasksFocus: { identity: ThreadIdentity; followupId?: string; token: number } | null;
   isArchivePageOpen: boolean;
   worktreesPageProjectId: string | null;
@@ -705,7 +708,7 @@ interface UIStore {
   setAboutDialogOpen: (open: boolean) => void;
   setVarinDiagnosticsDialogOpen: (open: boolean) => void;
   setSessionCreateDialogOpen: (open: boolean) => void;
-  setScheduledTasksDialogOpen: (open: boolean) => void;
+  setScheduledTasksDialogOpen: (open: boolean, conversation?: CalendarConversationContext) => void;
   openArrangements: (identity: ThreadIdentity, followupId?: string) => void;
   setArchivePageOpen: (open: boolean) => void;
   setWorktreesPageProjectId: (projectId: string | null) => void;
@@ -868,6 +871,7 @@ export const useUIStore = create<UIStore>()(
         isSessionCreateDialogOpen: false,
         mainSurfaceSelectionRevision: 0,
         isScheduledTasksDialogOpen: false,
+        scheduledTasksConversation: null,
         scheduledTasksFocus: null,
         isArchivePageOpen: false,
         worktreesPageProjectId: null,
@@ -1544,14 +1548,15 @@ export const useUIStore = create<UIStore>()(
 
         openArrangements: (identity, followupId) => {
           set(state => ({ mainSurfaceSelectionRevision: state.mainSurfaceSelectionRevision + 1,
+            scheduledTasksConversation: null,
             scheduledTasksFocus: { identity, followupId, token: (state.scheduledTasksFocus?.token ?? 0) + 1 },
             isScheduledTasksDialogOpen: true, isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false }));
         },
 
-        setScheduledTasksDialogOpen: (open) => {
+        setScheduledTasksDialogOpen: (open, conversation) => {
           set(state => open
-            ? { mainSurfaceSelectionRevision: state.mainSurfaceSelectionRevision + 1, isScheduledTasksDialogOpen: true, isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false }
-            : { isScheduledTasksDialogOpen: false, scheduledTasksFocus: null });
+            ? { mainSurfaceSelectionRevision: state.mainSurfaceSelectionRevision + 1, scheduledTasksConversation: conversation ?? null, isScheduledTasksDialogOpen: true, isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false }
+            : { isScheduledTasksDialogOpen: false, scheduledTasksConversation: null, scheduledTasksFocus: null });
         },
 
         setArchivePageOpen: (open) => {

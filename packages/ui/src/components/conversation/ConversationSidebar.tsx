@@ -4,7 +4,8 @@ import { VARIN_CONVERSATION_SLOTS } from '@varin/extension-contract';
 import React from 'react';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { useSidebarCatalog, type SidebarConversation as SessionSummary, type ConversationSessionAttentionState } from './sidebarCatalog';
-import { useThreadStore } from '@/stores/useThreadStore';
+import { selectedComposerKey, threadHostKey, useThreadStore } from '@/stores/useThreadStore';
+import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { Icon } from '@/components/icon/Icon';
 import { SwapIcon } from '@/components/motion/SwapIcon';
 import { FlipList } from './FlipList';
@@ -692,7 +693,10 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
   }, [selectedSessionIds.size, selectedSubtreeIds, t]);
 
   const handleOpenScheduledTasks = React.useCallback(() => {
-    setScheduledTasksDialogOpen(true);
+    const navigation = useThreadStore.getState();
+    const key = navigation.hostKey === threadHostKey() && !useExternalAgentStore.getState().selectedId ? selectedComposerKey(navigation) : null;
+    const draft = key ? useThreadDraftStore.getState().drafts[key] : undefined;
+    setScheduledTasksDialogOpen(true, key && !draft?.harnessId ? { identity: navigation.selectedIdentity ?? undefined, model: draft?.model } : undefined);
     if (mobileVariant) setSessionSwitcherOpen(false);
     onRequestClose?.();
   }, [mobileVariant, onRequestClose, setScheduledTasksDialogOpen, setSessionSwitcherOpen]);

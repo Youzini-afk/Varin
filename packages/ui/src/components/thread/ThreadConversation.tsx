@@ -774,7 +774,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     {!botSurface && <Departure present={empty} animated={sendDeparts} exit="sink" stagger=".varin-draft-starters > *" className="conversation-starters"><DraftPresetChips cwd={workspacePath ?? initialWorkspacePath} sessionId={identity.threadId} className="varin-draft-starters"
       onSubmit={starter => {
         if (starter.ref.type === 'command' && starter.ref.name === 'craft-goal') { useThreadDraftStore.getState().patch(draftKey, { goalArmed: true }); messageInput.current?.focus(); return; }
-        if (starter.ref.type === 'command' && starter.ref.name === 'schedule-task') { useUIStore.getState().setScheduledTasksDialogOpen(true); return; }
+        if (starter.ref.type === 'command' && starter.ref.name === 'schedule-task') { useUIStore.getState().setScheduledTasksDialogOpen(true, { identity, model: selectedModel }); return; }
         setText(current => [current.trimEnd(), starter.submitText].filter(Boolean).join('\n\n'));
         messageInput.current?.focus();
       }} /></Departure>}
