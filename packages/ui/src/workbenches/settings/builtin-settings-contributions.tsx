@@ -1,4 +1,5 @@
 import { WorkConnectionsPage } from '@/components/sections/connections/WorkConnectionsPage';
+import { BrowserSettingsPage } from '@/components/sections/browsers/BrowserSettingsPage';
 import { ExternalAgentsPage } from '@/components/sections/external-agents/ExternalAgentsPage';
 import { AccessSettingsPage, HistorySettingsPage, NetworkSettingsPage } from '@/components/sections/connections/SettingsUtilityPages';
 import { StorageSettingsPage } from '@/components/sections/storage/StorageSettingsPage';
@@ -46,6 +47,7 @@ const implementationFor = (spec: BuiltinSettingsPageSpec): SettingsPageImplement
       case 'storage': implementation = { renderContent: () => <StorageSettingsPage /> }; break;
       case 'usage': implementation = { renderContent: () => <UsageSettingsPage /> }; break;
       case 'work-connections': implementation = { renderContent: () => <WorkConnectionsPage /> }; break;
+      case 'browsers': implementation = { renderContent: () => <BrowserSettingsPage /> }; break;
       case 'network': implementation = { renderContent: () => <NetworkSettingsPage /> }; break;
       case 'access': implementation = { renderContent: () => <AccessSettingsPage /> }; break;
       case 'images': implementation = { renderContent: () => <HarnessSettingsPage section="images" /> }; break;

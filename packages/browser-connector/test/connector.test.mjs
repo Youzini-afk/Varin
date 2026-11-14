@@ -106,11 +106,11 @@ test('debugger detach while navigation is in flight returns unknown and never fa
 test('pause fences queued input; resume invalidates references', async () => {
   const f = fixture(); const page = await f.connector.share(7);
   const { value } = await f.execute('read', 'read', { pageId: page.pageId });
-  await f.connector.pause(page.pageId, true);
+  assert.equal((await f.execute('takeover', 'pause', page.pageId, true)).value, true);
   const paused = await f.execute('paused', 'act', page.pageId, { action: 'reload' });
   assert.equal(paused.effect, 'none'); assert.match(paused.error, /takeover/);
   assert.equal((await f.execute('observe-paused', 'read', { pageId: page.pageId })).ok, true);
-  await f.connector.pause(page.pageId, false);
+  assert.equal((await f.execute('resume', 'pause', page.pageId, false)).value, true);
   assert.equal((await f.execute('stale', 'act', page.pageId, { action: 'click', ref: value.elements[0].ref })).effect, 'none');
 });
 
@@ -142,7 +142,8 @@ test('capability limits reject raw CDP, evaluate, open and file access', async (
   }
   assert.equal((await f.execute('cdp', 'command', page.pageId, 'Network.getAllCookies')).ok, false);
   const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url)));
-  assert.deepEqual(manifest.permissions, ['activeTab', 'debugger', 'nativeMessaging', 'storage']);
+  assert.deepEqual(manifest.permissions, ['activeTab', 'debugger', 'storage']);
+  assert.deepEqual(manifest.optional_host_permissions, ['http://*/*', 'https://*/*']);
   assert.equal(manifest.host_permissions, undefined); assert.equal(manifest.externally_connectable, undefined);
 });
 

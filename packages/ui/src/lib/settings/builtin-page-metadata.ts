@@ -7,6 +7,7 @@ export type BuiltinSettingsRenderer =
   | 'storage'
   | 'usage'
   | 'work-connections'
+  | 'browsers'
   | 'network'
   | 'access'
   | 'images'
@@ -51,6 +52,7 @@ const spec = (
 ): BuiltinSettingsPageSpec => ({ meta, renderer, ...(availability ? { availability } : {}) });
 
 export const BUILTIN_SETTINGS_PAGE_SPECS: readonly BuiltinSettingsPageSpec[] = [
+  spec({ slug: 'browsers', title: 'Browser', titleKey: 'settings.browser.title', group: 'harness', kind: 'single', icon: 'global', order: 8.1, keywords: ['browser', 'chrome', 'edge', 'cdp', '浏览器', '浏览器连接'] }, 'browsers'),
   spec({ slug: 'external-agents', title: 'External Agents', titleKey: 'external.title', group: 'harness', kind: 'single', icon: 'terminal', order: 1.5, keywords: ['external', 'harness', 'codex', 'claude', 'pi', 'acp'] }, 'external-agents'),
   spec({ slug: 'history', title: 'History and recovery', titleKey: 'settings.page.history.title', group: 'general', kind: 'single', icon: 'chat-history', order: 8, keywords: ['history and recovery'] }, 'history'),
   spec({ slug: 'storage', title: 'Storage', titleKey: 'settings.page.storage.title', group: 'general', kind: 'single', icon: 'database-2', order: 7, keywords: ['storage'] }, 'storage'),

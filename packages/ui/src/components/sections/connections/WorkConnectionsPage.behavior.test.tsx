@@ -7,9 +7,10 @@ import type { ComputerCatalog } from '@/lib/computers';
 
 const fixture = vi.hoisted(() => ({ generation: 1, listeners: new Set<() => void>(), sources: vi.fn(), computers: vi.fn(),
   selected: {} as { identity: ThreadIdentity | null; snapshot?: ThreadSnapshot; error?: string },
+  browsers: vi.fn(),
   translate: (key: string) => key,
 }));
-vi.mock('@varin/application-client', () => ({ getRuntimeEndpointGeneration: () => fixture.generation, getRuntimeApiBaseUrl: () => 'https://host.example',
+vi.mock('@varin/application-client', () => ({ browserResources: { configuration: fixture.browsers }, getRuntimeEndpointGeneration: () => fixture.generation, getRuntimeApiBaseUrl: () => 'https://host.example',
   subscribeRuntimeEndpointChanged: (listener: () => void) => { fixture.listeners.add(listener); return () => fixture.listeners.delete(listener); } }));
 vi.mock('@/hooks/useRuntimeAPIs', () => { const threads = { sources: { list: fixture.sources } }; return { useRuntimeAPIs: () => ({ threads }) }; });
 vi.mock('@/hooks/useSelectedThreadSnapshot', () => ({ useSelectedThreadSnapshot: () => fixture.selected }));
@@ -39,6 +40,7 @@ beforeEach(() => {
   fixture.selected = { identity: { runtime: 'agent', threadId: 'thread', branchId: 'branch' } };
   fixture.sources.mockResolvedValue({ targets: [], unavailable: [] } satisfies ThreadSourceTargets);
   fixture.computers.mockResolvedValue({ machines: [], desktops: [], defaultDesktopId: null } satisfies ComputerCatalog);
+  fixture.browsers.mockResolvedValue({ settings: { connections: [], defaultBrowserId: null, revision: 'revision' }, resources: [] });
   const { window, document } = parseHTML('<!doctype html><html><body></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);

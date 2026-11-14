@@ -6,13 +6,16 @@ import type { BrowserPageSnapshot } from '@varin/application-client';
 import type { BrowserResource, BrowserResourceBinding } from '@varin/protocol';
 import { ConnectedBrowserPage, ConnectedBrowserSurface } from './ConnectedBrowserPane';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), pages: vi.fn(), observe: vi.fn(), control: vi.fn(), host: 1, listeners: new Set<() => void>() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), pages: vi.fn(), observe: vi.fn(), control: vi.fn(), task: vi.fn(), selectTask: vi.fn(),
+  thread: null as { runtime: 'agent'; threadId: string; branchId: string } | null, host: 1, listeners: new Set<() => void>() }));
 vi.mock('@varin/application-client', () => ({
   browserResources: mocks, getRuntimeEndpointGeneration: () => mocks.host,
   subscribeRuntimeEndpointChanged: (listener: () => void) => { mocks.listeners.add(listener); return () => mocks.listeners.delete(listener); },
 }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string, params?: Record<string, string>) => `${key}${params ? ` ${Object.values(params).join(' ')}` : ''}` }) }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
+vi.mock('@/stores/useThreadStore', () => ({ useThreadStore: (read: (state: unknown) => unknown) => read({ selectedIdentity: mocks.thread }) }));
+vi.mock('@/stores/useUIStore', () => ({ useUIStore: { getState: () => ({ setSettingsPage: vi.fn(), setSettingsDialogOpen: vi.fn() }) } }));
 let root: Root | undefined;
 let container: HTMLDivElement;
 const binding = { browserId: 'office', instanceId: 'session-original', pageId: 'tab-original' };
@@ -26,17 +29,19 @@ const button = (label: string) => [...container.querySelectorAll('button')].find
 beforeEach(() => {
   const { document, window } = parseHTML('<html><body></body></html>');
   vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('HTMLElement', window.HTMLElement); vi.stubGlobal('Element', window.Element); vi.stubGlobal('Node', window.Node);
   container = document.createElement('div'); document.body.append(container);
   mocks.list.mockResolvedValue([resource]); mocks.pages.mockResolvedValue([snapshot('Original page').observation.page]); mocks.observe.mockResolvedValue(snapshot('Original page'));
+  mocks.thread = null; mocks.task.mockResolvedValue({ preferredBrowserId: null }); mocks.selectTask.mockResolvedValue({ preferredBrowserId: 'office' });
 });
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; vi.unstubAllGlobals(); vi.clearAllMocks(); mocks.host = 1; mocks.listeners.clear(); });
 const render = async (node: React.ReactNode) => act(async () => { root ??= createRoot(container); root.render(node); });
 
-it('shows exact identity and real observations; takeover and resume reobserve the same tab', async () => {
+it('shows readable activity and real observations; takeover and resume reobserve the same tab', async () => {
   await render(<ConnectedBrowserPage resource={resource} binding={binding} />);
-  expect(container.textContent).toContain('session-original tab-original');
+  expect(container.textContent).not.toContain('session-original');
   expect(container.textContent).toContain('Original page');
-  expect(container.textContent).toContain('waiting-task');
+  expect(container.textContent).toContain('browser.resource.waitingCount 1');
   expect(container.querySelector('iframe')).toBeNull();
   mocks.control.mockResolvedValue({ usage: snapshot('', 'human').usage }); mocks.observe.mockResolvedValue(snapshot('After takeover', 'human'));
   await act(async () => button('browser.takeOver').click());
@@ -48,6 +53,15 @@ it('shows exact identity and real observations; takeover and resume reobserve th
   expect(container.textContent).toContain('After resume');
   await act(async () => button('browser.resource.openOnDevice').click());
   expect(mocks.control.mock.calls[2].slice(0, 2)).toEqual([binding, 'activate']);
+});
+
+it('viewing a browser does not change task placement; the task action selects it through the owner', async () => {
+  mocks.thread = { runtime: 'agent', threadId: 'work', branchId: 'branch' };
+  await render(<ConnectedBrowserSurface binding={binding} onBindingChange={vi.fn()} preview={null} />);
+  expect(mocks.selectTask).not.toHaveBeenCalled();
+  await act(async () => button('browser.resource.useForTask').click());
+  expect(mocks.selectTask).toHaveBeenCalledWith('work', 'office');
+  expect(container.textContent).toContain('browser.resource.taskSelected');
 });
 
 it('does not offer local URL opening when activate is unsupported and retains failed observation honestly', async () => {

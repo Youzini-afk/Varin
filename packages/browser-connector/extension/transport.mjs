@@ -2,12 +2,11 @@ const isRecord = value => value && typeof value === 'object' && !Array.isArray(v
 export function connectorEndpoint(value) {
   const url = new URL(value);
   if (url.username || url.password || url.search || url.hash) throw new Error('Host URL cannot contain credentials, query or fragment');
-  const loopback = ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname);
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) throw new Error('Use HTTPS or a loopback HTTP Application Host');
-  if (url.pathname !== '/' && url.pathname !== '') throw new Error('Use the Application Host origin, not a page URL');
-  return new URL('/api/browser-resources/connector/exchange', url).href;
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Use an HTTP(S) Application Host');
+  url.pathname = `${url.pathname.replace(/\/+$/, '')}/`;
+  return new URL('api/browser-resources/connector/exchange', url).href;
 }
-/** Adapts native messaging to the original paired Host. No retry/re-pair/backoff replay. */
+/** Shared HTTP transport for the browser extension and optional native launcher. */
 export class ConnectorBridge {
   constructor({ endpoint, clientToken, send, fetch = globalThis.fetch, onStop = () => {}, pollMs = 400 }) {
     this.endpoint = connectorEndpoint(endpoint); this.clientToken = clientToken; this.send = send;
@@ -19,7 +18,7 @@ export class ConnectorBridge {
     if (this.stopped || !isRecord(message)) return;
     if (message.type === 'goodbye') { void this.closeGracefully(); return; }
     if (message.type === 'hello') {
-      if (this.hello) throw new Error('A native connection cannot replace its browser identity');
+      if (this.hello) throw new Error('A browser connection cannot replace its browser identity');
       const { browserId, instanceId, label, capabilities } = message;
       if (![browserId, instanceId, label].every(value => typeof value === 'string' && value.length > 0 && value.length <= 200)
         || !Array.isArray(capabilities) || capabilities.length > 64 || !capabilities.every(value => typeof value === 'string' && value.length < 100)) throw new Error('Invalid browser connector identity');
@@ -28,7 +27,7 @@ export class ConnectorBridge {
     else if (message.type === 'result' && this.hello && isRecord(message.result) && this.commandIds.has(message.result.id)) {
       this.commandIds.delete(message.result.id); this.results.push(message.result);
     }
-    else throw new Error('Unexpected native message');
+    else throw new Error('Unexpected browser transport message');
     this.wake();
   }
   wake() {

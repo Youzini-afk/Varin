@@ -145,6 +145,12 @@ try {
     }
   };
   copyAssets(sourceDir, buildDir);
+  // The small browser extension is delivered by the Host settings page on every platform.
+  fs.cpSync(path.join(repoRoot, 'packages/browser-connector/extension'), path.join(buildDir, 'browser-connector'), { recursive: true });
+  const connectorManifestPath = path.join(buildDir, 'browser-connector/manifest.json');
+  const connectorManifest = JSON.parse(fs.readFileSync(connectorManifestPath, 'utf8'));
+  connectorManifest.version = JSON.parse(fs.readFileSync(path.join(webRoot, 'package.json'), 'utf8')).version;
+  fs.writeFileSync(connectorManifestPath, `${JSON.stringify(connectorManifest, null, 2)}\n`);
 
   // ── Step 2b: Stage Computer Use driver assets ─────────────────────────
   // Keep drivers inside the compiled generation: validation/build failure must

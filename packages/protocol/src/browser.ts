@@ -10,6 +10,31 @@ export interface BrowserResource extends BrowserProviderStatus {
   browserId: string;
   label: string;
   deviceName: string;
+  source?: 'embedded' | 'cdp' | 'connector' | 'desktop';
+}
+
+/** Connection settings belong to the Host that reaches the browser, not the UI device. */
+export interface BrowserConnection {
+  id: string;
+  label: string;
+  endpoint: string;
+  scratchDirectory?: string;
+  headers?: Record<string, string>;
+}
+export interface BrowserSettings {
+  connections: BrowserConnection[];
+  defaultBrowserId: string | null;
+}
+export interface BrowserSettingsSnapshot extends BrowserSettings { revision: string }
+export interface BrowserSettingsDevice { id: string; label: string }
+export interface BrowserManagementSnapshot {
+  settings: BrowserSettingsSnapshot;
+  resources: BrowserResource[];
+  viewBrowserIds?: Record<string, string>;
+}
+export interface BrowserTaskSelection {
+  preferredBrowserId: string | null;
+  binding?: BrowserResourceBinding;
 }
 export interface BrowserResourceBinding {
   browserId: string;
@@ -147,6 +172,7 @@ export interface BrowserOwner {
   forScope?(scope: BrowserUseScope, binding: BrowserResourceBinding): BrowserOwner;
   pageUsage?(pageId: string): Promise<BrowserPageUsage>;
   controlPage?(pageId: string, action: 'takeover' | 'resume' | 'activate'): Promise<BrowserPageUsage>;
+  pausePage?(pageId: string, paused: boolean): Promise<void>;
   activate?(pageId: string): Promise<void>;
   dispose?(): Promise<void>;
   renderPage?(request: BrowserRenderRequest): Promise<BrowserRenderResult>;

@@ -7,10 +7,13 @@ import {
   type BrowserPageUsage, type BrowserReadRequest, type BrowserResource, type BrowserResourceBinding,
   type BrowserResourceCapability, type BrowserUseScope,
 } from '@varin/protocol';
-import { ManagedTargetClient, type ManagedRemoteTargetRegistry } from '../harness/managed-remote-client.js';
+import { ManagedTargetClient, managedEndpointIdentity, type ManagedRemoteTargetRegistry } from '../harness/managed-remote-client.js';
 import type { ManagedHostSourceOwner } from '../harness/managed-remote-types.js';
 import { compileToolJsonSchema } from '../models/schema.js';
 import type { BrowserResources } from './browser-resources.js';
+import type { BrowserManagementSnapshot, BrowserSettingsSnapshot } from '@varin/protocol';
+import type { BrowserSettingsOwner } from './browser-settings.js';
+import { probeBrowserConnection } from './browser-settings.js';
 
 const base = '/api/harness/managed-execution/v1/browser';
 const relative = '/browser';
@@ -118,6 +121,7 @@ export function managedBrowserThread(clientId: string, coordinatorHostId: string
 
 export function registerManagedBrowserRoutes(app: Express, options: {
   hostId: string; resources: BrowserResources; requireAuth: RequestHandler;
+  settings?: BrowserSettingsOwner;
   clientId(request: Request): Promise<string | undefined>;
 }) {
   const principals = new WeakMap<Request, string>();
@@ -142,6 +146,16 @@ export function registerManagedBrowserRoutes(app: Express, options: {
     // Never publish imported peers: discovery and dispatch are strictly one hop.
     res.json({ resources: await options.resources.list({ localOnly: true }) });
   }));
+  app.get(`${base}/configuration`, route(async (_req, res) => {
+    if (!options.settings) throw invalid('Browser connection management is unavailable');
+    res.json({ settings: await options.settings.read(), resources: await options.resources.list({ localOnly: true }) });
+  }));
+  app.put(`${base}/configuration`, route(async (req, res) => {
+    if (!options.settings || typeof req.body?.revision !== 'string') throw invalid('Browser settings revision is required');
+    const settings = await options.settings.save(req.body.revision, req.body);
+    res.json({ settings, resources: await options.resources.list({ localOnly: true }) });
+  }));
+  app.post(`${base}/probe`, route(async (req, res) => { res.json(await probeBrowserConnection(req.body)); }));
   app.post(`${base}/call`, route(async (req, res) => {
     const call = parseCall(req.body);
     const resource = (await options.resources.list({ localOnly: true })).find(item => item.browserId === call.browserId);
@@ -318,7 +332,20 @@ export class ManagedBrowserPeers {
   private readonly owners = new Map<string, ManagedBrowserOwner>();
   private flight?: Promise<void>;
   constructor(private readonly coordinatorHostId: string, private readonly resources: BrowserResources,
-    private readonly targets: Peers, private readonly fetchImpl: typeof fetch = fetch) {}
+    private readonly targets: Peers & Pick<ManagedRemoteTargetRegistry, 'selectForwardTarget'>, private readonly fetchImpl: typeof fetch = fetch) {}
+  private async client(connectionId: string) {
+    return new ManagedTargetClient(await this.targets.selectForwardTarget(connectionId), this.fetchImpl);
+  }
+  async configuration(connectionId: string, value?: BrowserSettingsSnapshot): Promise<BrowserManagementSnapshot> {
+    const client = await this.client(connectionId);
+    const result = await (value ? client.json<BrowserManagementSnapshot>(`${relative}/configuration`, value, 'PUT') : client.request<BrowserManagementSnapshot>(`${relative}/configuration`));
+    const peer = { kind: 'managed_host' as const, hostId: client.target.hostId, connectionId,
+      endpointIdentity: managedEndpointIdentity(client.target.connection) };
+    return { ...result, viewBrowserIds: Object.fromEntries(result.resources.map(resource => [resource.browserId, managedBrowserResourceId(peer, resource.browserId)])) };
+  }
+  async probe(connectionId: string, value: unknown) {
+    return (await this.client(connectionId)).json(`${relative}/probe`, value);
+  }
   refresh(): Promise<void> {
     if (this.flight) return this.flight;
     this.flight = this.discover().finally(() => { delete this.flight; });
@@ -338,8 +365,8 @@ export class ManagedBrowserPeers {
           if (!owner) {
             owner = new ManagedBrowserOwner(this.coordinatorHostId, target.resourceOwner, resource, this.targets, this.fetchImpl);
             this.owners.set(id, owner);
-            this.resources.register(owner, resource.label, `${target.label} · ${resource.deviceName}`, { remote: true });
-          } else owner.update(resource);
+            this.resources.register(owner, resource.label, `${target.label} · ${resource.deviceName}`, { remote: true, source: resource.source });
+          } else { owner.update(resource); this.resources.updateMetadata(id, resource.label, `${target.label} · ${resource.deviceName}`); }
         }
       } catch { /* An unavailable peer never erases the original resource binding. */ }
     }));

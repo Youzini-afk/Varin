@@ -5,6 +5,7 @@ import { routerTransport } from '../extensions/direct-router.test-helper.js';
 import { createManagedRemoteTargetRegistry, managedEndpointIdentity } from '../harness/managed-remote-client.js';
 import { BrowserResources } from './browser-resources.js';
 import { ManagedBrowserPeers, managedBrowserResourceId, managedBrowserThread, registerManagedBrowserRoutes } from './browser-managed.js';
+import { createBrowserSettings } from './browser-settings.js';
 
 const prefix = '/api/harness/managed-execution/v1';
 const mount = '/original/mount';
@@ -35,6 +36,9 @@ function fixture() {
   original.register(owner, 'Chrome', 'Browser device');
   original.register({ ...owner, browserId: 'recursive-import' }, 'Other peer', 'Elsewhere', { remote: true });
   const routes = Router();
+  let browserDocument: Record<string, unknown> = {};
+  const browserSettings = createBrowserSettings({ resources: original, read: async () => browserDocument,
+    update: async change => { browserDocument = change(browserDocument); } });
   routes.get(`${prefix}/identity`, (req, res) => {
     res.setHeader('X-Varin-Managed-Host', peerHostId);
     if (req.headers.authorization !== 'Bearer existing-host-token') { res.status(403).json({ error: 'Unpaired' }); return; }
@@ -42,6 +46,7 @@ function fixture() {
     res.json({ protocolVersion: 1, hostId: peerHostId, capabilities: [], machine: { state: 'available' } });
   });
   registerManagedBrowserRoutes(routes as unknown as Express, { hostId: peerHostId, resources: original,
+    settings: browserSettings,
     requireAuth: (_req, _res, next) => next(),
     clientId: async req => req.headers.authorization === 'Bearer existing-host-token' ? 'paired-coordinator' : undefined });
   const router = Router(); router.use(mount, routes);
@@ -68,7 +73,7 @@ function fixture() {
   const binding = { browserId: managedBrowserResourceId(peer, 'local-browser'), instanceId, pageId: 'tab' };
   const raw = (body: unknown, token = 'existing-host-token') => transport(new URL(`https://original.example${mount}${prefix}/browser/call`), {
     method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
-  return { owner, original, resources, peers, targets, scopes, fetch, binding, peer, raw,
+  return { owner, original, resources, peers, targets, scopes, fetch, binding, peer, raw, browserSettings,
     replaceInstance() { instanceId = 'new-browser-session'; }, replaceHost() { peerHostId = 'replacement-host'; },
     replaceEndpoint() { settings.desktopHosts[0]!.apiUrl = 'https://replacement.example/other'; },
     setOffline(value: boolean) { offline = value; }, loseReceipt() { lostReceipt = true; },
@@ -78,6 +83,17 @@ function fixture() {
   };
 }
 const call = { coordinatorHostId: 'coordinator', browserId: 'local-browser', instanceId: 'browser-session', method: 'list', args: [] };
+
+it('manages the selected device configuration through its original mounted connection and maps viewing back to that resource', async () => {
+  const f = fixture();
+  const initial = await f.peers.configuration('original-connection');
+  expect(initial.viewBrowserIds?.['local-browser']).toBe(f.binding.browserId);
+  const saved = await f.peers.configuration('original-connection', { ...initial.settings, defaultBrowserId: 'local-browser' });
+  expect((await f.browserSettings.read()).defaultBrowserId).toBe('local-browser');
+  expect(saved.settings.revision).not.toBe(initial.settings.revision);
+  await expect(f.peers.configuration('original-connection', initial.settings)).rejects.toThrow('changed');
+  expect(f.fetch.mock.calls.every(([, init]) => new Headers(init?.headers).get('Authorization') === 'Bearer existing-host-token')).toBe(true);
+});
 
 it('discovers local peer resources through existing mounted authenticated Host connections, never imported peers', async () => {
   const f = fixture();

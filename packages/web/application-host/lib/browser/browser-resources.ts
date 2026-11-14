@@ -12,6 +12,7 @@ interface Provider {
   unsubscribe: () => void;
   remote: boolean;
   dispose: boolean;
+  source?: BrowserResource['source'];
 }
 interface PageLane {
   human: boolean;
@@ -31,6 +32,18 @@ export class BrowserResources {
   private readonly lanes = new Map<string, PageLane>();
   private readonly bindings = new Map<string, BrowserResourceBinding>();
   private readonly retainedByThread = new Map<string, Set<string>>();
+  private preferences?: (threadId?: string) => Promise<{ task: string | null; default: string | null }>;
+
+  setPreferences(read: NonNullable<BrowserResources['preferences']>) { this.preferences = read; }
+  clearBinding(threadId: string) { this.bindings.delete(threadId); }
+  binding(threadId: string) { return this.bindings.get(threadId); }
+  async unregister(browserId: string) {
+    const provider = this.providers.get(browserId);
+    if (!provider) return;
+    this.providers.delete(browserId);
+    provider.unsubscribe();
+    if (provider.dispose) await provider.owner.dispose?.();
+  }
 
   private refresh?: () => Promise<void>;
   private refreshLocal?: () => Promise<void>;
@@ -39,8 +52,12 @@ export class BrowserResources {
     if (refreshLocal) this.refreshLocal = refreshLocal;
   }
   has(browserId: string) { return this.providers.has(browserId); }
+  updateMetadata(browserId: string, label: string, deviceName?: string) {
+    const provider = this.providers.get(browserId);
+    if (provider) { provider.label = label; if (deviceName !== undefined) provider.deviceName = deviceName; }
+  }
 
-  register(owner: BrowserOwner, label: string, deviceName: string, options: { remote?: boolean; dispose?: boolean } = {}) {
+  register(owner: BrowserOwner, label: string, deviceName: string, options: { remote?: boolean; dispose?: boolean; source?: BrowserResource['source'] } = {}) {
     if (this.providers.has(owner.browserId)) throw new Error('Duplicate browser resource');
     const unsubscribe = owner.subscribe(event => {
       if (event.kind === 'closed') {
@@ -55,25 +72,30 @@ export class BrowserResources {
           if (id !== owner.browserId || pageId !== page.pageId || (page.instanceId && page.instanceId !== instanceId)) continue;
           if (Boolean(lane.ownerPaused) === page.agentPaused) continue;
           lane.ownerPaused = Boolean(page.agentPaused);
+          if (owner.pausePage) lane.human = Boolean(page.agentPaused);
           lane.observationNeeded = true;
           lane.observedBy.clear();
           lane.epoch++;
         }
       }
     });
-    this.providers.set(owner.browserId, { owner, label, deviceName, fallbackInstance: randomUUID(), unsubscribe, remote: options.remote ?? false, dispose: options.dispose ?? true });
+    this.providers.set(owner.browserId, { owner, label, deviceName, fallbackInstance: randomUUID(), unsubscribe, remote: options.remote ?? false, dispose: options.dispose ?? true, source: options.source });
   }
   hasProviders() { return this.providers.size > 0; }
   private async describe(provider: Provider): Promise<BrowserResource> {
     const { owner, label, deviceName, fallbackInstance } = provider;
     const status = await owner.resource?.() ?? { state: 'online' as const, instanceId: fallbackInstance,
       capabilities: [...builtInCapabilities, ...(owner.activate ? ['activate' as const] : [])] };
-    return { browserId: owner.browserId, label, deviceName, ...status };
+    return { browserId: owner.browserId, label, deviceName, ...(provider.source ? { source: provider.source } : {}), ...status };
   }
-  async list({ localOnly = false }: { localOnly?: boolean } = {}) {
+  async list({ localOnly = false, threadId }: { localOnly?: boolean; threadId?: string } = {}) {
     await this.refreshLocal?.();
     if (!localOnly) await this.refresh?.();
-    return Promise.all([...this.providers.values()].filter(provider => !localOnly || !provider.remote).map(provider => this.describe(provider)));
+    const preferences = threadId ? await this.preferences?.(threadId) : undefined;
+    const selected = preferences?.task ?? (threadId ? this.bindings.get(threadId)?.browserId : undefined) ?? preferences?.default;
+    return Promise.all([...this.providers.values()].filter(provider => !localOnly || !provider.remote).map(async provider => ({
+      ...await this.describe(provider), ...(threadId ? { preferred: provider.owner.browserId === selected } : {}),
+    })));
   }
   private key(binding: BrowserResourceBinding) { return JSON.stringify([binding.browserId, binding.instanceId, binding.pageId ?? null]); }
   private lane(binding: BrowserResourceBinding) {
@@ -99,7 +121,9 @@ export class BrowserResources {
       await this.refresh?.();
     }
     const last = scope.threadId ? this.bindings.get(scope.threadId) : undefined;
-    const browserId = target.browserId ?? last?.browserId ?? (this.providers.size === 1 ? this.providers.keys().next().value : undefined);
+    const preferences = !target.browserId ? await this.preferences?.(scope.threadId) : undefined;
+    const browserId = target.browserId ?? preferences?.task ?? last?.browserId ?? preferences?.default
+      ?? (this.providers.size === 1 ? this.providers.keys().next().value : undefined);
     const provider = browserId ? this.providers.get(browserId) : undefined;
     if (!provider) throw missing(browserId ? 'Browser resource not found' : 'Choose a browser from browser_resources');
     let status = await this.describe(provider);
@@ -108,7 +132,7 @@ export class BrowserResources {
       status = await this.describe(provider);
     }
     if (status.state !== 'online' || !status.instanceId) throw missing(`Browser is ${status.state}; wait for its owner to reconnect`);
-    const expected = target.instanceId ?? (!target.browserId ? last?.instanceId : undefined);
+    const expected = target.instanceId ?? (!target.browserId && last && last.browserId === browserId ? last.instanceId : undefined);
     if (expected && expected !== status.instanceId) throw missing('The original browser instance ended. List its current pages before choosing another.');
     if (target.pageId && !expected) throw missing('A page requires its original browser instance');
     const binding = { browserId: provider.owner.browserId, instanceId: status.instanceId,
@@ -193,13 +217,16 @@ export class BrowserResources {
       } else if (action === 'takeover') {
         lane.human = true;
         lane.epoch++;
+        await owner.pausePage?.(pageId, true);
         await lane.active?.settled;
         if (lane.stopUnconfirmed) throw missing('The original action may still be running. Close the tab in its browser before replacing it.');
       } else {
         await lane.active?.settled;
         if (lane.stopUnconfirmed) throw missing('The original action has not confirmed that input stopped');
-        if (lane.human) {
+        await owner.pausePage?.(pageId, false);
+        if (lane.human || lane.ownerPaused) {
           lane.human = false;
+          if (owner.pausePage) lane.ownerPaused = false;
           lane.observationNeeded = true;
           lane.observedBy.clear();
           lane.epoch++;

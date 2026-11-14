@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { BrowserExecutionError, type BrowserOwner, type BrowserPage } from '@varin/protocol';
+import { BrowserExecutionError, type BrowserEvent, type BrowserOwner, type BrowserPage } from '@varin/protocol';
 import { BrowserResources } from './browser-resources.js';
 import { ConnectedBrowserOwner } from './browser-connector.js';
 
@@ -19,6 +19,21 @@ function fixture() {
   return { registry, replace: () => { instanceId = 'replacement'; } };
 }
 const target = { browserId: 'test', instanceId: 'initial', pageId: 'first' };
+test('page control is shared with the browser provider and can be resumed from either surface', async () => {
+  const registry = new BrowserResources(), pauses: boolean[] = [];
+  let publish!: (event: BrowserEvent) => void;
+  const changed = (paused: boolean) => publish({ kind: 'page', page: { ...page('first'), instanceId: 'initial', agentPaused: paused } });
+  registry.register({ browserId: 'test', resource: async () => ({ state: 'online', instanceId: 'initial', capabilities: ['tabs', 'act'] }),
+    list: async () => [page('first')], subscribe: listener => { publish = listener; return () => {}; },
+    pausePage: async (_pageId, paused) => { pauses.push(paused); changed(paused); },
+  } as BrowserOwner, 'Browser', 'Device');
+  await registry.use(target, {}, async () => undefined);
+  changed(true);
+  expect((await registry.control(target, 'resume')).controller).toBe('agent');
+  expect(pauses).toEqual([false]);
+  await registry.control(target, 'takeover'); expect(registry.usage(target).controller).toBe('human');
+  changed(false); expect(registry.usage(target).controller).toBe('agent');
+});
 function latch() {
   let release!: () => void;
   const wait = new Promise<void>(resolve => { release = resolve; });
@@ -63,6 +78,7 @@ test('connector does not replay a dispatched write across an instance change', a
   const owner = new ConnectedBrowserOwner('paired');
   const input = { browserId: 'local', instanceId: 'initial', label: 'Chrome', capabilities: ['act:navigate'] };
   const abort = new AbortController();
+  expect(await owner.exchange(input, abort.signal)).toEqual({ commands: [] });
   const poll = owner.exchange(input, abort.signal);
   const act = owner.act('page', { action: 'navigate', url: 'https://example.org' }).catch(error => error);
   expect((await poll).commands.map(command => command.method)).toEqual(['act']);
@@ -71,6 +87,22 @@ test('connector does not replay a dispatched write across an instance change', a
   expect(await act).toMatchObject({ effect: 'unknown' });
   await expect(owner.exchange(input, reconnect.signal)).rejects.toThrow('already ended');
   await owner.dispose();
+});
+
+test('connector acknowledges a page event before waiting for the subsequent action receipt', async () => {
+  const owner = new ConnectedBrowserOwner('paired');
+  const input = { browserId: 'local', instanceId: 'initial', label: 'Chrome', capabilities: ['act:navigate'] };
+  const controller = new AbortController();
+  await owner.exchange(input, controller.signal);
+  const poll = owner.exchange(input, controller.signal);
+  const action = owner.act('first', { action: 'navigate', url: 'https://example.org' }).catch(error => error);
+  const [command] = (await poll).commands;
+  try {
+    const event = owner.exchange({ ...input, events: [{ kind: 'page', page: page('first') }] }, controller.signal);
+    expect(await Promise.race([event.then(() => 'acknowledged'), new Promise(resolve => setImmediate(() => resolve('still polling')))])).toBe('acknowledged');
+    await owner.exchange({ ...input, results: [{ id: command!.id, ok: true, value: { page: page('first'), action: 'navigate' } }] }, controller.signal);
+    expect(await action).toMatchObject({ action: 'navigate' });
+  } finally { controller.abort(); await owner.dispose(); await action; }
 });
 
 test('a late terminal exchange cannot disconnect a replacement instance', async () => {

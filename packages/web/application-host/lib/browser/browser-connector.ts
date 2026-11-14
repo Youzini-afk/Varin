@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { BrowserExecutionError, type BrowserEvent, type BrowserOwner, type BrowserProviderStatus, type BrowserResourceCapability } from '@varin/protocol';
 
-type Method = 'list' | 'open' | 'read' | 'act' | 'activate';
+type Method = 'list' | 'open' | 'read' | 'act' | 'activate' | 'pause';
 interface Command { id: string; sequence: number; method: Method; args: unknown[] }
 interface Reply { id: string; ok: boolean; value?: unknown; error?: string; effect?: 'none' | 'unknown' }
 export interface ConnectorExchange {
@@ -41,6 +41,7 @@ export class ConnectedBrowserOwner implements BrowserOwner {
   private readonly pending = new Map<string, Pending>();
   private readonly listeners = new Set<(event: BrowserEvent) => void>();
   private wake?: () => void;
+  pausePage?: (pageId: string, paused: boolean) => Promise<void>;
   constructor(readonly browserId: string) {}
 
   private emit(event: BrowserEvent) {
@@ -65,6 +66,7 @@ export class ConnectedBrowserOwner implements BrowserOwner {
       capabilities, operations: [...this.operations] };
   }
   async exchange(input: ConnectorExchange, signal: AbortSignal): Promise<{ commands: Command[] }> {
+    const announcing = !this.online || this.current !== input.instanceId;
     if (input.disconnected && (input.instanceId !== this.current || this.ended.has(input.instanceId))) return { commands: [] };
     if (this.ended.has(input.instanceId)) throw fail('This browser connection has already ended');
     if (this.current && this.current !== input.instanceId) {
@@ -77,6 +79,10 @@ export class ConnectedBrowserOwner implements BrowserOwner {
       this.emit({ kind: 'connection', browserId: this.browserId, instanceId: this.current, state: 'online' });
     }
     this.operations = [...new Set(input.capabilities)];
+    if (this.operations.includes('pause')) this.pausePage = async (pageId, paused) => {
+      if (await this.request<boolean>('pause', [pageId, paused]) !== true) throw fail('The browser did not confirm its page control state');
+    };
+    else delete this.pausePage;
     clearTimeout(this.timeout);
     this.timeout = setTimeout(() => this.interrupt('Browser connector stopped responding; no dispatched action was retried'), deadlineMs);
     this.timeout.unref?.();
@@ -97,7 +103,11 @@ export class ConnectedBrowserOwner implements BrowserOwner {
       return { commands: [] };
     }
     if (this.wake) this.wake();
-    if (![...this.pending.values()].some(item => !item.issued) && !signal.aborted) {
+    // Acknowledge announcements, events and receipts immediately. A page event
+    // can precede its action receipt; holding that POST would prevent delivery
+    // of the queued receipt until the idle poll expires.
+    if (!announcing && !input.events?.length && !input.results?.length
+      && ![...this.pending.values()].some(item => !item.issued) && !signal.aborted) {
       await new Promise<void>(resolve => {
         const done = () => {
           clearTimeout(timer);

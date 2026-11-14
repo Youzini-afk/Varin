@@ -57,7 +57,7 @@ export function createBrowserRuntime(options: {
         call.signal.throwIfAborted();
         if (method === 'resources') {
           if (!options.resources) throw new Error('Browser resource discovery is unavailable on this Host. No alternative desktop or browser was selected.');
-          return success({ resources: await options.resources.list() });
+          return success({ resources: await options.resources.list({ threadId: invocation.threadId }) });
         }
         const execute = async (browser: BrowserOwner, binding?: BrowserResourceBinding): Promise<ToolExecutionReceipt> => {
           try {

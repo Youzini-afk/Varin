@@ -1,5 +1,6 @@
 import React from 'react';
-import { getRuntimeApiBaseUrl, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type ThreadSourceTargets } from '@varin/application-client';
+import { browserResources, getRuntimeApiBaseUrl, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type ThreadSourceTargets } from '@varin/application-client';
+import type { BrowserManagementSnapshot } from '@varin/protocol';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsTabs } from '@/components/sections/shared/SettingsTabs';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
@@ -34,6 +35,8 @@ function WorkConnectionsContent() {
   const [tab, setTab] = React.useState<'agent' | 'resources' | 'access'>('resources');
   const [sources, setSources] = React.useState<ThreadSourceTargets | null>(null);
   const [computers, setComputers] = React.useState<ComputerCatalog | null>(null);
+  const [browsers, setBrowsers] = React.useState<BrowserManagementSnapshot>();
+  const [browserError, setBrowserError] = React.useState<string>();
   const [sourceError, setSourceError] = React.useState<string | null>(null);
   const [computerError, setComputerError] = React.useState<string | null>(null);
   const [epoch, setEpoch] = React.useState(0);
@@ -41,6 +44,8 @@ function WorkConnectionsContent() {
   React.useEffect(() => {
     const abort = new AbortController();
     setSources(null); setComputers(null); setSourceError(null); setComputerError(null);
+    setBrowsers(undefined); setBrowserError(undefined);
+    void browserResources.configuration('local', abort.signal).then(value => { if (!abort.signal.aborted) setBrowsers(value); }, error => { if (!abort.signal.aborted) setBrowserError(String(error)); });
     if (threads) void threads.sources.list(null, abort.signal).then(value => { if (!abort.signal.aborted) setSources(value); }, error => { if (!abort.signal.aborted) setSourceError(String(error)); });
     else setSourceError(t('settings.connections.resourceUnavailable'));
     void listComputers().then(value => { if (!abort.signal.aborted) setComputers(value); }, error => { if (!abort.signal.aborted) setComputerError(String(error)); });
@@ -61,16 +66,19 @@ function WorkConnectionsContent() {
     : !snapshot ? t('common.loading') : sourceName;
   const desktopSummary = computerError ? t('settings.connections.resourceUnavailable') : !computers ? t('common.loading')
     : computers.defaultDesktopId ? defaultDesktop?.label ?? t('settings.connections.resourceUnavailable') : t('settings.connections.automaticDesktop');
+  const browserSummary = browserError ? t('settings.connections.resourceUnavailable') : !browsers ? t('common.loading')
+    : browsers.settings.defaultBrowserId ? browsers.resources.find(item => item.browserId === browsers.settings.defaultBrowserId)?.label ?? t('browser.resource.offline') : t('settings.browser.automatic');
   return <SettingsPageLayout title={t('settings.page.connections.title')} description={t('settings.connections.description')}
     headerEnd={<Button variant="ghost" size="sm" onClick={() => requestSettingsNavigation(() => setEpoch(value => value + 1))}><Icon name="refresh" className="size-4" />{t('settings.common.actions.refresh')}</Button>}>
     <div className="settings-connection-origin flex flex-wrap items-center gap-x-5 gap-y-2 typography-meta text-muted-foreground">
       <span>{t('settings.connections.interface')}: {t(`settings.connections.platform.${getClientPlatform()}`)}</span>
       {isDesktopShell() ? <span>{t(isDesktopLocalOriginActive() ? 'settings.connections.localAgent' : 'settings.connections.remoteAgent')}</span> : null}
     </div>
-    <div className="settings-connection-map mb-8 grid gap-6 @3xl:grid-cols-3">
+    <div className="settings-connection-map mb-8 grid gap-6 @3xl:grid-cols-2">
       <div className="settings-connection-node min-w-0"><Icon name="cloud" className="mb-3 size-5 text-muted-foreground" /><h2 className="typography-ui-label">{t('settings.connections.agent')}</h2><p className="mt-2 break-all typography-meta">{endpoint}</p><p className="mt-2 typography-meta text-muted-foreground">{t('settings.connections.agentHint')}</p></div>
       <div className="settings-connection-node min-w-0"><Icon name="folder" className="mb-3 size-5 text-muted-foreground" /><h2 className="typography-ui-label">{t('settings.connections.files')}</h2><p className="mt-2 typography-meta">{sourceSummary}</p>{source ? <><p className="mt-1 typography-meta text-muted-foreground">{t(`settings.connections.sourceMode.${source.mode}`)}</p><p className="mt-1 break-all font-mono typography-micro text-muted-foreground">{source.live_root?.canonicalRoot ?? (source.mode === 'materialized' ? source.execution_workspace_id : source.workspace_id)}</p></> : null}<p className="mt-2 typography-meta text-muted-foreground">{t('settings.connections.sourceFixed')}</p>{threadError ? <p role="alert" className="typography-meta text-destructive">{threadError}</p> : null}</div>
       <div className="settings-connection-node min-w-0"><Icon name="computer" className="mb-3 size-5 text-muted-foreground" /><h2 className="typography-ui-label">{t('settings.connections.computerDefault')}</h2><p className="mt-2 typography-meta">{desktopSummary}</p><p className="mt-2 typography-meta text-muted-foreground">{t('settings.connections.computerHint')}</p></div>
+      <div className="settings-connection-node min-w-0"><Icon name="global" className="mb-3 size-5 text-muted-foreground" /><h2 className="typography-ui-label">{t('settings.browser.title')}</h2><p className="mt-2 typography-meta">{browserSummary}</p><SettingsPageLink page="browsers">{t('browser.resource.manage')}</SettingsPageLink></div>
     </div>
     <SettingsTabs value={tab} label={t('settings.page.connections.title')} onChange={value => { if (value !== tab) requestSettingsNavigation(() => setTab(value)); }}
       items={[{ value: 'resources', label: t('bot.workspace.devices') }, { value: 'agent', label: t('bot.workspace.switchService') }, { value: 'access', label: t('bot.workspace.pair') }]} />
@@ -93,6 +101,11 @@ function WorkConnectionsContent() {
       <SettingsSection title={t('settings.connections.desktops')} description={t('settings.connections.desktopHint')}>
         {computerError ? <p role="alert" className="typography-meta text-destructive">{computerError}</p> : !computers ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : <div className="divide-y divide-border/60">{computers.desktops.map(desktop => <div key={desktop.id} className="flex items-center justify-between gap-3 py-3"><div><p className="typography-ui-label">{desktop.label}</p><p className="mt-1 typography-meta text-muted-foreground">{computers.machines.find(machine => machine.id === desktop.machineId)?.name ?? desktop.machineId} · {desktop.kind}</p></div><span className="typography-meta text-muted-foreground">{t(desktop.status === 'available' ? 'settings.computers.status.available' : desktop.status === 'stopped' ? 'settings.computers.status.stopped' : 'settings.computers.status.unavailable')}</span></div>)}{!computers.desktops.length ? <p className="typography-meta text-muted-foreground">{t('settings.computers.empty')}</p> : null}</div>}
         <SettingsPageLink page="harness-computers">{t('settings.page.harness.page.computers.title')}</SettingsPageLink>
+      </SettingsSection>
+      <SettingsSection title={t('settings.browser.title')} description={t('settings.browser.description')}>
+        {browserError ? <p role="alert" className="typography-meta text-destructive">{browserError}</p>
+          : <p className="typography-meta text-muted-foreground">{browsers?.resources.map(browser => `${browser.label} · ${browser.deviceName}`).join(' / ') || t(browsers ? 'settings.browser.empty' : 'common.loading')}</p>}
+        <SettingsPageLink page="browsers">{t('browser.resource.manage')}</SettingsPageLink>
       </SettingsSection>
     </>}
     <Dialog open={manageResources} onOpenChange={open => {

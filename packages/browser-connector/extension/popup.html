@@ -1,10 +1,13 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Varin Browser Connector</title><link rel="stylesheet" href="popup.css"></head>
-<body><h1>Share this tab with Varin</h1>
-<p>Only tabs you explicitly share are visible to your paired Varin Host. It can read, navigate and interact with them, including signed-in pages. Your browser keeps its own login data.</p>
-<p>No other tabs are shared. New tabs, private tabs, uploads and downloads are not supported. Closing this popup does not stop a task.</p>
-<button id="share">Share current tab</button><button id="disconnect">Disconnect all tabs</button>
-<p id="status" role="status"></p><ul id="pages"></ul>
-<p class="hint">Pause blocks new task input. An action already sent may still finish. Resume requires a fresh page observation. Stopping Chrome's debugging banner or opening DevTools may disconnect the shared tab.</p>
+<body><header><h1>Varin Browser</h1><p id="connection-name">Connect to your Varin service</p></header>
+<section id="setup"><form id="pair-form"><label for="pair-link">Device pairing link</label><textarea id="pair-link" rows="3" placeholder="varin://connect?…" autocomplete="off" spellcheck="false"></textarea>
+<label for="host-address">Service address</label><select id="host-address"></select><button type="submit">Connect to Varin</button></form>
+<p class="hint">Create a link in Varin → Settings → Browser. Allow access to that service when your browser asks.</p></section>
+<section id="connected" hidden><p class="hint">Share tabs for tasks to read and operate using your existing sign-in state.</p>
+<div class="actions"><button id="share">Share current tab</button><button id="disconnect" class="quiet">Stop all sharing</button></div>
+<ul id="pages"></ul><button id="forget" class="quiet">Disconnect this service</button></section>
+<p id="status" role="status"></p>
+<footer class="hint">Pausing blocks new task input; a submitted action may still finish. DevTools can detach a shared tab. Closing this popup keeps tasks connected.</footer>
 <script type="module" src="popup.mjs"></script></body></html>

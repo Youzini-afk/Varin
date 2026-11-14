@@ -2,7 +2,7 @@
 export const CAPABILITIES = Object.freeze([
   'list', 'read:overview', 'read:text', 'read:structure', 'read:screenshot',
   'act:navigate', 'act:back', 'act:forward', 'act:reload', 'act:close',
-  'act:click', 'act:type', 'act:press', 'activate',
+  'act:click', 'act:type', 'act:press', 'activate', 'pause',
 ]);
 const fault = (message, effect = 'none') => Object.assign(new Error(message), { effect });
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -142,6 +142,10 @@ export class TabConnector {
     if (method === 'list') return Promise.all([...this.pages.values()].map(page => this.state(page)));
     const pageId = method === 'read' ? args[0]?.pageId : args[0];
     const page = this.require(pageId);
+    if (method === 'pause') {
+      if (typeof args[1] !== 'boolean') throw fault('Choose whether this page is paused');
+      await this.pause(pageId, args[1]); return true;
+    }
     if (!['read', 'act', 'activate'].includes(method)) throw fault('This connector does not grant browser-wide or file operations');
     const run = async () => {
       this.require(pageId);

@@ -1,48 +1,48 @@
 import { TabConnector, CAPABILITIES } from './connector.mjs';
+import { ConnectorBridge } from './transport.mjs';
+import { parseConnectionLink, redeemConnection } from './pairing.mjs';
 
 let connector;
-let port;
+let transport;
 let connecting;
 let status = 'Not connected';
-const report = value => { try { port?.postMessage(value); } catch { void disconnect(); } };
+void chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+const notify = () => { void chrome.runtime.sendMessage({ type: 'state-changed' }).catch(() => {}); };
+const report = value => { try { transport?.accept(value); } catch { void disconnect(); } };
 async function connect() {
-  if (connector && port) return connector;
+  if (connector && transport) return connector;
   if (connecting) return connecting;
   connecting = (async () => {
-    const saved = await chrome.storage.local.get('browserId');
+    const saved = await chrome.storage.local.get(['browserId', 'connection']);
+    if (!saved.connection?.clientToken) throw new Error('Connect to Varin with a device link first');
     const browserId = typeof saved.browserId === 'string' ? saved.browserId : `extension:${crypto.randomUUID()}`;
     if (!saved.browserId) await chrome.storage.local.set({ browserId });
     const instanceId = crypto.randomUUID();
     const current = new TabConnector({ chrome, browserId, instanceId,
-      emit: event => { if (connector === current) report({ type: 'event', event }); } });
-    const native = chrome.runtime.connectNative('org.varin.browser_connector');
-    connector = current; port = native; status = 'Connecting to the paired Host';
-    native.onMessage.addListener(message => {
+      emit: event => { if (connector === current) { report({ type: 'event', event }); notify(); } } });
+    const bridge = new ConnectorBridge({ endpoint: saved.connection.hostUrl, clientToken: saved.connection.clientToken, send: message => {
       if (connector !== current) return;
-      if (message?.type === 'connected') status = 'Connected';
+      if (message?.type === 'connected') { status = 'Connected'; notify(); }
       else if (message?.type === 'command') void current.execute(message.command).then(result => {
         if (connector === current) report({ type: 'result', result });
       });
       else if (message?.type === 'disconnected') { status = 'Host connection interrupted. Reconnect and share tabs again.'; void disconnect(false); }
-    });
-    native.onDisconnect.addListener(() => {
-      // Reading lastError prevents Chrome logging it; credentials and page contents never enter logs.
-      void chrome.runtime.lastError;
-      if (connector === current) { status = 'Native helper disconnected. Reconnect and share tabs again.'; void disconnect(false); }
-    });
-    report({ type: 'hello', browserId, instanceId, label: `${navigator.userAgent.includes('Edg/') ? 'Edge' : 'Chrome'} shared tabs`, capabilities: CAPABILITIES });
+    } });
+    transport = bridge;
+    connector = current; status = 'Connecting to the paired Host';
+    report({ type: 'hello', browserId, instanceId, label: saved.connection.browserLabel || `${navigator.userAgent.includes('Edg/') ? 'Edge' : 'Chrome'} shared tabs`, capabilities: CAPABILITIES });
     return current;
   })();
   try { return await connecting; } finally { connecting = undefined; }
 }
 async function disconnect(updateStatus = true) {
-  const previous = connector; const native = port;
-  connector = undefined; port = undefined;
+  const previous = connector; const bridge = transport;
+  connector = undefined; transport = undefined;
   await previous?.stop();
-  if (updateStatus && native) {
-    try { native.postMessage({ type: 'goodbye' }); } catch { native.disconnect(); }
-  } else native?.disconnect();
+  if (updateStatus) await bridge?.closeGracefully();
+  else bridge?.stop();
   if (updateStatus) status = 'Disconnected. All shared tabs released.';
+  notify();
 }
 chrome.debugger.onDetach.addListener((source, reason) => connector?.detached(source.tabId, reason));
 chrome.debugger.onEvent.addListener((source, method, params) => connector?.onEvent(source, method, params));
@@ -52,7 +52,18 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   // Only our own popup has consent controls. No content script/external caller can share a tab.
   if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html') || sender.tab) return false;
   const work = async () => {
-    if (message?.action === 'state') return { status, pages: connector ? await connector.dispatch({ method: 'list', args: [] }) : [] };
+    if (message?.action === 'state') {
+      const { connection } = await chrome.storage.local.get('connection');
+      return { status, connection: connection ? { label: connection.label, hostUrl: connection.hostUrl } : null,
+        pages: connector ? await connector.dispatch({ method: 'list', args: [] }) : [] };
+    }
+    if (message?.action === 'pair') {
+      const parsed = parseConnectionLink(message.link);
+      const connection = await redeemConnection(parsed, message.hostUrl);
+      await disconnect(); await chrome.storage.local.set({ connection }); status = `Paired with ${connection.label}`;
+      return { status };
+    }
+    if (message?.action === 'forget') { await disconnect(); await chrome.storage.local.remove('connection'); return { status }; }
     if (message?.action === 'disconnect') { await disconnect(); return { status, pages: [] }; }
     if (message?.action === 'share') {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

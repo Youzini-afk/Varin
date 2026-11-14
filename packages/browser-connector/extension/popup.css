@@ -1,8 +1,13 @@
-:root { color-scheme: light dark; font: 14px/1.45 system-ui,sans-serif; }
-body { margin: 18px; width: 360px; }
-h1 { font-size: 18px; }
-button { padding: 8px 10px; margin: 4px 6px 4px 0; cursor: pointer; }
-#status { font-weight: 600; }
-ul { list-style: none; padding: 0; }
-li { border-top: 1px solid #8886; padding: 10px 0; overflow-wrap: anywhere; }
-.hint { opacity: .8; font-size: 12px; }
+:root { color-scheme: light dark; font: 13px/1.5 system-ui, sans-serif; color: light-dark(#26272b, #e1e2e6); background: light-dark(#fafafa, #202124); }
+body { width: 350px; margin: 0; padding: 20px; box-sizing: border-box; }
+header { margin-bottom: 20px; } h1 { font-size: 17px; font-weight: 600; margin: 0 0 4px; } p { margin: 8px 0; }
+#connection-name, .hint { color: light-dark(#686a73, #a9abb5); } .hint { font-size: 12px; }
+form { display: grid; gap: 8px; } label { font-weight: 500; } select { margin-bottom: 8px; }
+textarea, select { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid light-dark(#d4d5da, #45474f); border-radius: 9px; padding: 8px 10px; font: inherit; background: light-dark(#fff, #292a2e); color: inherit; }
+textarea { resize: vertical; } :focus-visible { outline: 2px solid light-dark(#697d9b, #9aabc3); outline-offset: 2px; }
+button { padding: 8px 12px; border: 1px solid transparent; border-radius: 9px; font: inherit; cursor: pointer; background: light-dark(#e3e8ef, #384250); color: inherit; transition: background .18s, opacity .18s; }
+button:hover { background: light-dark(#d7dfe9, #454f5d); } button:disabled { opacity: .5; cursor: default; }
+.quiet { background: transparent; color: light-dark(#686a73, #a9abb5); } .quiet:hover { background: light-dark(#ededf0, #303137); }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0; } ul { padding: 0; list-style: none; }
+li { border-top: 1px solid light-dark(#e1e2e6, #3a3c43); padding: 12px 0; } li strong { display: block; overflow-wrap: anywhere; font-weight: 500; } li div { color: light-dark(#686a73, #a9abb5); font-size: 12px; overflow-wrap: anywhere; margin: 3px 0 8px; } li button { font-size: 12px; margin-right: 5px; }
+#status { white-space: pre-wrap; overflow-wrap: anywhere; } footer { padding-top: 12px; border-top: 1px solid light-dark(#e1e2e6, #3a3c43); margin-top: 16px; } [hidden] { display: none !important; }

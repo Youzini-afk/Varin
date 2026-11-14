@@ -75,7 +75,7 @@ export async function prepareHost(platform = process.env.VARIN_TARGET_PLATFORM |
   const directory = path.join(productRoot, `host-${platform}-${arch}`, 'server');
   const result = await cache.task(`host-${platform}-${arch}`, {
     inputs: [...sharedInputs, 'packages/web/application-host', 'packages/web/scripts', 'packages/web/tsconfig.application-host.json',
-      'packages/computer-driver', 'scripts/host-production-boundary.mjs', 'scripts/refresh-grammar-manifest.mjs',
+      'packages/computer-driver', 'packages/browser-connector/extension', 'scripts/host-production-boundary.mjs', 'scripts/refresh-grammar-manifest.mjs',
       ...(windowsBuild?.windowsHelperInputs ?? [])],
     values: { ...environment, platform, arch, runtime: runtime.digest, computerBuild: computerBuild?.buildId ?? null }, outputs: [directory],
     build() { runBuild('packages/web/scripts/build-application-host.mjs', ['--output', directory], { VARIN_TARGET_PLATFORM: platform, VARIN_TARGET_ARCH: arch }); },

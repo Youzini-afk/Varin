@@ -68,7 +68,7 @@ import { createOfficeRuntime, OFFICE_CAPABILITY } from './lib/kernel/office-runt
 import { createBrowserRuntime, BROWSER_CAPABILITY } from './lib/kernel/browser-runtime.js';
 import { BrowserResources } from './lib/browser/browser-resources.js';
 import { registerBrowserResourceRoutes } from './lib/browser/browser-resource-routes.js';
-import { createCdpBrowserOwner } from './lib/browser/cdp-owner.js';
+import { createBrowserSettings } from './lib/browser/browser-settings.js';
 import { createLinuxBrowserResources } from './lib/browser/linux-browser-owner.js';
 import { ManagedBrowserPeers, registerManagedBrowserRoutes } from './lib/browser/browser-managed.js';
 import { createOfficeReader } from './lib/office/reader.js';
@@ -2120,19 +2120,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     resolveLiveSource: liveSources.validate, experiments: experimentService });
   const binaryFiles = createBinaryFileOwner({ kernel: kernelClient, runtime: agentRuntime, resolveLiveSource: liveSources.validate });
   const browserResources = new BrowserResources();
-  if (options.browser) browserResources.register(options.browser, 'Varin Browser', 'This Host', { dispose: false });
-  const cdpEndpoint = process.env.VARIN_BROWSER_CDP_ENDPOINT;
-  if (cdpEndpoint) {
-    const cdpBrowser = createCdpBrowserOwner({ browserId: 'configured-cdp', endpoint: cdpEndpoint,
-      ...(process.env.VARIN_BROWSER_CDP_SCRATCH_DIRECTORY ? { scratchDirectory: process.env.VARIN_BROWSER_CDP_SCRATCH_DIRECTORY } : {}) });
-    browserResources.register(cdpBrowser, 'Chromium (CDP)', 'Configured browser');
-    void cdpBrowser.connect().catch(() => undefined);
-  }
+  if (options.browser) browserResources.register(options.browser, 'Varin Browser', 'This Host', { dispose: false, source: 'embedded' });
+  const browserSettings = createBrowserSettings({ resources: browserResources, read: readSettingsFromDisk,
+    update: change => updateSettingsOnDisk(current => change(current) as typeof current),
+    environment: { endpoint: process.env.VARIN_BROWSER_CDP_ENDPOINT, scratchDirectory: process.env.VARIN_BROWSER_CDP_SCRATCH_DIRECTORY } });
+  browserResources.setPreferences(browserSettings.preferred);
   const linuxBrowsers = createLinuxBrowserResources({ computers: computerService, runtime: agentRuntime });
   const browserPeers = new ManagedBrowserPeers(hostId, browserResources, managedRemoteTargets);
   browserResources.setRefresh(() => browserPeers.refresh(), async () => {
+    await browserSettings.refresh();
     for (const { owner, label, deviceName } of await linuxBrowsers.discover()) {
-      if (!browserResources.has(owner.browserId)) browserResources.register(owner, label, deviceName);
+      if (!browserResources.has(owner.browserId)) browserResources.register(owner, label, deviceName, { source: 'desktop' });
     }
   });
   browserRuntimeOwner.current = createBrowserRuntime({ resources: browserResources, runtime: agentRuntime, sources: documentSources,
@@ -2213,7 +2211,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     releaseAttachmentSources: (plan, signal) => releaseDeletedAttachmentSources(kernelClient, agentRuntime, plan, signal),
     releaseSource:(source,id,signal)=>nativeWorkspaces!.retireSource(source,id,signal),
     releasePreparations:threads=>releaseSourcePreparations(threads),
-    releaseBrowser: (threadId: string) => browserResources.releaseThread(threadId) });
+    releaseBrowser: async (threadId: string) => { await browserResources.releaseThread(threadId); if ((await browserSettings.preferred(threadId)).task) await browserSettings.selectTask(threadId, null); } });
   const contentMaintenance = createContentMaintenance({ runtime: agentRuntime,
     releaseDeletedResources: signal => threadMaterialLifetime.releaseDeleted(signal),
     releaseCollectedResources: signal => interactiveUi.releaseDeleted(signal),
@@ -2784,8 +2782,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (auth?.type !== 'client' || !('clientId' in auth) || typeof auth.clientId !== 'string') return undefined;
       return await agentRuntime.principalCanUseHostResources?.(auth.principalId ?? null) ? auth.clientId : undefined;
     };
-    registerBrowserResourceRoutes(app, browserResources, authController.requireAuth, browserPeerClient);
-    registerManagedBrowserRoutes(app, { hostId, resources: browserResources, requireAuth: authController.requireAuth, clientId: browserPeerClient });
+    registerBrowserResourceRoutes(app, browserResources, authController.requireAuth, browserPeerClient, {
+      settings: browserSettings, peers: browserPeers,
+      connectorDirectory: path.join(__dirname, 'browser-connector'),
+      devices: async () => configuredHosts(await readSettingsFromDisk() as Record<string, unknown>).map(host => ({ id: host.id, label: host.label })),
+      thread: async id => { const thread = await agentRuntime.thread(id); if (thread.deleted_at_ms !== null) throw new Error('This task has been deleted'); },
+    });
+    registerManagedBrowserRoutes(app, { hostId, resources: browserResources, settings: browserSettings, requireAuth: authController.requireAuth, clientId: browserPeerClient });
   }
   const desktopMedia = attachDesktopMedia({ isDraining: () => isShuttingDown, server, hostId, computers: computerService,
     authenticate: async (request) => Boolean(await uiAuthController?.ensureSessionToken(request, { setHeader: () => undefined })),
