@@ -1,4 +1,4 @@
-[English](https://github.com/Youzini-afk/Varin/blob/main/.github/CODE_OF_CONDUCT.md) | 简体中文 | [繁體中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-TW.md) | [Français](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | [日本語](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
+[English](https://github.com/Astrmira/Varin/blob/main/.github/CODE_OF_CONDUCT.md) | 简体中文 | [繁體中文](https://github.com/Astrmira/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-TW.md) | [Français](https://github.com/Astrmira/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | [日本語](https://github.com/Astrmira/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
 
 # 贡献者公约行为准则
 
@@ -38,7 +38,7 @@
 
 ## 执行
 
-请通过 GitHub 的[私密报告表单](https://github.com/Youzini-afk/Varin/security/advisories/new)向维护者报告事件，
+请通过 GitHub 的[私密报告表单](https://github.com/Astrmira/Varin/security/advisories/new)向维护者报告事件，
 标题以「Conduct report:」开头；报告只有维护者可以看到。不要在公开的 Issue、讨论区或 Pull Request 中发布骚扰报告。
 
 所有投诉都将得到及时、公正的审查和调查。

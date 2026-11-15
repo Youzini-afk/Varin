@@ -1,4 +1,4 @@
-[English](https://github.com/Youzini-afk/Varin/blob/main/.github/CODE_OF_CONDUCT.md) | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | 繁體中文 | [Français](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | [日本語](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
+[English](https://github.com/Astrmira/Varin/blob/main/.github/CODE_OF_CONDUCT.md) | [简体中文](https://github.com/Astrmira/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | 繁體中文 | [Français](https://github.com/Astrmira/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | [日本語](https://github.com/Astrmira/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
 
 # Contributor Covenant 行為準則
 
@@ -44,7 +44,7 @@
 
 ## 執行
 
-請透過 GitHub 的[私密回報表單](https://github.com/Youzini-afk/Varin/security/advisories/new)私下向維護者回報事件。
+請透過 GitHub 的[私密回報表單](https://github.com/Astrmira/Varin/security/advisories/new)私下向維護者回報事件。
 標題請以「Conduct report:」開頭；回報內容只有維護者看得到。
 請勿在公開的議題、討論區或 Pull Request 中發布騷擾回報。
 

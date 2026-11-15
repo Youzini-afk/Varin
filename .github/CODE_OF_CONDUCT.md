@@ -1,4 +1,4 @@
-English | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-TW.md) | [Français](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | [日本語](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
+English | [简体中文](https://github.com/Astrmira/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | [繁體中文](https://github.com/Astrmira/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-TW.md) | [Français](https://github.com/Astrmira/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | [日本語](https://github.com/Astrmira/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
 
 # Contributor Covenant Code of Conduct
 
@@ -61,7 +61,7 @@ representative at an online or offline event.
 ## Enforcement
 
 Report incidents to the maintainers privately through GitHub's
-[private reporting form](https://github.com/Youzini-afk/Varin/security/advisories/new).
+[private reporting form](https://github.com/Astrmira/Varin/security/advisories/new).
 Start the title with "Conduct report:"; only the maintainers can see it. Do not
 post harassment reports in public issues, discussions or pull requests.
 

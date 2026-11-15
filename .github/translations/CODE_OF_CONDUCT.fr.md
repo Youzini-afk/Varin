@@ -1,4 +1,4 @@
-[English](https://github.com/Youzini-afk/Varin/blob/main/.github/CODE_OF_CONDUCT.md) | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-TW.md) | Français | [日本語](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
+[English](https://github.com/Astrmira/Varin/blob/main/.github/CODE_OF_CONDUCT.md) | [简体中文](https://github.com/Astrmira/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | [繁體中文](https://github.com/Astrmira/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-TW.md) | Français | [日本語](https://github.com/Astrmira/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
 
 # Code de conduite du Contributor Covenant
 
@@ -59,7 +59,7 @@ d'un événement en ligne ou hors ligne.
 ## Application
 
 Signalez les incidents aux mainteneurs en privé, via le
-[formulaire de signalement privé](https://github.com/Youzini-afk/Varin/security/advisories/new) de GitHub.
+[formulaire de signalement privé](https://github.com/Astrmira/Varin/security/advisories/new) de GitHub.
 Commencez le titre par « Conduct report: » ; seuls les mainteneurs peuvent le voir. Ne publiez pas de
 signalements de harcèlement dans des issues, des discussions ou des pull requests publiques.
 

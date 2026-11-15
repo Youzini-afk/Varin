@@ -1,4 +1,4 @@
-English | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/SECURITY.zh-CN.md)
+English | [简体中文](https://github.com/Astrmira/Varin/blob/main/.github/translations/SECURITY.zh-CN.md)
 
 # Varin security policy
 
@@ -29,7 +29,7 @@ Do not disclose a suspected vulnerability in a public issue, discussion, pull re
 terminal log, or chat transcript.
 
 Use GitHub's
-[private vulnerability reporting form](https://github.com/Youzini-afk/Varin/security/advisories/new).
+[private vulnerability reporting form](https://github.com/Astrmira/Varin/security/advisories/new).
 Only the maintainers and the people they invite can see the report.
 
 Please include in the private report:

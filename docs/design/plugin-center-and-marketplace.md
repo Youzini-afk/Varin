@@ -4,7 +4,7 @@
 
 本文整合插件界面、内置与外部插件管理、公开市场和发行包安装更新。连接类插件通过现有 Host 的授权与凭据机制接入。当前已实现的扩展机制见[扩展](../extensions.md)和[作者指南](../ops/varin-extension-authoring.md)。
 
-连接类插件的需求背景见 [#288](https://github.com/Youzini-afk/Varin/issues/288)。该议题中的 Gmail 业务由独立插件项目交付。
+连接类插件的需求背景见 [#288](https://github.com/Astrmira/Varin/issues/288)。该议题中的 Gmail 业务由独立插件项目交付。
 
 ## 1. 核心决定
 
@@ -321,7 +321,7 @@ Host 系统和架构决定执行包，当前 Surface 决定配置页和视觉 co
 
 Varin 主仓交付插件中心、发行包安装更新和可供插件调用的 Host 授权与凭据能力。平台交付不包含 Gmail 示例、业务页面或发行工作流。插件的业务实现、发行包和服务商授权配置由作者在插件项目维护。作者发布后可按同一收录流程提交到市场。
 
-需要用户确认的外部操作沿用 Varin 的权限与回执机制。插件提供这次操作实际使用的内容，平台负责将用户的确认绑定到该次操作。Gmail 发信预览及其发布要求由 [#288](https://github.com/Youzini-afk/Varin/issues/288) 单独跟踪。
+需要用户确认的外部操作沿用 Varin 的权限与回执机制。插件提供这次操作实际使用的内容，平台负责将用户的确认绑定到该次操作。Gmail 发信预览及其发布要求由 [#288](https://github.com/Astrmira/Varin/issues/288) 单独跟踪。
 
 ## 11. 实现落点
 

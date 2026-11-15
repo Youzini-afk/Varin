@@ -1,4 +1,4 @@
-[English](https://github.com/Youzini-afk/Varin/blob/main/.github/CONTRIBUTING.md) | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | [Français](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.fr.md) | 日本語
+[English](https://github.com/Astrmira/Varin/blob/main/.github/CONTRIBUTING.md) | [简体中文](https://github.com/Astrmira/Varin/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | [繁體中文](https://github.com/Astrmira/Varin/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | [Français](https://github.com/Astrmira/Varin/blob/main/.github/translations/CONTRIBUTING.fr.md) | 日本語
 
 # Varin への貢献
 
@@ -14,7 +14,7 @@ Varin は、導入してすぐにしっかり使えることを目指す Agent H
 
 ## 最初の作業を選ぶ
 
-[Issues](https://github.com/Youzini-afk/Varin/issues)、[Pull Requests](https://github.com/Youzini-afk/Varin/pulls)、[ディスカッション](https://github.com/Youzini-afk/Varin/discussions)で関連する作業を確認してください。最初の貢献には、小さく再現可能な問題が適しています。[good first issue](https://github.com/Youzini-afk/Varin/labels/good%20first%20issue) ラベルの付いた Issue から始めるのもよいでしょう。大きな変更では、改善したい作業手順を [Ideas](https://github.com/Youzini-afk/Varin/discussions/categories/ideas) か機能の提案で説明し、スケッチや試作品を早めに共有してください。質問は [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a) へどうぞ。そのほかの窓口は[サポート窓口](SUPPORT.ja.md)にまとめています。
+[Issues](https://github.com/Astrmira/Varin/issues)、[Pull Requests](https://github.com/Astrmira/Varin/pulls)、[ディスカッション](https://github.com/Astrmira/Varin/discussions)で関連する作業を確認してください。最初の貢献には、小さく再現可能な問題が適しています。[good first issue](https://github.com/Astrmira/Varin/labels/good%20first%20issue) ラベルの付いた Issue から始めるのもよいでしょう。大きな変更では、改善したい作業手順を [Ideas](https://github.com/Astrmira/Varin/discussions/categories/ideas) か機能の提案で説明し、スケッチや試作品を早めに共有してください。質問は [Q&A](https://github.com/Astrmira/Varin/discussions/categories/q-a) へどうぞ。そのほかの窓口は[サポート窓口](SUPPORT.ja.md)にまとめています。
 
 バグ報告だけでも役立ちます。バージョン、インストール方法、起きた現象、再現手順や例を記載してください。ログや画像から認証情報と個人のデータを取り除き、脆弱性は[セキュリティポリシー](../SECURITY.md)に沿って報告してください。
 

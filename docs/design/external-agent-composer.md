@@ -1,7 +1,7 @@
 # 外部 Agent 输入框：后续演进
 
 状态：2026-11-05，连接准备、空闲回收、能力缓存、默认值、统一工具栏与协议上下文已接入实现。
-当前行为与边界见[外部 Agent](../external-agents.md)。原设计来自 [#275](https://github.com/Youzini-afk/Varin/issues/275)，历史方案及 codeg `769610c6` 的源码比较保留在 Git 中。
+当前行为与边界见[外部 Agent](../external-agents.md)。原设计来自 [#275](https://github.com/Astrmira/Varin/issues/275)，历史方案及 codeg `769610c6` 的源码比较保留在 Git 中。
 
 ## 保留的产品边界
 

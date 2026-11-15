@@ -1,4 +1,4 @@
-[English](https://github.com/Youzini-afk/Varin/blob/main/.github/CONTRIBUTING.md) | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | 繁體中文 | [Français](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.fr.md) | [日本語](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.ja.md)
+[English](https://github.com/Astrmira/Varin/blob/main/.github/CONTRIBUTING.md) | [简体中文](https://github.com/Astrmira/Varin/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | 繁體中文 | [Français](https://github.com/Astrmira/Varin/blob/main/.github/translations/CONTRIBUTING.fr.md) | [日本語](https://github.com/Astrmira/Varin/blob/main/.github/translations/CONTRIBUTING.ja.md)
 
 # 為 Varin 貢獻
 
@@ -14,7 +14,7 @@ Varin 是一個應當開箱即用的 Agent Harness。最有價值的貢獻，是
 
 ## 從哪裡開始
 
-先在 [Issues](https://github.com/Youzini-afk/Varin/issues)、[Pull Requests](https://github.com/Youzini-afk/Varin/pulls) 和[討論區](https://github.com/Youzini-afk/Varin/discussions)中尋找相關工作。第一次貢獻可以從小而明確、能重現的問題開始，標有 [good first issue](https://github.com/Youzini-afk/Varin/labels/good%20first%20issue) 的 Issue 適合入手。較大的改動，先在 [Ideas](https://github.com/Youzini-afk/Varin/discussions/categories/ideas) 或功能建議中說明想改善的工作流程，並提早分享草圖或原型。使用問題請到 [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a)；其他管道見[取得協助](SUPPORT.zh-TW.md)。
+先在 [Issues](https://github.com/Astrmira/Varin/issues)、[Pull Requests](https://github.com/Astrmira/Varin/pulls) 和[討論區](https://github.com/Astrmira/Varin/discussions)中尋找相關工作。第一次貢獻可以從小而明確、能重現的問題開始，標有 [good first issue](https://github.com/Astrmira/Varin/labels/good%20first%20issue) 的 Issue 適合入手。較大的改動，先在 [Ideas](https://github.com/Astrmira/Varin/discussions/categories/ideas) 或功能建議中說明想改善的工作流程，並提早分享草圖或原型。使用問題請到 [Q&A](https://github.com/Astrmira/Varin/discussions/categories/q-a)；其他管道見[取得協助](SUPPORT.zh-TW.md)。
 
 問題報告本身也很有幫助。請提供版本、安裝方式、實際現象，以及重現步驟或範例。日誌和截圖中請移除金鑰與私人內容。漏洞報告請使用[安全政策](../SECURITY.md)中的管道。
 

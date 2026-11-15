@@ -4,21 +4,21 @@
   <img src="../../.github/readme/assets/wordmark.svg" alt="Varin" width="720" />
 </p>
 
-<p align="center"><strong>你的長期 AI 助手，也是隨時可進入的工作空間。</strong></p>
+<p align="center"><strong>你的個人超級智慧體。</strong></p>
 
-<p align="center">和 Varin 交流，讓工作持續推進，需要時再進入細節。<br />開源，使用自己的模型與金鑰，在自己的電腦或伺服器上執行。</p>
+<p align="center">從日常事務到複雜任務，Varin 可以直接動手，也能組織其他 Agent 協作。<br />開源，可自行部署，自由選擇模型。</p>
 
 <p align="center">
   <a href="https://varin.dev/zh-tw/">官網</a> ·
-  <a href="https://github.com/Youzini-afk/Varin/releases/latest">下載</a> ·
+  <a href="https://github.com/Astrmira/Varin/releases/latest">下載</a> ·
   <a href="../../packages/docs/README.zh-CN.md">使用指南</a> ·
   <a href="../../docs/ops/varin-extension-authoring.md">開發擴充功能</a> ·
-  <a href="https://github.com/Youzini-afk/Varin/discussions">討論區</a>
+  <a href="https://github.com/Astrmira/Varin/discussions">討論區</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Youzini-afk/Varin/releases"><img src="https://img.shields.io/github/v/release/Youzini-afk/Varin" alt="Release" /></a>
-  <a href="https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml"><img src="https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/Astrmira/Varin/releases"><img src="https://img.shields.io/github/v/release/Astrmira/Varin" alt="Release" /></a>
+  <a href="https://github.com/Astrmira/Varin/actions/workflows/ci.yml"><img src="https://github.com/Astrmira/Varin/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3" /></a>
 </p>
 
@@ -28,7 +28,7 @@
 
 ## 從和 Varin 交流開始
 
-Varin 是陪你持續工作的個人 AI 助手。可以一起討論想法、快速查一件事，也可以交給它需要長期推進的工作。小事它能直接處理，大一些的工作可以安排 Agent 協作，後續還能帶著已有脈絡繼續交辦。
+Varin 是一個開源個人 AI 智慧體，能使用檔案、瀏覽器和連線的電腦完成工作。你可以和它討論想法、讓它直接處理任務，也可以讓它組織其他 Agent 協作。工作過程中隨時補充要求、查看進度，之後也能繼續交辦。在自己的電腦或伺服器上執行，模型由你選擇。
 
 - **工作繼續，你也可以繼續說。** 新訊息可以補充正在進行的工作；希望稍後處理的內容，也能單獨排隊。
 - **知道它正在做什麼。** 旁側面板匯集當前工作、回覆、待處理問題、記憶和日程。需要時在聊天旁開啟任務詳情，也能進入完整工作台。
@@ -150,22 +150,22 @@ Harness 負責模型周圍的上下文和執行機制：
 
    | 使用方式 | 入口 |
    | --- | --- |
-   | Windows、macOS 或 Linux | [下載安裝檔](https://github.com/Youzini-afk/Varin/releases/latest)，選擇與系統和 CPU 架構對應的版本。 |
+   | Windows、macOS 或 Linux | [下載安裝檔](https://github.com/Astrmira/Varin/releases/latest)，選擇與系統和 CPU 架構對應的版本。 |
    | 在自己的伺服器上執行，用瀏覽器存取 | [Docker 自行託管](../../docs/ops/cloud-deployment.md)，包含持久化目錄、密碼和遠端存取設定。 |
-   | 手機 | Android 從[最新版本](https://github.com/Youzini-afk/Varin/releases/latest)下載 APK 安裝，iPhone 安裝網頁應用程式（PWA），然後在設定中與 Host 配對。[行動裝置指南](../../packages/docs/content/docs/zh-cn/mobile.mdx) |
+   | 手機 | Android 從[最新版本](https://github.com/Astrmira/Varin/releases/latest)下載 APK 安裝，iPhone 安裝網頁應用程式（PWA），然後在設定中與 Host 配對。[行動裝置指南](../../packages/docs/content/docs/zh-cn/mobile.mdx) |
    | 從原始碼執行 | 見[從原始碼執行](#從原始碼執行)。 |
 
 2. 開啟設定，填入模型服務商的 API Key，或連接本機服務。[模型渠道](../../packages/docs/content/docs/zh-cn/providers.mdx)
 3. 從和 Varin 對話開始。希望直接與執行者合作時進入工作台，想親自處理檔案時進入 IDE。
 
-Varin 正處於 1.0 之前的活躍開發階段。本頁介紹目前原始碼，[發行說明](https://github.com/Youzini-afk/Varin/releases)記錄各發行版的內容。升級前請備份重要的應用程式資料。
+Varin 正處於 1.0 之前的活躍開發階段。本頁介紹目前原始碼，[發行說明](https://github.com/Astrmira/Varin/releases)記錄各發行版的內容。升級前請備份重要的應用程式資料。
 
 ## 從原始碼執行
 
 使用 **Node.js 24**、**Bun 1.3.14**、Git，以及 [rust-toolchain.toml](../../kernel/rust-toolchain.toml) 指定的 Rust 工具鏈。原生相依套件還需要 C/C++ 工具鏈與 CMake。環境與指令說明見[開發指南](../../docs/development.md)。
 
 ```sh
-git clone https://github.com/Youzini-afk/Varin.git
+git clone https://github.com/Astrmira/Varin.git
 cd Varin
 bun install --frozen-lockfile
 bun run dev
@@ -183,9 +183,9 @@ bun run dev
 
 ## 交流與參與
 
-- 使用問題到 [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a) 提問，作品分享和想法建議在[討論區](https://github.com/Youzini-afk/Varin/discussions)交流。[取得協助](../translations/SUPPORT.zh-TW.md)列出了各類問題該去哪裡。
+- 使用問題到 [Q&A](https://github.com/Astrmira/Varin/discussions/categories/q-a) 提問，作品分享和想法建議在[討論區](https://github.com/Astrmira/Varin/discussions)交流。[取得協助](../translations/SUPPORT.zh-TW.md)列出了各類問題該去哪裡。
 - 歡迎貢獻：工具與上下文處理、模型服務商串接、擴充功能、文件與翻譯，以及各平台的實測報告。[貢獻指南](../translations/CONTRIBUTING.zh-TW.md)介紹了開發準備和 Pull Request 流程。
-- [回報問題](https://github.com/Youzini-afk/Varin/issues/new?template=bug.yml) · [提出建議](https://github.com/Youzini-afk/Varin/issues/new?template=feature.yml) · [私下回報安全漏洞](../SECURITY.md)
+- [回報問題](https://github.com/Astrmira/Varin/issues/new?template=bug.yml) · [提出建議](https://github.com/Astrmira/Varin/issues/new?template=feature.yml) · [私下回報安全漏洞](../SECURITY.md)
 - 聯絡信箱：[varin@astrmira.com](mailto:varin@astrmira.com)。
 
 感謝 [LinuxDO](https://linux.do) 社群的支持。

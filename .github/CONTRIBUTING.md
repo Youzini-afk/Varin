@@ -1,4 +1,4 @@
-English | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | [Français](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.fr.md) | [日本語](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.ja.md)
+English | [简体中文](https://github.com/Astrmira/Varin/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | [繁體中文](https://github.com/Astrmira/Varin/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | [Français](https://github.com/Astrmira/Varin/blob/main/.github/translations/CONTRIBUTING.fr.md) | [日本語](https://github.com/Astrmira/Varin/blob/main/.github/translations/CONTRIBUTING.ja.md)
 
 # Contributing to Varin
 
@@ -14,7 +14,7 @@ Varin is an agent harness that should work well out of the box. The most useful 
 
 ## Pick a starting point
 
-Search [issues](https://github.com/Youzini-afk/Varin/issues), [pull requests](https://github.com/Youzini-afk/Varin/pulls) and [Discussions](https://github.com/Youzini-afk/Varin/discussions) for related work. A small, reproducible problem is a useful first contribution; issues labeled [good first issue](https://github.com/Youzini-afk/Varin/labels/good%20first%20issue) are a good place to begin. For a larger change, describe the workflow you want to improve in [Ideas](https://github.com/Youzini-afk/Varin/discussions/categories/ideas) or a feature request, and share a sketch or prototype early. Questions go to [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a); [Getting help](SUPPORT.md) lists the other channels.
+Search [issues](https://github.com/Astrmira/Varin/issues), [pull requests](https://github.com/Astrmira/Varin/pulls) and [Discussions](https://github.com/Astrmira/Varin/discussions) for related work. A small, reproducible problem is a useful first contribution; issues labeled [good first issue](https://github.com/Astrmira/Varin/labels/good%20first%20issue) are a good place to begin. For a larger change, describe the workflow you want to improve in [Ideas](https://github.com/Astrmira/Varin/discussions/categories/ideas) or a feature request, and share a sketch or prototype early. Questions go to [Q&A](https://github.com/Astrmira/Varin/discussions/categories/q-a); [Getting help](SUPPORT.md) lists the other channels.
 
 Bug reports are useful on their own. Include the version, installation method, what happened, and steps or an example that reproduce it. Remove credentials and private content from logs and screenshots. Use the [security policy](SECURITY.md) for vulnerability reports.
 

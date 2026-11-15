@@ -133,10 +133,10 @@ arm64 的 native 依赖与 kernel 在镜像组装时校验，但这不等同于 
 
 ```bash
 # 当前 main 的精确来源；没有版本 bump、Git tag 或 GitHub Release 创建。
-gh workflow run docker-commit.yml --repo Youzini-afk/Varin --ref main
+gh workflow run docker-commit.yml --repo Astrmira/Varin --ref main
 
 # SHA 为已核实的 main 历史完整提交号。
-gh workflow run docker-commit.yml --repo Youzini-afk/Varin --ref main -f source_sha="$SHA"
+gh workflow run docker-commit.yml --repo Astrmira/Varin --ref main -f source_sha="$SHA"
 ```
 
 workflow 和准入、推广、容器烟测脚本固定来自 dispatch 的 tooling SHA；Docker 构建上下文来自所选 source SHA。
@@ -195,7 +195,7 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 artifact，也可显式选择确切 attempt。它不会从失败、过期或不可验证的新候选悄悄回退到旧候选：
 
 ```bash
-gh workflow run docker-commit.yml --repo Youzini-afk/Varin --ref main \
+gh workflow run docker-commit.yml --repo Astrmira/Varin --ref main \
   -f resume_run_id="$RUN_ID" -f resume_run_attempt="$ATTEMPT"
 ```
 

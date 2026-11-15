@@ -13,4 +13,4 @@
 <!-- 有助于说明效果时附上截图、录屏或使用示例；不适用可删除此节。 -->
 <!-- Add screenshots, a recording, or an example when useful. Remove this section if it does not apply. -->
 
-<!-- 贡献指南 / Contribution guide: https://github.com/Youzini-afk/Varin/blob/main/.github/CONTRIBUTING.md -->
+<!-- 贡献指南 / Contribution guide: https://github.com/Astrmira/Varin/blob/main/.github/CONTRIBUTING.md -->

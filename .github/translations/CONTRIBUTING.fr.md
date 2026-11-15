@@ -1,4 +1,4 @@
-[English](https://github.com/Youzini-afk/Varin/blob/main/.github/CONTRIBUTING.md) | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | Français | [日本語](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CONTRIBUTING.ja.md)
+[English](https://github.com/Astrmira/Varin/blob/main/.github/CONTRIBUTING.md) | [简体中文](https://github.com/Astrmira/Varin/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | [繁體中文](https://github.com/Astrmira/Varin/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | Français | [日本語](https://github.com/Astrmira/Varin/blob/main/.github/translations/CONTRIBUTING.ja.md)
 
 # Contribuer à Varin
 
@@ -14,7 +14,7 @@ Varin est un harness d'agents qui doit bien fonctionner dès l'installation. Les
 
 ## Choisir un point de départ
 
-Cherchez les travaux liés dans les [issues](https://github.com/Youzini-afk/Varin/issues), les [pull requests](https://github.com/Youzini-afk/Varin/pulls) et les [Discussions](https://github.com/Youzini-afk/Varin/discussions). Un petit problème reproductible convient bien à une première contribution ; les issues portant le label [good first issue](https://github.com/Youzini-afk/Varin/labels/good%20first%20issue) sont un bon point de départ. Pour un changement plus large, décrivez le parcours à améliorer dans [Ideas](https://github.com/Youzini-afk/Varin/discussions/categories/ideas) ou dans une demande de fonctionnalité, et partagez tôt un croquis ou un prototype. Les questions vont dans [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a) ; la page [Obtenir de l'aide](SUPPORT.fr.md) indique les autres canaux.
+Cherchez les travaux liés dans les [issues](https://github.com/Astrmira/Varin/issues), les [pull requests](https://github.com/Astrmira/Varin/pulls) et les [Discussions](https://github.com/Astrmira/Varin/discussions). Un petit problème reproductible convient bien à une première contribution ; les issues portant le label [good first issue](https://github.com/Astrmira/Varin/labels/good%20first%20issue) sont un bon point de départ. Pour un changement plus large, décrivez le parcours à améliorer dans [Ideas](https://github.com/Astrmira/Varin/discussions/categories/ideas) ou dans une demande de fonctionnalité, et partagez tôt un croquis ou un prototype. Les questions vont dans [Q&A](https://github.com/Astrmira/Varin/discussions/categories/q-a) ; la page [Obtenir de l'aide](SUPPORT.fr.md) indique les autres canaux.
 
 Un rapport de bug est déjà utile. Indiquez la version, le mode d'installation, le comportement observé et les étapes ou un exemple pour le reproduire. Retirez les identifiants et les données privées des journaux et captures. Signalez les vulnérabilités selon la [politique de sécurité](../SECURITY.md).
 

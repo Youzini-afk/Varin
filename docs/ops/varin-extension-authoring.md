@@ -289,7 +289,7 @@ metadata; its version must match the manifest version.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/Youzini-afk/Varin/main/packages/extension-contract/schema/varin.extension.schema.json",
+  "$schema": "https://raw.githubusercontent.com/Astrmira/Varin/main/packages/extension-contract/schema/varin.extension.schema.json",
   "schemaVersion": 1,
   "id": "dev.example.memory-workbench",
   "displayName": "Memory Workbench",
@@ -1000,7 +1000,7 @@ order. A rerun skips a version only when npm reports the same immutable integrit
 with different bytes fails closed.
 
 The workflow uses npm Trusted Publishing with GitHub OIDC. It has no `NPM_TOKEN`, browser approval, or
-GitHub Environment gate. Each package trusts repository `Youzini-afk/Varin`, workflow filename
+GitHub Environment gate. Each package trusts repository `Astrmira/Varin`, workflow filename
 `npm-publish.yml`, no environment claim, and the `npm publish` action. GitHub obtains a short-lived
 credential for each run, and npm attaches provenance automatically.
 

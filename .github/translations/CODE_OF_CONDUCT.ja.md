@@ -1,4 +1,4 @@
-[English](https://github.com/Youzini-afk/Varin/blob/main/.github/CODE_OF_CONDUCT.md) | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-TW.md) | [Français](https://github.com/Youzini-afk/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | 日本語
+[English](https://github.com/Astrmira/Varin/blob/main/.github/CODE_OF_CONDUCT.md) | [简体中文](https://github.com/Astrmira/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | [繁體中文](https://github.com/Astrmira/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.zh-TW.md) | [Français](https://github.com/Astrmira/Varin/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | 日本語
 
 # Contributor Covenant 行動規範
 
@@ -48,7 +48,7 @@
 
 ## 施行
 
-インシデントは、GitHub の[非公開の報告フォーム](https://github.com/Youzini-afk/Varin/security/advisories/new)からメンテナーに非公開で報告してください。
+インシデントは、GitHub の[非公開の報告フォーム](https://github.com/Astrmira/Varin/security/advisories/new)からメンテナーに非公開で報告してください。
 タイトルは「Conduct report:」で始めてください。報告はメンテナーだけが閲覧できます。
 嫌がらせの報告を、公開の issue、ディスカッション、Pull Request に投稿しないでください。
 

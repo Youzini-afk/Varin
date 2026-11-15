@@ -4,21 +4,21 @@ English | [简体中文](.github/readme/README.zh-CN.md) | [繁體中文](.githu
   <img src=".github/readme/assets/wordmark.svg" alt="Varin" width="720" />
 </p>
 
-<p align="center"><strong>An AI assistant for ongoing work, with a workspace you can step into.</strong></p>
+<p align="center"><strong>Your personal super agent.</strong></p>
 
-<p align="center">Talk with Varin, keep work moving, and open the details whenever you want.<br />Open source. Your models, your keys, your computer or server.</p>
+<p align="center">From everyday requests to complex tasks, Varin gets to work and brings in other agents when needed.<br />Open source and self-hostable, with the models you choose.</p>
 
 <p align="center">
   <a href="https://varin.dev">Website</a> ·
-  <a href="https://github.com/Youzini-afk/Varin/releases/latest">Download</a> ·
+  <a href="https://github.com/Astrmira/Varin/releases/latest">Download</a> ·
   <a href="packages/docs/README.md">User guides</a> ·
   <a href="docs/ops/varin-extension-authoring.md">Build extensions</a> ·
-  <a href="https://github.com/Youzini-afk/Varin/discussions">Discussions</a>
+  <a href="https://github.com/Astrmira/Varin/discussions">Discussions</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Youzini-afk/Varin/releases"><img src="https://img.shields.io/github/v/release/Youzini-afk/Varin" alt="Release" /></a>
-  <a href="https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml"><img src="https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/Astrmira/Varin/releases"><img src="https://img.shields.io/github/v/release/Astrmira/Varin" alt="Release" /></a>
+  <a href="https://github.com/Astrmira/Varin/actions/workflows/ci.yml"><img src="https://github.com/Astrmira/Varin/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3" /></a>
 </p>
 
@@ -28,7 +28,7 @@ English | [简体中文](.github/readme/README.zh-CN.md) | [繁體中文](.githu
 
 ## Meet Varin
 
-Varin is a personal AI assistant for ongoing work. Talk through an idea, ask a quick question, or hand over something that will take time. It can do small jobs itself, bring in Agents for larger ones, and return to an existing task with its context intact.
+Varin is an open-source personal AI agent that works with your files, browser and connected computers. Discuss an idea, ask it to get something done, or let it coordinate other Agents on a larger task. You can give further instructions as work progresses, inspect what it is doing and pick up a task later. Run it on your own computer or server, with your choice of models.
 
 - **Keep talking while work continues.** Follow-up messages can guide the current work; queue a message when you want it handled afterward.
 - **See what is happening.** The side panel brings together current work, replies, things that need your input, memory and schedules. Open a task beside the conversation, or enter its full workbench.
@@ -152,22 +152,22 @@ The core runtime is written in Rust. The desktop, web and mobile interfaces shar
 
    | Where | How |
    | --- | --- |
-   | Windows, macOS or Linux | [Download the installer](https://github.com/Youzini-afk/Varin/releases/latest) for your system and CPU architecture. |
+   | Windows, macOS or Linux | [Download the installer](https://github.com/Astrmira/Varin/releases/latest) for your system and CPU architecture. |
    | Your own server, used from a browser | [Self-host with Docker](docs/ops/cloud-deployment.md), with persistent storage, passwords and remote access. |
-   | Your phone | On Android, install the APK from the [latest release](https://github.com/Youzini-afk/Varin/releases/latest); on iPhone, install the web app (PWA). Then pair it with your Host from Settings. [Mobile guide](packages/docs/content/docs/mobile.mdx) |
+   | Your phone | On Android, install the APK from the [latest release](https://github.com/Astrmira/Varin/releases/latest); on iPhone, install the web app (PWA). Then pair it with your Host from Settings. [Mobile guide](packages/docs/content/docs/mobile.mdx) |
    | From source | See [Run from source](#run-from-source). |
 
 2. Open Settings and add an API key for a model provider, or connect a local service. [Model channels](packages/docs/content/docs/providers.mdx)
 3. Start a conversation with Varin. Open the Workbench for direct Agent collaboration, or the IDE when you want to work in the files.
 
-Varin is in active development before 1.0. This README describes the current source; [release notes](https://github.com/Youzini-afk/Varin/releases) describe each published build. Back up important application data before upgrading.
+Varin is in active development before 1.0. This README describes the current source; [release notes](https://github.com/Astrmira/Varin/releases) describe each published build. Back up important application data before upgrading.
 
 ## Run from source
 
 Use **Node.js 24**, **Bun 1.3.14**, Git, and the Rust toolchain in [rust-toolchain.toml](kernel/rust-toolchain.toml). Native dependencies also need a C/C++ toolchain and CMake. See the [development guide](docs/development.md) for setup and commands.
 
 ```sh
-git clone https://github.com/Youzini-afk/Varin.git
+git clone https://github.com/Astrmira/Varin.git
 cd Varin
 bun install --frozen-lockfile
 bun run dev
@@ -185,9 +185,9 @@ For how the pieces fit together, read the [architecture](docs/architecture.md), 
 
 ## Community and contributing
 
-- Ask questions in [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a), share what you built, and suggest ideas in [Discussions](https://github.com/Youzini-afk/Varin/discussions). [Getting help](.github/SUPPORT.md) lists where each kind of request goes.
+- Ask questions in [Q&A](https://github.com/Astrmira/Varin/discussions/categories/q-a), share what you built, and suggest ideas in [Discussions](https://github.com/Astrmira/Varin/discussions). [Getting help](.github/SUPPORT.md) lists where each kind of request goes.
 - Contributions are welcome: tools and context handling, model providers, extensions, documentation and translations, and test reports from your platform. The [contribution guide](.github/CONTRIBUTING.md) covers setup and pull requests.
-- [Report a bug](https://github.com/Youzini-afk/Varin/issues/new?template=bug.yml) · [Suggest a feature](https://github.com/Youzini-afk/Varin/issues/new?template=feature.yml) · [Report a vulnerability privately](.github/SECURITY.md)
+- [Report a bug](https://github.com/Astrmira/Varin/issues/new?template=bug.yml) · [Suggest a feature](https://github.com/Astrmira/Varin/issues/new?template=feature.yml) · [Report a vulnerability privately](.github/SECURITY.md)
 - Contact: [varin@astrmira.com](mailto:varin@astrmira.com).
 
 Thanks to the [LinuxDO](https://linux.do) community for its support.

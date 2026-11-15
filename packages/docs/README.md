@@ -2,7 +2,7 @@ English | [简体中文](README.zh-CN.md)
 
 # Varin user guides
 
-Connect a model, start a conversation, and work with files and tools. Read them at [varin.dev/docs](https://varin.dev/docs/), or as Markdown/MDX in this repository.
+Get started with Varin, your personal super agent. Choose a model, connect your tools and devices, and give it a task. Read the guides at [varin.dev/docs](https://varin.dev/docs/), or as Markdown/MDX in this repository.
 
 ## Start here
 

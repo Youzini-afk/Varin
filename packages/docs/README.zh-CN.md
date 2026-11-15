@@ -2,7 +2,7 @@
 
 # Varin 使用指南
 
-从连接模型、开始对话，到使用文件与工具，可以按手头的任务查找指南。可以在 [varin.dev/docs](https://varin.dev/docs/) 阅读，也可以直接在仓库中阅读这些 Markdown/MDX 文件。
+开始使用 Varin，你的个人超级智能体。选择模型、连接工具与设备，把任务交给它。你可以在 [varin.dev/docs](https://varin.dev/docs/) 阅读指南，也可以直接在仓库中阅读这些 Markdown/MDX 文件。
 
 ## 从这里开始
 

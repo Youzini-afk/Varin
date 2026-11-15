@@ -1,4 +1,4 @@
-[English](https://github.com/Youzini-afk/Varin/blob/main/.github/SECURITY.md) | 简体中文
+[English](https://github.com/Astrmira/Varin/blob/main/.github/SECURITY.md) | 简体中文
 
 # Varin 安全策略
 
@@ -24,7 +24,7 @@ Varin 目前仍处于 1.0 之前的开发阶段，不维护 LTS 分支。
 
 不要在公开 Issue、Discussion、Pull Request、截图、终端日志或聊天记录中披露疑似漏洞。
 
-请使用 GitHub 的[私密漏洞报告表单](https://github.com/Youzini-afk/Varin/security/advisories/new)。
+请使用 GitHub 的[私密漏洞报告表单](https://github.com/Astrmira/Varin/security/advisories/new)。
 报告只有维护者及其邀请的人可以看到。
 
 私密报告请包含：
