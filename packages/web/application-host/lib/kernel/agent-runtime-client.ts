@@ -1059,6 +1059,9 @@ export class AgentRuntimeClient {
   pendingBotWork(signal?: AbortSignal, inactivityMinutes?: number): Promise<import('./protocol.generated.js').ColdBotWork[]> {
     return this.kernel.agentRuntimeRequest('runtime.bot.work.pending', inactivityMinutes === undefined ? {} : { inactivityMinutes }, signal);
   }
+  holdColdWork(input: import('./protocol.generated.js').BotWorkHoldParams, signal?: AbortSignal): Promise<unknown> {
+    return this.kernel.agentRuntimeRequest('runtime.bot.work.hold', input, signal);
+  }
   admitBotWork(input: import('./protocol.generated.js').BotWorkAdmitParams, signal?: AbortSignal): Promise<InputSubmitReceipt> {
     return this.kernel.agentRuntimeRequest('runtime.bot.work.admit', input, signal);
   }

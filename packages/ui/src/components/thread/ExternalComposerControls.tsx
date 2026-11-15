@@ -13,6 +13,8 @@ export interface ExternalComposerOptions {
   disabled?: boolean;
   retryDisabled?: boolean;
   retryDisabledReason?: string;
+  /** Only provided while an existing external turn is active. */
+  delivery?: { mode: 'steer' | 'next_turn'; canSteer: boolean };
   onChange(choice: ExternalSessionChoice): void;
   onInteract(kind: 'focus' | 'input' | 'menu'): void;
   onRetryModels?(): void;
@@ -46,7 +48,7 @@ export function ExternalOptionMenu({ options, kind, onComplete }: { options: Ext
   const currentName = values.find(value => value.id === current)?.name ?? current ?? t('external.notReported');
   const apply = (value?: string) => { choose(options, kind, value); onComplete?.(); };
   return <div className="min-w-56 max-w-sm space-y-1 p-1 typography-meta">
-    <p className="px-2 py-1 text-muted-foreground">{t('external.nextRequest')}{options.source === 'cached' ? ` · ${t('external.previousCapabilities')}` : ''}</p>
+    <p className="px-2 py-1 text-muted-foreground">{t('external.nextTurnOptions')}{options.source === 'cached' ? ` · ${t('external.previousCapabilities')}` : ''}</p>
     {kind === 'model' && <input type="search" aria-label={t('external.searchModels')} placeholder={t('external.searchModels')} className="mb-1 w-full rounded border border-border bg-background px-2 py-1.5" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') event.preventDefault(); if (event.key !== 'Escape') event.stopPropagation(); }} />}
     <button type="button" disabled={options.disabled} className="flex w-full items-center justify-between gap-2 rounded px-2 py-2 text-left hover:bg-interactive-hover" onClick={() => apply()}>
       <span>{t('external.inheritCurrent', { current: currentName })}</span>{selected === undefined || selected === '' ? <Icon name="check" className="size-3.5 shrink-0" /> : null}

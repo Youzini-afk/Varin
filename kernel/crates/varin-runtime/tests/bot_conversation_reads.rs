@@ -118,7 +118,6 @@ fn same_principal_direct_bots_discover_and_read_without_lending_agent_authority(
     );
 
     for (caller, target) in [
-        ("ordinary", "source"),
         ("foreign", "source"),
         ("reader", "foreign"),
     ] {
@@ -128,6 +127,7 @@ fn same_principal_direct_bots_discover_and_read_without_lending_agent_authority(
             .authorize(&|| false)
             .is_err());
     }
+    db.capture_family_read("ordinary", Some("source"), None).unwrap().authorize(&|| false).unwrap();
     // Archives are browse filters, not revocation, and default discovery excludes them.
     let revision = db.inspect_thread("source").unwrap()["revision"]
         .as_u64()

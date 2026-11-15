@@ -20,7 +20,7 @@ fn send(f: &mut Fixture, key: &str) -> MessageReceipt {
             key.into(),
             child.child_thread_id,
             child.child_branch_id,
-            MessageInput { attachments: Vec::new(), after_current: None,
+            MessageInput { executor_options: None, attachments: Vec::new(), after_current: None,
                 source_agent: None,
             name: None,
                 wait: None,
@@ -72,7 +72,7 @@ fn user_message_from_collaboration_continues_the_same_main_thread() {
     f.settle_exchange();
     finish(&mut f, RunState::Completed);
     let original = f.db.launch_intent(&f.context.run_id).unwrap().unwrap();
-    let prepared = f.db.prepare_user_message("collaboration-main".into(), "thread:parent".into(), "branch:parent".into(), MessageInput { attachments: Vec::new(), after_current: None,
+    let prepared = f.db.prepare_user_message("collaboration-main".into(), "thread:parent".into(), "branch:parent".into(), MessageInput { executor_options: None, attachments: Vec::new(), after_current: None,
         source_agent: None, name: None, wait: None, target_thread_id: Some("thread:parent".into()), target_branch_id: Some("branch:parent".into()),
         reply_to: None, kind: MessageKind::Request, text: "Continue with these findings".into(),
     }).unwrap().load().unwrap();
@@ -90,7 +90,7 @@ fn user_message_from_collaboration_continues_the_same_main_thread() {
 fn separate_work_waits_for_the_current_execution_without_steering_it() {
     let mut f = Fixture::new();
     f.accept(); f.settle_exchange();
-    let prepared = f.db.prepare_user_message("queued-independent-work".into(), "thread:parent".into(), "branch:parent".into(), MessageInput { attachments: Vec::new(),
+    let prepared = f.db.prepare_user_message("queued-independent-work".into(), "thread:parent".into(), "branch:parent".into(), MessageInput { executor_options: None, attachments: Vec::new(),
         after_current: Some(true), source_agent: None, name: None, wait: None,
         target_thread_id: Some("thread:parent".into()), target_branch_id: Some("branch:parent".into()),
         reply_to: None, kind: MessageKind::Request, text: "Handle this independent task after the current one".into(),
@@ -109,7 +109,7 @@ fn separate_work_waits_for_the_current_execution_without_steering_it() {
 fn queued_collaboration_can_be_edited_sent_now_or_withdrawn_without_replacing_its_identity() {
     let mut f = Fixture::new(); f.accept(); f.settle_exchange();
     let make = |key: &str, db: &mut Catalog| {
-        let prepared = db.prepare_user_message(key.into(), "thread:parent".into(), "branch:parent".into(), MessageInput {
+        let prepared = db.prepare_user_message(key.into(), "thread:parent".into(), "branch:parent".into(), MessageInput { executor_options: None,
             attachments: vec![], after_current: Some(true), source_agent: None, name: None, wait: None,
             target_thread_id: Some("thread:parent".into()), target_branch_id: Some("branch:parent".into()),
             reply_to: None, kind: MessageKind::Request, text: "Original draft".into(),
@@ -146,7 +146,7 @@ fn queued_collaboration_can_be_edited_sent_now_or_withdrawn_without_replacing_it
 #[test]
 fn deferred_inform_becomes_available_after_the_run_without_waking_a_model() {
     let mut f = Fixture::new(); f.accept(); f.settle_exchange();
-    let prepared = f.db.prepare_user_message("passive-after".into(), "thread:parent".into(), "branch:parent".into(), MessageInput {
+    let prepared = f.db.prepare_user_message("passive-after".into(), "thread:parent".into(), "branch:parent".into(), MessageInput { executor_options: None,
         attachments: vec![], after_current: Some(true), source_agent: None, name: None, wait: None,
         target_thread_id: Some("thread:parent".into()), target_branch_id: Some("branch:parent".into()), reply_to: None,
         kind: MessageKind::Inform, text: "Reference for later".into(),

@@ -14,12 +14,14 @@ import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLay
 import { SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
 import { Icon } from '@/components/icon/Icon';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
 import { HarnessIcon } from '@/components/thread/HarnessIcon';
 import { openExternalUrl } from '@/lib/url';
+import type { SourceResourceOwner } from '@varin/protocol';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSourceExternalAgents } from '@/hooks/useSourceExternalAgents';
 import { externalThinkingOptions } from '@/components/thread/externalSessionChoice';
 
 function AgentDefaultsFields({ value, cache, disabled, onChange }: {
@@ -122,6 +124,7 @@ function ConfigurationRow({
   busy,
   profile,
   capabilityCache,
+  owner,
   save,
   remove,
 }: {
@@ -129,11 +132,14 @@ function ConfigurationRow({
   busy: boolean;
   profile?: ExternalAgentProfile;
   capabilityCache?: ExternalAgentCapabilityCache;
+  owner?: SourceResourceOwner;
   save(value: ExternalAgentConfiguration): Promise<void>;
   remove(): Promise<void>;
 }) {
   const { t } = useI18n();
   const host = getRuntimeEndpointGeneration();
+  const remote = owner?.kind === 'managed_host';
+  const disabled = configuration.availability === 'disabled' || !configuration.enabled;
   const [expanded, setExpanded] = React.useState(false);
   const [draft, setDraft] = React.useState(configuration);
   const [args, setArgs] = React.useState(JSON.stringify(configuration.args));
@@ -158,19 +164,21 @@ function ConfigurationRow({
     setDetecting(true);
     setError('');
     try {
-      const result = await createExternalAgentsHttpAPI(host).detect(configuration.id, request.signal);
+      const api = createExternalAgentsHttpAPI(host);
+      const result = await (owner ? api.detect(configuration.id, request.signal, owner) : api.detect(configuration.id, request.signal));
       if (!request.signal.aborted && host === getRuntimeEndpointGeneration()) setDetection(result);
     } catch (error) {
       if (!request.signal.aborted && host === getRuntimeEndpointGeneration()) setError(String(error));
     } finally {
       if (!request.signal.aborted && host === getRuntimeEndpointGeneration()) setDetecting(false);
     }
-  }, [host, configuration.id]);
+  }, [host, configuration.id, owner]);
   const detectionArguments = JSON.stringify(configuration.args);
   React.useEffect(() => {
+    if (disabled || remote) { setDetecting(false); return; }
     void detect();
     return () => controller.current?.abort();
-  }, [detect, configuration.command, detectionArguments]);
+  }, [detect, configuration.command, detectionArguments, disabled, remote]);
   return (
     <section className="border-b border-border/60 py-5">
       <div className="flex items-center gap-3">
@@ -180,7 +188,7 @@ function ConfigurationRow({
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
         >
-          <HarnessIcon harness={configuration.harness} profileId={profile?.id} className="size-5" />
+          <HarnessIcon harness={configuration.harness} configurationId={configuration.id} profileId={profile?.id} className="size-5" />
           <span className="min-w-0">
             <span className="block font-medium">{configuration.name}</span>
             <span className="block truncate typography-meta text-muted-foreground">
@@ -209,14 +217,21 @@ function ConfigurationRow({
         >
           {t(detecting ? 'external.cancel' : 'external.detect')}
         </Button>
-        <Switch
-          aria-label={`${configuration.name} · ${t('external.enabled')}`}
-          checked={configuration.enabled}
-          disabled={busy}
-          onCheckedChange={(enabled) =>
-            void save({ ...configuration, enabled }).catch((error) => setError(String(error)))
-          }
-        />
+        <Select
+          value={configuration.availability ?? (configuration.enabled ? 'enabled' : 'disabled')}
+          disabled={busy || remote}
+          onValueChange={availability => {
+            if (availability !== 'auto' && availability !== 'enabled' && availability !== 'disabled') return;
+            void save({ ...configuration, availability, enabled: availability !== 'disabled' }).catch((error) => setError(String(error)));
+          }}
+        >
+          <SelectTrigger className="w-36" aria-label={`${configuration.name} · ${t('external.availability')}`}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {(profile || ['codex', 'claude', 'pi'].includes(configuration.id)) && <SelectItem value="auto">{t('external.availability.auto')}</SelectItem>}
+            <SelectItem value="enabled">{t('external.availability.enabled')}</SelectItem>
+            <SelectItem value="disabled">{t('external.availability.disabled')}</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
       <div
         className="grid transition-[grid-template-rows,opacity] duration-200 ease-out"
@@ -227,6 +242,7 @@ function ConfigurationRow({
             className="space-y-4 pt-5"
             onSubmit={(event) => {
               event.preventDefault();
+              if (remote) return;
               setError('');
               try {
                 const parsed: unknown = JSON.parse(args);
@@ -253,11 +269,12 @@ function ConfigurationRow({
             <p className="typography-meta text-muted-foreground">{t('external.detectionScope')}</p>
             <label className="block space-y-2 typography-meta">
               <span>{t('external.name')}</span>
-              <Input value={draft.name} onChange={(e) => setDraft((v) => ({ ...v, name: e.target.value }))} />
+              <Input disabled={remote} value={draft.name} onChange={(e) => setDraft((v) => ({ ...v, name: e.target.value }))} />
             </label>
             <label className="block space-y-2 typography-meta">
               <span>{t('external.command')}</span>
               <Input
+                disabled={remote}
                 value={draft.command}
                 onChange={(e) => setDraft((v) => ({ ...v, command: e.target.value }))}
                 spellCheck={false}
@@ -265,9 +282,9 @@ function ConfigurationRow({
             </label>
             <label className="block space-y-2 typography-meta">
               <span>{t('external.arguments')}</span>
-              <Input value={args} onChange={(e) => setArgs(e.target.value)} spellCheck={false} />
+              <Input disabled={remote} value={args} onChange={(e) => setArgs(e.target.value)} spellCheck={false} />
             </label>
-            <AgentDefaultsFields value={draft.defaults} disabled={busy}
+            <AgentDefaultsFields value={draft.defaults} disabled={busy || remote}
               cache={draft.command === configuration.command && args === JSON.stringify(configuration.args) ? capabilityCache : undefined}
               onChange={defaults => setDraft(value => {
                 const next = { ...value };
@@ -277,10 +294,10 @@ function ConfigurationRow({
             {detection?.executable && (
               <p className="break-all typography-meta text-muted-foreground">{detection.executable}</p>
             )}
-            <Button disabled={busy} type="submit">
+            <Button disabled={busy || remote} type="submit">
               {t('external.save')}
             </Button>
-            {configuration.harness === 'acp' && !profile && (
+            {!remote && configuration.harness === 'acp' && !profile && (
               <Button
                 disabled={busy}
                 type="button"
@@ -308,12 +325,26 @@ export function ExternalAgentsPage() {
 }
 function ExternalAgentsSettings({ host }: { host: number }) {
   const { t } = useI18n();
-  const settings = useExternalAgents();
-  const loadError = useExternalAgentStore((state) => state.error);
+  const local = useExternalAgents();
+  const localError = useExternalAgentStore((state) => state.error);
+  const projects = useProjectsStore(state => state.projects);
+  const devices = React.useMemo(() => {
+    const records = new Map<string, Extract<SourceResourceOwner, { kind: 'managed_host' }>>();
+    for (const project of projects) {
+      const owner = project.source?.resourceOwner;
+      if (owner?.kind === 'managed_host') records.set(JSON.stringify(owner), owner);
+    }
+    return records;
+  }, [projects]);
+  const [device, setDevice] = React.useState('local');
+  const owner = devices.get(device);
+  const remote = useSourceExternalAgents(owner, Boolean(owner));
+  const settings = owner ? remote.settings : local;
+  const loadError = owner ? remote.error : localError;
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState('');
   const remove = async (id: string) => {
-    if (!settings) return;
+    if (!settings || owner) return;
     setSaving(true);
     try {
       await createExternalAgentsHttpAPI(host).configure(
@@ -330,7 +361,7 @@ function ExternalAgentsSettings({ host }: { host: number }) {
     }
   };
   const save = async (configuration: ExternalAgentConfiguration) => {
-    if (!settings || host !== getRuntimeEndpointGeneration()) return;
+    if (!settings || owner || host !== getRuntimeEndpointGeneration()) return;
     const generation = host;
     setSaving(true);
     try {
@@ -350,6 +381,19 @@ function ExternalAgentsSettings({ host }: { host: number }) {
   return (
     <SettingsPageLayout title={t('external.title')}>
       <p className="mb-5 text-sm text-muted-foreground">{t('external.description')}</p>
+      {devices.size > 0 && <SettingsFieldRow label={t('external.executionDevice')}>
+        <Select value={owner ? device : 'local'} onValueChange={value => { setDevice(value); setError(''); }}>
+          <SelectTrigger className="w-56 max-w-full" aria-label={t('external.executionDevice')}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="local">{t('external.currentDevice')}</SelectItem>
+            {[...devices].map(([id, target]) => <SelectItem key={id} value={id}>{target.hostId}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </SettingsFieldRow>}
+      {owner && <div className="my-3 flex items-center gap-2 typography-meta text-muted-foreground">
+        <span>{t('external.remoteSettingsHint')}</span>
+        <Button variant="ghost" size="sm" disabled={remote.loading} onClick={remote.retry}>{t(remote.loading ? 'external.detecting' : 'external.refreshDevice')}</Button>
+      </div>}
       {(error || loadError) && (
         <p role="alert" className="text-destructive typography-meta">
           {error || loadError}
@@ -357,7 +401,8 @@ function ExternalAgentsSettings({ host }: { host: number }) {
       )}
       {settings?.agents.map((configuration) => (
         <ConfigurationRow
-          key={configuration.id}
+          key={`${owner ? device : 'local'}:${configuration.id}`}
+          {...(owner ? { owner } : {})}
           configuration={configuration}
           capabilityCache={settings.capabilityCache?.[configuration.id]}
           profile={settings.profiles?.find(profile => profile.id === configuration.id)}
@@ -366,17 +411,17 @@ function ExternalAgentsSettings({ host }: { host: number }) {
           remove={() => remove(configuration.id)}
         />
       ))}
-      {settings?.profiles?.filter(profile => !settings.agents.some(agent => agent.id === profile.id)).map(profile => <section key={profile.id} className="space-y-2 border-b border-border/60 py-5">
+      {!owner && settings?.profiles?.filter(profile => !settings.agents.some(agent => agent.id === profile.id)).map(profile => <section key={profile.id} className="space-y-2 border-b border-border/60 py-5">
         <div className="flex items-center gap-3"><HarnessIcon harness={profile.harness} profileId={profile.id} /><span className="flex-1 font-medium">{profile.name}</span>
           <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => void save({ id: profile.id, name: profile.name,
-            harness: profile.harness, enabled: false, command: profile.launch.command, args: profile.launch.args }).catch(error => setError(String(error)))}>{t('external.addProfile')}</Button>
+            harness: profile.harness, enabled: false, availability: 'disabled', command: profile.launch.command, args: profile.launch.args }).catch(error => setError(String(error)))}>{t('external.addProfile')}</Button>
         </div>
         <p className="typography-meta text-muted-foreground">{profile.description}</p>
         <p className="typography-meta text-muted-foreground">{t('external.platforms')}: {profile.platforms.join(' · ')}</p>
         {profile.authentication && <p className="typography-meta text-muted-foreground">{profile.authentication}</p>}
         {profile.installUrl && <Button type="button" variant="ghost" size="sm" onClick={() => void openExternalUrl(profile.installUrl!).catch(error => setError(String(error)))}>{t('external.installGuide')}</Button>}
       </section>)}
-      <Button
+      {!owner && <Button
         className="mt-5"
         variant="outline"
         disabled={!settings || saving}
@@ -393,7 +438,7 @@ function ExternalAgentsSettings({ host }: { host: number }) {
       >
         <Icon name="add" className="mr-2 size-4" />
         {t('external.add')}
-      </Button>
+      </Button>}
     </SettingsPageLayout>
   );
 }

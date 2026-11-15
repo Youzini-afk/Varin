@@ -275,7 +275,7 @@ pub(super) fn execute(
     match method {
         "runtime.messages.send" => {
             let p: MessageSendParams = serde_json::from_value(params)?;
-            let input = varin_runtime::catalog::messages::MessageInput { attachments: p.attachments.unwrap_or_default(), after_current: p.after_current,
+            let input = varin_runtime::catalog::messages::MessageInput { executor_options: None, attachments: p.attachments.unwrap_or_default(), after_current: p.after_current,
                 source_agent: p.source_agent,
             name: p.name,
                 wait: None,

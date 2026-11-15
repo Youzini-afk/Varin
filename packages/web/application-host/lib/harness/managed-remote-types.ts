@@ -200,6 +200,8 @@ export interface ManagedSourceService {
   externalCapture(principal:ManagedSourcePrincipal,input:import('../external-agents/managed-capture.js').ManagedExternalCaptureRequest,signal?:AbortSignal):Promise<unknown>;
   externalChildSource(principal:ManagedSourcePrincipal,input:ManagedExternalChildSourceRequest,signal?:AbortSignal):Promise<ManagedExternalChildSourceResult>;
   externalProjectSource(principal:ManagedSourcePrincipal,input:ManagedExternalProjectSourceRequest,signal?:AbortSignal):Promise<ManagedExternalProjectSourceResult>;
+  externalDetect(principal:ManagedSourcePrincipal,input:{coordinatorHostId:string;configurationId:string},signal?:AbortSignal):Promise<import('@varin/application-client').ExternalAgentDetection>;
+  externalInspect(principal:ManagedSourcePrincipal,input:{coordinatorHostId:string;configurationId:string;refresh?:boolean},signal?:AbortSignal):Promise<import('@varin/application-client').ExternalExecutorInspection>;
   externalSettings(principal:ManagedSourcePrincipal,input:{coordinatorHostId:string},signal?:AbortSignal):Promise<import('@varin/application-client').ExternalAgentSettings>;
   externalPrepare(principal: ManagedSourcePrincipal, input: {coordinatorHostId:string;conversationId:string;resourceOwner:ManagedHostSourceOwner;path:string;expectedWorkspaceId?:string}, signal?:AbortSignal): Promise<LaunchSource>;
   externalBinding(principal: ManagedSourcePrincipal, input: ManagedExternalLaunchRequest, signal?: AbortSignal): Promise<ManagedExternalLaunchBinding>;

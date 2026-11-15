@@ -784,6 +784,9 @@ fn activation_hold_code(hold: activation::MessageActivationHold) -> String {
         DependencyWait => "dependency_wait",
         Preparing => "preparing",
         SourceUnsettled => "source_unsettled",
+        ModelUnavailable => "model_unavailable",
+        SourceUnavailable => "source_unavailable",
+        BotSuspended => "bot_suspended",
     }
     .into()
 }

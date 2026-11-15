@@ -4,11 +4,12 @@ import type {
   ExternalInteractionResponse,
 } from '@varin/application-client';
 import type { HarnessConnection, HarnessSink, HarnessInput } from './adapter.js';
+import { assertSteeringContent, HarnessSteeringRejected } from './adapter.js';
 import { ContextUsage } from './context-usage.js';
 import { formInteraction } from './interaction-form.js';
 import { fileInputText } from './attachments.js';
 import { dedicatedOptions } from './dedicated-options.js';
-import { HarnessTransport, record, text, clientInfo, type RecordValue } from './transport.js';
+import { HarnessProtocolError, HarnessTransport, record, text, clientInfo, type RecordValue } from './transport.js';
 
 export async function connectCodex(
   peer: HarnessTransport,
@@ -74,7 +75,7 @@ export async function connectCodex(
     resume: true,
     images: true,
     files: 'paths',
-    steering: false,
+    steering: true,
     modelsError,
     modelsRefresh: true,
     protocol: {
@@ -582,6 +583,51 @@ export async function connectCodex(
         reject = undefined;
         turnId = undefined;
       }
+    },
+    async steer(input, options) {
+      if (failure) throw failure;
+      assertSteeringContent(input);
+      const owner = sink, expected = turnId;
+      if (!owner || !expected || !dispatched || settled || stopRequested ||
+          (options.expectedNativeId && options.expectedNativeId !== expected))
+        throw new HarnessSteeringRejected('The selected Codex turn is no longer accepting supplements');
+      await options.beforeDispatch(expected);
+      if (failure) throw failure;
+      if (sink !== owner || turnId !== expected || settled || stopRequested)
+        throw new HarnessSteeringRejected('The selected Codex turn ended before supplement delivery');
+      let accepted: RecordValue;
+      try {
+        accepted = await peer.request('turn/steer', {
+          threadId: sessionId,
+          expectedTurnId: expected,
+          input: [
+            { type: 'text', text: fileInputText(input) },
+            ...(input.images ?? []).map(image => ({
+              type: 'image', url: `data:${image.mimeType};base64,${image.data}`,
+            })),
+          ],
+        });
+      } catch (error) {
+        // These JSON-RPC errors reject validation/dispatch, not a lost receipt.
+        // Server/internal errors are uncertain and must never trigger a replay.
+        if (error instanceof HarnessProtocolError &&
+            [-32600, -32601, -32602].includes(Number(error.code))) {
+          if (error.code === -32601) {
+            capabilities.steering = false;
+            for (const listener of changed) listener();
+          }
+          throw new HarnessSteeringRejected(error.message);
+        }
+        throw error;
+      }
+      if (accepted.turnId !== expected) {
+        const error = new Error('Codex did not confirm the original steering turn; review native history before retrying');
+        markFailed(error);
+        throw error;
+      }
+      // Completion may have raced the response. The fixed native ID still
+      // proves association with that original turn, not its successor.
+      return { inputId: options.inputId, disposition: 'appended', nativeId: expected };
     },
     async stop() {
       stopRequested = true;

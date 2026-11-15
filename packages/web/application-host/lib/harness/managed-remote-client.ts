@@ -492,6 +492,8 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       projectManagement: (input, signal) => request('projectManagement', input, signal),
       externalProjectSource: (input, signal) => request('externalProjectSource', input, signal),
       externalSettings: (input, signal) => request('externalSettings', input, signal),
+      externalDetect: (input, signal) => request('externalDetect', input, signal),
+      externalInspect: (input, signal) => request('externalInspect', input, signal),
       externalPrepare: (input, signal) => request('externalPrepare', input, signal),
       terminal:(input,signal)=>request('terminal',input,signal),
       terminalStream:async(input,emit,signal)=>{if(input.coordinatorHostId!==options.coordinatorHostId)throw new Error('Terminal coordinator changed');

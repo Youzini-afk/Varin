@@ -97,7 +97,7 @@ pub(super) fn message_participants(
     kind: &str,
     data: &mut Value,
 ) -> Result<()> {
-    if !kind.starts_with("message.") || kind == "message.accepted" {
+    if (!kind.starts_with("message.") && kind != "ingress.preparation_hold") || kind == "message.accepted" {
         return Ok(());
     }
     let input = data["input_id"]

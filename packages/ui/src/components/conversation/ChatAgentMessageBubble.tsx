@@ -1,5 +1,6 @@
 import React from 'react';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
+import { HarnessIcon } from '@/components/thread/HarnessIcon';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { useThreadStore } from '@/stores/useThreadStore';
@@ -30,6 +31,8 @@ export function ChatAgentMessageBubble({ id, senderThreadId, senderBranchId, tar
   const delegates = useExternalAgentStore(state => state.children);
   const member = (id?: string) => threads.find(thread => thread.thread_id === id || (id && thread.agent_code === id.toUpperCase()));
   const source = member(senderThreadId), target = member(targetThreadId);
+  const externalMember = (id?: string) => external.find(conversation => conversation.id === id) ?? delegates.find(child => child.conversationId === id);
+  const externalSource = externalMember(senderThreadId), externalTarget = externalMember(targetThreadId);
   const name = (id?: string) => {
     const thread = member(id);
     return thread?.title || thread?.agent_code || external.find(v => v.id === id)?.title || delegates.find(v => v.conversationId === id)?.name || id || t('chat.agentMessage.agent');
@@ -42,14 +45,15 @@ export function ChatAgentMessageBubble({ id, senderThreadId, senderBranchId, tar
   return <article className="chat-agent-message" data-outgoing={outgoing} data-kind={kind} data-arrive={arrives || undefined}>
     <button type="button" className="chat-agent-message-avatar" disabled={!senderThreadId}
       aria-label={t('collaboration.viewMember', { name: name(senderThreadId) })} onClick={() => openMember(senderThreadId, senderBranchId)}>
-      <AgentAvatar identity={source?.thread_id ?? senderThreadId ?? id} avatar={source?.avatar ?? delegates.find(v => v.conversationId === senderThreadId)?.avatar} size={26} />
+      {externalSource ? <HarnessIcon harness={externalSource.harness} configurationId={externalSource.configurationId} className="size-[26px]" />
+        : <AgentAvatar identity={source?.thread_id ?? senderThreadId ?? id} avatar={source?.avatar} size={26} />}
     </button>
     <div className="chat-agent-message-column">
       <div className="chat-agent-message-route">
         <button type="button" disabled={!senderThreadId} title={name(senderThreadId)} onClick={() => openMember(senderThreadId, senderBranchId)}><span>{name(senderThreadId)}</span></button>
         {targetThreadId && <><Icon name="arrow-right" className="size-3 shrink-0" />
           <button type="button" title={name(targetThreadId)} onClick={() => openMember(targetThreadId, targetBranchId)}>
-            {target && <AgentAvatar identity={target.thread_id} avatar={target.avatar} size={14} />}<span>{name(targetThreadId)}</span>
+            {externalTarget ? <HarnessIcon harness={externalTarget.harness} configurationId={externalTarget.configurationId} className="size-3.5" /> : target && <AgentAvatar identity={target.thread_id} avatar={target.avatar} size={14} />}<span>{name(targetThreadId)}</span>
           </button></>}
       </div>
       <div className="chat-agent-message-bubble" data-expanded={expanded}>

@@ -200,7 +200,7 @@ impl Catalog {
             child.child_thread_id,
             child.child_branch_id,
             actor,
-            messages::MessageInput { attachments: report.attachments.iter().map(|file|super::attachments::AttachmentSelection::Ref{reference:file.reference.clone()}).collect(),
+            messages::MessageInput { executor_options: None, attachments: report.attachments.iter().map(|file|super::attachments::AttachmentSelection::Ref{reference:file.reference.clone()}).collect(),
                 after_current: None,
                 source_agent: None,
                 name: None,

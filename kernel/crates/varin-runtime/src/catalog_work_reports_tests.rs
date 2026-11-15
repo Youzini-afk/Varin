@@ -23,7 +23,7 @@ fn send_schema() -> ToolSchema {
 
 fn request(f: &mut child_fixture::Fixture, target: &Receipt) -> messages::MessageReceipt {
     let schema = send_schema();
-    let input = messages::MessageInput {
+    let input = messages::MessageInput { executor_options: None,
         attachments: vec![],
         after_current: None,
         source_agent: None,
@@ -320,4 +320,152 @@ fn reused_delegated_execution_reports_to_its_actual_requester_branch_not_origina
     assert_eq!(delivery.parent_branch_id,"different-branch");
     assert_eq!(db.child_task(&child.operation_id).unwrap().parent_run_id,child.parent_run_id);
     drop(db); std::fs::remove_dir_all(root).unwrap();
+}
+
+fn independent_conversation(f: &mut child_fixture::Fixture, thread: &str, bot: Option<&str>) -> Receipt {
+    let branch = format!("{thread}-main");
+    if let Some(bot) = bot {
+        f.db.publish_bot_gate(bot::BotGate { bot_id: bot.into(), profile_revision: 1, activity_operation_id: None, permitted: true }).unwrap();
+        f.db.create_bot_thread(thread, &branch, bot).unwrap();
+    } else {
+        f.db.create_thread(thread, &branch).unwrap();
+    }
+    let route = format!("{thread}-route");
+    f.db.fork_branch(&branch, &route, None).unwrap();
+    let mut launch = f.launch.clone();
+    launch.tools.push(send_schema());
+    launch.tool_schema_generation += 1;
+    f.db.submit_with_launch(&SubmitInput {
+        key: format!("initial-{thread}"), thread_id: thread.into(), branch_id: route,
+        expected_head: None, input: json!({"text":"Original independent conversation"}),
+        configuration: f.db.run(&f.context.run_id).unwrap().configuration,
+    }, Some(launch)).unwrap()
+}
+
+fn deliver_request(f: &mut child_fixture::Fixture, work: &Receipt) {
+    f.db.commit_execution(&work.run_id, f.db.epoch(), &ExecutionRecord::StateChanged { state: RunState::Runnable, waiting_on: None }).unwrap();
+    let head = f.db.head(&work.branch_id).unwrap();
+    let delivery = f.db.prepare_input_delivery(&work.run_id, f.db.epoch(), head.as_deref()).unwrap().load().unwrap();
+    f.db.admit_input_delivery(delivery).unwrap().unwrap();
+}
+
+#[test]
+fn independent_roots_and_bots_report_to_the_exact_requesting_branch_without_adoption() {
+    for bots in [false, true] {
+        let mut f = child_fixture::Fixture::new();
+        let caller = independent_conversation(&mut f, "caller", bots.then_some("first-bot"));
+        let work = independent_conversation(&mut f, "receiver", bots.then_some("second-bot"));
+        f.context.run_id = caller.run_id.clone();
+        let sent = request(&mut f, &work);
+        deliver_request(&mut f, &work);
+        let head = f.db.head(&work.branch_id).unwrap();
+        f.db.append_history(&work.run_id, f.db.epoch(), head.as_deref(), HistorySource::Assistant,
+            json!({"id":"independent-answer","provenance":{"kind":"assistant"},"content":{"kind":"text","text":"Answer from the independent receiver"},"opaque":null}), None).unwrap();
+        f.db.commit_execution(&work.run_id, f.db.epoch(), &ExecutionRecord::StateChanged { state: RunState::Completed, waiting_on: None }).unwrap();
+        assert_eq!(scheduling::thread_family(&f.db.db, "caller").unwrap(), "caller");
+        assert_eq!(scheduling::thread_family(&f.db.db, "receiver").unwrap(), "receiver");
+        assert!(f.db.child_task_for_thread("receiver").unwrap().is_none());
+        assert!(f.db.agent_source(&caller.run_id, "receiver").is_err(), "conversation contact grants no file-source authority");
+        let root = f.root.clone();
+        drop(f.db);
+        let owner = std::sync::Mutex::new(Catalog::open(&root).unwrap());
+        super::super::deliver_reports(&owner).unwrap();
+        super::super::deliver_reports(&owner).unwrap();
+        let db = owner.into_inner().unwrap();
+        let reply_id = format!("message:bot-report:run:{}:{}", work.run_id, sent.identity.message_id);
+        let reply = db.capture_message("caller", "caller-route", &reply_id).unwrap().load().unwrap();
+        assert_eq!(reply.summary.receipt.identity.target_branch_id, "caller-route");
+        assert_eq!(reply.summary.receipt.identity.kind, if bots { MessageKind::Request } else { MessageKind::Inform });
+        assert!(reply.text.contains("Answer from the independent receiver"));
+        assert!(db.capture_message("caller", "caller-main", &reply_id).is_err());
+        let original = db.capture_message("caller", "caller-route", &sent.identity.message_id).unwrap().load().unwrap();
+        assert_eq!(original.summary.reply_wait.unwrap().state, messages::reply_wait::ReplyWaitState::Replied);
+        assert!(db.pending_work_reports().unwrap().is_empty());
+        assert_eq!(db.bot_for_thread("receiver").unwrap().as_deref(), bots.then_some("second-bot"));
+        drop(db);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn explicit_reply_fulfills_cross_root_request_without_duplicate_terminal_report() {
+    let mut f = child_fixture::Fixture::new();
+    let caller = independent_conversation(&mut f, "caller", None);
+    let work = independent_conversation(&mut f, "receiver", None);
+    f.context.run_id = caller.run_id.clone();
+    let sent = request(&mut f, &work);
+    deliver_request(&mut f, &work);
+    let reply = f.db.prepare_user_message("explicit-answer".into(), work.thread_id.clone(), work.branch_id.clone(), messages::MessageInput { executor_options: None,
+        attachments: vec![], after_current: None, source_agent: None, name: None, wait: None,
+        target_thread_id: None, target_branch_id: None, reply_to: Some(sent.identity.message_id.clone()),
+        kind: MessageKind::Inform, text: "Here is the explicit answer".into(),
+    }).unwrap().load().unwrap();
+    f.db.admit_message(reply).unwrap();
+    f.db.commit_execution(&work.run_id, f.db.epoch(), &ExecutionRecord::StateChanged { state: RunState::Completed, waiting_on: None }).unwrap();
+    assert!(f.db.pending_work_reports().unwrap().is_empty());
+    let original = f.db.capture_message("caller", "caller-route", &sent.identity.message_id).unwrap().load().unwrap();
+    assert_eq!(original.summary.reply_wait.unwrap().state, messages::reply_wait::ReplyWaitState::Replied);
+    let current = f.db.capture_family_read("caller", None, None).unwrap().directory_page(false,
+        family::FamilyListQuery { scope: Some("current".into()), query: Some("receiver".into()), ..Default::default() }, &||false).unwrap();
+    assert!(current.members.is_empty());
+    let root = f.root.clone(); drop(f); std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn several_requests_consumed_by_one_run_share_an_identified_result() {
+    let mut f = child_fixture::Fixture::new();
+    let first = independent_conversation(&mut f, "first", None);
+    let second = independent_conversation(&mut f, "second", None);
+    let work = independent_conversation(&mut f, "receiver", None);
+    f.context.run_id = first.run_id;
+    let first_request = request(&mut f, &work);
+    f.context.run_id = second.run_id;
+    let second_request = request(&mut f, &work);
+    deliver_request(&mut f, &work);
+    f.db.commit_execution(&work.run_id, f.db.epoch(), &ExecutionRecord::StateChanged { state: RunState::Completed, waiting_on: None }).unwrap();
+    for request in [first_request, second_request] {
+        let report = f.db.capture_work_report(&request.identity.message_id, &work.run_id).unwrap().load().unwrap();
+        assert_eq!(report.request_count, 2);
+        assert!(report.text.contains("share this execution and final answer"));
+        assert_eq!(report.run.id, work.run_id);
+    }
+    let root = f.root.clone(); drop(f); std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn same_thread_other_branch_is_a_distinct_message_participant() {
+    let mut f = child_fixture::Fixture::new();
+    let caller = independent_conversation(&mut f, "conversation", None);
+    f.db.fork_branch("conversation-main", "other-route", None).unwrap();
+    let launch = f.db.launch_intent(&caller.run_id).unwrap().unwrap().selection;
+    let work = f.db.submit_with_launch(&SubmitInput {
+        key:"other-branch".into(), thread_id:caller.thread_id.clone(), branch_id:"other-route".into(), expected_head:None,
+        input:json!({"text":"Work independently on this branch"}),configuration:f.db.run(&caller.run_id).unwrap().configuration,
+    },Some(launch)).unwrap();
+    f.context.run_id = caller.run_id;
+    let sent = request(&mut f, &work);
+    assert_eq!(sent.identity.sender_thread_id, sent.identity.target_thread_id);
+    assert_eq!(sent.identity.sender_branch_id, "conversation-route");
+    assert_eq!(sent.identity.target_branch_id, "other-route");
+    deliver_request(&mut f, &work);
+    assert!(f.db.history("other-route").unwrap().iter().any(|item|item.id==sent.identity.message_id));
+    assert!(!f.db.history("conversation-main").unwrap().iter().any(|item|item.id==sent.identity.message_id));
+    let root=f.root.clone();drop(f);std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn stopping_requester_does_not_cancel_or_adopt_independent_receiver() {
+    let mut f = child_fixture::Fixture::new();
+    let caller = independent_conversation(&mut f, "caller", None);
+    let work = independent_conversation(&mut f, "receiver", None);
+    f.context.run_id=caller.run_id.clone();
+    let sent=request(&mut f,&work);
+    deliver_request(&mut f,&work);
+    f.db.request_cancel_run(&caller.run_id).unwrap();
+    assert!(!f.db.run(&work.run_id).unwrap().cancel_requested);
+    assert_eq!(f.db.run(&work.run_id).unwrap().state,RunState::Runnable);
+    assert!(f.db.child_task_for_thread("receiver").unwrap().is_none());
+    let request=f.db.capture_message("receiver","receiver-route",&sent.identity.message_id).unwrap().load().unwrap();
+    assert_eq!(request.summary.state,InputState::Delivered);
+    let root=f.root.clone();drop(f);std::fs::remove_dir_all(root).unwrap();
 }

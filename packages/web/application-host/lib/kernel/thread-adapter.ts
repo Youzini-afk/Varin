@@ -194,39 +194,72 @@ export class ThreadAdapter {
   }
   private sourceDirectory?: SourceDirectory;
   private botWorkProfile?: (botId: string, signal: AbortSignal) => Promise<{ homeDir: string; model: ThreadModel } | null>;
-  private readonly coldBotPreparations = new Set<string>();
+  private conversationWorkModel?: (identity: ThreadIdentity, signal: AbortSignal) => Promise<ThreadModel | null>;
+  private readonly coldWorkPreparations = new Set<string>();
   bindBotWorkProfile(resolve: NonNullable<ThreadAdapter['botWorkProfile']>): void { this.botWorkProfile = resolve; }
-  /** Model/source preparation only; the original ingress retains scheduling and admission. */
+  bindConversationWorkModel(resolve: NonNullable<ThreadAdapter['conversationWorkModel']>): void { this.conversationWorkModel = resolve; }
+  /** Prepare the existing durable ingress; the process that requested work does not own this launch. */
   private botInactivityMinutes: () => Promise<number> = async () => 20;
   bindBotInactivityMinutes(read: () => Promise<number>): void { this.botInactivityMinutes = read; }
   async recoverBotWork(signal: AbortSignal): Promise<void> {
-    if (!this.botWorkProfile || !this.prepareContext) return;
+    const prepareContext = this.prepareContext;
+    if (!prepareContext || (!this.botWorkProfile && !this.conversationWorkModel)) return;
     for (const work of await this.runtime.pendingBotWork(signal, await this.botInactivityMinutes())) {
-      if (this.coldBotPreparations.has(work.inputId)) continue;
-      this.coldBotPreparations.add(work.inputId);
+      if (this.coldWorkPreparations.has(work.inputId)) continue;
+      this.coldWorkPreparations.add(work.inputId);
       void this.launchAdmitted(`cold:${work.inputId}`, async () => {
-        const profile = await this.botWorkProfile!(work.botId, signal);
-        if (!profile) return;
         const identity: ThreadIdentity = { runtime: 'agent', threadId: work.threadId, branchId: work.branchId };
-        const location = await this.resolveSource(identity, { resourceOwner: { kind: 'local' }, path: profile.homeDir }, signal);
-        const { source } = await this.prepareSource({ ...identity, key: work.inputId, resourceOwner: location.resourceOwner,
-          workspaceId: location.workspaceId, mode: 'live_root', content: { mode: 'saved-files' }, captureScopes: [] }, signal);
-        await this.admitSource(source, identity, undefined, signal);
-        const model = await waitForModelBinding(this.models.resolveModel(profile.model), model => model.credentialOwner.release(), signal);
+        const hold = async (reason: 'model_unavailable' | 'source_unavailable') => {
+          signal.throwIfAborted();
+          await this.runtime.holdColdWork({ inputId: work.inputId, revision: work.revision, reason }, signal);
+        };
+        let bot: { homeDir: string; model: ThreadModel } | null | undefined;
+        let model: Awaited<ReturnType<ThreadModelAuthority['resolveModel']>> | undefined;
         try {
-          const initialContext = await this.prepareContext!(identity, source, { mode: 'bot', threadRole: 'main', projectId: `bot:${work.botId}` }, signal);
-          const childDispatch = this.prepareChildProfiles ? await this.prepareChildProfiles({ modelOwner: model.credentialOwner,
-            parent: { configuration: model.configuration, credential_scope: await model.credentialOwner.scope() } }, signal) : undefined;
+          bot = work.botId ? await this.botWorkProfile?.(work.botId, signal) : null;
+          const selection = work.botId ? bot?.model : await this.conversationWorkModel?.(identity, signal);
+          if (selection) model = await waitForModelBinding(this.models.resolveModel(selection), model => model.credentialOwner.release(), signal);
+        } catch (error) {
+          if (!signal.aborted) await hold('model_unavailable');
+          throw error;
+        }
+        if (!model) { await hold('model_unavailable'); return; }
+        try {
+          let source: ThreadSource | null = null;
+          let initialContext: InitialContext;
+          try {
+            if (bot) {
+              const location = await this.resolveSource(identity, { resourceOwner: { kind: 'local' }, path: bot.homeDir }, signal);
+              source = (await this.prepareSource({ ...identity, key: work.inputId, resourceOwner: location.resourceOwner,
+                workspaceId: location.workspaceId, mode: 'live_root', content: { mode: 'saved-files' }, captureScopes: [] }, signal)).source;
+            } else {
+              const thread = await this.runtime.thread(identity.threadId, signal);
+              const canUseHostSources = await this.runtime.principalCanUseHostResources?.(thread.principal_id) ?? true;
+              if (canUseHostSources) source = await this.defaultDeviceSource?.(identity) ?? null;
+            }
+            if (source) await this.admitSource(source, identity, undefined, signal);
+            initialContext = work.botId
+              ? await prepareContext(identity, source, { mode: 'bot', threadRole: 'main', projectId: `bot:${work.botId}` }, signal)
+              : await prepareContext.main(identity, source, signal);
+          } catch (error) {
+            if (!signal.aborted) await hold('source_unavailable');
+            throw error;
+          }
+          const credentialScope = await model.credentialOwner.scope();
+          const childDispatch = this.prepareChildProfiles ? await this.prepareChildProfiles({ modelOwner: model.credentialOwner, ...(source ? { resourceOwner: source.resourceOwner } : {}),
+            parent: { configuration: model.configuration, credential_scope: credentialScope } }, signal) : undefined;
           signal.throwIfAborted();
           const receipt = await this.runtime.admitBotWork({ work, configuration: model.configuration, initialContext,
-            launch: { inheritSource: false, source: { resourceOwner: source.resourceOwner, workspaceId: source.workspaceId,
+            launch: { inheritSource: false, source: source ? { resourceOwner: source.resourceOwner, workspaceId: source.workspaceId,
               executionWorkspaceId: source.executionWorkspaceId, branchId: source.branchId ?? null, revision: source.revision ?? null,
-              mode: source.mode, liveRoot: source.liveRoot ?? null }, enabledTools: source.tools, credentialScope: await model.credentialOwner.scope(),
-              ...(childDispatch ? { childDispatch } : {}) } }, signal);
+              mode: source.mode, liveRoot: source.liveRoot ?? null,
+              ...(source.mode === 'native_workspace' && source.nativeScope ? { nativeScope: source.nativeScope } : {}),
+              ...(source.environmentRunId ? { environmentRunId: source.environmentRunId } : {}) } : null,
+              enabledTools: source?.tools ?? [], credentialScope, ...(childDispatch ? { childDispatch } : {}) } }, signal);
           void this.continueLaunch(receipt.run_id, { credentialOwner: model.credentialOwner, signal }).catch(() => undefined);
         } finally { model.credentialOwner.release(); }
       }, signal).catch(error => { if (!signal.aborted) this.onLaunchError(work.inputId, error); })
-        .finally(() => this.coldBotPreparations.delete(work.inputId));
+        .finally(() => this.coldWorkPreparations.delete(work.inputId));
     }
   }
   bindSourceDirectory(directory: SourceDirectory): void { this.sourceDirectory = directory; }
@@ -1036,7 +1069,8 @@ export class ThreadAdapter {
         stage = 'skills';
         const skill = await this.skillInput(identity, initialContext.resources, preparation.instruction, signal);
         stage = 'child_profiles';
-        const childDispatch = this.prepareChildProfiles ? await this.prepareChildProfiles({ modelOwner: model.credentialOwner, parent: {
+        const childDispatch = this.prepareChildProfiles ? await this.prepareChildProfiles({ modelOwner: model.credentialOwner,
+          ...(source ? { resourceOwner: source.resourceOwner } : {}), parent: {
           configuration: model.configuration, credential_scope: await model.credentialOwner.scope(),
         } }, signal) : undefined;
         signal.throwIfAborted();
@@ -1166,7 +1200,8 @@ export class ThreadAdapter {
               }
             }
             if (this.prepareChildProfiles) {
-              command.launch!.childDispatch = await this.prepareChildProfiles({ modelOwner: model.credentialOwner, parent: {
+              command.launch!.childDispatch = await this.prepareChildProfiles({ modelOwner: model.credentialOwner,
+                ...(candidateSource ? { resourceOwner: candidateSource.resourceOwner } : {}), parent: {
                 configuration: model.configuration, credential_scope: command.launch!.credentialScope ?? null,
               } });
             }

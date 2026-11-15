@@ -85,7 +85,7 @@ fn preset(id: &str, model: Option<ChildModelBinding>) -> ChildPreset {
     }
 }
 fn input() -> DispatchInput {
-    DispatchInput { organization: None, attachments: Vec::new(), model: None, thinking: None, input_types: Vec::new(), project_id:None, background:Vec::new(), source_path: None,
+    DispatchInput { executor: None, executor_options: None, organization: None, attachments: Vec::new(), model: None, thinking: None, input_types: Vec::new(), project_id:None, background:Vec::new(), source_path: None,
         inherit_context: false,
         source_agent: None,
         name: None,
@@ -109,7 +109,7 @@ fn selected_presets_freeze_real_model_and_instructions_normal_disabled_is_indepe
     let mut selected = preset("worker-custom", Some(other.clone()));
     selected.work_focus = vec!["research".into()];
     selected.avatar = Some("dome-ivory".into());
-    let catalog = ChildDispatchCatalog { model_selection_preparation: false, projects:Vec::new(),
+    let catalog = ChildDispatchCatalog { executors: Vec::new(), model_selection_preparation: false, projects:Vec::new(),
         native_capabilities: Vec::new(),
         identity: "configuration-1".into(),
         normal_unavailable: Some(ChildCapabilityFailure {
@@ -165,7 +165,7 @@ fn same_model_choice_key_preserves_first_catalog_and_original_request_never_uses
     let original_ref = original.reference.clone();
     drop(original);
     let parent = model(&f);
-    let catalog = ChildDispatchCatalog { model_selection_preparation: false, projects:Vec::new(),
+    let catalog = ChildDispatchCatalog { executors: Vec::new(), model_selection_preparation: false, projects:Vec::new(),
         native_capabilities: Vec::new(),
         identity: "first".into(),
         normal_unavailable: None,
@@ -178,7 +178,7 @@ fn same_model_choice_key_preserves_first_catalog_and_original_request_never_uses
             .active
             .unwrap();
     let changed =
-        f.db.prepare_child_catalog(Some(ChildDispatchCatalog { model_selection_preparation: false, projects:Vec::new(),
+        f.db.prepare_child_catalog(Some(ChildDispatchCatalog { executors: Vec::new(), model_selection_preparation: false, projects:Vec::new(),
             native_capabilities: Vec::new(),
             identity: "later-settings".into(),
             normal_unavailable: None,
@@ -253,7 +253,7 @@ fn inherited_settings_require_original_parent_basis_and_unavailable_cannot_be_na
         code: "unsupported".into(),
         capabilities: unavailable.tools.clone(),
     });
-    let catalog = ChildDispatchCatalog { model_selection_preparation: false, projects:Vec::new(),
+    let catalog = ChildDispatchCatalog { executors: Vec::new(), model_selection_preparation: false, projects:Vec::new(),
         native_capabilities: Vec::new(),
         identity: "inherit".into(),
         normal_unavailable: None,
@@ -343,4 +343,45 @@ fn normal_modes_preserve_private_text_path_and_missing_configuration_never_falls
     drop(selected);
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn executor_selection_precedence_and_native_options_remain_separate() {
+    let f = Fixture::new();
+    let mut selected = f.db.capture_child_dispatch_invocation(&f.context).unwrap().load().unwrap();
+    let binding = ExternalChildBinding { configuration_id:"codex".into(),harness:"codex".into(),
+        resource_owner:Some(varin_runtime::catalog::launches::SourceResourceOwner::Local),
+        model:None,thinking:None,mode:None,config:None,launch:ExternalLaunch{command:"codex".into(),args:vec![]} };
+    selected.catalog.executors.push(ChildExecutor{reference:"exec:CODEX".into(),name:"Codex".into(),binding:binding.clone(),availability:"auto".into()});
+    let mut external = preset("external-role",None);
+    external.tools.clear(); external.external=Some(binding); external.external.as_mut().unwrap().model=Some("preset-model".into());
+    selected.catalog.presets.push(external);
+    let mut request=input();
+    assert!(selected.external_preset(&request).unwrap().is_none()); // Free dispatch always Varin.
+    request.executor=Some("codex".into());
+    let direct=selected.external_preset(&request).unwrap().unwrap();
+    assert_eq!(direct.external.as_ref().unwrap().model,None); // No fabricated external defaults.
+    assert_eq!(direct.external.as_ref().unwrap().configuration_id,"codex");
+    let mut native_role=preset("native-code-role",None); native_role.work_focus=vec!["code".into()]; selected.catalog.presets.push(native_role);
+    request.preset=Some("native-code-role".into());
+    request.executor=Some("exec:CODEX".into());
+    assert!(selected.external_preset(&request).unwrap().is_some());
+    request.preset=Some("external-role".into()); request.executor=None;
+    assert_eq!(selected.external_preset(&request).unwrap().unwrap().external.unwrap().model.as_deref(),Some("preset-model"));
+    request.executor_options=Some(ExecutorOptions {model:Some("explicit-native-model".into()),thinking:Some("high".into()),..Default::default()});
+    let explicit=selected.external_preset(&request).unwrap().unwrap();
+    assert_eq!(selected.external_input(&request,&explicit).unwrap()["model"],"explicit-native-model");
+    assert_eq!(selected.external_input(&request,&explicit).unwrap()["thinking"],"high");
+    request.executor_options=None; request.executor=Some("varin".into());
+    assert!(selected.external_preset(&request).unwrap().is_none());
+    assert!(selected.resolve(&request).is_ok());
+    request.preset=None; request.executor=Some("codex".into()); request.model=Some("native-channel-id".into());
+    assert!(selected.external_preset(&request).unwrap_err().to_string().contains("executorOptions"));
+    request.model=None; request.tools=Some(vec!["file_read".into()]);
+    assert!(selected.external_preset(&request).is_err());
+    request.tools=None; selected.catalog.executors[0].availability="disabled".into();
+    assert!(selected.external_preset(&request).unwrap_err().to_string().contains("disabled"));
+    request.executor=Some("/tmp/arbitrary-program".into());
+    assert!(request.validate().is_err());
+    let root=f.root.clone();drop(selected);drop(f);std::fs::remove_dir_all(root).unwrap();
 }

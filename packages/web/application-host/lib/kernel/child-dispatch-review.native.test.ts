@@ -55,6 +55,8 @@ import { createLanguageOwner } from './language-owner.js';
 import { createStructureSource } from '../structure/source.js';
 import { createTreeSitterStructureProvider } from '../structure/tree-sitter-provider.js';
 import { ExternalAgentsService } from '../external-agents/service.js';
+import { createResourceOwner } from './resource-owner.js';
+import { inspectExecutors } from '../external-agents/executor-discovery.js';
 import { createExternalSourceOwner } from '../external-agents/source.js';
 import { createKernelProcessService } from './process-service.js';
 import { createExtensionTools } from './extension-tool-owner.js';
@@ -315,6 +317,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
     if (external) {
       const executable = path.join(root, 'external-fixture.mjs');
       await fs.writeFile(executable, `import {createInterface} from 'node:readline';import {writeFileSync} from 'node:fs';
+if(process.argv.includes('--version')){process.stdout.write('fixture 1\\n');process.exit(0);}
 const send=v=>process.stdout.write(JSON.stringify(v)+'\\n');
 createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);const reply=result=>send({jsonrpc:'2.0',id:m.id,result});
 if(m.method==='initialize')reply({});if(m.method==='thread/start'||m.method==='thread/resume')reply({thread:{id:'external-native-session'}});
@@ -323,6 +326,10 @@ send({method:'item/completed',params:{threadId:'external-native-session',turnId:
 send({method:'turn/completed',params:{threadId:'external-native-session',turn:{id:'external-native-turn',status:'completed'}}});}});`);
       const configuration = await external.settings();
       await external.configure({ defaultAgent: null, agents: [{ id: 'fixture', name: 'External fixture', harness: 'codex', enabled: true, command: process.execPath, args: [executable] }] }, configuration.revision, 'external-fixture');
+      kernel.setResourceOwner(createResourceOwner({runtime,resources,organization:async(request,_run,signal)=>{
+        if(request.action==='executors')return {result:await inspectExecutors(external,request.input,signal)};
+        throw new Error('Unsupported fixture organization query');
+      }}));
       external.startChildren(createExternalSourceOwner({ kernel, storage, ...(managedRegistry?{managed:{coordinatorHostId:runtime.coordinatorHostId,source:runtime.managedSource.bind(runtime)}}:{}), capture: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => ({ kind: 'directory' }) } }));
     }
     const profiles = createAgentProfilesAPI({ settings, contextAgentDefinition: signal => runtime.contextAgentDefinition(signal), capabilities: signal => runtime.childCapabilities(signal) });
@@ -486,10 +493,28 @@ function waitArguments(body: Record<string, unknown>) {
 
 it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses its real %s source, returns its report and resumes the parent without a synthetic child Run', async workMode => {
   let operationId = '', executionRef = ''; let step = 0; let preset = '';
+  let discoveryRequested=false, executorRef='';
   const parentReply = gate();
   const f = await fixture(async ({ body, response }) => {
     assertPairing(body);
-    if (++step === 1) complete(response, [tool('dispatch', { preset, task: 'Write a result and report', workMode }, 'external-dispatch')]);
+    if(workMode==='shared' && !discoveryRequested){
+      // Add a configuration after the native request catalog was frozen. Discovery
+      // and dispatch must use its real owner, not require a new native Run/preset.
+      const settings=await h.external!.settings();
+      const fixture=settings.agents.find(agent=>agent.id==='fixture')!;
+      await h.external!.configure({defaultAgent:null,agents:[...settings.agents,{...fixture,id:'late-fixture',name:'Late configured executor'}]},settings.revision,'late-executor');
+      discoveryRequested=true;
+      return complete(response,[tool('executors',{action:'inspect',executor:'late-fixture'},'discover-executor')]);
+    }
+    if(workMode==='shared' && !executorRef){
+      const discovered=result(body,'executors');
+      expect(discovered,JSON.stringify(discovered)).toMatchObject({outcome:'succeeded'});
+      const content=discovered!.content as {executors:Array<{ref:string;configurationId:string;installation:{status:string};authentication:string}>};
+      expect(content.executors).toHaveLength(1);
+      expect(content.executors[0]).toMatchObject({configurationId:'late-fixture',installation:{status:'installed'},authentication:'unknown'});
+      executorRef=content.executors[0]!.ref;
+    }
+    if (++step === 1) complete(response, [tool('dispatch', { ...(workMode === 'shared' ? {executor:executorRef} : {preset}), task: 'Write a result and report', workMode }, 'external-dispatch')]);
     else if (step === 2) { ({ operationId, executionRef } = await acceptedDispatch(h, body)); complete(response, [tool('wait_child', { target: executionRef }, 'external-wait')]); }
     else if (step === 3) { expect(JSON.stringify(body.input)).toContain('EXTERNAL_HARNESS_RESULT'); complete(response, [tool('send', { targetThreadId: executionRef, kind: 'inform', text: 'PASSIVE_EXTERNAL_NOTE' }, 'external-inform')]); }
     else if (step === 4) { expect(JSON.stringify(result(body, 'send'))).toContain('next_input'); complete(response, [tool('send', { targetThreadId: executionRef, kind: 'request', text: 'CONTINUE_EXTERNAL_TASK', wait: {} }, 'external-request')]); }
@@ -503,6 +528,8 @@ it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses i
     else { expect(JSON.stringify(body.input)).toContain('EXTERNAL_HARNESS_RESULT'); complete(response, [answer('Delegation received', 'external-parent-answer')]); parentReply.release(); }
   });
   const h = await f.openHost({ external: true });
+  // The shared case has no external preset at all: configuration selection is sufficient.
+  if (workMode === 'isolated_write') {
   const profiles = await h.profiles.read({ runtime: 'agent' });
   const saved = await h.profiles.save({ runtime: 'agent', expectedRevision: profiles.revision, config: { kind: 'custom', key: '', agent: {
     name: 'External fixture', description: 'External worker', instructions: '', enabled: true, workFocus: [], external: { configurationId: 'fixture' },
@@ -510,6 +537,7 @@ it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses i
   const profile = saved.snapshot.profiles.find(profile => profile.id === saved.profileId)!;
   if (profile.config.kind !== 'custom') throw new Error('Expected an external custom preset');
   preset = `custom:${profile.config.key}`;
+  }
   const identity = await h.api.create(`external-${workMode}`);
   const workspaceId = (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId;
   const prepared = await h.api.prepareSource({ ...identity, key: 'external-source', resourceOwner: { kind: 'local' }, workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
@@ -2954,3 +2982,47 @@ it('a real remote external failure reaches the parent model with its original st
   });
   expect(step).toBe(3);expect((await h.runtime.run(parent.run_id)).state).toBe('completed');
 },45_000);
+
+it('an ordinary independent requester discovers, reads and reuses a manual external session without adopting it', async () => {
+  let step = 0, conversationId = '';
+  const f = await fixture(async ({ body, response }) => {
+    assertPairing(body);
+    if (++step === 1) return complete(response, [tool('threads', { backend: 'external', query: 'Existing manual Codex' }, 'find-manual-external')]);
+    if (step === 2) {
+      expect(JSON.stringify(result(body, 'threads'))).toContain('Existing manual Codex');
+      return complete(response, [tool('read_thread', { threadId: conversationId, query: { kind: 'recent', limit: 10 } }, 'read-manual-external')]);
+    }
+    if (step === 3) {
+      expect(JSON.stringify(result(body, 'read_thread'))).toContain('ORIGINAL_MANUAL_USER_TASK');
+      expect(JSON.stringify(result(body, 'read_thread'))).toContain('EXTERNAL_HARNESS_RESULT');
+      return complete(response, [tool('send', { targetThreadId: conversationId, kind: 'request', text: 'CONTINUE_THE_ORIGINAL_SESSION', afterCurrent: true, wait: {} }, 'reuse-manual-external')]);
+    }
+    expect(step).toBe(4);
+    expect(JSON.stringify(body.input)).toContain('EXTERNAL_HARNESS_RESULT');
+    return complete(response, [answer('Existing external result received', 'manual-reuse-final')]);
+  });
+  const h = await f.openHost({ external: true });
+  const original = await h.external!.create({ key: 'manual-external-before-request', configurationId: 'fixture', cwd: f.workspace, title: 'Existing manual Codex' });
+  conversationId = original.id;
+  const first = await h.external!.send(original.id, 'original-user-turn', { text: 'ORIGINAL_MANUAL_USER_TASK' });
+  await expect.poll(async () => (await h.external!.read(original.id)).turns.find(turn => turn.id === first.id)?.status).toBe('completed');
+  const initial = (await h.external!.read(original.id)).conversation;
+  expect(initial.parent).toBeUndefined();
+  const identity = await h.api.create('independent-external-requester');
+  const parent = await h.api.submit({ ...identity, key: 'independent-request', expectedHead: null, text: 'Find and continue the existing external work', model });
+  await combinedFixtureTerminal(h.runtime, parent.run_id);
+  expect((await h.runtime.run(parent.run_id)).state).toBe('completed');
+  expect(step).toBe(4);
+  const final = await h.external!.read(original.id);
+  expect(final.turns).toHaveLength(2);
+  expect(final.conversation.sessionId).toBe(initial.sessionId);
+  expect(final.conversation.cwd).toBe(initial.cwd);
+  expect(final.conversation.parent).toBeUndefined();
+  const requests = await h.external!.children();
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({ message_kind: 'request', parent_run_id: parent.run_id, parent_thread_id: identity.threadId,
+    parent_branch_id: identity.branchId, conversation_id: original.id, dispatch_operation_id: null, resources_released: true });
+  expect(requests[0]!.report).toMatchObject({ status: 'completed', turnId: requests[0]!.turn_id, executionTurnId: requests[0]!.turn_id });
+  expect(await h.runtime.childExecutions()).toHaveLength(0);
+  expect(h.errors).toEqual([]);
+}, 45_000);

@@ -33,6 +33,8 @@ export interface ManagedSourceServiceOptions {
   projectManagement?: ReturnType<typeof import('../projects/managed-project-management.js').createManagedProjectManagementOwner>;
   externalProjectSource?: ReturnType<typeof import('../external-agents/managed-project-source.js').createManagedExternalProjectSourceOwner>;
   terminal?:ReturnType<typeof import('../terminal/managed-owner.js').createManagedTerminalOwner>;
+  externalDetect?:(id:string,signal?:AbortSignal)=>Promise<import('@varin/application-client').ExternalAgentDetection>;
+  externalInspect?:(id:string,refresh:boolean,signal?:AbortSignal)=>Promise<import('@varin/application-client').ExternalExecutorInspection>;
   externalSettings?:(signal?:AbortSignal)=>Promise<import('@varin/application-client').ExternalAgentSettings>;
   externalLaunch?: (configurationId: string, harness: import('@varin/application-client').ExternalHarness, sessionId?: string, signal?: AbortSignal) => Promise<{binding:import('./managed-remote-types.js').ManagedExternalLaunchBinding;command:string;args:string[];env:NodeJS.ProcessEnv}>;
   workspaceFiles?: import('../workspace/resource-files.js').ResourceFilesOwner;
@@ -294,6 +296,16 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       if(!options.externalProjectSource)throw new SourceAdmissionError('source_unavailable');
       if(input.action!=='remove')await registration(input.source,signal);
       return options.externalProjectSource(principal,input,signal);
+    },
+    async externalDetect(principal,input,signal) {
+      requireReadPrincipal(principal,input.coordinatorHostId);
+      if (!['terminal:use','process:control'].every(c => principal.capabilities.includes(c)) || !options.externalDetect) throw new SourceAdmissionError('source_authority_denied');
+      return options.externalDetect(input.configurationId,signal);
+    },
+    async externalInspect(principal,input,signal) {
+      requireReadPrincipal(principal,input.coordinatorHostId);
+      if (!['terminal:use','process:control'].every(c => principal.capabilities.includes(c)) || !options.externalInspect) throw new SourceAdmissionError('source_authority_denied');
+      return options.externalInspect(input.configurationId,input.refresh === true,signal);
     },
     async externalSettings(principal,input,signal) {
       requireReadPrincipal(principal,input.coordinatorHostId);

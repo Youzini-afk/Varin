@@ -123,7 +123,7 @@ fn retrieval_completion_never_requests_a_work_report_even_after_reopen_with_old_
         assert!(db.capture_family_read("thread:parent", Some(&child.child_thread_id), None).is_err(),
             "the hidden retrieval remains outside public collaboration reads");
         assert!(db.prepare_user_message("forbidden-private-reply".into(), "thread:parent".into(), "branch:parent".into(),
-            messages::MessageInput { attachments: vec![], after_current: None, source_agent: None, name: None, wait: None,
+            messages::MessageInput { executor_options: None, attachments: vec![], after_current: None, source_agent: None, name: None, wait: None,
                 target_thread_id: Some(child.child_thread_id.clone()), target_branch_id: Some(child.child_branch_id.clone()),
                 reply_to: Some(message_id), kind: MessageKind::Inform, text: "Do not revive this private worker".into(),
             }).is_err(), "ordinary messages cannot reuse the internal delivery route");

@@ -5,12 +5,14 @@ import { HarnessSettingsValidationError, agentPresetTools, resolveAgentTools, me
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import type { ThreadModelAuthority } from './thread-adapter.js';
 import type { ThreadThinkingLevel, ExternalAgentSettings } from '@varin/application-client';
-import type { ChildCapabilityDescriptor, ChildCapabilityFailure, ChildDispatchCatalog, ChildModelBinding, ChildPreset, ChildProjectSource } from './protocol.generated.js';
+import type { ChildCapabilityDescriptor, ChildCapabilityFailure, ChildExecutor, ChildDispatchCatalog, ChildModelBinding, ChildPreset, ChildProjectSource } from './protocol.generated.js';
 import { waitWithSignal } from '../cancellation.js';
 import { waitForModelBinding } from './model-binding-lifetime.js';
+import { executorChoices } from '../external-agents/executor-discovery.js';
 
 export interface ChildProfileInput {
   parent: ChildModelBinding;
+  resourceOwner?: import('@varin/protocol').SourceResourceOwner;
   /** The original parent selection retains implementations referenced by its frozen child catalog. */
   modelOwner?: ExistingHostCredentialOwner;
 }
@@ -18,8 +20,8 @@ export type ChildProfilePreparer = (input: ChildProfileInput, signal?: AbortSign
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
   : record(value) ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
-const freeze = (presets: ChildPreset[], normal_unavailable: ChildCapabilityFailure | null, native_capabilities: ChildCapabilityDescriptor[] = [], projects: ChildProjectSource[] = []): ChildDispatchCatalog => ({
-  identity: createHash('sha256').update(JSON.stringify(canonical({ presets, normal_unavailable, native_capabilities, projects, model_selection_preparation: true }))).digest('hex'), presets, normal_unavailable, native_capabilities, projects, model_selection_preparation: true,
+const freeze = (presets: ChildPreset[], normal_unavailable: ChildCapabilityFailure | null, native_capabilities: ChildCapabilityDescriptor[] = [], projects: ChildProjectSource[] = [], executors: ChildExecutor[] = []): ChildDispatchCatalog => ({
+  identity: createHash('sha256').update(JSON.stringify(canonical({ presets, normal_unavailable, native_capabilities, projects, executors, model_selection_preparation: true }))).digest('hex'), presets, normal_unavailable, native_capabilities, projects, executors, model_selection_preparation: true,
 });
 const unavailable = (code: string, capabilities: string[] = []): ChildCapabilityFailure => ({ code, capabilities });
 
@@ -29,7 +31,7 @@ export function createChildProfilePreparer(owners: {
   projects?(): Promise<ChildProjectSource[]>;
   capabilities(signal?: AbortSignal): Promise<ChildCapabilityDescriptor[]>;
   models: ThreadModelAuthority;
-  externalAgents?(): Promise<ExternalAgentSettings>;
+  externalAgents?(owner?: import('@varin/protocol').SourceResourceOwner): Promise<ExternalAgentSettings>;
 }): ChildProfilePreparer {
   return async (input, signal) => {
     signal?.throwIfAborted();
@@ -56,7 +58,18 @@ export function createChildProfilePreparer(owners: {
     // against the child's selected focus, including recursive delegation.
     const observations = [...observePresets(settings.models, main, settings.agents, undefined, 'agent', defaults),
       observeQuickRetrieval(settings.models, main, defaults.retrieval)];
+    const projects = await owners.projects?.() ?? [];
     const externalSettings = owners.externalAgents ? await waitWithSignal(owners.externalAgents(), signal) : undefined;
+    // Snapshot existing configuration identities, not installation or login state. A live
+    // executors query probes only its requested Host and the launch owner rechecks settings.
+    const hostSettings: Array<{owner: import('@varin/protocol').SourceResourceOwner; settings: ExternalAgentSettings}> = externalSettings ? [{owner:{kind:'local'},settings:externalSettings}] : [];
+    const remoteOwners = new Map(projects.filter(project => project.resource_owner.kind === 'managed_host').map(project => [JSON.stringify(canonical(project.resource_owner)), project.resource_owner]));
+    if (input.resourceOwner?.kind === 'managed_host') remoteOwners.set(JSON.stringify(canonical(input.resourceOwner)),input.resourceOwner);
+    if (owners.externalAgents) for (const owner of remoteOwners.values()) {
+      try { hostSettings.push({owner,settings:await waitWithSignal(owners.externalAgents(owner),signal)}); }
+      catch { signal?.throwIfAborted(); /* An unavailable connection cannot prevent local work. */ }
+    }
+    const executors: ChildExecutor[] = hostSettings.flatMap(({owner,settings}) => executorChoices(settings,owner));
     const presets = await Promise.all(observations.map(async (entry): Promise<ChildPreset> => {
       const definition = entry.definition;
       const toolsSource = definition.slot
@@ -106,6 +119,6 @@ export function createChildProfilePreparer(owners: {
     }));
     signal?.throwIfAborted();
     return freeze(presets, settings.models.worker?.enabled === false && settings.models.verifier?.enabled === false
-      && !presets.some(preset => !preset.unavailable) ? unavailable('child-roles-disabled') : null, descriptors, await owners.projects?.() ?? []);
+      && !presets.some(preset => !preset.unavailable) ? unavailable('child-roles-disabled') : null, descriptors, projects, executors);
   };
 }

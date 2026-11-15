@@ -994,7 +994,7 @@ export interface MessageControlParams {
 
 export type MessageKind = 'inform' | 'request';
 
-export type MessageActivationHold = 'manual_pause' | 'question' | 'goal_blocked' | 'dependency_wait' | 'preparing' | 'source_unsettled';
+export type MessageActivationHold = 'manual_pause' | 'question' | 'goal_blocked' | 'dependency_wait' | 'preparing' | 'source_unsettled' | 'model_unavailable' | 'source_unavailable' | 'bot_suspended';
 
 export type MessageActivation = { state: 'passive' } | { state: 'pending'; executionId: string | null; holdReason: MessageActivationHold | null } | { state: 'bound'; runId: string; executionId: string | null; holdReason: MessageActivationHold | null } | { state: 'cancelled'; runId: string | null; executionId: string | null } | { state: 'failed'; executionId: string | null; code: string };
 
@@ -3297,9 +3297,16 @@ export interface ChildCapabilityFailure {
   capabilities: string[];
 }
 
+export interface ChildExecutor {
+  reference: string;
+  name: string;
+  binding: NonNullable<ChildPreset['external']>;
+  availability: 'auto' | 'enabled' | 'disabled';
+}
+
 export interface ChildPreset {
   work_focus?: string[];
-  external?: { configuration_id: string; harness: 'codex' | 'claude' | 'pi' | 'acp'; model?: string; launch: { command: string; args: string[] } };
+  external?: { configuration_id: string; harness: 'codex' | 'claude' | 'pi' | 'acp'; resource_owner?: SourceResourceOwner; model?: string; thinking?: string; mode?: string; config?: Record<string, string>; launch: { command: string; args: string[] } };
   description?: string;
   tools_source: 'default' | 'explicit';
   id: string;
@@ -3352,6 +3359,7 @@ export interface ChildProjectSource {
 }
 
 export interface ChildDispatchCatalog {
+  executors?: ChildExecutor[];
   projects?: ChildProjectSource[];
   native_capabilities: ChildCapabilityDescriptor[];
   identity: string;
@@ -3387,6 +3395,8 @@ export interface TreeCancellationReceipt {
 }
 
 export interface ChildInput {
+  executor?: string;
+  executorOptions?: {model?:string;thinking?:string;mode?:string;config?:Record<string,string>};
   workFocus?: "general" | "code" | "research" | "office";
   projectId?: string;
   background?: Array<{threadId:string;branchId:string;headId:string;itemIds:string[]}>;
@@ -3542,6 +3552,7 @@ export interface ChildWait {
 }
 
 export interface FamilyListParams {
+  relationship?: string;
   filePath?: string;
   parentThreadId?: string;
   parentBranchId?: string;

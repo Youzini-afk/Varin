@@ -1,4 +1,4 @@
-//! Same-task discovery and fixed conversation views over the original Catalog/ContentStore.
+//! Product-conversation discovery and fixed conversation views over the original Catalog/ContentStore.
 //! Captures are short control operations; ancestry, decoding and body IO belong to readers.
 use super::*;
 use crate::execution::{
@@ -183,6 +183,8 @@ pub struct FamilyListQuery {
     pub workspace_id: Option<String>,
     pub updated_after_ms: Option<u64>,
     pub updated_before_ms: Option<u64>,
+    /// Product access and delegation ancestry are independent of execution scope.
+    pub relationship: Option<String>,
     pub scope: Option<String>,
     pub query: Option<String>,
     pub cursor: Option<String>,
@@ -253,6 +255,12 @@ pub(super) const CURRENT: &str = r#"(
    WHERE pending.kind='bot.request_report_pending' AND json_extract(work.body,'$.thread_id')=t.id
      AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id
        WHERE internal.child_thread_id=request.sender_thread_id AND json_extract(owner.body,'$.executor')='code_retrieval')
+     AND NOT EXISTS(SELECT 1 FROM input_queue explicit_reply
+       WHERE explicit_reply.origin='message' AND explicit_reply.state!='cancelled'
+         AND json_extract(explicit_reply.body,'$.origin.identity.replyTo')=request.id
+         AND explicit_reply.sender_thread_id=json_extract(request.body,'$.origin.identity.targetThreadId')
+         AND explicit_reply.sender_branch_id=request.branch_id
+         AND json_extract(explicit_reply.body,'$.origin.identity.actor.kind')!='work_report')
      AND NOT EXISTS(SELECT 1 FROM input_queue reply
        JOIN history delivered ON delivered.id=reply.id JOIN runs receiver ON receiver.id=delivered.run_id
        WHERE reply.id='message:bot-report:run:'||work.id||':'||request.id AND reply.state='delivered'
@@ -537,6 +545,7 @@ impl Catalog {
         let target = match (resolved_thread.as_deref(), resolved_branch.as_deref()) {
             (Some(thread), Some(branch)) => {
                 if caller!=thread {super::threads::require_public(&self.db,thread)?;}
+                super::threads::require_branch_available(&self.db, branch)?;
                 let (actual, head): (String, Option<String>) = self
                     .db
                     .query_row(
@@ -618,10 +627,9 @@ impl FamilyRead {
         if super::principals::thread(&current,&self.caller)?!=self.principal {return Err(RuntimeError::Conflict("Reader principal changed during read".into()));}
         if let Some((target, branch, _)) = &self.target {
             super::threads::require_available(&current, target)?;
-            if super::scheduling::thread_family(&current, target)? != super::scheduling::thread_family(&current, &self.caller)?
-                && !super::bot_work::readable_conversation(&current, &self.caller, target)?
-                && !super::bot_work::linked(&current, &self.caller, target, Some(branch), false, false)? {
-                return Err(RuntimeError::Conflict("followed conversation access changed during read".into()));
+            super::threads::require_branch_available(&current, branch)?;
+            if target != &self.caller {
+                super::threads::require_conversation_access(&current, &self.caller, target)?;
             }
         }
         if let Some(invocation) = &self.invocation {
@@ -682,14 +690,11 @@ impl FamilyRead {
             }
         }
         if super::principals::thread(&db,&self.caller)?!=self.principal {return Err(RuntimeError::Conflict("Reader principal changed before read".into()));}
-        let root = super::scheduling::thread_family(&db, &self.caller)?;
         if let Some((target, branch, _)) = &self.target {
-            if super::scheduling::thread_family(&db, target)? != root
-                && !super::bot_work::readable_conversation(&db, &self.caller, target)?
-                && !super::bot_work::linked(&db, &self.caller, target, Some(branch), false, false)? {
-                return Err(RuntimeError::Conflict(
-                    "Thread is outside the caller's task family".into(),
-                ));
+            super::threads::require_available(&db, target)?;
+            super::threads::require_branch_available(&db, branch)?;
+            if target != &self.caller {
+                super::threads::require_conversation_access(&db, &self.caller, target)?;
             }
             let actual: String = db.query_row(
                 "SELECT thread_id FROM branches WHERE id=?1",
@@ -752,8 +757,8 @@ impl FamilyRead {
         self.list_page(include_self, FamilyListQuery { scope:Some("all".into()),..Default::default() },cancel)
     }
     pub fn list_page(self, include_self: bool, mut query:FamilyListQuery, cancel: &dyn Fn() -> bool) -> Result<FamilyList> {
-        // Existing family consumers use this view for task/resource authority and
-        // active-work summaries. Archiving changes browsing, never those rights.
+        // Detailed views preserve archived task metadata. Communication visibility is
+        // independent of the cancellation, source and integration owners.
         query.archived.get_or_insert_with(||"include".into());
         let db = self.open(cancel)?;
         self.list_page_in(&db,include_self,query,true,cancel)
@@ -761,6 +766,7 @@ impl FamilyRead {
     /// Model discovery deliberately avoids the detailed UI task/branch/source projection.
     pub fn directory_page(self, include_self: bool, mut query:FamilyListQuery, cancel: &dyn Fn() -> bool) -> Result<FamilyList> {
         let db=self.open(cancel)?;
+        threads::require_product_caller(&db, &self.caller)?;
         let organization_scope=serde_json::to_string(&super::principals::thread(&db,&self.caller)?)?;
         let organization_revision=db.query_row("SELECT revision FROM organization_spaces WHERE scope=?1",[organization_scope],|r|read_number(r,0)).optional()?.unwrap_or(0);
         let cursor=query.cursor.take().map(|token|self.decode::<DirectoryCursor>(&token)).transpose()?;
@@ -800,8 +806,8 @@ impl FamilyRead {
                 (SELECT json_extract(child.body,'$.state') FROM external_children child WHERE json_extract(child.body,'$.conversation_id')=e.id ORDER BY child.rowid DESC LIMIT 1),'idle'),json_extract(e.body,'$.parent.threadId')
             FROM external_conversations e JOIN model_agents a ON a.owner_kind='external' AND a.owner_id=e.id
             WHERE json_extract(e.body,'$.deleted')=0 AND e.rowid<=?3 AND e.rowid<?4 AND ({scope})
-            AND (EXISTS(SELECT 1 FROM external_children c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id WHERE json_extract(c.body,'$.conversation_id')=e.id)
-                OR EXISTS(SELECT 1 FROM bot_thread_bindings b JOIN threads t ON t.id=b.thread_id WHERE b.thread_id=?2 AND t.principal_id IS json_extract(e.body,'$.principalId')))
+            AND EXISTS(SELECT 1 FROM threads caller WHERE caller.id=?2 AND caller.hidden_kind IS NULL AND caller.deleted_at_ms IS NULL AND caller.principal_id IS json_extract(e.body,'$.principalId'))
+            AND (?13!='family' OR EXISTS(SELECT 1 FROM external_children c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id WHERE json_extract(c.body,'$.conversation_id')=e.id))
             AND (?5 IS NULL OR e.id=?5 OR instr(lower(json_extract(e.body,'$.title')),lower(?5))>0 OR a.agent_code=?5 COLLATE NOCASE)
             AND (?6 IS NULL OR EXISTS(SELECT 1 FROM external_children c WHERE json_extract(c.body,'$.conversation_id')=e.id AND json_extract(c.body,'$.parent_thread_id')=?6 AND (?7 IS NULL OR json_extract(c.body,'$.parent_branch_id')=?7)))
             AND (?8 IS NULL OR json_extract(e.body,'$.workspaceId')=?8 OR json_extract(e.body,'$.nativeWorkspace.workspace_id')=?8)
@@ -810,7 +816,7 @@ impl FamilyRead {
             ORDER BY e.rowid DESC LIMIT ?12");
         let read_limit:i64=-1;
         let mut statement=db.prepare(&sql)?;
-        let rows=statement.query_map(params![root,self.caller,maximum,before,query.query,parent,query.parent_branch_id,query.workspace_id,query.updated_after_ms.map(sql_number).transpose()?,query.updated_before_ms.map(sql_number).transpose()?,query.file_path,read_limit],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,read_number(r,4)?,r.get::<_,bool>(5)?,r.get::<_,String>(6)?,r.get::<_,Option<String>>(7)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        let rows=statement.query_map(params![root,self.caller,maximum,before,query.query,parent,query.parent_branch_id,query.workspace_id,query.updated_after_ms.map(sql_number).transpose()?,query.updated_before_ms.map(sql_number).transpose()?,query.file_path,read_limit,query.relationship.as_deref().unwrap_or("all")],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,read_number(r,4)?,r.get::<_,bool>(5)?,r.get::<_,String>(6)?,r.get::<_,Option<String>>(7)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
         let mut selected=Vec::new();
         for row in rows {
             check(cancel)?;
@@ -832,7 +838,7 @@ impl FamilyRead {
     pub(super) fn list_page_in(&self,db:&Connection, include_self: bool, query:FamilyListQuery, details: bool, cancel: &dyn Fn() -> bool) -> Result<FamilyList> {
         let root = super::scheduling::thread_family(&db, &self.caller)?;
         let scope = query.scope.as_deref().unwrap_or("current");
-        if !["current","history","all"].contains(&scope) || query.limit == Some(0) { return Err(RuntimeError::Invalid("invalid task directory query".into())); }
+        if !["current","history","all"].contains(&scope) || !["all","family"].contains(&query.relationship.as_deref().unwrap_or("all")) || query.limit == Some(0) { return Err(RuntimeError::Invalid("invalid task directory query".into())); }
         let maximum:i64 = db.query_row("SELECT coalesce(max(rowid),0) FROM threads",[],|r|r.get(0))?;
         let parent=query.parent_thread_id.as_deref().map(|id|super::threads::resolve(&db,id)).transpose()?;
         let mut filter_query=query.clone(); filter_query.cursor=None;
@@ -844,12 +850,12 @@ impl FamilyRead {
         let scope_filter = match scope { "current"=>CURRENT.to_owned(),"history"=>format!("NOT {CURRENT}"),_=>"1".into() };
         let limit=query.limit.unwrap_or(usize::MAX);
         let read_limit:i64=-1;
-        let sql=format!("WITH RECURSIVE family(id) AS (SELECT ?1 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id), readable(id) AS (SELECT id FROM family UNION SELECT candidate.id FROM threads candidate JOIN threads caller ON caller.id=?5 JOIN bot_thread_bindings bot ON bot.thread_id=caller.id WHERE candidate.principal_id IS caller.principal_id AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN context_jobs c ON c.run_id=r.id WHERE b.thread_id=candidate.id) AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN operations o ON o.run_id=r.id WHERE b.thread_id=candidate.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1')) SELECT t.id,t.rowid,{CURRENT},t.updated_at_ms FROM threads t JOIN readable f ON t.id=f.id WHERE t.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id=t.id AND json_extract(owner.body,'$.executor')='code_retrieval') AND t.rowid<=?2 AND t.rowid<?3 AND (?4 OR t.id!=?5) AND ({scope_filter}) AND (?6 IS NULL OR t.id=?6 OR instr(lower(t.title),lower(?6))>0 OR t.agent_code=?6 COLLATE NOCASE)
+        let sql=format!("WITH RECURSIVE family(id) AS (SELECT ?1 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id), readable(id) AS (SELECT candidate.id FROM threads candidate JOIN threads caller ON caller.id=?5 WHERE candidate.principal_id IS caller.principal_id AND candidate.hidden_kind IS NULL AND caller.hidden_kind IS NULL AND caller.deleted_at_ms IS NULL AND (?14!='family' OR candidate.id IN family)) SELECT t.id,t.rowid,{CURRENT},t.updated_at_ms FROM threads t JOIN readable f ON t.id=f.id WHERE t.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id=t.id AND json_extract(owner.body,'$.executor')='code_retrieval') AND t.rowid<=?2 AND t.rowid<?3 AND (?4 OR t.id!=?5) AND ({scope_filter}) AND (?6 IS NULL OR t.id=?6 OR instr(lower(t.title),lower(?6))>0 OR t.agent_code=?6 COLLATE NOCASE)
           AND (?8 IS NULL OR EXISTS(SELECT 1 FROM child_tasks c WHERE c.child_thread_id=t.id AND json_extract(c.body,'$.parent_thread_id')=?8 AND (?9 IS NULL OR json_extract(c.body,'$.parent_branch_id')=?9)))
           AND (?10 IS NULL OR EXISTS(SELECT 1 FROM runs r JOIN branches b ON b.id=r.branch_id JOIN run_launches l ON l.id=r.id WHERE b.thread_id=t.id AND json_extract(l.body,'$.selection.source.workspace_id')=?10))
           AND (?11 IS NULL OR t.updated_at_ms>=?11) AND (?12 IS NULL OR t.updated_at_ms<=?12)
           AND (?13 IS NULL OR EXISTS(SELECT 1 FROM child_result_files f JOIN delegated_executions d ON d.id=f.execution_id JOIN child_tasks c ON c.id=d.child_operation_id WHERE c.child_thread_id=t.id AND f.path=?13)) ORDER BY t.rowid DESC LIMIT ?7");
-        let candidates = db.prepare(&sql)?.query_map(params![root,maximum,before,include_self,self.caller,query.query,read_limit,parent,query.parent_branch_id,query.workspace_id,query.updated_after_ms.map(sql_number).transpose()?,query.updated_before_ms.map(sql_number).transpose()?,query.file_path], |r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,bool>(2)?,read_number(r,3)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        let candidates = db.prepare(&sql)?.query_map(params![root,maximum,before,include_self,self.caller,query.query,read_limit,parent,query.parent_branch_id,query.workspace_id,query.updated_after_ms.map(sql_number).transpose()?,query.updated_before_ms.map(sql_number).transpose()?,query.file_path,query.relationship.as_deref().unwrap_or("all")], |r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,bool>(2)?,read_number(r,3)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
         let mut selected=Vec::new();
         for candidate in candidates {
             check(cancel)?;
@@ -863,10 +869,7 @@ impl FamilyRead {
         let next_cursor=if candidates.len()>limit { Some(self.sign(&MemberCursor{caller:self.caller.clone(),root:root.clone(),before:candidates[limit-1].0.1,maximum,scope:scope.into(),query:query.query.clone(),filters})?) } else {None};
         for ((thread,_,current,updated_at_ms),(organization,conversation_type)) in candidates.into_iter().take(limit) {
             check(cancel)?;
-            if super::scheduling::thread_family(&db, &thread)? != root
-                && !super::bot_work::readable_conversation(&db, &self.caller, &thread)? {
-                return Err(RuntimeError::Invalid("inconsistent task lineage".into()));
-            }
+            super::threads::require_conversation_access(&db, &self.caller, &thread)?;
             let child: Option<String> = db
                 .query_row(
                     "SELECT body FROM child_tasks WHERE child_thread_id=?1",
@@ -906,7 +909,7 @@ impl FamilyRead {
             let mut branches=Vec::new();
             if details {
             let mut statement = db.prepare(
-                "SELECT id,head,active_run FROM branches WHERE thread_id=?1 ORDER BY rowid",
+                "SELECT id,head,active_run FROM branches WHERE thread_id=?1 AND NOT EXISTS(SELECT 1 FROM events e WHERE e.subject=branches.id AND e.kind='branch.deleted') ORDER BY rowid",
             )?;
             for row in statement.query_map([&thread], |row| {
                 Ok((

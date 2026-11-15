@@ -211,3 +211,20 @@ it('retains shipped-default provenance and explicit preset/custom arrays for exa
   expect(explicit.presets.find(preset => preset.id === 'worker')?.tools_source).toBe('explicit');
   expect(explicit.presets.find(preset => preset.id === 'custom:explicit')?.tools_source).toBe('explicit');
 });
+
+it('discovers configuration identities independently of presets, partitions them by actual Host and does not probe sessions', async () => {
+  const f = await fixture();
+  const target = {kind:'managed_host' as const,hostId:'target',connectionId:'paired',endpointIdentity:'paired-endpoint'};
+  const requested:unknown[]=[];
+  const prepare=createChildProfilePreparer({models:f.models,settings:async()=>({}),capabilities:async()=>f.capabilities,
+    projects:async()=>[{id:'remote-project',name:'Remote',path:'/target/project',resource_owner:target}],
+    externalAgents:async owner=>{requested.push(owner);return {revision:1,defaultAgent:'codex',agents:[{id:'codex',name:'Codex',harness:'codex',command:owner?'target-codex':'codex',args:[],enabled:!owner,availability:owner?'disabled':'auto'}]};}});
+  const catalog=await prepare({parent:f.parent});
+  expect(requested).toHaveLength(2);
+  expect(catalog.executors).toHaveLength(2);
+  expect(catalog.executors?.[0]).toMatchObject({availability:'auto',binding:{configuration_id:'codex',resource_owner:{kind:'local'}}});
+  expect(catalog.executors?.[1]).toMatchObject({availability:'disabled',binding:{resource_owner:target}});
+  expect(catalog.executors?.[0]?.reference).not.toBe(catalog.executors?.[1]?.reference);
+  expect(catalog.executors?.[0]?.binding).not.toHaveProperty('model');
+  expect((await prepare({parent:f.parent})).executors?.map(choice=>choice.reference)).toEqual(catalog.executors?.map(choice=>choice.reference));
+});

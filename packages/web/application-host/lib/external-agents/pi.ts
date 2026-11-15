@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ExternalAgentCapabilities } from '@varin/application-client';
 import type { HarnessConnection, HarnessSink } from './adapter.js';
+import { assertSteeringContent, HarnessSteeringRejected } from './adapter.js';
 import { fileInputText } from './attachments.js';
 import { dedicatedOptions } from './dedicated-options.js';
 import { ContextUsage } from './context-usage.js';
@@ -46,6 +47,8 @@ export async function connectPi(
     resume: true,
     images: true,
     files: 'paths',
+    // RPC steer is wired below, but per-input consumption and settlement cannot
+    // yet be proven through Pi's uncorrelated queue events. Keep UI capability off.
     steering: false,
     modelsError,
     modelsRefresh: true,
@@ -430,6 +433,38 @@ export async function connectPi(
         fail = undefined;
         dispatched = false;
       }
+    },
+    async steer(input, options) {
+      if (failure) throw failure;
+      assertSteeringContent(input);
+      const owner = sink, original = admission;
+      if (!owner || !dispatched || !runStarted || settled || stopped)
+        throw new HarnessSteeringRejected('The selected Pi execution is no longer accepting supplements');
+      await options.beforeDispatch();
+      if (failure) throw failure;
+      if (sink !== owner || admission !== original || settled || stopped)
+        throw new HarnessSteeringRejected('The selected Pi execution ended before supplement delivery');
+      let accepted: RecordValue;
+      try {
+        accepted = await peer.request('steer', {
+          message: fileInputText(input),
+          ...(input.images?.length ? { images: input.images.map(image => ({
+            type: 'image', data: image.data, mimeType: image.mimeType,
+          })) } : {}),
+        });
+      } catch (error) {
+        if (error instanceof HarnessProtocolError && error.method === 'steer' &&
+            error.code !== 'request_timeout') throw new HarnessSteeringRejected(error.message);
+        throw error;
+      }
+      if (accepted.disposition !== 'queued' && accepted.disposition !== 'handled') {
+        const error = new Error('Pi did not confirm the steering disposition; review native history before retrying');
+        markFailed(error);
+        throw error;
+      }
+      // Pi's acknowledgement has no run/message identity and explicitly does
+      // not prove the message remains queued. Never manufacture consumption.
+      return { inputId: options.inputId, disposition: accepted.disposition };
     },
     async stop() {
       stopped = true;

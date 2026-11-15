@@ -61,6 +61,11 @@ pub struct DispatchInput {
     #[serde(default, skip_serializing_if="Vec::is_empty")]
     pub background: Vec<super::background::BackgroundReference>,
     pub task: String,
+    /// A configuration reference, never an executable path. Explicit varin overrides an external preset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_options: Option<ExecutorOptions>,
     /// Stable configured channel-model identity from the disclosed catalog.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -113,11 +118,17 @@ impl DispatchInput {
             task.push_str("\n\nSearch scope (relative to the admitted source): ");
             task.push_str(&serde_json::to_string(&paths)?);
         }
-        Ok(Self { organization: None, attachments: Vec::new(), model: None, thinking: None, input_types: Vec::new(), project_id:None, background:Vec::new(), task, inherit_context: false, source_agent: None, source_path: None, name: None, preset: Some("code_retrieval".into()), work_focus: None, work_mode: Some(ChildWorkMode::Shared), tools: None })
+        Ok(Self { executor: None, executor_options: None, organization: None, attachments: Vec::new(), model: None, thinking: None, input_types: Vec::new(), project_id:None, background:Vec::new(), task, inherit_context: false, source_agent: None, source_path: None, name: None, preset: Some("code_retrieval".into()), work_focus: None, work_mode: Some(ChildWorkMode::Shared), tools: None })
     }
 
     pub fn validate(&self) -> Result<()> {
         for attachment in &self.attachments { attachment.validate()?; }
+        if self.executor.as_deref().is_some_and(|value| value.trim().is_empty() || value.contains(['\0', '/', '\\'])) {
+            return Err(RuntimeError::Invalid("executor must be a discovered configuration reference or built-in alias, not a command/path".into()));
+        }
+        if self.executor_options.as_ref().is_some_and(|options| [options.model.as_ref(), options.thinking.as_ref(), options.mode.as_ref()].into_iter().flatten().any(|v| v.trim().is_empty() || v.contains('\0'))) {
+            return Err(RuntimeError::Invalid("External options require nonempty native option values".into()));
+        }
         if self.work_focus.as_deref().is_some_and(|focus| !launches::WORK_FOCUS_IDS.contains(&focus)) {
             return Err(RuntimeError::Invalid("workFocus must be general, code, research or office".into()));
         }
@@ -230,9 +241,37 @@ pub struct ChildPreset {
     pub model: Option<ChildModelBinding>,
     pub unavailable: Option<ChildCapabilityFailure>,
 }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutorOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<std::collections::BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ChildExecutor {
+    pub reference: String,
+    pub name: String,
+    pub binding: ExternalChildBinding,
+    pub availability: String,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ExternalChildBinding {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<std::collections::BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource_owner: Option<launches::SourceResourceOwner>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
     pub configuration_id: String,
     pub harness: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -245,6 +284,8 @@ pub struct ExternalLaunch { pub command: String, pub args: Vec<String> }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildDispatchCatalog {
+    #[serde(default, skip_serializing_if="Vec::is_empty")]
+    pub executors: Vec<ChildExecutor>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub model_selection_preparation: bool,
     #[serde(default, skip_serializing_if="Vec::is_empty")]
@@ -259,6 +300,12 @@ pub struct ChildDispatchCatalog {
 pub struct ChildProjectSource { #[serde(default,skip_serializing_if="Option::is_none")] pub selection:Option<super::organization::ProjectSourceSelection>, pub id:String, pub name:String, pub path:String, pub resource_owner:launches::SourceResourceOwner }
 impl ChildDispatchCatalog {
     pub fn validate(&self) -> Result<()> {
+        validate_names(&self.executors.iter().map(|executor|executor.reference.clone()).collect::<Vec<_>>())?;
+        if self.executors.iter().any(|executor| !executor.reference.starts_with("exec:") || executor.name.trim().is_empty()
+            || !["auto","enabled","disabled"].contains(&executor.availability.as_str())
+            || executor.binding.configuration_id.trim().is_empty() || !["codex","claude","pi","acp"].contains(&executor.binding.harness.as_str())) {
+            return Err(RuntimeError::Invalid("Malformed executor configuration selection".into()));
+        }
         validate_names(&self.projects.iter().map(|project|project.id.clone()).collect::<Vec<_>>())?;
         if self.projects.iter().any(|project|project.path.trim().is_empty()||project.path.contains('\0')||project.selection.as_ref().is_some_and(|selection| !selection.valid(None))) {
             return Err(RuntimeError::Invalid("Registered project source is malformed".into()));
@@ -568,15 +615,81 @@ impl ChildDispatchSelection {
 
     pub fn external_preset(&self, input: &DispatchInput) -> Result<Option<ChildPreset>> {
         input.validate()?;
-        let Some(preset) = self.catalog.presets.iter().find(|p| input.preset.as_deref() == Some(p.id.as_str()) && p.external.is_some()) else { return Ok(None); };
+        if input.executor.as_deref() == Some("varin") { return Ok(None); }
+        let role = input.preset.as_ref().map(|id| self.catalog.presets.iter().find(|preset| &preset.id == id)
+            .ok_or_else(|| RuntimeError::Invalid(format!("Unknown Agent preset: {id}")))).transpose()?;
+        let mut preset = if let Some(executor) = &input.executor {
+            let project = self.project(input)?;
+            let local = launches::SourceResourceOwner::Local;
+            let source_owner = project.as_ref().map(|project| &project.resource_owner)
+                .or(self.frozen.source.as_ref().map(|source| &source.resource_owner));
+            let matches = self.catalog.executors.iter().filter(|choice| &choice.reference == executor
+                || (choice.binding.configuration_id == *executor && choice.binding.resource_owner.as_ref() == source_owner.or(Some(&local)))).collect::<Vec<_>>();
+            if matches.len() != 1 { return Err(RuntimeError::Invalid(format!("Executor {executor} is unavailable or ambiguous on this source Host; use executors to select a concrete configuration"))); }
+            let choice = matches[0];
+            if choice.binding.resource_owner.as_ref() != source_owner.or(Some(&local)) {
+                let location = |owner: &launches::SourceResourceOwner| match owner {
+                    launches::SourceResourceOwner::Local => "host:local".to_owned(),
+                    launches::SourceResourceOwner::ManagedHost {host_id,..} => format!("host:{host_id}"),
+                };
+                return Err(RuntimeError::Invalid(format!("Executor {} is on {}, but the selected file source is on {}; select a project on the target Host or hand off attachments to a target-host conversation",choice.reference,location(choice.binding.resource_owner.as_ref().unwrap_or(&local)),location(source_owner.unwrap_or(&local)))));
+            }
+            if choice.availability == "disabled" { return Err(RuntimeError::Invalid("External executor is explicitly disabled".into())); }
+            let mut preset = role.cloned().unwrap_or_else(|| ChildPreset {
+                id: choice.reference.clone(), name: choice.name.clone(), instructions: String::new(), description: None, avatar: None,
+                work_focus: Vec::new(), external: None, tools: Vec::new(), tools_source: ChildPresetToolsSource::Explicit,
+                retired_work_mode: None, model_source: ChildModelSource::Inherit, inherit_base: None, model: None, unavailable: None,
+            });
+            let previous = preset.external.as_ref().filter(|previous| previous.configuration_id == choice.binding.configuration_id
+                && previous.resource_owner.as_ref().is_none_or(|owner| choice.binding.resource_owner.as_ref() == Some(owner))).cloned();
+            preset.external = Some(choice.binding.clone());
+            if let Some(previous) = previous {
+                let binding = preset.external.as_mut().unwrap();
+                binding.model = previous.model; binding.thinking = previous.thinking; binding.mode = previous.mode; binding.config = previous.config;
+            }
+            preset.unavailable = None;
+            preset.tools.clear(); preset.work_focus.clear(); preset.model = None; preset.inherit_base = None;
+            preset
+        } else {
+            let Some(preset) = role.filter(|preset| preset.external.is_some()) else {
+                if input.executor_options.is_some() { return Err(RuntimeError::Invalid("executorOptions require an external executor".into())); }
+                return Ok(None);
+            };
+            preset.clone()
+        };
+        // A preset's backend identity is resolved on the selected source Host, not on
+        // the coordinator that happened to compile its role fields.
+        if input.executor.is_none() {
+            let project = self.project(input)?;
+            let local = launches::SourceResourceOwner::Local;
+            let source_owner = project.as_ref().map(|project| &project.resource_owner)
+                .or(self.frozen.source.as_ref().map(|source| &source.resource_owner)).unwrap_or(&local);
+            let binding = preset.external.as_mut().expect("external preset");
+            if let Some(choice) = self.catalog.executors.iter().find(|choice| choice.binding.configuration_id == binding.configuration_id
+                && choice.binding.resource_owner.as_ref() == Some(source_owner)) {
+                binding.resource_owner = choice.binding.resource_owner.clone();
+                binding.launch = choice.binding.launch.clone();
+                binding.harness = choice.binding.harness.clone();
+                if choice.availability == "disabled" { return Err(RuntimeError::Invalid("External executor is explicitly disabled on the selected Host".into())); }
+                if preset.unavailable.as_ref().is_some_and(|failure| ["external-agent-disabled","external-agent-unavailable"].contains(&failure.code.as_str())) { preset.unavailable = None; }
+            }
+        }
+        if input.model.is_some() || input.thinking.is_some() { return Err(RuntimeError::Invalid("Use executorOptions for an external executor's model/thinking; native model IDs do not apply".into())); }
+        if let Some(options) = &input.executor_options {
+            let binding = preset.external.as_mut().expect("external selection");
+            if options.config.is_some() { binding.config = options.config.clone(); }
+            if options.model.is_some() { binding.model = options.model.clone(); }
+            if options.thinking.is_some() { binding.thinking = options.thinking.clone(); }
+            if options.mode.is_some() { binding.mode = options.mode.clone(); }
+        }
         if input.work_focus.is_some() { return Err(RuntimeError::Invalid("workFocus selects Varin's native tool disclosure; this external Agent manages its own modes. Omit workFocus for an external preset".into())); }
-        self.require_preset_focus(preset, self.work_focus(input))?;
+        self.require_preset_focus(&preset, self.work_focus(input))?;
         if let Some(reason) = &preset.unavailable { return Err(RuntimeError::Invalid(format!("external Agent unavailable: {}", reason.code))); }
         if input.tools.is_some() { return Err(RuntimeError::Invalid("External Agents use their own tools; omit tools for this dispatch".into())); }
         // A prompt is not a read-only boundary. Only advertise this mode after the adapter
         // implements the harness's actual sandbox/permission capability.
         if input.work_mode == Some(ChildWorkMode::ReadOnly) { return Err(RuntimeError::Invalid("This external Agent has no configured read-only execution boundary; select shared or isolated_write".into())); }
-        Ok(Some(preset.clone()))
+        Ok(Some(preset))
     }
     pub fn external_input(&self, input: &DispatchInput, preset: &ChildPreset) -> Result<Value> {
         let mut text = String::new();
@@ -599,7 +712,12 @@ impl ChildDispatchSelection {
         }
         text.push_str(&input.task);
         let mut value = json!({"text":text,"task":input.task,"_launch":preset.external.as_ref().map(|b|&b.launch)});
-        if let Some(model) = preset.external.as_ref().and_then(|b| b.model.as_ref()) { value["model"] = json!(model); }
+        if let Some(binding) = &preset.external {
+            if let Some(config) = &binding.config { value["config"] = json!(config); }
+            if let Some(model) = &binding.model { value["model"] = json!(model); }
+            if let Some(thinking) = &binding.thinking { value["thinking"] = json!(thinking); }
+            if let Some(mode) = &binding.mode { value["mode"] = json!(mode); }
+        }
         Ok(value)
     }
     pub fn host_tool(&self, name: &str) -> Option<&ToolSchema> {
@@ -704,6 +822,8 @@ impl ChildDispatchSelection {
     pub fn resolve(&self, input: &DispatchInput) -> Result<ResolvedChildSelection> {
         input.validate()?;
         self.project(input)?;
+        if input.executor_options.is_some() { return Err(RuntimeError::Invalid("executorOptions require an external executor".into())); }
+        if input.executor.as_deref().is_some_and(|executor| executor != "varin") { return Err(RuntimeError::Invalid("External executor must use external dispatch".into())); }
         let focus = self.work_focus(input);
         let model_selection_required = input.preset.is_none() && self.catalog.model_selection_preparation;
         if !model_selection_required && (input.model.is_some() || input.thinking.is_some()) {
@@ -722,7 +842,7 @@ impl ChildDispatchSelection {
                 .ok_or_else(|| {
                     RuntimeError::Invalid(format!("child preset {id} is not selected. Available presets: {available}. Configure child agents in Settings > Agents, or omit preset to use the default delegation."))
                 })?;
-            if let Some(failure) = &preset.unavailable {
+            if let Some(failure) = &preset.unavailable.as_ref().filter(|_| !(input.executor.as_deref() == Some("varin") && preset.external.is_some())) {
                 return Err(RuntimeError::Invalid(format!(
                     "child preset {id} unavailable: {}{}. Available presets: {available}. Configure this child agent in Settings > Agents, or omit preset to use the default delegation.",
                     failure.code, if failure.capabilities.is_empty() { String::new() }
@@ -741,7 +861,7 @@ impl ChildDispatchSelection {
                 ));
             }
             (
-                if self.project(input)?.is_some() { preset.tools.clone() } else { self.preset_tools(preset) },
+                if input.executor.as_deref() == Some("varin") && preset.external.is_some() { self.catalog.native_capabilities.iter().filter(|cap| cap.default_presets.contains(&ChildPresetDefault::Worker)).map(|cap| cap.name.clone()).collect() } else if self.project(input)?.is_some() { preset.tools.clone() } else { self.preset_tools(preset) },
                 // Placement is chosen by this dispatch, independently of the role.
                 input.work_mode.unwrap_or(ChildWorkMode::Shared),
                 preset.instructions.clone(),

@@ -1028,3 +1028,81 @@ it('does not let a delayed Pi stats response overwrite a newer protocol snapshot
   await first;
   expect(connection.contextUsage).toEqual({ used: 90, size: 100 });
 });
+
+describe('native supplement delivery', () => {
+  it('Codex pins steering to the original native turn even when completion races its acknowledgement', async () => {
+    const peer = new Peer(), s = sink(), steering = deferred<RecordValue>();
+    const fallback = peer.handler;
+    peer.handler = (method, params) => method === 'turn/start' ? { turn: { id: 'owned' } }
+      : method === 'turn/steer' ? steering.promise : fallback(method, params);
+    const connection = await connectCodex(peer.transport, '/workspace');
+    const result = connection.prompt({ text: 'first' }, s);
+    await vi.waitFor(() => expect(s.started).toHaveBeenCalledWith('owned'));
+    const persisted = vi.fn(async () => {});
+    const receipt = connection.steer!({ text: 'supplement', images: [{ mimeType: 'image/png', data: 'aA==' }] },
+      { inputId: 'additional-input', expectedNativeId: 'owned', beforeDispatch: persisted });
+    const frame = await peer.call('turn/steer');
+    expect(persisted).toHaveBeenCalledWith('owned');
+    expect(frame.params).toEqual({ threadId: 'thread', expectedTurnId: 'owned', input: [
+      { type: 'text', text: 'supplement' }, { type: 'image', url: 'data:image/png;base64,aA==' },
+    ] });
+    peer.event('turn/completed', codexEvent('owned', { turn: { id: 'owned', status: 'completed' } }));
+    await expect(result).resolves.toMatchObject({ status: 'completed' });
+    steering.resolve({ turnId: 'owned' });
+    await expect(receipt).resolves.toEqual({ inputId: 'additional-input', disposition: 'appended', nativeId: 'owned' });
+    expect(peer.frames.filter(frame => frame.method === 'turn/start')).toHaveLength(1);
+  });
+
+  it('Codex refuses option changes and does not spill a supplement into a successor after durable preparation', async () => {
+    const peer = new Peer(), s = sink(), ready = deferred<void>();
+    const fallback = peer.handler;
+    peer.handler = (method, params) => method === 'turn/start' ? { turn: { id: 'owned' } } : fallback(method, params);
+    const connection = await connectCodex(peer.transport, '/workspace');
+    const result = connection.prompt({ text: 'first' }, s);
+    await vi.waitFor(() => expect(s.started).toHaveBeenCalled());
+    await expect(connection.steer!({ text: 'invalid', model: 'other' },
+      { inputId: 'invalid', beforeDispatch: async () => {} })).rejects.toThrow('cannot change');
+    const receipt = connection.steer!({ text: 'supplement' }, { inputId: 'extra', beforeDispatch: () => ready.promise });
+    peer.event('turn/completed', codexEvent('owned', { turn: { id: 'owned', status: 'completed' } }));
+    await result;
+    ready.resolve();
+    await expect(receipt).rejects.toThrow('ended before supplement delivery');
+    expect(peer.frames.some(frame => frame.method === 'turn/steer')).toBe(false);
+  });
+
+  it('Codex treats a lost steering acknowledgement as unknown and never falls back to turn/start', async () => {
+    const peer = new Peer(), s = sink(), response = deferred<RecordValue>();
+    const fallback = peer.handler;
+    peer.handler = (method, params) => method === 'turn/start' ? { turn: { id: 'owned' } }
+      : method === 'turn/steer' ? response.promise : fallback(method, params);
+    const connection = await connectCodex(peer.transport, '/workspace');
+    const result = connection.prompt({ text: 'first' }, s);
+    void result.catch(() => {});
+    await vi.waitFor(() => expect(s.started).toHaveBeenCalled());
+    const receipt = connection.steer!({ text: 'supplement' }, { inputId: 'extra', beforeDispatch: async () => {} });
+    await peer.call('turn/steer');
+    peer.stdout.end();
+    await expect(receipt).rejects.toThrow('connection closed');
+    expect(peer.frames.filter(frame => frame.method === 'turn/start')).toHaveLength(1);
+  });
+
+  it('Pi preserves queued versus handled receipts without fabricating native consumption', async () => {
+    const peer = new Peer('pi'), s = sink();
+    const fallback = peer.handler;
+    let disposition = 'queued';
+    peer.handler = (method, params) => method === 'steer' ? { disposition } : fallback(method, params);
+    const connection = await pi(peer);
+    const result = connection.prompt({ text: 'first' }, s);
+    await peer.call('prompt');
+    peer.emit({ type: 'agent_start' });
+    await expect(connection.steer!({ text: 'first supplement' }, { inputId: 'first-input', beforeDispatch: async () => {} }))
+      .resolves.toEqual({ inputId: 'first-input', disposition: 'queued' });
+    disposition = 'handled';
+    await expect(connection.steer!({ text: 'second supplement' }, { inputId: 'second-input', beforeDispatch: async () => {} }))
+      .resolves.toEqual({ inputId: 'second-input', disposition: 'handled' });
+    // The UI must not claim per-input consumption until that native evidence is wired.
+    expect(connection.capabilities.steering).toBe(false);
+    peer.emit({ type: 'agent_settled' });
+    await expect(result).resolves.toMatchObject({ status: 'completed' });
+  });
+});

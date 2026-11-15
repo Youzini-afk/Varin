@@ -39,6 +39,9 @@ export async function connectClaude(
     resume: true,
     images: true,
     files: 'paths',
+    // SDK priority:next can cross the native result boundary. Until the bridge
+    // projects those actual subsequent executions, do not advertise same-turn
+    // steering or mislabel an enqueued SDK input as consumed by this turn.
     steering: false,
     models: [],
   };

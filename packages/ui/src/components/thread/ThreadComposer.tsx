@@ -142,6 +142,9 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   const canSend = hasInput || Boolean(ghostSuggestion);
   const composerActions = { primary: active && !hasInput && !retrying ? 'stop' : 'send', showSecondaryStop: active && hasInput && Boolean(onStop) };
   const primaryBusy = loading || (composerActions.primary === 'stop' ? aborting : sending);
+  const sendLabel = t(retrying ? 'chat.messages.retry' : external?.delivery
+    ? external.delivery.mode === 'steer' ? 'external.sendCurrentTurn' : 'external.sendNextTurn'
+    : 'chat.chatInput.actions.sendMessageAria');
   const primaryIcon = { name: primaryBusy ? 'loader-4' : composerActions.primary === 'stop' ? 'stop' : 'arrow-up', spin: primaryBusy } as const;
   const footerIconButtonClass = 'flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35';
   const handleAbort = () => onStop?.();
@@ -371,6 +374,9 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
         <div ref={inputContentRef} className="flex min-w-0 shrink-0 flex-col" data-conversation-composer-input-content="true">
         {children}
         {external && <ExternalChoiceValidation key={backendIdentity} options={external} />}
+        {external?.delivery && <p className="px-3 pt-1 typography-micro text-muted-foreground" data-external-delivery-mode={external.delivery.mode}>
+          {t(external.delivery.mode === 'steer' ? 'external.sendCurrentTurn' : 'external.sendNextTurn')} · {t('external.nextTurnOptionsHint')}
+        </p>}
 
           {isMobile ? (
             <div className="flex min-w-0 items-center justify-end border-b border-border/40 px-2 py-1">
@@ -537,10 +543,10 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                 </Tooltip>
               )}
               {prepareSendMode && active && hasInput && !retrying ? <DropdownMenu>
-                <DropdownMenuTrigger asChild><button type="button" className={footerIconButtonClass} disabled={pending} aria-label={t('bot.workspace.sendOptions')}><Icon name="arrow-down-s" className="size-3.5" /></button></DropdownMenuTrigger>
+                <DropdownMenuTrigger asChild><button type="button" className={footerIconButtonClass} disabled={pending} aria-label={t(external ? 'external.sendOptions' : 'bot.workspace.sendOptions')}><Icon name="arrow-down-s" className="size-3.5" /></button></DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => submit('boundary')}><Icon name="arrow-up" className="size-4" />{t('bot.workspace.sendNow')}</DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => submit('next_run')}><Icon name="time" className="size-4" />{t('bot.workspace.sendLater')}<span className="ml-auto typography-micro text-muted-foreground">Alt ↵</span></DropdownMenuItem>
+                  {(!external || external.delivery?.canSteer) && <DropdownMenuItem onSelect={() => submit('boundary')}><Icon name="arrow-up" className="size-4" />{t(external ? 'external.sendCurrentTurn' : 'bot.workspace.sendNow')}</DropdownMenuItem>}
+                  <DropdownMenuItem onSelect={() => submit('next_run')}><Icon name="time" className="size-4" />{t(external ? 'external.sendNextTurn' : 'bot.workspace.sendLater')}<span className="ml-auto typography-micro text-muted-foreground">Alt ↵</span></DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu> : null}
               <Tooltip>
@@ -564,7 +570,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                     )}
                     aria-label={loading ? t('common.loading') : composerActions.primary === 'stop'
                       ? t('chat.chatInput.actions.stopGeneratingAria')
-                      : t(retrying ? 'chat.messages.retry' : 'chat.chatInput.actions.sendMessageAria')}
+                      : sendLabel}
                     aria-busy={loading || (composerActions.primary === 'stop' ? aborting : undefined)}
                     data-conversation-composer-primary-action={composerActions.primary}
                   >
@@ -577,7 +583,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                 <TooltipContent side="top">
                   {loading ? t('common.loading') : composerActions.primary === 'stop'
                     ? t('chat.chatInput.actions.stopGeneratingAria')
-                    : t(retrying ? 'chat.messages.retry' : 'chat.chatInput.actions.sendMessageAria')}
+                    : sendLabel}
                 </TooltipContent>
               </Tooltip>
             </div>

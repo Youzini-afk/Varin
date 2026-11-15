@@ -1,4 +1,4 @@
-//! First Bot activation prepares the same native ingress and launch as later turns.
+//! First product-conversation activation prepares the same native ingress and launch as later turns.
 use super::*;
 pub(super) fn execute(
     runtime: Arc<RunSupervisor>,
@@ -22,6 +22,12 @@ pub(super) fn execute(
             lock()?.pending_cold_bot_work().map_err(domain)?,
         )?);
     }
+    if method == "runtime.bot.work.hold" {
+        let p: BotWorkHoldParams = serde_json::from_value(params)?;
+        let revision = u64::try_from(p.revision).map_err(|_| KernelError::Protocol("Cold ingress revision must be nonnegative".into()))?;
+        lock()?.set_cold_work_hold(&p.input_id, revision, p.reason.as_deref()).map_err(domain)?;
+        return Ok(Value::Null);
+    }
     let p: BotWorkAdmitParams = serde_json::from_value(params)?;
     if let Some(receipt) = lock()?
         .cold_bot_work_receipt(&p.work.input_id)
@@ -32,7 +38,7 @@ pub(super) fn execute(
     validate_configuration(&p.configuration)?;
     if p.launch.inherit_source == Some(true) {
         return Err(KernelError::Protocol(
-            "first Bot activation needs its actual source selection".into(),
+            "first conversation activation needs its actual source selection".into(),
         ));
     }
     let launch = input_commands::selected_launch(&p.configuration, p.launch, true, false)?;
@@ -41,7 +47,7 @@ pub(super) fn execute(
         .personalization
         .map(personalization_basis)
         .transpose()?
-        .ok_or_else(|| KernelError::Protocol("Bot context needs its actual scope".into()))?;
+        .ok_or_else(|| KernelError::Protocol("Conversation context needs its actual scope".into()))?;
     let initial = varin_runtime::catalog::context::ContextProposal {
         key: format!("initial-context:{}", p.work.branch_id),
         branch_id: p.work.branch_id.clone(),

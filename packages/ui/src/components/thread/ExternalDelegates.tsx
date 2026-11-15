@@ -5,7 +5,6 @@ import {
   useExternalAgentStore,
   openConversationFromNavigation,
 } from '@/stores/useExternalAgentStore';
-import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { HarnessIcon } from './HarnessIcon';
 import { ChildState } from '@/components/conversation/childPresentation';
 import { ChatAgentMessageBubble } from '@/components/conversation/ChatAgentMessageBubble';
@@ -33,9 +32,8 @@ export function ExternalDelegateList({ parentThreadId }: { parentThreadId: strin
           className="thread-overview-action typography-meta"
           onClick={() => void openConversationFromNavigation({ threadId: child.conversationId })}
         >
-          <AgentAvatar identity={child.conversationId} avatar={child.avatar} size={22} />
+          <HarnessIcon harness={child.harness} configurationId={child.configurationId ?? conversations.find(c => c.id === child.conversationId)?.configurationId} className="size-[22px]" />
           <span className="min-w-0 flex-1 truncate">{child.name}</span>
-          <HarnessIcon harness={child.harness} className="size-3" />
           <ChildState state={child.state} />
         </button>
       ))}
@@ -77,12 +75,7 @@ export function ExternalDelegationMessage({
       text={text}
       senderThreadId={report ? child.conversationId : child.parentThreadId}
       targetThreadId={report ? child.parentThreadId : child.conversationId}
-      status={
-        <>
-          <HarnessIcon harness={child.harness} className="size-3" />
-          <ChildState state={child.state} />
-        </>
-      }
+      status={<ChildState state={child.state} />}
     >
       {error ? (
         <p role="alert" className="text-destructive typography-meta">

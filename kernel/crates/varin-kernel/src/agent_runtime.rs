@@ -3253,7 +3253,7 @@ impl FamilyCommand {
                     varin_runtime::catalog::family::FamilyListQuery{file_path:p.file_path,parent_thread_id:p.parent_thread_id,parent_branch_id:p.parent_branch_id,workspace_id:p.workspace_id,
                         updated_after_ms:p.updated_after_ms.map(u64::try_from).transpose().map_err(|_|KernelError::Protocol("invalid updatedAfterMs".into()))?,
                         updated_before_ms:p.updated_before_ms.map(u64::try_from).transpose().map_err(|_|KernelError::Protocol("invalid updatedBeforeMs".into()))?,
-                        scope:p.scope,query:p.query,cursor:p.cursor,limit:size(p.limit)?.or(Some(20)),..Default::default()},
+                        relationship:p.relationship,scope:p.scope,query:p.query,cursor:p.cursor,limit:size(p.limit)?.or(Some(20)),..Default::default()},
                 )
             }
             "runtime.family.runs" => {

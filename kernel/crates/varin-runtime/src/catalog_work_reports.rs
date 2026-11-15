@@ -12,6 +12,14 @@ const WORK_REQUEST: &str = r#"q.state='delivered' AND q.origin='message'
     AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id
         WHERE internal.child_thread_id=q.sender_thread_id AND json_extract(owner.body,'$.executor')='code_retrieval')"#;
 
+// An explicit reply already fulfills this exact request. Automatic terminal publication
+// must not send a second copy or reopen the observer that consumed the explicit reply.
+const UNANSWERED: &str = r#"NOT EXISTS(SELECT 1 FROM input_queue reply
+    WHERE reply.origin='message' AND reply.state!='cancelled'
+      AND json_extract(reply.body,'$.origin.identity.replyTo')=q.id
+      AND reply.sender_thread_id=json_extract(q.body,'$.origin.identity.targetThreadId')
+      AND reply.sender_branch_id=q.branch_id)"#;
+
 fn requests(db: &Connection, run: &str) -> Result<Vec<inputs::QueuedInputMetadata>> {
     let mut query = db.prepare(&format!("SELECT q.body FROM input_queue q WHERE q.run_id=?1 AND {WORK_REQUEST}"))?;
     let rows = query
@@ -55,6 +63,7 @@ struct ReportRead {
     name: String,
     execution: model_references::ExecutionReference,
     failure: Option<RunFailure>,
+    request_count: usize,
     items: Vec<HistoryItem>,
     content: crate::content::ContentStore,
 }
@@ -65,6 +74,7 @@ struct ReportBody {
     answer: Option<HistoryItem>,
     execution: model_references::ExecutionReference,
     partial: bool,
+    request_count: usize,
 }
 impl ReportRead {
     fn load(self) -> Result<ReportBody> {
@@ -119,6 +129,9 @@ impl ReportRead {
             self.execution.reference,
             state.as_str().unwrap_or_default()
         );
+        if self.request_count > 1 {
+            notice.push_str(&format!("\nThis execution handled {} requests; they share this execution and final answer.", self.request_count));
+        }
         if let Some(failure) = self.failure {
             notice.push_str(&format!("\n{}: {}", failure.code, failure.message));
         }
@@ -133,13 +146,14 @@ impl ReportRead {
             answer,
             execution: self.execution,
             partial,
+            request_count: self.request_count,
         })
     }
 }
 
 impl Catalog {
     fn pending_work_reports(&self) -> Result<Vec<(String, String)>> {
-        let mut query = self.db.prepare(&format!("SELECT DISTINCT json_extract(e.data,'$.messageId'),json_extract(e.data,'$.runId') FROM events e JOIN input_queue q ON q.id=json_extract(e.data,'$.messageId') JOIN threads target ON target.id=q.sender_thread_id JOIN branches b ON b.id=q.branch_id JOIN threads source ON source.id=b.thread_id WHERE e.kind='bot.request_report_pending' AND {WORK_REQUEST} AND target.deleted_at_ms IS NULL AND source.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM commands c WHERE c.id='bot-report:run:'||json_extract(e.data,'$.runId')||':'||q.id) ORDER BY e.cursor"))?;
+        let mut query = self.db.prepare(&format!("SELECT DISTINCT json_extract(e.data,'$.messageId'),json_extract(e.data,'$.runId') FROM events e JOIN input_queue q ON q.id=json_extract(e.data,'$.messageId') JOIN threads target ON target.id=q.sender_thread_id JOIN branches b ON b.id=q.branch_id JOIN threads source ON source.id=b.thread_id WHERE e.kind='bot.request_report_pending' AND {WORK_REQUEST} AND {UNANSWERED} AND target.deleted_at_ms IS NULL AND source.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM commands c WHERE c.id='bot-report:run:'||json_extract(e.data,'$.runId')||':'||q.id) ORDER BY e.cursor"))?;
         let rows = query.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
         rows.collect::<std::result::Result<_, _>>()
             .map_err(Into::into)
@@ -174,6 +188,7 @@ impl Catalog {
             request,
             name,
             failure,
+            request_count: requests(&self.db, run_id)?.len(),
             items,
             content: self.content.clone(),
         })
@@ -222,7 +237,7 @@ impl Catalog {
         };
         let data = json!({"kind":"work_report","executionRef":body.execution.reference,"agentRef":body.execution.agent_id,
             "status":body.run.state,"runId":body.run.id,"itemId":body.answer.as_ref().map(|item|&item.id),
-            "read":read,"previewPartial":body.partial});
+            "read":read,"previewPartial":body.partial,"relatedRequestCount":body.request_count});
         self.prepare_message(
             format!("bot-report:run:{}:{}", body.run.id, body.request.message_id),
             body.run.thread_id,
@@ -231,7 +246,7 @@ impl Catalog {
                 run_id: body.run.id,
                 request_message_id: body.request.message_id.clone(),
             },
-            messages::MessageInput {
+            messages::MessageInput { executor_options: None,
                 attachments: attachments
                     .iter()
                     .map(|file| attachments::AttachmentSelection::Ref {
@@ -282,7 +297,14 @@ pub(super) fn deliver(catalog: &std::sync::Mutex<Catalog>) -> Result<()> {
             let body = read.load()?;
             let preparation = lock()?.prepare_work_report(body)?;
             let prepared = preparation.load()?;
-            lock()?.admit_message(prepared)?;
+            // Hydration ran outside the writer. An explicit reply may have arrived
+            // during that I/O; recheck while holding the same owner as admission.
+            let mut db = lock()?;
+            let unanswered: bool = db.db.query_row(
+                &format!("SELECT EXISTS(SELECT 1 FROM input_queue q WHERE q.id=?1 AND {UNANSWERED})"),
+                [&message], |row| row.get(0),
+            )?;
+            if unanswered { db.admit_message(prepared)?; }
             Ok(())
         })();
         if let Err(error) = delivered {

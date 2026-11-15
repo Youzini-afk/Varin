@@ -63,37 +63,6 @@ pub(super) fn linked(
     let Some(bot) = bot else { return Ok(false) };
     db.query_row("SELECT EXISTS(SELECT 1 FROM events e,json_each(e.data,'$.threads') link WHERE e.subject=?1 AND e.kind='bot.matter.updated' AND json_extract(e.data,'$.archived')=0 AND json_extract(link.value,'$.threadId')=?2 AND (?3 IS NULL OR json_extract(link.value,'$.branchId')=?3) AND (NOT ?4 OR json_extract(link.value,'$.send')=1) AND (NOT ?5 OR json_extract(link.value,'$.memory')=1) AND NOT EXISTS(SELECT 1 FROM events later WHERE later.subject=e.subject AND later.kind='bot.matter.updated' AND json_extract(later.data,'$.id')=json_extract(e.data,'$.id') AND later.cursor>e.cursor))", params![format!("bot-work:{bot}"),target,branch,send,memory], |row|row.get(0)).map_err(Into::into)
 }
-/// Bot conversations can work with the user's ordinary conversations directly.
-/// Matters describe ongoing work; they are not required to discover or contact it.
-pub(super) fn ordinary_conversation(db: &Connection, caller: &str, target: &str) -> Result<bool> {
-    db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM bot_thread_bindings bot JOIN threads caller ON caller.id=bot.thread_id JOIN threads target ON target.id=?2 WHERE bot.thread_id=?1 AND caller.principal_id IS target.principal_id AND NOT EXISTS(SELECT 1 FROM bot_thread_bindings other WHERE other.thread_id=target.id))",
-        params![caller, target], |row| row.get(0),
-    ).map_err(Into::into)
-}
-/// Read authority is deliberately separate from messaging and memory links.
-/// Only a directly bound Bot conversation gains the principal-wide product view;
-/// delegated Agents retain their original family and explicit-background authority.
-pub(super) fn readable_conversation(db: &Connection, caller: &str, target: &str) -> Result<bool> {
-    db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM bot_thread_bindings bot JOIN threads caller ON caller.id=bot.thread_id JOIN threads target ON target.id=?2 WHERE bot.thread_id=?1 AND caller.principal_id IS target.principal_id AND target.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id=target.id AND json_extract(owner.body,'$.executor')='code_retrieval') AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN context_jobs c ON c.run_id=r.id WHERE b.thread_id=target.id) AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN operations o ON o.run_id=r.id WHERE b.thread_id=target.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1'))",
-        params![caller, target], |row| row.get(0),
-    ).map_err(Into::into)
-}
-pub(super) fn can_message(
-    db: &Connection,
-    sender: &str,
-    branch: &str,
-    target: &str,
-    target_branch: &str,
-) -> Result<bool> {
-    Ok(
-        ordinary_conversation(db, sender, target)?
-            || ordinary_conversation(db, target, sender)?
-            || linked(db, sender, target, Some(target_branch), true, false)?
-            || linked(db, target, sender, Some(branch), true, false)?,
-    )
-}
 pub(super) fn followers(db: &Connection, thread: &str, branch: &str) -> Result<Vec<String>> {
     let mut query=db.prepare("SELECT DISTINCT binding.bot_id FROM bot_thread_bindings binding JOIN events e ON e.subject='bot-work:'||binding.bot_id JOIN json_each(e.data,'$.threads') link WHERE e.kind='bot.matter.updated' AND json_extract(e.data,'$.archived')=0 AND json_extract(link.value,'$.threadId')=?1 AND json_extract(link.value,'$.branchId')=?2 AND NOT EXISTS(SELECT 1 FROM events later WHERE later.subject=e.subject AND later.kind='bot.matter.updated' AND json_extract(later.data,'$.id')=json_extract(e.data,'$.id') AND later.cursor>e.cursor)")?;
     let rows = query.query_map(params![thread, branch], |row| row.get::<_, String>(0))?;
@@ -114,9 +83,9 @@ impl Catalog {
             .transpose()
     }
     pub fn pending_cold_bot_work(&self) -> Result<Vec<ColdBotWork>> {
-        let mut query = self.db.prepare("SELECT q.body,b.bot_id FROM input_queue q JOIN branches branch ON branch.id=q.branch_id JOIN bot_thread_bindings b ON b.thread_id=branch.thread_id WHERE q.origin IN ('work_event','followup','calendar') AND q.state='queued' AND q.activation='activating' AND NOT EXISTS(SELECT 1 FROM runs r WHERE r.branch_id=q.branch_id) ORDER BY q.cursor")?;
+        let mut query = self.db.prepare("SELECT q.body,b.bot_id FROM input_queue q JOIN branches branch ON branch.id=q.branch_id JOIN threads t ON t.id=branch.thread_id LEFT JOIN bot_thread_bindings b ON b.thread_id=branch.thread_id WHERE (q.origin='message' OR (b.bot_id IS NOT NULL AND q.origin IN ('work_event','followup','calendar'))) AND q.state='queued' AND q.activation='activating' AND json_extract(q.body,'$.origin.activation.state')='pending' AND t.hidden_kind IS NULL AND t.deleted_at_ms IS NULL AND t.archived=0 AND NOT EXISTS(SELECT 1 FROM events e WHERE e.subject=branch.id AND e.kind='branch.deleted') AND NOT EXISTS(SELECT 1 FROM runs r WHERE r.branch_id=q.branch_id) AND NOT EXISTS(SELECT 1 FROM child_tasks c WHERE c.child_thread_id=t.id) ORDER BY q.cursor")?;
         let rows = query.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
         })?;
         let mut result = Vec::new();
         let mut branches = std::collections::BTreeSet::new();
@@ -139,6 +108,29 @@ impl Catalog {
         Ok(result)
     }
 
+    /// Host preparation may be blocked before a first Run exists. Record the reason on
+    /// the original ingress without failing it or changing its admission revision.
+    pub fn set_cold_work_hold(&mut self, input_id: &str, revision: u64, reason: Option<&str>) -> Result<()> {
+        if reason.is_some_and(|reason| !matches!(reason, "model_unavailable" | "source_unavailable")) {
+            return Err(RuntimeError::Invalid("Unknown cold conversation preparation reason".into()));
+        }
+        let row: inputs::QueuedInputMetadata = record(&self.db, "input_queue", input_id)?;
+        if row.revision != revision || row.state != InputState::Queued
+            || !matches!(activation::fact(&row)?, activation::IngressActivationFact::Pending { execution_id: None })
+            || activation::latest_run(&self.db, &row.branch_id)?.is_some() {
+            return Err(RuntimeError::RequestActivationStale);
+        }
+        let previous: Option<String> = self.db.query_row(
+            "SELECT json_extract(data,'$.reason') FROM events WHERE subject=?1 AND kind='ingress.preparation_hold' ORDER BY cursor DESC LIMIT 1",
+            [input_id], |row| row.get(0),
+        ).optional()?.flatten();
+        if previous.as_deref() == reason { return Ok(()); }
+        let tx = self.db.transaction()?;
+        event(&tx, input_id, revision, "ingress.preparation_hold", json!({"reason":reason,"threadId":row.thread_id,"branchId":row.branch_id}))?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn prepare_cold_bot_work(
         &self,
         work: ColdBotWork,
@@ -149,7 +141,7 @@ impl Catalog {
     ) -> Result<ColdBotPreparation> {
         if work.owner_epoch != self.epoch
             || !self.pending_cold_bot_work()?.contains(&work)
-            || basis.mode != "bot"
+            || basis.mode != if work.bot_id.is_some() { "bot" } else { "agent" }
             || basis.thread_role != "main"
             || basis.thread_id != work.thread_id
         {
@@ -373,7 +365,8 @@ impl Catalog {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ColdBotWork {
-    pub bot_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_id: Option<String>,
     pub input_id: String,
     pub thread_id: String,
     pub branch_id: String,

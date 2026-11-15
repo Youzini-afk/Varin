@@ -405,7 +405,7 @@ fn bot_following_preserves_associations_without_gating_ordinary_conversation_acc
     update.key = "grant-send".into(); update.expected_revision = saved.revision; update.matter = saved;
     update.matter.threads[0].send = true;
     let saved = db.update_bot_matter(update.clone(),None).unwrap();
-    assert!(super::bot_work::can_message(&db.db,"thread","main","ordinary","ordinary-main").unwrap());
+    assert!(super::threads::accessible_conversation(&db.db,"thread","ordinary").unwrap());
     update.key = "unfollow".into(); update.expected_revision = saved.revision; update.matter = saved; update.matter.archived = true;
     db.update_bot_matter(update,None).unwrap();
     assert!(read.authorize(&||false).is_ok());
@@ -434,7 +434,7 @@ fn bot_sessions_discover_read_and_contact_user_work_without_matter_links() {
             let branch = match target { "thread" => "main", "second-session" => "second-route", _ => "other-bot-route" };
             db.capture_family_read(caller, Some(target), Some(branch)).unwrap().authorize(&||false).unwrap();
             if target != caller {
-                assert!(!super::bot_work::can_message(&db.db,caller,"second-route",target,branch).unwrap());
+                assert!(super::threads::accessible_conversation(&db.db,caller,target).unwrap());
                 assert!(!super::bot_work::linked(&db.db,caller,target,Some(branch),false,true).unwrap());
             }
         }
@@ -457,8 +457,8 @@ fn bot_sessions_discover_read_and_contact_user_work_without_matter_links() {
             query: FamilyReadQuery::Recent { limit: Some(10), max_item_bytes: None },
         }, &||false).unwrap();
         assert!(serde_json::to_string(&page).unwrap().contains("Original task context"));
-        assert!(super::bot_work::can_message(&db.db,caller,"second-route","ordinary","ordinary-main").unwrap());
-        assert!(!super::bot_work::can_message(&db.db,caller,"second-route","another-users-task","another-users-route").unwrap());
+        assert!(super::threads::accessible_conversation(&db.db,caller,"ordinary").unwrap());
+        assert!(!super::threads::accessible_conversation(&db.db,caller,"another-users-task").unwrap());
         assert!(db.capture_family_read(caller, Some("another-users-task"), Some("another-users-route")).unwrap().authorize(&||false).is_err());
     }
     assert_eq!(db.bot_for_thread("ordinary").unwrap(), None);
@@ -725,13 +725,56 @@ fn bot_cross_session_fixed_history_media_and_background_share_read_authority() {
 
     let background=super::background::BackgroundReference {thread_id:"thread".into(),branch_id:"main".into(),head_id:item.id.clone(),item_ids:vec![item.id.clone()]};
     super::background::authorize(&db.db,"reader",&[background.clone()]).unwrap();
-    assert!(super::background::authorize(&db.db,"ordinary-reader",&[background.clone()]).is_err());
-    assert!(db.capture_family_read("ordinary-reader",Some("thread"),Some("main")).unwrap().authorize(&||false).is_err());
-    assert!(!super::bot_work::can_message(&db.db,"reader","reader-main","thread","main").unwrap());
+    assert!(super::background::authorize(&db.db,"ordinary-reader",&[background.clone()]).is_ok());
+    assert!(db.capture_family_read("ordinary-reader",Some("thread"),Some("main")).unwrap().authorize(&||false).is_ok());
+    assert!(super::threads::accessible_conversation(&db.db,"reader","thread").unwrap());
     // Previously returned anchors and media descriptors carry no independent authority.
     db.db.execute("UPDATE threads SET principal_id='other-user' WHERE id='thread'",[]).unwrap();
     assert!(db.capture_family_read("reader",Some("thread"),Some("main")).unwrap().read(continuation,&||false).is_err());
     assert!(db.capture_family_read("reader",Some("thread"),Some("main")).unwrap()
         .media_output(None,&page.anchor,&source.input_id,descriptor.part_index,&descriptor.content_ref,&||false).is_err());
     assert!(super::background::authorize(&db.db,"reader",&[background]).is_err());
+}
+
+#[test]
+fn first_cross_root_request_uses_the_original_ingress_for_ordinary_and_bot_launches() {
+    use super::messages::MessageInput;
+    for bot in [false, true] {
+        let fixture = Fixture::new(); let mut db = fixture.open();
+        db.create_thread("sender", "sender-main").unwrap();
+        if bot { db.publish_bot_gate(gate(1, true)).unwrap(); db.create_bot_thread("receiver", "receiver-main", "bot").unwrap(); }
+        else { db.create_thread("receiver", "receiver-main").unwrap(); }
+        let message = |kind| MessageInput { executor_options: None, attachments:vec![], after_current:None, source_agent:None, name:None, wait:None,
+            target_thread_id:Some("receiver".into()), target_branch_id:Some("receiver-main".into()), reply_to:None, kind, text:"First collaborative input".into() };
+        let passive=db.prepare_user_message("passive".into(),"sender".into(),"sender-main".into(),message(MessageKind::Inform)).unwrap().load().unwrap();
+        db.admit_message(passive).unwrap();
+        assert!(db.pending_cold_bot_work().unwrap().is_empty());
+        let prepared=db.prepare_user_message("first-request".into(),"sender".into(),"sender-main".into(),message(MessageKind::Request)).unwrap().load().unwrap();
+        let receipt=db.admit_message(prepared).unwrap().receipt;
+        assert!(db.capture_request_activations().unwrap().is_empty());
+        let work=db.pending_cold_bot_work().unwrap().remove(0);
+        assert_eq!(work.bot_id.as_deref(),bot.then_some("bot"));
+        assert_eq!(work.input_id,receipt.identity.message_id);
+        db.set_cold_work_hold(&work.input_id,work.revision,Some("model_unavailable")).unwrap();
+        db.set_cold_work_hold(&work.input_id,work.revision,Some("model_unavailable")).unwrap();
+        let count:i64=db.db.query_row("SELECT count(*) FROM events WHERE subject=?1 AND kind='ingress.preparation_hold'",[&work.input_id],|r|r.get(0)).unwrap();
+        assert_eq!(count,1);
+        let view=db.capture_message("sender","sender-main",&work.input_id).unwrap().load().unwrap();
+        assert!(matches!(view.summary.activation,activation::MessageActivation::Pending{hold_reason:Some(activation::MessageActivationHold::ModelUnavailable),..}));
+        assert_eq!(view.summary.revision,work.revision);
+        db.set_cold_work_hold(&work.input_id,work.revision,None).unwrap();
+        let initial=context::ContextProposal{key:"initial".into(),branch_id:"receiver-main".into(),through_id:None,expected_revision:0,
+            summary:String::new(),effective_system_prompt:"Original receiver instructions".into(),instruction_sources:vec![],memory_checkpoint:None};
+        let basis=serde_json::from_value(json!({"mode":if bot{"bot"}else{"agent"},"threadRole":"main","revision":0,"configurationDigest":"original",
+            "memorySnapshot":{"revision":0,"memories":[]},"threadId":"receiver","projectId":null,"originalSections":[],"instructionSources":[]})).unwrap();
+        let prepared=db.prepare_cold_bot_work(work.clone(),command().configuration,initial,basis,None).unwrap();
+        let fake_receipt=Receipt{thread_id:"receiver".into(),branch_id:"receiver-main".into(),run_id:"unused".into(),input_id:"unused".into(),cursor:0};
+        let launch=launches::LaunchSelection::from_binding(&request_snapshot(&fake_receipt).view.binding,DefaultAgentPolicy.identity(),None);
+        let admitted=db.admit_cold_bot_work(prepared.load(launch).unwrap()).unwrap();
+        assert_eq!(admitted.input_id,work.input_id);
+        assert_eq!(admitted.thread_id,"receiver");
+        assert!(db.pending_cold_bot_work().unwrap().is_empty());
+        assert!(db.child_task_for_thread("receiver").unwrap().is_none());
+        assert_eq!(db.cold_bot_work_receipt(&work.input_id).unwrap(),Some(admitted));
+    }
 }

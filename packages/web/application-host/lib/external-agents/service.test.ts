@@ -674,7 +674,7 @@ it.each([false,true])('prepares project-only external children on the target own
   const prepared={cwd:'/target/original-project-copy',workspaceId:'project-workspace',executionWorkspaceId:'project-copy',kind:'isolated',
     projectSource:{resourceOwner,workspaceId:'project-workspace',executionWorkspaceId:'project-copy',mode:'native_workspace',branchId:'original-project-branch'}};
   const sources={prepare:vi.fn(async()=>prepared),release:vi.fn(async()=>{}),remove:vi.fn(async()=>{})};
-  const targetBinding={configurationIdentity:'frozen-target-config',configuration:{id:'fixture',name:'Target',harness:'codex',enabled:true,command:'target-only-program',args:['target-profile']},command:'target-only-program',args:['target-profile']};
+  const targetBinding={configurationIdentity:'frozen-target-config',configuration:{id:'fixture',name:'Target',harness:'codex',enabled:true,command:'target-only-program',args:['target-profile'],defaults:{model:'target-default',thinking:'low'}},command:'target-only-program',args:['target-profile']};
   const externalBinding=vi.fn(async()=>{if(bindingFails)throw new Error('Target configuration unavailable');return targetBinding;});
   const actions:Array<Record<string,unknown>>=[];
   let notify:((event:{stream:string})=>void)|undefined;
@@ -686,7 +686,7 @@ it.each([false,true])('prepares project-only external children on the target own
     if(c.action==='read')return {conversation:{id:child.conversation_id,needsReview:false},turns:child.turn_id?[{id:child.turn_id,status:'completed'}]:[],items:[]};
     if(c.action==='child_source'){child={...child,source:c.source};return structuredClone(child);}
     if(c.action==='create')return c;
-    if(c.action==='child_input')return {text:'Original accepted task',_launch:targetBinding};
+    if(c.action==='child_input')return {text:'Original accepted task',thinking:'high',_launch:targetBinding};
     if(c.action==='admit')return {id:'accepted-turn'};
     if(c.action==='child_link'){child={...child,turn_id:'accepted-turn'};return child;}
     if(c.action==='child_finish'){child={...child,report:{},resources_released:c.released===true,receipt_published:true};return child;}
@@ -707,8 +707,151 @@ it.each([false,true])('prepares project-only external children on the target own
   }else{
     expect(actions.find(c=>c.action==='child_source')).toMatchObject({source:{executionBinding:{configurationIdentity:'frozen-target-config',launch:{command:'target-only-program',args:['target-profile']}}}});
     expect(actions.find(c=>c.action==='create')).toMatchObject({cwd:prepared.cwd,executionSource:{resource_owner:resourceOwner}});
+    expect(actions.find(c=>c.action==='admit')).toMatchObject({input:{model:'target-default',thinking:'high',text:'Original accepted task'}});
     notify!({stream:'durable'});
     await vi.waitFor(()=>expect(sources.release,JSON.stringify(actions)).toHaveBeenCalledOnce());
     expect(sources.remove).not.toHaveBeenCalled();
   }
+});
+
+it('durably fences a current-turn supplement and returns a shared native execution receipt without a new prompt', async () => {
+  const f = await fixture();
+  const connection = await vi.mocked(connectCodex).mock.results.at(-1)!.value as HarnessConnection;
+  connection.capabilities.steering = true;
+  const id = 'external:test', target = 'current', extra = 'supplement';
+  f.setSnapshot({ conversation: { ...f.snapshot.conversation, needsReview: false, activeTurn: target },
+    turns: [{ id: target, conversationId: id, key: 'original', status: 'running', nativeId: 'native-current', createdAt: 1, updatedAt: 1 }] });
+  const receipt = { id: extra, conversationId: id, key: 'supplement-key', status: 'preparing', createdAt: 2, updatedAt: 2,
+    steering: { state: 'accepted', targetTurnId: target } };
+  const original = f.kernel.agentRuntimeRequest.getMockImplementation()!;
+  let savedInput: unknown;
+  f.kernel.agentRuntimeRequest.mockImplementation(async (method, params) => {
+    if (params.command.action === 'steer_admit') { savedInput = params.command.input; return receipt; }
+    if (params.command.action === 'steer_receipt') return { ...receipt, status: 'running', consumedByTurnId: target,
+      nativeId: params.command.nativeId, steering: { ...receipt.steering, state: params.command.state } };
+    if (params.command.action === 'input') return savedInput;
+    return original(method, params);
+  });
+  connection.steer = vi.fn(async (_input, options) => {
+    await options.beforeDispatch('native-current');
+    expect(f.commands.some(command => command.action === 'steer_dispatch')).toBe(true);
+    return { inputId: options.inputId, disposition: 'appended', nativeId: 'native-current' };
+  });
+  const sent = await f.service.send(id, 'supplement-key', { text: 'keep working but use this fact' }, { mode: 'steer', expectedTurnId: target });
+  expect(sent).toMatchObject({ id: extra, consumedByTurnId: target, steering: { state: 'appended' } });
+  expect(connection.prompt).not.toHaveBeenCalled();
+  expect(connection.steer).toHaveBeenCalledOnce();
+  f.setSnapshot({ turns: [...f.snapshot.turns, sent] });
+  await expect(f.service.send(id, 'supplement-key', { text: 'keep working but use this fact' }, { mode: 'steer', expectedTurnId: target })).resolves.toEqual(sent);
+  expect(connection.steer).toHaveBeenCalledOnce();
+  await expect(f.service.send(id, 'supplement-key', { text: 'keep working but use this fact' }, { mode: 'next_turn' })).rejects.toThrow('another input');
+});
+
+it('never turns an uncertain supplement into queued work or repeats its native delivery', async () => {
+  const f = await fixture();
+  const connection = await vi.mocked(connectCodex).mock.results.at(-1)!.value as HarnessConnection;
+  connection.capabilities.steering = true;
+  const id = 'external:test', target = 'current';
+  f.setSnapshot({ conversation: { ...f.snapshot.conversation, needsReview: false, activeTurn: target },
+    turns: [{ id: target, conversationId: id, key: 'original', status: 'running', nativeId: 'native-current', createdAt: 1, updatedAt: 1 }] });
+  const receipt = { id: 'extra', conversationId: id, key: 'extra', status: 'preparing', createdAt: 2, updatedAt: 2,
+    steering: { state: 'accepted', targetTurnId: target } };
+  const original = f.kernel.agentRuntimeRequest.getMockImplementation()!;
+  f.kernel.agentRuntimeRequest.mockImplementation(async (method, params) => {
+    if (params.command.action === 'steer_admit') return receipt;
+    if (params.command.action === 'steer_receipt') return { ...receipt, status: 'interrupted',
+      steering: { ...receipt.steering, state: params.command.state, error: params.command.error } };
+    return original(method, params);
+  });
+  connection.steer = vi.fn(async (_input, options) => { await options.beforeDispatch('native-current'); throw new Error('acknowledgement lost'); });
+  const sent = await f.service.send(id, 'extra', { text: 'supplement' }, { mode: 'steer', expectedTurnId: target });
+  expect(sent.steering).toMatchObject({ state: 'unknown', error: 'acknowledgement lost' });
+  expect(connection.prompt).not.toHaveBeenCalled();
+  expect(f.commands.some(command => command.action === 'begin' || command.action === 'admit')).toBe(false);
+});
+
+it('keeps installation, authentication and explicit disabled intent separate without opening discovery sessions', async () => {
+  const f = await fixture({ connect:false });
+  const settings=await f.service.settings();
+  expect(settings.agents.find(agent=>agent.id==='codex')).toMatchObject({availability:'auto',enabled:true});
+  f.config.enabled=false; f.config.availability='disabled';
+  expect(await f.service.inspectExecutor('fixture')).toMatchObject({availability:'disabled',installation:{status:'unknown'},authentication:'unknown'});
+  expect(f.spawn).not.toHaveBeenCalled();
+  const first=await f.service.inspectExecutor('fixture',true);
+  expect(first).toMatchObject({availability:'disabled',installation:{status:'installed',version:'fixture 1'},authentication:'unknown',connection:'not_connected',capabilitySource:'unknown'});
+  expect(f.spawn).not.toHaveBeenCalled();
+  expect(await f.service.inspectExecutor('fixture')).toMatchObject({installation:{checkedAt:first.installation.checkedAt}});
+  const refreshed=await f.service.inspectExecutor('fixture',true);
+  expect(refreshed.installation.checkedAt).toBeGreaterThanOrEqual(first.installation.checkedAt!);
+  expect(f.config.enabled).toBe(false);
+});
+
+it.each([true, false])('existing Agent request uses native steering only when its original preference permits it (%s)', async prefer => {
+  const f = await fixture();
+  const connection = await vi.mocked(connectCodex).mock.results.at(-1)!.value as HarnessConnection;
+  connection.capabilities.steering = true;
+  const id = 'external:test', target = 'running-work';
+  const turn = { id: 'request-input', conversationId: id, key: 'request-op', status: 'queued' as const, createdAt: 2, updatedAt: 2 };
+  f.setSnapshot({ conversation: { ...f.snapshot.conversation, needsReview: false, activeTurn: target }, turns: [
+    { id: target, conversationId: id, key: 'original', status: 'running', nativeId: 'native-work', createdAt: 1, updatedAt: 1 }, turn,
+  ] });
+  const child = { operation_id: 'request-op', conversation_id: id, parent_run_id: 'sender-run',
+    parent_thread_id: 'sender', parent_branch_id: 'sender-branch', turn_id: turn.id, message_kind: 'request',
+    state: 'queued', cancel_requested: false, report: null, resources_released: false, receipt_published: true };
+  const original = f.kernel.agentRuntimeRequest.getMockImplementation()!;
+  const calls: string[] = [];
+  f.kernel.agentRuntimeRequest.mockImplementation(async (method, params) => {
+    const c = params.command; calls.push(String(c.action));
+    if (c.action === 'child_list') return [child];
+    if (c.action === 'input') return { text: 'sender asks for a supplement', task: 'supplement', senderThreadId: 'sender', senderBranchId: 'sender-branch', _preferSteering: prefer };
+    if (c.action === 'steer_prepare') return { ...turn, status: 'preparing', steering: { state: 'accepted', targetTurnId: target } };
+    if (c.action === 'steer_receipt') return { ...turn, status: 'running', consumedByTurnId: target, steering: { state: c.state, targetTurnId: target } };
+    return original(method, params);
+  });
+  connection.steer = vi.fn(async (input, options) => {
+    expect(input.text).toBe('sender asks for a supplement');
+    await options.beforeDispatch('native-work');
+    return { inputId: options.inputId, nativeId: 'native-work', disposition: 'appended' };
+  });
+  f.service.startChildren({} as never);
+  await vi.waitFor(() => expect(calls).toContain('input'));
+  if (prefer) {
+    await vi.waitFor(() => expect(calls).toContain('steer_receipt'));
+    expect(connection.steer).toHaveBeenCalledOnce();
+    expect(f.commands.find(c => c.action === 'item')?.content).toMatchObject({ senderThreadId: 'sender', text: 'supplement', turnId: turn.id });
+  } else expect(connection.steer).not.toHaveBeenCalled();
+  expect(connection.prompt).not.toHaveBeenCalled();
+  expect(calls).not.toContain('admit');
+});
+
+it.each([false, true])('existing-session requests settle without adopting or cleaning the manual conversation (cancelled passive input: %s)', async cancelled => {
+  const f = await fixture();
+  const child = { operation_id: 'independent-request', conversation_id: 'external:test', parent_run_id: 'requester-run',
+    parent_thread_id: 'requester', parent_branch_id: 'requester-branch', dispatch_operation_id: null,
+    message_kind: cancelled ? 'inform' : 'request', turn_id: cancelled ? null : 'own-request-turn',
+    cancel_requested: cancelled, resources_released: true, receipt_published: false, report: null, handoff: null, project_source: null };
+  f.setSnapshot({ conversation: { ...f.snapshot.conversation, needsReview: false }, turns: cancelled ? [] : [
+    { id: 'own-request-turn', conversationId: 'external:test', key: 'independent-request', status: 'completed', createdAt: 1, updatedAt: 2 },
+  ] });
+  const original = f.kernel.agentRuntimeRequest.getMockImplementation()!;
+  const calls: Array<Record<string, unknown>> = [];
+  let finished = false;
+  f.kernel.agentRuntimeRequest.mockImplementation(async (method, params) => {
+    calls.push(params.command);
+    if (params.command.action === 'child_list') return finished ? [] : [child];
+    if (params.command.action === 'child_finish') { finished = true; return { ...child, report: {}, receipt_published: true }; }
+    return original(method, params);
+  });
+  const sources = { prepare: vi.fn(), release: vi.fn(), remove: vi.fn() };
+  f.service.startChildren(sources as never);
+  await vi.waitFor(() => expect(finished).toBe(true));
+  expect(calls.find(c => c.action === 'child_finish')).toMatchObject({ operationId: 'independent-request', released: true,
+    ...(cancelled ? { failure: 'External message cancelled before input delivery' } : {}) });
+  expect(calls.some(c => ['create', 'admit', 'child_source', 'child_link'].includes(String(c.action)))).toBe(false);
+  expect(sources.prepare).not.toHaveBeenCalled();
+  expect(sources.release).not.toHaveBeenCalled();
+  expect(sources.remove).not.toHaveBeenCalled();
+  expect(f.stop).not.toHaveBeenCalled();
+  expect((await f.service.read('external:test')).conversation.parent).toBeUndefined();
+  expect((await f.service.read('external:test')).connected).toBe(true);
 });
