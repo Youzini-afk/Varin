@@ -598,14 +598,14 @@ fn attachment_read_failure_releases_only_unpublished_relation_and_never_delivers
 }
 
 #[test]
-fn unrelated_target_is_rejected_before_attachment_owner_receives_any_request() {
+fn cross_principal_target_is_rejected_before_attachment_owner_receives_any_request() {
     let f = Fixture::new(
         json!({"kind":"inform","targetThreadId":"unrelated","attachments":[{"path":"secret.bin"}]}),
     );
     f.catalog
         .lock()
         .unwrap()
-        .create_thread("unrelated", "unrelated-branch")
+        .create_thread_with_principal("unrelated", "unrelated-branch", Some("other-principal"))
         .unwrap();
     assert!(f.authorize().is_err());
     let completed = f.endpoint.execute(

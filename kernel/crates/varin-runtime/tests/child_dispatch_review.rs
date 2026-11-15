@@ -2295,7 +2295,7 @@ fn legacy_material_inheritance_is_converted_once_without_reinterpreting_new_pros
 fn failed_attachment_preparations_retain_exact_remote_call_until_safe_owner_cleanup() {
     use sha2::{Digest, Sha256};
     use varin_runtime::catalog::attachments::{Attachment, AttachmentSelection};
-    for (version, effect) in [("8", Effect::None), ("9", Effect::None), ("9", Effect::Unknown)] {
+    for (version, effect) in [("8", Effect::None), ("9", Effect::None), ("9", Effect::Unknown), ("10", Effect::None), ("10", Effect::Unknown)] {
         let schema = |name: &str, version: &str| ToolSchema { requirements: None, name: name.into(), version: version.into(),
             description: String::new(), schema: json!({"type":"object"}), output_schema: None, metadata: None };
         let mut f = Fixture::new_parent_custom(7, schema("file_read", "1"), schema("dispatch", version), false, false, false, |input, launch| {

@@ -732,7 +732,7 @@ it('durably fences a current-turn supplement and returns a shared native executi
     if (params.command.action === 'input') return savedInput;
     return original(method, params);
   });
-  connection.steer = vi.fn(async (_input, options) => {
+  connection.steer = vi.fn<NonNullable<HarnessConnection['steer']>>(async (_input, options) => {
     await options.beforeDispatch('native-current');
     expect(f.commands.some(command => command.action === 'steer_dispatch')).toBe(true);
     return { inputId: options.inputId, disposition: 'appended', nativeId: 'native-current' };
@@ -808,7 +808,7 @@ it.each([true, false])('existing Agent request uses native steering only when it
     if (c.action === 'steer_receipt') return { ...turn, status: 'running', consumedByTurnId: target, steering: { state: c.state, targetTurnId: target } };
     return original(method, params);
   });
-  connection.steer = vi.fn(async (input, options) => {
+  connection.steer = vi.fn<NonNullable<HarnessConnection['steer']>>(async (input, options) => {
     expect(input.text).toBe('sender asks for a supplement');
     await options.beforeDispatch('native-work');
     return { inputId: options.inputId, nativeId: 'native-work', disposition: 'appended' };
