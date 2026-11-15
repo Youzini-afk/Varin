@@ -31,6 +31,7 @@ import { createPlanOwner } from './plan-owner.js';
 import { PlanService } from './plan-service.js';
 import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
 import { createKernelClient } from './kernel-client.js';
+import { KernelRequestError } from './kernel-error.js';
 import { bindDocumentTextCodec } from '../documents/inspect.js';
 import { createNativeWorkspaceOwner, type NativeWorkspaceOwner } from './native-workspaces.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
@@ -497,17 +498,35 @@ it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses i
   let phase = 'fixture', providerPhase = 'not_started', detection = 'not_started';
   let verified = false;
   const observed: { host?: FixtureHost; requests?: RecordedRequest[]; runId?: string } = {};
+  const diagnosticToken = (value: unknown) => typeof value === 'string' && /^[a-z][a-z0-9_.-]{0,95}$/i.test(value) ? value : 'invalid';
+  const errorSummary = (error: unknown) => error instanceof KernelRequestError ? {
+    type: 'KernelRequestError', method: diagnosticToken(error.method), code: diagnosticToken(error.code),
+    settlement: error.settlement === 'not_dispatched' || error.settlement === 'response' ? error.settlement : 'invalid',
+    category: typeof error.message === 'string' && error.message.startsWith('operation error: conflict:') ? 'conflict' : 'other',
+  } : { type: error instanceof Error ? diagnosticToken(error.name) : typeof error };
   let diagnostic: Promise<void> | undefined;
   const diagnose = () => diagnostic ??= (async () => {
     // Log local progress before RPCs, still inside the unchanged 45s budget.
     console.error('External dispatch stage', { workMode, phase, providerPhase, step, discoveryRequested, discovered: Boolean(executorRef), detection,
-      requests: observed.requests?.length, hostErrorTypes: observed.host?.errors.map(error => error instanceof Error ? error.name : typeof error) });
+      requests: observed.requests?.length, hostErrors: observed.host?.errors.map(errorSummary) });
     if (!observed.host || !observed.runId) return;
     const signal = AbortSignal.timeout(1_000);
+    const bounded = <T,>(promise: Promise<T>) => waitWithSignal(promise, signal).catch(() => undefined);
     // runtime.run() also releases terminal owners; diagnostics only inspect.
-    const run = await waitWithSignal(observed.host.kernel.agentRuntimeRequest<import('./protocol.generated.js').Run, 'runtime.run.inspect'>(
-      'runtime.run.inspect', { runId: observed.runId }, signal), signal).catch(() => undefined);
-    console.error('External dispatch Run', { observed: Boolean(run), state: run?.state, waiting: Boolean(run?.waiting_on) });
+    const [run, children, launch] = await Promise.all([
+      bounded(observed.host.kernel.agentRuntimeRequest<import('./protocol.generated.js').Run, 'runtime.run.inspect'>(
+        'runtime.run.inspect', { runId: observed.runId }, signal)),
+      operationId ? bounded(observed.host.kernel.agentRuntimeRequest<import('./protocol.generated.js').ExternalChild[], 'runtime.external.command'>(
+        'runtime.external.command', { command: { action: 'child_list', activeOnly: false } }, signal)) : undefined,
+      bounded(observed.host.runtime.launch(observed.runId, signal)),
+    ]);
+    const child = children?.find(value => value.operation_id === operationId);
+    const preparationFailure = launch?.preparation_failure;
+    console.error('External dispatch Run', { observed: Boolean(run), state: run?.state, waiting: Boolean(run?.waiting_on),
+      launchObserved: Boolean(launch), startable: launch?.startable, requiresRebind: launch?.requires_rebind, paused: Boolean(launch?.pause),
+      preparationFailure: preparationFailure && diagnosticToken(preparationFailure) !== 'invalid' ? preparationFailure : Boolean(preparationFailure),
+      childObserved: Boolean(child), childState: child ? diagnosticToken(child.state) : undefined, hasTurn: Boolean(child?.turn_id),
+      hasReport: Boolean(child?.report), resourcesReleased: child?.resources_released, receiptPublished: child?.receipt_published });
   })();
   const watchdog = setTimeout(() => { void diagnose(); }, 40_000);
   watchdog.unref();
