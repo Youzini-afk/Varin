@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
 import type { KernelClient, KernelScopedClient } from './kernel-client.js';
 import { createMemoryOwner, type MemoryQuery } from './memory-owner.js';
@@ -9,6 +9,8 @@ function storageFixture() {
   type RecordValue = Awaited<ReturnType<KernelScopedClient['putRecord']>>;
   let current: RecordValue | null = null;
   const operations = new Map<string, { kind: string; state: string; result: RecordValue }>();
+  const exitListeners = new Set<Parameters<KernelClient['subscribeExit']>[0]>();
+  const issueGrant = vi.fn(async () => ({}));
   let writes = 0;
   const scoped = {
     getRecord: async () => current && structuredClone(current),
@@ -21,7 +23,11 @@ function storageFixture() {
       return structuredClone(current);
     },
   };
-  return { client: { issueGrant: async () => ({}), scoped: () => scoped } as unknown as KernelClient, writes: () => writes, scoped };
+  return { client: { issueGrant, scoped: () => scoped,
+    subscribeExit: (listener: Parameters<KernelClient['subscribeExit']>[0]) => { exitListeners.add(listener); return () => { exitListeners.delete(listener); }; },
+  } as unknown as KernelClient, writes: () => writes, scoped, issueGrant,
+    exit: () => { for (const listener of exitListeners) listener(new Error('Kernel exited')); },
+  };
 }
 
 it('child ordinary memory resolves self, preserves shared scopes and reconciles original receipts after a user edit', async () => {
@@ -57,6 +63,10 @@ it('child ordinary memory resolves self, preserves shared scopes and reconciles 
   expect(await owner({ ...query, scope: { ...scope, mode: 'bot' } }, new AbortController().signal)).toMatchObject({ status: 'rejected' });
   await personalization.saveNote({ id: childNote.id, scope: childNote.scope, content: 'Newer child user edit', revision: 6 });
   const writes = storage.writes();
+  expect(storage.issueGrant).toHaveBeenCalledTimes(1);
+  storage.exit();
+  expect(await read({ action: 'read', scope: 'currentThread' })).toMatchObject({ status: 'ready', notes: [expect.objectContaining({ content: 'Newer child user edit' })] });
+  expect(storage.issueGrant).toHaveBeenCalledTimes(2);
   personalization = open(); owner = createMemoryOwner({ personalization, prepareContext });
   expect(await owner({ ...query, action: 'receipt' }, new AbortController().signal)).toEqual(saved);
   expect(await owner(query, new AbortController().signal)).toEqual(saved);

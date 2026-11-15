@@ -28,7 +28,7 @@ export function createNestedMemoryHostFixture() {
       writes++; return structuredClone(result);
     },
   };
-  const storage = { issueGrant: async () => ({}), scoped: () => scoped } as unknown as KernelClient;
+  const storage = { issueGrant: async () => ({}), scoped: () => scoped, subscribeExit: () => () => {} } as unknown as KernelClient;
   const personalization = createAgentPersonalization({ client: storage, context: async () => ({ bot: false, threadRole: 'main' }) });
   const prepareContext = Object.assign(async () => { throw new Error('This fixture requires the original checkpoint for context synchronization'); },
     { main: async () => { throw new Error('No fixture main context'); },
