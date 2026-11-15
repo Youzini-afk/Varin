@@ -358,11 +358,6 @@ function Messages({
                 </div>
               </ToolDisclosure>
             )}
-            {group[0]?.kind === 'user' && receipt?.steering && <div role="status" className="typography-micro text-muted-foreground">
-              <p>{t(`external.steering.${receipt.steering.state}`)}</p>
-              {receipt.consumedByTurnId && <p>{t('external.sharedTurnResult')}</p>}
-              {receipt.steering.error && <p className="text-destructive">{receipt.steering.error}</p>}
-            </div>}
             {ended && (
               <>
                 <TurnFooter

@@ -819,14 +819,15 @@ it.each(['lost-response', 'unknown'] as const)('keeps the exact supplement ident
   expect(api.send).toHaveBeenCalledTimes(2);
 });
 
-it('shows real supplement delivery and shared result facts without inventing a separately completed turn', async () => {
+it('shows a supplement as a normal message without delivery copy or a separate completion', async () => {
   const { view } = activeConversation();
   view.turns.push({ id: 'supplement', conversationId: 'prepared', key: 'supplement-key', status: 'completed', createdAt: 1, updatedAt: 1,
     consumedByTurnId: 'active', steering: { state: 'queued', targetTurnId: 'active' } });
   view.items.push({ id: 'user-supplement', turnId: 'supplement', kind: 'user', text: 'Additional detail', complete: true });
   await renderConversation();
-  expect(container.textContent).toContain('Supplement queued by the Agent · waiting for an execution boundary');
-  expect(container.textContent).toContain('Shares the result of the turn that consumed this input.');
+  expect(container.textContent).toContain('Additional detail');
+  expect(container.textContent).not.toContain('Supplement queued by the Agent');
+  expect(container.textContent).not.toContain('Shares the result of the turn that consumed this input.');
   expect(container.textContent).not.toContain('Completed');
 });
 
@@ -843,7 +844,7 @@ it('opens a supplementary input together with the actual shared execution result
   expect(container.textContent).toContain('Additional detail');
   expect(container.textContent).toContain('Actual shared answer');
   expect(container.textContent).not.toContain('Unrelated historical answer');
-  expect(container.textContent).toContain('Shares the result of the turn that consumed this input.');
+  expect(container.textContent).not.toContain('Shares the result of the turn that consumed this input.');
   expect(container.querySelector('form')).toBeNull();
   expect(container.textContent?.match(/Completed/g)).toHaveLength(1);
   expect(container.textContent!.indexOf('Completed')).toBeGreaterThan(container.textContent!.indexOf('Actual shared answer'));
