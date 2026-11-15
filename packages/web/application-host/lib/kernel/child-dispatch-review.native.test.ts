@@ -494,8 +494,27 @@ function waitArguments(body: Record<string, unknown>) {
 it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses its real %s source, returns its report and resumes the parent without a synthetic child Run', async workMode => {
   let operationId = '', executionRef = ''; let step = 0; let preset = '';
   let discoveryRequested=false, executorRef='';
+  let phase = 'fixture', providerPhase = 'not_started', detection = 'not_started';
+  let verified = false;
+  const observed: { host?: FixtureHost; requests?: RecordedRequest[]; runId?: string } = {};
+  let diagnostic: Promise<void> | undefined;
+  const diagnose = () => diagnostic ??= (async () => {
+    // Log local progress before RPCs, still inside the unchanged 45s budget.
+    console.error('External dispatch stage', { workMode, phase, providerPhase, step, discoveryRequested, discovered: Boolean(executorRef), detection,
+      requests: observed.requests?.length, hostErrorTypes: observed.host?.errors.map(error => error instanceof Error ? error.name : typeof error) });
+    if (!observed.host || !observed.runId) return;
+    const signal = AbortSignal.timeout(1_000);
+    // runtime.run() also releases terminal owners; diagnostics only inspect.
+    const run = await waitWithSignal(observed.host.kernel.agentRuntimeRequest<import('./protocol.generated.js').Run, 'runtime.run.inspect'>(
+      'runtime.run.inspect', { runId: observed.runId }, signal), signal).catch(() => undefined);
+    console.error('External dispatch Run', { observed: Boolean(run), state: run?.state, waiting: Boolean(run?.waiting_on) });
+  })();
+  const watchdog = setTimeout(() => { void diagnose(); }, 40_000);
+  watchdog.unref();
+  cleanup.push(async () => { clearTimeout(watchdog); });
   const parentReply = gate();
   const f = await fixture(async ({ body, response }) => {
+    providerPhase = 'pairing';
     assertPairing(body);
     if(workMode==='shared' && !discoveryRequested){
       // Add a configuration after the native request catalog was frozen. Discovery
@@ -503,13 +522,16 @@ it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses i
       const declaredTools = (body.tools as Array<{ name: string }>).map(tool => tool.name);
       expect(declaredTools).toContain('tool_invoke');
       expect(declaredTools).not.toContain('executors');
+      providerPhase = 'late-configuration';
       const settings=await h.external!.settings();
       const fixture=settings.agents.find(agent=>agent.id==='fixture')!;
       await h.external!.configure({defaultAgent:null,agents:[...settings.agents,{...fixture,id:'late-fixture',name:'Late configured executor'}]},settings.revision,'late-executor');
       discoveryRequested=true;
+      providerPhase = 'discovery';
       return complete(response,[tool('executors',{action:'inspect',executor:'late-fixture'},'discover-executor')]);
     }
     if(workMode==='shared' && !executorRef){
+      providerPhase = 'discovery-result';
       const discovered=result(body,'executors');
       expect(discovered,JSON.stringify(discovered)).toMatchObject({outcome:'succeeded'});
       const content=discovered!.content as {executors:Array<{ref:string;configurationId:string;installation:{status:string};authentication:string}>};
@@ -517,8 +539,9 @@ it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses i
       expect(content.executors[0]).toMatchObject({configurationId:'late-fixture',installation:{status:'installed'},authentication:'unknown'});
       executorRef=content.executors[0]!.ref;
     }
+    providerPhase = ['dispatch', 'accept-dispatch', 'passive-send', 'request-reply', 'update', 'submit-code', 'final-answer'][step] ?? 'final-report';
     if (++step === 1) complete(response, [tool('dispatch', { ...(workMode === 'shared' ? {executor:executorRef} : {preset}), task: 'Write a result and report', workMode }, 'external-dispatch')]);
-    else if (step === 2) { ({ operationId, executionRef } = await acceptedDispatch(h, body)); complete(response, [tool('wait_child', { target: executionRef }, 'external-wait')]); }
+    else if (step === 2) { ({ operationId, executionRef } = await acceptedDispatch(h, body)); providerPhase = 'wait-child'; complete(response, [tool('wait_child', { target: executionRef }, 'external-wait')]); }
     else if (step === 3) { expect(JSON.stringify(body.input)).toContain('EXTERNAL_HARNESS_RESULT'); complete(response, [tool('send', { targetThreadId: executionRef, kind: 'inform', text: 'PASSIVE_EXTERNAL_NOTE' }, 'external-inform')]); }
     else if (step === 4) { expect(JSON.stringify(result(body, 'send'))).toContain('next_input'); complete(response, [tool('send', { targetThreadId: executionRef, kind: 'request', text: 'CONTINUE_EXTERNAL_TASK', wait: {} }, 'external-request')]); }
     else if (step === 5) complete(response, [tool('update', { source: executionRef, files: ['external-result.txt'] }, 'external-update')]);
@@ -530,9 +553,29 @@ it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses i
     else if (step === 7) { expect(result(body, 'submit_code'), JSON.stringify(result(body, 'submit_code'))).toMatchObject({ outcome: 'succeeded' }); expect(JSON.stringify(result(body, 'submit_code'))).toContain(workMode === 'shared' ? 'shared_source' : 'applied'); complete(response, [answer('Delegation received', 'external-parent-answer')]); parentReply.release(); }
     else { expect(JSON.stringify(body.input)).toContain('EXTERNAL_HARNESS_RESULT'); complete(response, [answer('Delegation received', 'external-parent-answer')]); parentReply.release(); }
   });
+  observed.requests = f.requests;
+  phase = 'host';
   const h = await f.openHost({ external: true });
+  observed.host = h;
+  cleanup.push(async () => { clearTimeout(watchdog); if (!verified) await diagnose(); });
+  const detect = h.external!.detect.bind(h.external);
+  h.external!.detect = async (...args) => {
+    detection = 'pending';
+    try {
+      const result = await detect(...args);
+      // Inspect hides the original failure. Keep only a category from this same
+      // probe, never its paths/environment/error payload or a second probe.
+      detection = result.status !== 'failed' ? result.status
+        : /unconfirmed/i.test(result.message ?? '') ? 'failed:unconfirmed_exit_or_release'
+        : /did not finish|timeout|timed out/i.test(result.message ?? '') ? 'failed:timeout'
+        : /no version/i.test(result.message ?? '') ? 'failed:empty_version'
+        : /spawn|failed to start/i.test(result.message ?? '') ? 'failed:spawn_or_start' : 'failed:other';
+      return result;
+    } catch (error) { detection = 'threw'; throw error; }
+  };
   // The shared case has no external preset at all: configuration selection is sufficient.
   if (workMode === 'isolated_write') {
+  phase = 'preset';
   const profiles = await h.profiles.read({ runtime: 'agent' });
   const saved = await h.profiles.save({ runtime: 'agent', expectedRevision: profiles.revision, config: { kind: 'custom', key: '', agent: {
     name: 'External fixture', description: 'External worker', instructions: '', enabled: true, workFocus: [], external: { configurationId: 'fixture' },
@@ -541,14 +584,22 @@ it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses i
   if (profile.config.kind !== 'custom') throw new Error('Expected an external custom preset');
   preset = `custom:${profile.config.key}`;
   }
+  phase = 'thread';
   const identity = await h.api.create(`external-${workMode}`);
+  phase = 'workspace';
   const workspaceId = (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId;
+  phase = 'source';
   const prepared = await h.api.prepareSource({ ...identity, key: 'external-source', resourceOwner: { kind: 'local' }, workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  phase = 'submit';
   const parent = await h.api.submit({ ...identity, key: 'external-parent', expectedHead: null, text: 'Delegate this task to the external fixture and wait', model, source: prepared.source });
+  observed.runId = parent.run_id;
+  phase = 'provider-exchanges';
   // The model exchanges and code transfers belong to the test's execution
   // budget. Check durable completion after the actual final provider response.
   await parentReply.promise;
-  await expect.poll(async () => (await h.runtime.run(parent.run_id)).state).toBe('completed').catch(async error => { console.error('External dispatch state', await h.external!.children(), h.errors); throw error; });
+  phase = 'durable-completion';
+  await expect.poll(async () => (await h.runtime.run(parent.run_id)).state).toBe('completed').catch(async error => { await diagnose(); throw error; });
+  phase = 'result-assertions';
   const child = (await h.external!.children()).find(child => child.operation_id === operationId)!;
   expect(child.state).toBe('completed'); expect(child.resources_released).toBe(true);
   expect(await h.runtime.childExecutions()).toHaveLength(0);
@@ -576,10 +627,13 @@ it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses i
     } finally { db.close(); }
   }
   expect(h.errors).toEqual([]);
+  phase = 'delete-conversation';
   await h.external!.update(conversation.id, conversation.revision, { deleted: true });
   expect((await h.external!.list()).some(c => c.id === conversation.id)).toBe(false);
   if (workMode === 'isolated_write') await expect(fs.access(conversation.cwd)).rejects.toThrow();
   else expect(await fs.readFile(path.join(f.workspace, 'external-result.txt'), 'utf8')).toBe('External harness wrote this');
+  verified = true;
+  clearTimeout(watchdog);
 });
 function blockChild(original: ContextPreparer, entered: ReturnType<typeof gate>, release: ReturnType<typeof gate>): ContextPreparer {
   const prepare: ContextPreparer = Object.assign(async (...args: Parameters<ContextPreparer>) => {

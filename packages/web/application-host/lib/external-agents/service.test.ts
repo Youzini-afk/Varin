@@ -532,7 +532,8 @@ it.each(['timeout', 'cancel', 'unconfirmed'] as const)('bounds version stdout dr
   if (outcome === 'timeout') {
     expect(AbortSignal.timeout).toHaveBeenCalledWith(15_000);
     expect(await detection).toMatchObject({ status: 'failed', message: 'Program version query did not finish' });
-  } else await expect(detection).rejects.toThrow(outcome === 'cancel' ? 'Version query cancelled' : 'process exit is unconfirmed');
+  } else if (outcome === 'cancel') await expect(detection).rejects.toThrow('Version query cancelled');
+  else expect(await detection).toMatchObject({ status: 'failed', message: 'Program version query failed and process exit is unconfirmed' });
   expect(stdout.readableEnded).toBe(false);
   expect(release).toHaveBeenCalledTimes(outcome === 'unconfirmed' ? 0 : 1);
 });
