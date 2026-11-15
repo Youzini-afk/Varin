@@ -294,7 +294,6 @@ function Messages({
   cwd: string;
   receipts: ExternalTurn[];
 }) {
-  const { t } = useI18n();
   const mode = useUIStore((state) => state.chatRenderMode);
   const groups: ExternalItem[][] = [];
   const turns = new Map<string, ExternalItem[]>();

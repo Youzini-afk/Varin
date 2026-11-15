@@ -108,7 +108,7 @@ function complete(response: ServerResponse, output: unknown[]) {
 function tool(name: string, args: unknown, id: string) {
   // The provider decoder and gateway select the admitted schema. The fixture only
   // chooses whether a tool is directly disclosed or invoked through discovery.
-  const discovered = ['wait_child', 'child_status', 'child_cancel', 'child_report', 'threads', 'read_thread', 'send', 'memory'];
+  const discovered = ['executors', 'wait_child', 'child_status', 'child_cancel', 'child_report', 'threads', 'read_thread', 'send', 'memory'];
   if (discovered.includes(name) || CODE_EXCHANGE_TOOL_DECLARATIONS.some(d => d.tool?.name === name)) {
     args = { name, arguments: args }; name = 'tool_invoke';
   }
@@ -500,6 +500,9 @@ it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses i
     if(workMode==='shared' && !discoveryRequested){
       // Add a configuration after the native request catalog was frozen. Discovery
       // and dispatch must use its real owner, not require a new native Run/preset.
+      const declaredTools = (body.tools as Array<{ name: string }>).map(tool => tool.name);
+      expect(declaredTools).toContain('tool_invoke');
+      expect(declaredTools).not.toContain('executors');
       const settings=await h.external!.settings();
       const fixture=settings.agents.find(agent=>agent.id==='fixture')!;
       await h.external!.configure({defaultAgent:null,agents:[...settings.agents,{...fixture,id:'late-fixture',name:'Late configured executor'}]},settings.revision,'late-executor');
@@ -667,8 +670,13 @@ it('family tools and public views read original and fork-inherited conversations
   expect(inheritedRuns.runs).toContainEqual(expect.objectContaining({ runId: original.runId, branchId: child.child_branch_id }));
   const selected = { threadId: fork.threadId, branchId: fork.branchId, runId: original.runId, query: { kind: 'recent' as const } };
   expect((await h.api.family!.read(identity, selected)).items.some(item => item.id === original.id)).toBe(true);
+  // Conversation access follows the authenticated product scope, not ancestry.
+  // An independent public conversation is readable, but another principal is not.
   const unrelated = await h.api.create('unrelated-family');
-  await expect(h.api.family!.read(identity, { threadId: unrelated.threadId, branchId: unrelated.branchId, query: { kind: 'recent' } })).rejects.toMatchObject({ status: 409 });
+  expect(await h.api.family!.read(identity, { threadId: unrelated.threadId, branchId: unrelated.branchId, query: { kind: 'recent' } }))
+    .toMatchObject({ threadId: unrelated.threadId, branchId: unrelated.branchId, items: [] });
+  const foreign = await h.runtime.createThread('thread:foreign-family', 'branch:foreign-family', undefined, 'foreign-principal');
+  await expect(h.api.family!.read(identity, { ...foreign, query: { kind: 'recent' } })).rejects.toMatchObject({ status: 409 });
   const requestCount = f.requests.length;
   await h.close();
   const reopened = await f.openHost();

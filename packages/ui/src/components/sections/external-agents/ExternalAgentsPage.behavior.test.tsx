@@ -2,11 +2,10 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { ExternalAgentsAPI, ExternalAgentSettings } from '@varin/application-client';
+import type { ExternalAgentsAPI, ExternalAgentSettings, ProjectEntry } from '@varin/application-client';
 import { ExternalAgentsPage } from './ExternalAgentsPage';
 import { externalAgentEn } from '@/lib/i18n/messages/external-agents';
 import { openExternalUrl } from '@/lib/url';
-import type { ProjectEntry } from '@/stores/useProjectsStore';
 import type { SourceResourceOwner } from '@varin/protocol';
 
 const f = vi.hoisted(() => ({ host: 1, listeners: new Set<() => void>(), settings: undefined as ExternalAgentSettings | undefined,
