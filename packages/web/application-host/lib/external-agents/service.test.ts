@@ -485,6 +485,58 @@ it('uses the same branded executable version for detection and cached handshake 
   expect(f.settings.capabilityCache!.fixture?.agentVersion).toBe('fixture 1');
 });
 
+it('drains a completed version probe before inspecting executor installation', async () => {
+  const f = await fixture({ connect: false });
+  const stdout = new PassThrough();
+  stdout.end('fixture 1\n');
+  const release = vi.fn(async () => { expect(stdout.readableEnded).toBe(true); });
+  const spawn = vi.fn(async () => ({ stdout, stderr: new PassThrough(), completion: Promise.resolve(),
+    exitCode: 0, exitConfirmed: true, release }));
+  const service = new ExternalAgentsService({ kernel: f.kernel as unknown as KernelClient, spawn: spawn as never,
+    directory: '/tmp/varin-service-portable', resolveWorkspace: async () => ({ workspaceId: 'workspace', root: '/tmp' }) });
+  cleanups.push(() => service.close());
+  // A native process can finish and buffer stdout before its handle reaches the
+  // version reader. Its completion is not the Readable consumer's end event.
+  expect(await service.inspectExecutor('fixture')).toMatchObject({
+    installation: { status: 'installed', version: 'fixture 1' }, authentication: 'unknown',
+  });
+  expect(spawn).toHaveBeenCalledTimes(1);
+  expect(release).toHaveBeenCalledTimes(1);
+});
+
+it.each(['timeout', 'cancel', 'unconfirmed'] as const)('bounds version stdout draining without inventing process exit (%s)', async outcome => {
+  const f = await fixture({ connect: false });
+  const controller = new AbortController();
+  if (outcome === 'timeout') vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+  const stdout = new PassThrough();
+  const release = vi.fn(async () => {});
+  let spawned!: () => void;
+  const reachedSpawn = new Promise<void>(resolve => { spawned = resolve; });
+  let complete!: () => void;
+  const completion = new Promise<void>(resolve => { complete = resolve; });
+  const spawn = vi.fn(async () => {
+    spawned();
+    return { stdout, stderr: new PassThrough(), completion, exitCode: 0, exitConfirmed: outcome !== 'unconfirmed', release };
+  });
+  const service = new ExternalAgentsService({ kernel: f.kernel as unknown as KernelClient, spawn: spawn as never,
+    directory: '/tmp/varin-service-portable', resolveWorkspace: async () => ({ workspaceId: 'workspace', root: '/tmp' }) });
+  cleanups.push(async () => { stdout.destroy(); await service.close(); });
+  const detection = service.detect('fixture', outcome === 'timeout' ? undefined : controller.signal);
+  let settled = false;
+  void detection.finally(() => { settled = true; }).catch(() => {});
+  await reachedSpawn;
+  complete();
+  await new Promise<void>(resolve => setImmediate(resolve));
+  if (outcome !== 'unconfirmed') expect(settled).toBe(false);
+  controller.abort(new Error('Version query cancelled'));
+  if (outcome === 'timeout') {
+    expect(AbortSignal.timeout).toHaveBeenCalledWith(15_000);
+    expect(await detection).toMatchObject({ status: 'failed', message: 'Program version query did not finish' });
+  } else await expect(detection).rejects.toThrow(outcome === 'cancel' ? 'Version query cancelled' : 'process exit is unconfirmed');
+  expect(stdout.readableEnded).toBe(false);
+  expect(release).toHaveBeenCalledTimes(outcome === 'unconfirmed' ? 0 : 1);
+});
+
 it('keeps durable delegated work alive even before its transient Host task has started', async () => {
   let now = 1_000;
   vi.spyOn(Date, 'now').mockImplementation(() => now);

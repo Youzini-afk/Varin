@@ -6,6 +6,7 @@ import { mkdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import { finished } from 'node:stream/promises';
 import {
   ExternalAgentError,
   isExternalInteractionValueValid,
@@ -612,17 +613,24 @@ export class ExternalAgentsService {
     await mkdir(cwd, { recursive: true });
     // This deadline bounds only a version query, never a model turn or native effect.
     const timeout = AbortSignal.timeout(15_000);
+    const probeSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
     const args = profileVersionArguments(launch.args, profile);
     const child = await this.deps.spawn(launch.command, args, {
       cwd, env: launch.env, stdio: ['ignore', 'pipe', 'pipe'],
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout, windowsHide: true,
+      signal: probeSignal, windowsHide: true,
     });
     const stdout: Buffer[] = [];
+    // Native completion confirms capture and exit, not delivery of already
+    // buffered Readable bytes to this consumer. Observe errors immediately, but
+    // keep native completion first so output cannot mask unconfirmed ownership.
+    const stdoutDrained = finished(child.stdout, { cleanup: true, writable: false, signal: probeSignal });
+    void stdoutDrained.catch(() => {});
     child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
     child.stderr.resume();
     try {
       await child.completion;
       if (!child.exitConfirmed) throw new Error('Program version query exit is unconfirmed');
+      await stdoutDrained;
       signal?.throwIfAborted();
       if (timeout.aborted) throw new ExternalAgentError('probe_timeout', 'Program version query did not finish');
       if (child.exitCode !== 0) throw new Error(`Program version check exited with ${child.exitCode}`);
@@ -631,6 +639,8 @@ export class ExternalAgentsService {
       return version;
     } catch (error) {
       if (!child.exitConfirmed) throw new AggregateError([error], 'Program version query failed and process exit is unconfirmed');
+      signal?.throwIfAborted();
+      if (timeout.aborted) throw new ExternalAgentError('probe_timeout', 'Program version query did not finish');
       throw error;
     } finally {
       if (child.exitConfirmed) await child.release();
