@@ -5,7 +5,7 @@ import { object } from './configuration.js';
 import { modelList } from './discovery.js';
 import type { ChannelType } from './channel-types.js';
 
-export const CHANNEL_DIRECTORY_URL = 'https://raw.githubusercontent.com/Youzini-afk/Varin/main/packages/web/application-host/lib/models/channel-directory.json';
+export const CHANNEL_DIRECTORY_URL = 'https://raw.githubusercontent.com/Astrmira/Varin/main/packages/web/application-host/lib/models/channel-directory.json';
 export const BUNDLED_CHANNEL_DIRECTORY: unknown = JSON.parse(readFileSync(new URL('./channel-directory.json', import.meta.url), 'utf8'));
 export interface ChannelDirectoryEntry {
   id: string; name: string; kind: 'model-vendor' | 'agent-service' | 'local'; protocol: string;

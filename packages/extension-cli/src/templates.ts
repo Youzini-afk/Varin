@@ -81,7 +81,7 @@ const brokeredHostFiles = (options: {
   summary: string;
 }): Record<string, string> => ({
   "varin.extension.json": json({
-    $schema: "https://raw.githubusercontent.com/Youzini-afk/Varin/main/packages/extension-contract/schema/varin.extension.schema.json",
+    $schema: "https://raw.githubusercontent.com/Astrmira/Varin/main/packages/extension-contract/schema/varin.extension.schema.json",
     schemaVersion: 1,
     id: options.id,
     version: "0.1.0",
@@ -349,7 +349,7 @@ export const createInitFiles = (options: {
 
   return {
     "varin.extension.json": json({
-      $schema: "https://raw.githubusercontent.com/Youzini-afk/Varin/main/packages/extension-contract/schema/varin.extension.schema.json",
+      $schema: "https://raw.githubusercontent.com/Astrmira/Varin/main/packages/extension-contract/schema/varin.extension.schema.json",
       schemaVersion: 1,
       id: options.id,
       version: "0.1.0",

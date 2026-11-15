@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-export const NPM_PUBLIC_REPOSITORY = 'https://github.com/Youzini-afk/Varin.git';
+export const NPM_PUBLIC_REPOSITORY = 'https://github.com/Astrmira/Varin.git';
 
 export const NPM_PUBLIC_PACKAGES = Object.freeze([
   { directory: 'packages/extension-contract', name: '@varin/extension-contract' },

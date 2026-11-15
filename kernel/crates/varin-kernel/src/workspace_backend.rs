@@ -17,7 +17,7 @@ pub(crate) fn help_url() -> &'static str {
     if cfg!(windows) {
         "https://winfsp.dev/rel/"
     } else if cfg!(target_os = "macos") {
-        "https://github.com/Youzini-afk/Varin/blob/main/packages/workspace-driver/macos/README.md"
+        "https://github.com/Astrmira/Varin/blob/main/packages/workspace-driver/macos/README.md"
     } else {
         "https://github.com/libfuse/libfuse"
     }

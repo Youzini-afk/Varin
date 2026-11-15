@@ -20,7 +20,7 @@ import {
   SETTINGS_FIELD_LABEL_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 
-const GITHUB_URL = 'https://github.com/Youzini-afk/Varin';
+const GITHUB_URL = 'https://github.com/Astrmira/Varin';
 const LICENSE_URL = `${GITHUB_URL}/blob/main/LICENSE`;
 const CONTACT_EMAIL = 'varin@astrmira.com';
 

@@ -60,7 +60,7 @@ composition with a minimal DOM substitute, not arbitrary Shell layouts. These ch
 real broker, render a browser, or certify every supported platform.
 
 The complete manifest, lifecycle, update, distribution-profile, and publishing workflow is in the
-[Varin extension authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/ops/varin-extension-authoring.md).
+[Varin extension authoring guide](https://github.com/Astrmira/Varin/blob/main/docs/ops/varin-extension-authoring.md).
 
 ## Release packages
 

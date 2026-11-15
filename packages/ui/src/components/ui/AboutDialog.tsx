@@ -9,7 +9,7 @@ import { useI18n } from '@/lib/i18n';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { runtimeFetch } from '@varin/application-client';
 
-const LICENSE_URL = 'https://github.com/Youzini-afk/Varin/blob/main/LICENSE';
+const LICENSE_URL = 'https://github.com/Astrmira/Varin/blob/main/LICENSE';
 const CONTACT_EMAIL = 'varin@astrmira.com';
 
 interface AboutDialogProps {
@@ -87,7 +87,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
           <div className="flex flex-col items-center gap-2 pt-2">
             <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
               <a
-                href="https://github.com/Youzini-afk/Varin"
+                href="https://github.com/Astrmira/Varin"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"

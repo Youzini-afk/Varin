@@ -9,7 +9,7 @@ export type UpdaterFeed = {
 
 export const PRODUCTION_UPDATER_FEED: Readonly<UpdaterFeed> = Object.freeze({
   provider: 'github',
-  owner: 'Youzini-afk',
+  owner: 'Astrmira',
   repo: 'Varin',
 });
 

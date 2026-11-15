@@ -1,6 +1,6 @@
 {
   "name": "@varin/electron",
-  "version": "0.9.47",
+  "version": "0.9.48",
   "license": "AGPL-3.0-only",
   "private": true,
   "description": "Varin desktop runtime",
@@ -249,7 +249,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "Youzini-afk",
+      "owner": "Astrmira",
       "repo": "Varin"
     },
     "deb": {

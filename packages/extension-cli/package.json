@@ -17,11 +17,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Youzini-afk/Varin.git",
+    "url": "https://github.com/Astrmira/Varin.git",
     "directory": "packages/extension-cli"
   },
-  "homepage": "https://github.com/Youzini-afk/Varin/tree/main/packages/extension-cli",
-  "bugs": "https://github.com/Youzini-afk/Varin/issues",
+  "homepage": "https://github.com/Astrmira/Varin/tree/main/packages/extension-cli",
+  "bugs": "https://github.com/Astrmira/Varin/issues",
   "publishConfig": {
     "access": "public"
   },

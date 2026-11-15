@@ -32,7 +32,7 @@ interface UpdateDialogProps {
   runtimeType?: 'desktop' | 'web' | 'mobile' | null;
 }
 
-const GITHUB_RELEASES_URL = 'https://github.com/Youzini-afk/Varin/releases';
+const GITHUB_RELEASES_URL = 'https://github.com/Astrmira/Varin/releases';
 
 type ChangelogSection = {
   version: string;

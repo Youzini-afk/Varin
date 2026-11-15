@@ -14,7 +14,7 @@ provides the mount's `VarinWorkbenchCompositionHost` as a `workbench` prop and t
 uses the Shell's declared seams, not private product UI imports.
 `defineReactTransitionScene` and `useVarinTransitionScene` adapt the stable transition controller
 without sharing Varin's own React root or prescribing a Shell DOM structure.
-See the complete [authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/ops/varin-extension-authoring.md).
+See the complete [authoring guide](https://github.com/Astrmira/Varin/blob/main/docs/ops/varin-extension-authoring.md).
 
 `defineReactSettingsPage` adapts the public settings `region` props. `defineReactMessageRenderer`,
 `defineReactToolRenderer`, and `defineReactSessionDecoration` take a `matches` predicate and a component.

@@ -58,7 +58,7 @@ const environment = ({ artifacts, output }) => ({
   ...process.env,
   LATEST_YML_DIR: artifacts,
   RUNNER_TEMP: output,
-  GH_REPO: 'Youzini-afk/Varin',
+  GH_REPO: 'Astrmira/Varin',
   VARIN_VERSION: '1.2.3',
 });
 

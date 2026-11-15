@@ -35,7 +35,7 @@ ARG ROLE
 ARG VARIANT
 ARG BASE_REFERENCE
 LABEL io.varin.image.role=$ROLE io.varin.image.variant=$VARIANT io.varin.image.base=$BASE_REFERENCE
-LABEL org.opencontainers.image.source="https://github.com/Youzini-afk/Varin" org.opencontainers.image.revision="${commitSource}" org.opencontainers.image.version="0.9.38"
+LABEL org.opencontainers.image.source="https://github.com/Astrmira/Varin" org.opencontainers.image.revision="${commitSource}" org.opencontainers.image.version="0.9.38"
 LABEL io.varin.publication.kind="commit" io.varin.build.run_id="8" io.varin.build.run_attempt="1" io.varin.build.tooling_sha="${commitTooling}"
 ENV VARIN_IMAGE_VARIANT=$VARIANT
 `);
@@ -92,7 +92,7 @@ ENV VARIN_IMAGE_VARIANT=$VARIANT
   // boundary maps fixed production names to this isolated, disposable registry.
   // These scratch fixtures test index/config/copy/pull behavior, not app startup.
   const names = { standardApp: 'varin', toolbeltApp: 'varin-toolbelt', slimBase: 'varin-runtime-slim', toolbeltBase: 'varin-runtime-toolbelt' };
-  const commitReceipt = { schema: 1, repository: 'Youzini-afk/Varin', workflow: '.github/workflows/docker-commit.yml',
+  const commitReceipt = { schema: 1, repository: 'Astrmira/Varin', workflow: '.github/workflows/docker-commit.yml',
     tag: `commit-${commitSource}`, source: { sha: commitSource, version: '0.9.38' },
     producer: { runId: '8', runAttempt: '1', toolingSha: commitTooling }, build: { runId: '8', runAttempt: '1', toolingSha: commitTooling },
     images: Object.fromEntries(Object.entries(names).map(([key, name]) => [key, `${productionPrefix}${name}@${sources[key].split('@')[1]}`])) };

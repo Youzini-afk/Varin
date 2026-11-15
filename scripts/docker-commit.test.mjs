@@ -15,9 +15,9 @@ const source = 'a'.repeat(40), tooling = 'b'.repeat(40), prefix = 'ghcr.io/youzi
 const digest = value => `sha256:${value.repeat(64)}`;
 const images = { standardApp: `${prefix}varin@${digest('1')}`, toolbeltApp: `${prefix}varin-toolbelt@${digest('2')}`,
   slimBase: `${prefix}varin-runtime-slim@${digest('3')}`, toolbeltBase: `${prefix}varin-runtime-toolbelt@${digest('4')}` };
-const input = { eventName: 'workflow_dispatch', ref: 'refs/heads/main', repository: 'Youzini-afk/Varin',
+const input = { eventName: 'workflow_dispatch', ref: 'refs/heads/main', repository: 'Astrmira/Varin',
   sourceSha: source, toolingSha: tooling, version: '0.9.38' };
-const receipt = () => ({ schema: 1, repository: 'Youzini-afk/Varin', workflow: '.github/workflows/docker-commit.yml',
+const receipt = () => ({ schema: 1, repository: 'Astrmira/Varin', workflow: '.github/workflows/docker-commit.yml',
   tag: `commit-${source}`, source: { sha: source, version: '0.9.38' },
   producer: { runId: '42', runAttempt: '2', toolingSha: tooling },
   build: { runId: '42', runAttempt: '2', toolingSha: tooling }, images: { ...images } });
@@ -26,7 +26,7 @@ function registryFixture() {
   const fixture = imageRegistryFixture(images);
   for (const [ref, config] of fixture.configs) {
     const labels = config.config.Labels;
-    Object.assign(labels, { 'org.opencontainers.image.source': 'https://github.com/Youzini-afk/Varin',
+    Object.assign(labels, { 'org.opencontainers.image.source': 'https://github.com/Astrmira/Varin',
       'org.opencontainers.image.revision': source, 'org.opencontainers.image.version': '0.9.38',
       'io.varin.publication.kind': 'commit', 'io.varin.build.run_id': '42', 'io.varin.build.tooling_sha': tooling,
       'io.varin.build.run_attempt': labels['io.varin.image.role'] === 'runtime-base' ? '1' : '2' });
@@ -221,9 +221,9 @@ test('resume verifies repository/workflow/main provenance, producer success, art
   const f = gitFixture(t), value = receipt();
   value.source.sha = f.sourceSha; value.tag = `commit-${f.sourceSha}`;
   value.producer.toolingSha = value.build.toolingSha = f.toolingSha;
-  const archive = archiveOf(f.root, value), root = 'repos/Youzini-afk/Varin/actions';
+  const archive = archiveOf(f.root, value), root = 'repos/Astrmira/Varin/actions';
   const run = { id: 42, run_attempt: 2, workflow_id: 17, path: '.github/workflows/docker-commit.yml',
-    event: 'workflow_dispatch', head_branch: 'main', head_sha: f.toolingSha, repository: { full_name: 'Youzini-afk/Varin', id: 19 }, conclusion: 'failure' };
+    event: 'workflow_dispatch', head_branch: 'main', head_sha: f.toolingSha, repository: { full_name: 'Astrmira/Varin', id: 19 }, conclusion: 'failure' };
   const artifact = { id: 80, name: 'varin-commit-images-2', digest: archive.digest, expired: false, size_in_bytes: archive.bytes.length,
     workflow_run: { id: 42, repository_id: 19, head_repository_id: 19, head_branch: 'main', head_sha: f.toolingSha } };
   const data = new Map([

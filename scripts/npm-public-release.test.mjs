@@ -35,7 +35,7 @@ const fixture = async () => {
       publishConfig: { access: 'public' },
       repository: {
         type: 'git',
-        url: 'https://github.com/Youzini-afk/Varin.git',
+        url: 'https://github.com/Astrmira/Varin.git',
         directory: definition.directory,
       },
       dependencies,

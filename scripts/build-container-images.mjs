@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { acceptImageRelease, createImageRegistry, dockerCommand, imageVersionParts, resolveRuntimeBase } from './docker-release.mjs';
 import { acceptCommitPublication } from './docker-commit.mjs';
 
-const repository = 'Youzini-afk/Varin';
+const repository = 'Astrmira/Varin';
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const shaPattern = /^[a-f0-9]{40}$/;
 const names = { slim_base: 'varin-runtime-slim', toolbelt_base: 'varin-runtime-toolbelt',

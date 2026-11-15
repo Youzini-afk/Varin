@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { createImageRegistry, dockerCommand, imageArtifactPlan, imageVersionParts,
   promoteImages, verifyImage, writeAnonymousDockerConfig } from './docker-release.mjs';
 
-const repository = 'Youzini-afk/Varin';
+const repository = 'Astrmira/Varin';
 const workflowPath = '.github/workflows/docker-commit.yml';
 const artifactPrefix = 'varin-commit-images-';
 const producerJob = 'Record verified candidate';
@@ -64,7 +64,7 @@ export function createCommitRegistry(runDocker) {
 
 export function acceptCommitPublication({ eventName, ref, repository: repo, toolingSha, sourceSha, version }) {
   if (eventName !== 'workflow_dispatch' || ref !== 'refs/heads/main' || !sameRepository(repo)) {
-    throw new Error('Commit images require a manual workflow dispatched from trusted main in Youzini-afk/Varin');
+    throw new Error('Commit images require a manual workflow dispatched from trusted main in Astrmira/Varin');
   }
   sha(toolingSha); sha(sourceSha); imageVersionParts(version);
   return { repository, sourceSha, version, toolingSha, tag: `commit-${sourceSha}` };

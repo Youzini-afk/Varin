@@ -121,7 +121,7 @@ const packageRelease = async (tag, outputArgument) => {
 
   const manifest = {
     artifacts,
-    repository: 'Youzini-afk/Varin',
+    repository: 'Astrmira/Varin',
     schemaVersion: 1,
     sourceCommit: gitCommit(),
     tag,

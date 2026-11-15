@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Varin Install Script
-# Usage: curl -fsSL https://raw.githubusercontent.com/Youzini-afk/Varin/main/scripts/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/Astrmira/Varin/main/scripts/install.sh | bash
 
 set -euo pipefail
 

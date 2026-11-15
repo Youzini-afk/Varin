@@ -73,7 +73,7 @@ unknown `contractVersion` is still parsed (structure, id, kind, supports) but it
 not validated. Use `checkVarinContributionCompatibility` and `isVarinContributionCompatible`
 to determine whether a contribution is executable on the current runtime.
 
-See the complete [authoring guide](https://github.com/Youzini-afk/Varin/blob/main/docs/ops/varin-extension-authoring.md).
+See the complete [authoring guide](https://github.com/Astrmira/Varin/blob/main/docs/ops/varin-extension-authoring.md).
 
 `VARIN_AGENT_POLICY_CONTRACT` describes the `varin.agent.policy@4` Decision boundary, its explicit
 state-only `transitionState` method and required `modelRoles`/`stateTransition` description, including

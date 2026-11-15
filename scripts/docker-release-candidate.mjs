@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { acceptImageRelease, assertImageReleaseTag } from './docker-release.mjs';
 import { assertAncestor, sourceVersion } from './docker-commit.mjs';
 
-const repository = 'Youzini-afk/Varin';
+const repository = 'Astrmira/Varin';
 const workflow = '.github/workflows/docker.yml';
 const artifactPrefix = 'varin-container-build-';
 const imageNames = { standard_app: 'varin', toolbelt_app: 'varin-toolbelt',

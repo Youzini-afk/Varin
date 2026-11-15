@@ -248,7 +248,7 @@ const extractArchive = async (archive: string, destination: string, signal: Abor
 };
 
 const componentUrl = (version: string, platform: string, arch: string): string => (
-  `https://github.com/Youzini-afk/Varin/releases/download/v${encodeURIComponent(version)}/Varin-local-semantic-${encodeURIComponent(version)}-${platform}-${arch}.tar.gz`
+  `https://github.com/Astrmira/Varin/releases/download/v${encodeURIComponent(version)}/Varin-local-semantic-${encodeURIComponent(version)}-${platform}-${arch}.tar.gz`
 );
 
 export const localSemanticComponentUrl = componentUrl;

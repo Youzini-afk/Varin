@@ -191,10 +191,10 @@ describe('checkForUpdates', () => {
         json: async () => ({
           latestVersion: '1.10.0',
           updateAvailable: true,
-          downloadUrl: 'https://github.com/Youzini-afk/Varin/releases/download/v1.10.0/Varin-1.10.0-42-android.aab',
+          downloadUrl: 'https://github.com/Astrmira/Varin/releases/download/v1.10.0/Varin-1.10.0-42-android.aab',
         }),
       })
-      .when('api.github.com/repos/Youzini-afk/Varin/releases/tags/v1.10.0', {
+      .when('api.github.com/repos/Astrmira/Varin/releases/tags/v1.10.0', {
         ok: true,
         json: async () => ({
           assets: [
@@ -224,7 +224,7 @@ describe('checkForUpdates', () => {
   });
 
   it('keeps a direct Android APK URL from the update API', async () => {
-    const apkUrl = 'https://github.com/Youzini-afk/Varin/releases/download/v1.10.0/Varin-1.10.0-42-android.apk';
+    const apkUrl = 'https://github.com/Astrmira/Varin/releases/download/v1.10.0/Varin-1.10.0-42-android.apk';
     fetchMock.when('updates.varin.test', {
       ok: true,
       json: async () => ({

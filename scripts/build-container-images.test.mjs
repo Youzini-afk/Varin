@@ -7,7 +7,7 @@ import { buildContainerImages, buildLogMetrics, builtImageReferences, containerB
 
 const sha = 'a'.repeat(40), tooling = 'b'.repeat(40), digest = value => `sha256:${value.repeat(64)}`;
 const input = { publication: 'commit', sourceSha: sha, toolingSha: tooling, version: '0.9.39', runId: '12', runAttempt: '1',
-  repository: 'Youzini-afk/Varin', githubSha: tooling, ref: 'refs/heads/main', eventName: 'workflow_dispatch',
+  repository: 'Astrmira/Varin', githubSha: tooling, ref: 'refs/heads/main', eventName: 'workflow_dispatch',
   sourceDirectory: '/source', outputDirectory: '/output' };
 const bases = { slim_base: `ghcr.io/youzini-afk/varin-runtime-slim@${digest('1')}`,
   toolbelt_base: `ghcr.io/youzini-afk/varin-runtime-toolbelt@${digest('2')}` };

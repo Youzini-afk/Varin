@@ -21,7 +21,7 @@ function fixture(t) {
   const source = git('rev-parse', 'HEAD'); git('tag', 'v0.9.42');
   git('commit', '--quiet', '--allow-empty', '-m', 'Current tooling');
   const tooling = git('rev-parse', 'HEAD'); git('remote', 'add', 'origin', cwd);
-  const env = { GITHUB_REPOSITORY: 'Youzini-afk/Varin', GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main',
+  const env = { GITHUB_REPOSITORY: 'Astrmira/Varin', GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main',
     GITHUB_SHA: tooling, INPUT_RELEASE_REF: 'v0.9.42' };
   const candidate = resolveImageRelease(env, cwd);
   const images = Object.fromEntries(['standard_app', 'toolbelt_app', 'slim_base', 'toolbelt_base'].map((key, index) =>
@@ -61,9 +61,9 @@ test('resume reads the original successful builder, not overall run status or a 
   const bytes = fs.readFileSync(archive), hash = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
   assert.deepEqual(readReleaseBuildArchive(bytes, hash), f.result);
   assert.throws(() => readReleaseBuildArchive(Buffer.concat([bytes, Buffer.from('changed')]), hash), /integrity/);
-  const root = 'repos/Youzini-afk/Varin/actions';
+  const root = 'repos/Astrmira/Varin/actions';
   const run = { id: 42, workflow_id: 17, path: '.github/workflows/docker.yml', event: 'push',
-    head_branch: 'v0.9.42', head_sha: f.source, repository: { full_name: 'Youzini-afk/Varin', id: 19 }, conclusion: 'failure' };
+    head_branch: 'v0.9.42', head_sha: f.source, repository: { full_name: 'Astrmira/Varin', id: 19 }, conclusion: 'failure' };
   const artifact = { id: 80, name: 'varin-container-build-1', digest: hash, expired: false,
     workflow_run: { id: 42, head_sha: f.source, repository_id: 19, head_repository_id: 19 } };
   const data = new Map([
