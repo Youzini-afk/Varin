@@ -49,6 +49,7 @@
 
 ## 持续演进的设计
 
+- [会话协作与外部执行者](design/conversation-collaboration-and-executors.md)：设计提案；原生主任务与 Bot 跨会话协作、外部程序发现与无预设派发，以及 Codex／Claude Code／Pi／ACP 的能力、监控和生命周期完善。对外 MCP／CLI／Skill 协作桥接暂缓。
 - [聊天定点引用与可拖动输入标记](design/chat-quoting-and-draggable-markers.md)：实施中；按选区／正文块或具体对象引用，在输入框用可拖动的引用与图片标记安排位置，统一撤销、附件交付和历史定位，内部来源信息不再拼入模型正文。
 - [文件与终端编码](design/text-encoding.md)：设计提案；GBK／GB2312 项目的无感读改写、原格式保存、统一文件文本能力，以及独立的终端 I/O 合同，尚未实施。
 - [插件中心、公开收录目录与作者发行来源](design/plugin-center-and-marketplace.md)：设计方案；市场维护列表展示资料，安装更新直连作者来源，插件配置与业务状态由插件页面负责。包含公开站点、发行包、账号接入及实施验收设计。

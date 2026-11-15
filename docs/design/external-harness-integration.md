@@ -4,6 +4,8 @@
 
 当前实现与支持边界见[外部 Agent](../external-agents.md)。按用户本轮决定，D/E 的 CLI、Skills、MCP 能力共享暂缓；F 的恢复增强、外部已有历史导入和未声明的 ACP 文件/终端回调留待后续。下文保留完整目标，不能作为这些后续能力已经可用的说明。
 
+2026-11-15 的后续设计见[会话协作与外部执行者](conversation-collaboration-and-executors.md)：原生跨会话联系、外部执行者直接发现与派发，以及现有适配完善以该稿为准。对外协作桥接继续暂缓；本文第 12 节保留的能力共享设想不属于本轮实施范围。
+
 本文整理已讨论的产品方向、架构边界、界面交互和实现顺序。接口名称及示例是目标语义，正式实现时以公共 API、私有 schema 和实际后端协议为准。
 现行机制仍见[架构](../architecture.md)、[运行时](../runtime.md)、[Agent 协作](../collaboration.md)、[资源](../resources.md)与[工作台](../workbench.md)。
 
