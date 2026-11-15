@@ -20,7 +20,7 @@ import type { ThreadIdentity, ThreadSource } from '@varin/application-client';
 import type { DocumentAuthority } from '../documents/authority.js';
 import type { ContextPreparer } from './thread-context.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
-import type { ChildPreparationProgress, DelegatedExecution, InputResourcePreparation, KernelWorkingResultCandidate } from './protocol.generated.js';
+import type { ChildPreparationProgress, DelegatedExecution, InputResourcePreparation, KernelWorkingResultCandidate, UnacceptedChildDependencies } from './protocol.generated.js';
 
 export interface ThreadCollaborationOwners {
   prepareProjectSource?: import('./child-project-source.js').ChildProjectSourcePreparer;
@@ -166,8 +166,15 @@ export class ThreadCollaboration {
         const children = await this.owners.runtime.children(epoch.signal);
         this.owners.kernel.reconcileChildToolHandoffs(children);
         const executions = await this.owners.runtime.childExecutions(undefined, epoch.signal);
-        const unaccepted = await this.owners.runtime.unacceptedChildDependencies(epoch.signal);
-        for (const source of unaccepted) {
+        let unaccepted: UnacceptedChildDependencies[] | undefined;
+        try { unaccepted = await this.owners.runtime.unacceptedChildDependencies(epoch.signal); }
+        catch (error) {
+          // Failed cleanup discovery retains its original dependencies for a later wake;
+          // it cannot block accepted children or independently committed Run launches.
+          if (!epoch.signal.aborted) this.owners.onError(undefined, error);
+        }
+        epoch.signal.throwIfAborted();
+        if (unaccepted) for (const source of unaccepted) {
           if (this.cleaningSources.has(source.operation_id)) continue;
           if (this.owners.canExecuteThread && !await this.owners.canExecuteThread(source.parent_thread_id)) continue;
           const cleanup = this.releaseUnacceptedSource(source, epoch.signal).catch(error => {
