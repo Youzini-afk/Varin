@@ -223,3 +223,23 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## External execution product marks
+
+`packages/ui/src/assets/harness-logos` includes the dedicated Codex mark from OpenAI's
+[AGENTS.md project](https://github.com/agentsmd/agents.md) (MIT, Copyright (c) 2025 OpenAI),
+the Pi website mark (MIT, Copyright (c) 2026 Earendil Inc. and contributors), and the
+OpenCode Mark paths (MIT, Copyright (c) 2025 opencode). Their full licenses are distributed
+in `packages/web/public/licenses/agentsmd-LICENSE.txt`, `pi-website-LICENSE.txt`, and
+`opencode-LICENSE.txt`.
+
+Gemini CLI's official IDE companion icon and Kimi Code CLI's official web icon are incorporated
+under Apache-2.0. The unchanged licenses are in `packages/web/public/licenses/gemini-cli-LICENSE.txt`
+and `kimi-LICENSE.txt`; Kimi's upstream notice (Copyright 2025 Moonshot AI) is preserved in
+`kimi-NOTICE.txt`. Cursor's unchanged 2D cube light/dark marks come from the official
+[Cursor brand resources](https://cursor.com/brand), provided by Anysphere, Inc. to represent Cursor.
+Claude Code reuses the LobeHub Claude SVG covered above.
+
+These marks identify compatible external products and do not imply their endorsement. Exact source
+paths, adaptations, theme treatment and intentional neutral fallbacks are recorded in
+[`harness-logos/README.md`](packages/ui/src/assets/harness-logos/README.md).

@@ -17,10 +17,12 @@ import {
   type ExternalItem,
   type ExternalTurn,
   type ExternalObservation,
+  type ExternalSendOptions,
 } from '@varin/application-client';
 import { useExternalAgents, useExternalAgentStore } from '@/stores/useExternalAgentStore';
 import { EMPTY_THREAD_DRAFT, useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useI18n } from '@/lib/i18n';
 import { ThreadComposer } from './ThreadComposer';
 import { HarnessSelector } from './HarnessSelector';
@@ -54,6 +56,8 @@ import { ThreadAttachments, ThreadFileDrafts } from './ThreadAttachments';
 
 const describe = (value: unknown): string =>
   typeof value === 'string' ? value : value === undefined ? '' : JSON.stringify(value, null, 2);
+const inputConfirmed = (turn: ExternalTurn): boolean =>
+  !turn.steering || ['appended', 'queued', 'handled'].includes(turn.steering.state);
 const heading = (item: ExternalItem) => {
   if (!item.tool) return item.text.split('\n').find((v) => v.trim()) ?? '';
   const input =
@@ -318,14 +322,18 @@ function Messages({
       last.push(item);
     else groups.push([item]);
   }
+  // Supplements can interleave their own input receipt with one real turn's
+  // output. Its completion belongs after the last group, not every boundary.
+  const lastGroupByTurn = new Map(groups.map((group, index) => [group[0]!.turnId, index]));
   return (
     <>
       {groups.map((group, index) => {
         const receipt = receipts.find((turn) => turn.id === group[0]!.turnId);
         const ended =
           receipt &&
+          !receipt.consumedByTurnId && !receipt.steering &&
           ['completed', 'failed', 'cancelled', 'interrupted'].includes(receipt.status) &&
-          groups[index + 1]?.[0]?.turnId !== receipt.id;
+          lastGroupByTurn.get(receipt.id) === index;
         return (
           <React.Fragment key={group[0]!.id}>
             {group.length === 1 ? (
@@ -379,6 +387,8 @@ export function ExternalConversationView({ id, readOnly = false, turnId }: { id:
 }
 function ExternalConversationSession({ id, host, readOnly, turnId }: { id: string; host: number; readOnly: boolean; turnId?: string }) {
   const { t } = useI18n();
+  const followUpBehavior = useMessageQueueStore(state => state.followUpBehavior);
+  const submitMode = React.useRef<'boundary' | 'next_run' | undefined>(undefined);
   const snapshotPublisher = React.useRef({}).current;
   const api = React.useMemo(() => createExternalAgentsHttpAPI(host), [host]);
   const settings = useExternalAgents();
@@ -571,12 +581,19 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
     }
   }, [earlier]);
   React.useEffect(() => {
-    if (!draft.externalInput || !snapshot?.turns.some((turn) => turn.key === draft.externalInput!.key))
+    if (!draft.externalInput) return;
+    const receipt = snapshot?.turns.find(turn => turn.key === draft.externalInput!.key);
+    if (!receipt) return;
+    if (receipt.steering?.state === 'rejected') {
+      setFailure(new ExternalAgentError('steering_rejected', receipt.steering.error ?? t('external.steeringRejected')));
+      useThreadDraftStore.getState().patch(key, { externalInput: undefined, externalInputOptions: undefined, externalInputSnapshot: undefined });
       return;
-    useThreadDraftStore.getState().patch(key, current => ({ externalInput: undefined, externalInputSnapshot: undefined,
+    }
+    if (!inputConfirmed(receipt)) return;
+    useThreadDraftStore.getState().patch(key, current => ({ externalInput: undefined, externalInputOptions: undefined, externalInputSnapshot: undefined,
       ...acknowledgeDraftMarkers(current, draft.externalInputSnapshot?.editorText ?? draft.externalInput!.text, draft.externalInputSnapshot?.markerObjectIds, draft.externalInputSnapshot?.markerOccurrenceIds, draft.externalInputSnapshot),
     }));
-  }, [snapshot?.turns, draft.externalInput, draft.externalInputSnapshot, key]);
+  }, [snapshot?.turns, draft.externalInput, draft.externalInputSnapshot, key, t]);
   const act = async (operation: () => Promise<unknown>, refresh = false) => {
     if (acting.current || !isCurrent()) return;
     acting.current = true;
@@ -590,6 +607,26 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
       acting.current = false;
       if (isCurrent()) setPending(false);
     }
+  };
+  const sendPreparedInput = async (request: NonNullable<typeof draft.externalInput>, delivery: ExternalSendOptions | undefined,
+    captured: typeof draft.externalInputSnapshot) => {
+    try {
+      const receipt = delivery ? await api.send(id, request.key, request, delivery) : await api.send(id, request.key, request);
+      if (!isCurrent()) return;
+      if (receipt.steering?.state === 'rejected') throw new ExternalAgentError('steering_rejected', receipt.steering.error ?? t('external.steeringRejected'));
+      if (!inputConfirmed(receipt)) { await refreshView.current(); return; }
+    } catch (error) {
+      if (isCurrent() && error instanceof ExternalAgentError && error.status >= 400 && error.status < 500
+        && error.code !== 'host_changed' && error.code !== 'input_changed')
+        patch({ externalInput: undefined, externalInputOptions: undefined, externalInputSnapshot: undefined });
+      throw error;
+    }
+    if (!isCurrent()) return;
+    const current = useThreadDraftStore.getState().drafts[key];
+    patch({ ...(current ? acknowledgeDraftMarkers(current, captured?.editorText ?? request.text, captured?.markerObjectIds, captured?.markerOccurrenceIds, captured) : {}),
+      externalInput: undefined, externalInputOptions: undefined, externalInputSnapshot: undefined });
+    follow.current = true;
+    await useExternalAgentStore.getState().refresh();
   };
   const insertImageReference = (number: number) => {
     const object = useThreadDraftStore.getState().drafts[key]?.markerObjects?.find(object => object.kind === 'image' && object.number === number);
@@ -609,10 +646,12 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
   const c = snapshot.conversation,
     activeTurn = c.activeTurn,
     active = snapshot.turns.find((v) => v.id === activeTurn);
-  const last = snapshot.turns.at(-1),
-    queued = snapshot.turns.filter((v) => v.status === 'queued');
+  const last = snapshot.turns.filter(turn => !turn.steering && !turn.consumedByTurnId).at(-1),
+    queued = snapshot.turns.filter((v) => v.status === 'queued' && !v.steering);
   const capabilities = snapshot.capabilities ?? settings?.capabilityCache?.[c.configurationId]?.capabilities;
   const capabilitiesSource = snapshot.capabilities ? snapshot.capabilitiesSource ?? (snapshot.connected ? 'live' : 'cached') : capabilities ? 'cached' : undefined;
+  const canSteer = Boolean(snapshot.connected && capabilitiesSource === 'live' && capabilities?.steering && active && ['running', 'waiting_user'].includes(active.status));
+  const deliveryMode = canSteer && followUpBehavior !== 'queue' ? 'steer' : 'next_turn';
   const model = draft.externalModels?.[c.configurationId] ?? '';
   const unresolvedInput = Boolean(draft.externalInput && !pending);
   const options = draft.externalOptions?.[c.configurationId] ?? {};
@@ -622,8 +661,10 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
     externalOptions: { ...draft.externalOptions, [c.configurationId]: { thinking: value.thinking, mode: value.mode, config: value.config } },
   });
   const errorText = failure instanceof Error ? failure.message : failure ? String(failure) : error;
-  const messages = [...new Map([...earlier, ...snapshot.items].map((item) => [item.id, item])).values()].filter(item => !turnId || item.turnId === turnId);
-  const controls = <button type="button" title={t('external.details')} onClick={() => setDetails(true)}><HarnessSelector value={c.configurationId} /></button>;
+  const consumedTurnId = turnId ? snapshot.turns.find(turn => turn.id === turnId)?.consumedByTurnId : undefined;
+  const messages = [...new Map([...earlier, ...snapshot.items].map((item) => [item.id, item])).values()]
+    .filter(item => !turnId || item.turnId === turnId || item.turnId === consumedTurnId);
+  const controls = <button type="button" title={t('external.details')} onClick={() => setDetails(true)}><HarnessSelector value={c.configurationId} harness={c.harness} /></button>;
   return (
     <section className="regular-chat-view relative flex h-full min-h-0 min-w-0 flex-col">
       <div ref={track} className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1">
@@ -680,15 +721,17 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
                     <p className="line-clamp-2 whitespace-pre-wrap">{draft.externalInput!.text}</p>
                     <Button
                       variant="ghost"
-                      disabled={pending || c.needsReview}
+                      disabled={pending || c.needsReview && draft.externalInputOptions?.mode !== 'steer'}
                       onClick={() =>
                         void act(async () => {
-                          const ready = await ensureConnected(); if (!ready || !isCurrent()) return;
-                          if (!ready.connected || ready.capabilitiesSource === 'cached') throw new Error(t('external.prepareHint'));
+                          // A strict supplement retry reconciles its original receipt. Do not
+                          // restart a connection or require a still-active target to read it.
+                          if (draft.externalInputOptions?.mode !== 'steer') {
+                            const ready = await ensureConnected(); if (!ready || !isCurrent()) return;
+                            if (!ready.connected || ready.capabilitiesSource === 'cached') throw new Error(t('external.prepareHint'));
+                          }
                           const request = draft.externalInput!;
-                          await api.send(id, request.key, request);
-                          if (!isCurrent()) return;
-                          patch({ externalInput: undefined, externalInputSnapshot: undefined, ...acknowledgeDraftMarkers(useThreadDraftStore.getState().drafts[key], draft.externalInputSnapshot?.editorText ?? request.text, draft.externalInputSnapshot?.markerObjectIds, draft.externalInputSnapshot?.markerOccurrenceIds, draft.externalInputSnapshot) });
+                          await sendPreparedInput(request, draft.externalInputOptions, draft.externalInputSnapshot);
                         })
                       }
                     >
@@ -730,12 +773,18 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
               <form
                 onSubmit={(event) => {
                   event.preventDefault();
+                  const requestedMode = submitMode.current;
+                  submitMode.current = undefined;
                   if (acting.current || pending || unresolvedInput || c.needsReview || capabilities?.images === false && hasDraftInlineImages(draft) || (!draft.text.trim() && !draft.images.length && !draft.files?.length && !draft.markerObjects?.length)) return;
                   const originalText = draft.text, originalImages = draft.images, originalFiles = draft.files;
+                  const mode = requestedMode === 'boundary' ? 'steer' : requestedMode === 'next_run' ? 'next_turn' : deliveryMode;
+                  const delivery: ExternalSendOptions | undefined = mode === 'steer' ? { mode, expectedTurnId: activeTurn } : active || requestedMode ? { mode: 'next_turn' } : undefined;
                   void act(async () => {
+                    if (mode === 'steer' && !canSteer) throw new ExternalAgentError('steering_unavailable', t('external.steeringUnavailable'));
                     const ready = await ensureConnected(); if (!ready || !isCurrent()) return;
                     if (!ready.connected || !ready.capabilities || ready.capabilitiesSource === 'cached' || ready.conversation.needsReview) throw new Error(t(ready.conversation.needsReview ? 'external.review' : 'external.prepareHint'));
                     if (hasDraftInlineImages(draft) && !ready.capabilities.images) throw new Error(t('external.imagesUnsupported'));
+                    if (mode === 'steer' && (!ready.capabilities.steering || ready.conversation.activeTurn !== delivery?.expectedTurnId)) throw new ExternalAgentError('steering_unavailable', t('external.steeringUnavailable'));
                     if (draft.files?.some(file => !externalAttachmentSupported(ready.capabilities, file))) throw new Error(t('external.filesUnsupported'));
                     const attachments = draft.externalInput ? [] : await prepareDraftFiles(key, draft.files ?? [], `external:${id}`,
                       (file, signal) => api.uploadAttachment(id, { key: file.uploadKey ?? file.id, filename: file.filename, mimeType: file.mimeType, data: file.data }, signal));
@@ -744,34 +793,17 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
                     if (!isCurrent()) return;
                     const request = draft.externalInput ?? { key: crypto.randomUUID(), text: draft.text, ...quotedFiles,
                       images: (await prepareDraftMarkerImages(draft)).map(v => ({ data: v.data, mimeType: v.mimeType, reference: v.reference })),
-                      ...externalSessionInput(normalizeExternalSessionChoice(choice, ready.capabilities), ready.capabilities) };
+                      ...(mode === 'steer' ? {} : externalSessionInput(normalizeExternalSessionChoice(choice, ready.capabilities), ready.capabilities)) };
                     if (!isCurrent()) return;
                     const captured = draft.externalInputSnapshot ?? { editorText: originalText, markerObjectIds: draft.markerObjects?.map(object => object.id), markerOccurrenceIds: draft.references?.map(reference => reference.id), images: originalImages, fileIds: originalFiles?.map(file => file.id) };
-                    patch({ externalInput: request, externalInputSnapshot: captured });
-                    try {
-                      await api.send(id, request.key, request);
-                    } catch (error) {
-                      if (
-                        isCurrent() && error instanceof ExternalAgentError &&
-                        error.status >= 400 &&
-                        error.status < 500 &&
-                        error.code !== 'host_changed' &&
-                        error.code !== 'input_changed'
-                      )
-                        patch({ externalInput: undefined, externalInputSnapshot: undefined });
-                      throw error;
-                    }
-                    if (!isCurrent()) return;
-                    const current = useThreadDraftStore.getState().drafts[key];
-                    patch({
-                      ...(current ? acknowledgeDraftMarkers(current, captured.editorText, captured.markerObjectIds, captured.markerOccurrenceIds, captured) : {}),
-                      externalInput: undefined, externalInputSnapshot: undefined,
-                    });
-                    follow.current = true;
-                    await useExternalAgentStore.getState().refresh();
+                    patch({ externalInput: request, externalInputOptions: delivery, externalInputSnapshot: captured });
+                    await sendPreparedInput(request, delivery, captured);
                   });
                 }}
               >
+                {failure instanceof ExternalAgentError && failure.code.startsWith('steering_') && !unresolvedInput && <div className="chat-input-column mb-2">
+                  <Button type="submit" variant="ghost" disabled={pending || c.needsReview} onClick={() => { submitMode.current = 'next_run'; }}>{t('external.sendNextTurn')}</Button>
+                </div>}
                 <input type="file" accept="image/*" multiple hidden ref={imageInput} onChange={event => {
                   const files = [...(event.target.files ?? [])]; event.target.value = ''; addFiles(files);
                 }} />
@@ -798,7 +830,8 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
                   thinkingLevel="off"
                   onModelChange={() => {}}
                   backendControls={controls}
-                  external={{ capabilities, source: capabilitiesSource, choice, disabled: pending || unresolvedInput, retryDisabled: Boolean(active) || queued.length > 0, retryDisabledReason: snapshot.connected && capabilities?.resume === false && !capabilities.modelsRefresh ? t('external.reconnectUnsupported') : undefined, onChange: changeChoice,
+                  prepareSendMode={mode => { submitMode.current = mode; }}
+                  external={{ capabilities, source: capabilitiesSource, choice, delivery: active ? { mode: deliveryMode, canSteer } : undefined, disabled: pending || unresolvedInput, retryDisabled: Boolean(active) || queued.length > 0, retryDisabledReason: snapshot.connected && capabilities?.resume === false && !capabilities.modelsRefresh ? t('external.reconnectUnsupported') : undefined, onChange: changeChoice,
                     onInteract: kind => { if (kind !== 'input' || !failure) void ensureConnected().catch(() => {}); }, onRetryModels: () => { void ensureConnected(capabilities?.modelsRefresh ? 'models' : true).catch(() => {}); } }}
                   connectionStatus={<ExternalConnectionStatus snapshot={snapshot} name={settings?.agents.find(agent => agent.id === c.configurationId)?.name}
                     busy={connecting} cancelling={cancelling} error={failure ?? (errorText || undefined)} reconnectDisabled={pending || Boolean(active) || queued.length > 0}

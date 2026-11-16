@@ -7,6 +7,7 @@ import {
   parseConversationOrganizationPlacement,
   type ExternalAgentSettings,
   type ExternalInput,
+  type ExternalSendOptions,
 } from '@varin/application-client';
 import type { ExternalAgentsService } from './service.js';
 
@@ -90,7 +91,7 @@ export function registerExternalAgentRoutes(
   const fields: Record<string, string[]> = {
     settings: ['resourceOwner'],
     configure: ['value', 'expectedRevision', 'key'],
-    detect: ['id'],
+    detect: ['id', 'resourceOwner'],
     list: [],
     children: [],
     'child-presentation': ['operationId'],
@@ -100,7 +101,7 @@ export function registerExternalAgentRoutes(
     authenticate: ['id', 'methodId'],
     continue: ['id'],
     disconnect: ['id'],
-    send: ['id', 'key', 'input'],
+    send: ['id', 'key', 'input', 'options'],
     stop: ['id', 'turnId', 'force'],
     respond: ['id', 'requestId', 'response'],
     update: ['id', 'expectedRevision', 'patch'],
@@ -131,7 +132,7 @@ export function registerExternalAgentRoutes(
             );
             break;
           case 'detect':
-            result = await service.detect(string(body.id), controller.signal);
+            result = await service.detect(string(body.id), controller.signal, body.resourceOwner === undefined ? undefined : parseSourceResourceOwner(body.resourceOwner));
             break;
           case 'list':
             result = (await service.list(controller.signal)).filter(conversation => (conversation.principalId ?? null) === owner);
@@ -146,6 +147,7 @@ export function registerExternalAgentRoutes(
               name: c.name,
               avatar: c.avatar ?? undefined,
               harness: c.binding.harness,
+              configurationId: c.binding.configuration_id,
               state: c.report && !c.resources_released ? 'settling' : c.state,
               turnId: c.turn_id ?? undefined,
               reportReady: Boolean(c.report) && c.receipt_published,
@@ -193,6 +195,7 @@ export function registerExternalAgentRoutes(
               string(body.id),
               string(body.key),
               object(body.input) as unknown as ExternalInput,
+              ...(body.options === undefined ? [] : [object(body.options) as ExternalSendOptions]),
             );
             break;
           case 'stop':

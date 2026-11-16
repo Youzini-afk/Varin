@@ -74,7 +74,7 @@ pub(super) fn external_report(
     tx: &Transaction<'_>,
     child: &super::external_children::ExternalChild,
 ) -> Result<()> {
-    if super::bot::thread_bot(tx, &child.parent_thread_id)?.is_some() {
+    if child.message_kind.is_some() || super::bot::thread_bot(tx, &child.parent_thread_id)?.is_some() {
         event(
             tx,
             "bot-work-pending",
@@ -327,7 +327,8 @@ pub fn deliver(owner: &std::sync::Mutex<Catalog>) -> Result<()> {
                                 name: child.name.clone(), status: child.report.as_ref().and_then(|r| r.get("outcome")).cloned().unwrap_or_else(|| json!(child.state)) };
                             Either::External(read,identity)
                         };
-                        let passive = db.run(&child.parent_run_id)?.cancel_requested || delivered;
+                        let passive = db.run(&child.parent_run_id)?.cancel_requested || delivered
+                            || super::bot::thread_bot(&db.db, &child.parent_thread_id)?.is_none();
                         (content, publication, epoch, body, passive)
                     }
                     _ => return Err(RuntimeError::Invalid("unknown work update".into())),
@@ -389,6 +390,12 @@ pub fn deliver(owner: &std::sync::Mutex<Catalog>) -> Result<()> {
                 report_attachments = serde_json::from_value(report.get("attachments").cloned().unwrap_or_else(|| json!([])))?;
                 let next = json!({"tool":collaboration::REPORT_TOOL,"arguments":{"target":identity.execution.reference}});
                 model_data = Some(identity.model(report["page"]["next_offset"].is_number(), next));
+                if let Some(actual) = report["report"]["executionRef"].as_str() {
+                    let model = model_data.as_mut().expect("external report projection");
+                    model["requestRef"] = json!(identity.execution.reference);
+                    model["executionRef"] = json!(actual);
+                    model["sharedExecution"] = report["report"]["sharedExecution"].clone();
+                }
                 let answer = [report["report"]["detail"].as_str().unwrap_or_default(), report["page"]["text"].as_str().unwrap_or_default()]
                     .into_iter().filter(|text| !text.is_empty()).collect::<Vec<_>>().join("\n\n");
                 let (preview, partial) = report_preview(&answer);

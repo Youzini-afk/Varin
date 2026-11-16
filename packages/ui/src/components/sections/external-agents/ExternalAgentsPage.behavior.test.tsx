@@ -2,19 +2,21 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { ExternalAgentsAPI, ExternalAgentSettings } from '@varin/application-client';
+import type { ExternalAgentsAPI, ExternalAgentSettings, ProjectEntry } from '@varin/application-client';
 import { ExternalAgentsPage } from './ExternalAgentsPage';
 import { externalAgentEn } from '@/lib/i18n/messages/external-agents';
 import { openExternalUrl } from '@/lib/url';
+import type { SourceResourceOwner } from '@varin/protocol';
 
 const f = vi.hoisted(() => ({ host: 1, listeners: new Set<() => void>(), settings: undefined as ExternalAgentSettings | undefined,
-  detect: vi.fn<ExternalAgentsAPI['detect']>(), configure: vi.fn<ExternalAgentsAPI['configure']>(), refresh: vi.fn(async () => {}) }));
+  projects: [] as ProjectEntry[], read: vi.fn<ExternalAgentsAPI['settings']>(), detect: vi.fn<ExternalAgentsAPI['detect']>(), configure: vi.fn<ExternalAgentsAPI['configure']>(), refresh: vi.fn(async () => {}) }));
 vi.mock('@varin/application-client', () => ({
   getRuntimeEndpointGeneration: () => f.host,
   subscribeRuntimeEndpointChanged: (listener: () => void) => { f.listeners.add(listener); return () => f.listeners.delete(listener); },
-  createExternalAgentsHttpAPI: () => ({ detect: f.detect, configure: f.configure }),
+  createExternalAgentsHttpAPI: () => ({ settings: f.read, detect: f.detect, configure: f.configure }),
 }));
 vi.mock('@/lib/i18n', () => { const t = (key: string) => (externalAgentEn as Record<string, string>)[key] ?? key; return { useI18n: () => ({ t }) }; });
+vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (select: (state: { projects: ProjectEntry[] }) => unknown) => select({ projects: f.projects }) }));
 vi.mock('@/stores/useExternalAgentStore', () => ({ useExternalAgents: () => f.settings,
   useExternalAgentStore: Object.assign(() => null, { getState: () => ({ refresh: f.refresh }) }) }));
 vi.mock('@/lib/url', () => ({ openExternalUrl: vi.fn(async () => true) }));
@@ -39,18 +41,16 @@ vi.mock('@/components/ui/select', async () => {
 });
 vi.mock('@/components/ui/button', () => ({ Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => <button {...props} /> }));
 vi.mock('@/components/ui/input', () => ({ Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} /> }));
-vi.mock('@/components/ui/switch', () => ({ Switch: ({ checked, disabled, onCheckedChange, ...props }: { checked: boolean; disabled: boolean; onCheckedChange(value: boolean): void; 'aria-label': string }) =>
-  <button {...props} disabled={disabled} role="switch" aria-checked={checked} onClick={() => onCheckedChange(!checked)} /> }));
 let root: Root, container: HTMLDivElement;
 beforeEach(() => {
-  vi.clearAllMocks(); f.host++;
+  vi.clearAllMocks(); f.host++; f.projects = [];
   // Metadata is supplied by the Host, rather than a renderer-owned installation registry.
   f.settings = { revision: 7, defaultAgent: null, profiles: [
     { id: 'named', name: 'Named ACP', harness: 'acp', description: 'Host-provided description', platforms: ['linux', 'darwin'],
       launch: { command: '/host/bin/agent', args: ['--acp'] }, authentication: 'Run the original CLI login yourself.',
       compatibility: 'The installed release negotiates its actual capabilities.', installUrl: 'https://example.test/agent/setup' },
   ], agents: [
-    { id: 'named', name: 'Named ACP', harness: 'acp', enabled: false, command: '/host/bin/agent', args: ['--acp'] },
+    { id: 'named', name: 'Named ACP', harness: 'acp', enabled: true, command: '/host/bin/agent', args: ['--acp'] },
     { id: 'custom', name: 'Custom ACP', harness: 'acp', enabled: false, command: 'custom', args: [] },
   ] };
   f.detect.mockImplementation(async id => ({ id, status: 'available', version: '1.2.3' }));
@@ -75,10 +75,10 @@ it('shows Host profile guidance and installation-only detection without auto log
   await act(async () => button('Installation and setup guide').click());
   expect(openExternalUrl).toHaveBeenCalledExactlyOnceWith('https://example.test/agent/setup');
 });
-it('toggles a built-in configuration without changing launch arguments or inventing authentication status', async () => {
+it('enables a built-in configuration without changing launch arguments or inventing authentication status', async () => {
   await render();
-  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Named ACP · Enable in Varin"]')!.click());
-  expect(f.configure).toHaveBeenCalledWith({ agents: [{ ...f.settings!.agents[0], enabled: true }, f.settings!.agents[1]], defaultAgent: null }, 7, expect.any(String));
+  await act(async () => namedRow().querySelector<HTMLButtonElement>('[data-option="enabled"]')!.click());
+  expect(f.configure).toHaveBeenCalledWith({ agents: [{ ...f.settings!.agents[0], enabled: true, availability: 'enabled' }, f.settings!.agents[1]], defaultAgent: null }, 7, expect.any(String));
   expect(container.textContent).not.toContain('Authenticated');
 });
 it('discards old Host detection results and aborts the original observation when the Host changes', async () => {
@@ -113,7 +113,7 @@ it('offers only cached Host defaults and persists explicit choices on Save, with
   expect(f.configure).toHaveBeenCalledWith({ agents: [
     { ...f.settings!.agents[0], defaults: { model: 'reasoner', thinking: 'high', mode: 'plan' } }, f.settings!.agents[1],
   ], defaultAgent: null }, 7, expect.any(String));
-  expect(f.detect).toHaveBeenCalledTimes(2);
+  expect(f.detect).toHaveBeenCalledTimes(1);
 });
 
 it('clears model-specific thinking and preserves unsaved defaults through a metadata refresh', async () => {
@@ -135,4 +135,37 @@ it('keeps an unavailable saved default visible and clearable without inventing c
   await act(async () => namedRow().querySelector<HTMLButtonElement>('[data-option="inherit"]')!.click());
   await saveNamed();
   expect(f.configure.mock.calls[0]![0].agents[0]).not.toHaveProperty('defaults');
+});
+
+it('offers auto-discovery only for known profiles and keeps disablement explicit', async () => {
+  await render();
+  const custom = [...container.querySelectorAll('section')].find(node => node.textContent?.includes('Custom ACP'))!;
+  expect(custom.querySelector('[data-option="auto"]')).toBeNull();
+  await act(async () => namedRow().querySelector<HTMLButtonElement>('[data-option="auto"]')!.click());
+  expect(f.configure.mock.lastCall?.[0].agents[0]).toMatchObject({ availability: 'auto', enabled: true });
+  await act(async () => namedRow().querySelector<HTMLButtonElement>('[data-option="disabled"]')!.click());
+  expect(f.configure.mock.lastCall?.[0].agents[0]).toMatchObject({ availability: 'disabled', enabled: false });
+});
+
+it('reads and detects on the selected project device without editing its configuration on the current Host', async () => {
+  const resourceOwner: SourceResourceOwner = {
+    kind: 'managed_host', hostId: 'other-device', connectionId: 'pairing', endpointIdentity: 'endpoint',
+  };
+  f.projects = [{ id: 'project', path: '/other', source: { resourceOwner, workspaceId: 'registered' } }];
+  f.read.mockResolvedValue({ revision: 3, defaultAgent: null, agents: [
+    { id: 'remote-agent', name: 'Remote Agent', harness: 'codex', enabled: true, command: 'codex', args: [] },
+  ] });
+  await render();
+  expect(f.detect.mock.calls.map(([id]) => id)).toEqual(['named']);
+  await act(async () => button('other-device').click());
+  expect(f.read).toHaveBeenCalledWith(expect.any(AbortSignal), resourceOwner);
+  expect(container.textContent).toContain('Remote Agent');
+  expect(container.textContent).not.toContain('Custom ACP');
+  expect(f.detect.mock.calls.map(([id]) => id)).toEqual(['named']);
+  const row = [...container.querySelectorAll('section')].find(node => node.textContent?.includes('Remote Agent'))!;
+  const detect = [...row.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === button('Detect').textContent)!;
+  await act(async () => detect.click());
+  expect(f.detect).toHaveBeenLastCalledWith('remote-agent', expect.any(AbortSignal), resourceOwner);
+  expect(row.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
+  expect(f.configure).not.toHaveBeenCalled();
 });

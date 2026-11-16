@@ -3,6 +3,8 @@ import { useSidebarCatalog, type SidebarConversation as SessionSummary, type Con
 import { useThreadStore } from '@/stores/useThreadStore';
 import { Icon } from '@/components/icon/Icon';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
+import { HarnessIcon } from './HarnessIcon';
+import { openConversationFromNavigation, useExternalAgentStore } from '@/stores/useExternalAgentStore';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,7 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
-import { openThreadFromNavigation, startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
+import { startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { formatSessionCompactDateLabel } from '@/lib/sessionDateLabels';
@@ -47,7 +49,7 @@ const SwitcherNode: React.FC<{
       ? <Icon name="error-warning" className="size-3.5 shrink-0 text-[var(--status-error)]" />
       : attention
         ? <Icon name="notification-3" className="size-3.5 shrink-0 text-[var(--status-warning)]" />
-        : session.harness && !session.parentId ? <Icon name="chat-4" className="size-3.5 shrink-0 text-muted-foreground" /> : null;
+        : null;
   return (
     <>
       <DropdownMenuItem
@@ -55,7 +57,7 @@ const SwitcherNode: React.FC<{
         className={cn('min-w-0 gap-2', currentSessionId === session.id && 'bg-interactive-active')}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
       >
-        {session.harness && !session.parentId ? null : <AgentAvatar identity={session.id} avatar={session.avatar} size={20} {...(session.lead ? { role: 'lead' as const } : {})} />}{icon}
+        {session.harness ? <HarnessIcon harness={session.harness} configurationId={session.configurationId} className="size-5" /> : <AgentAvatar identity={session.id} avatar={session.avatar} size={20} {...(session.lead ? { role: 'lead' as const } : {})} />}{icon}
         <span className="min-w-0 flex-1">
           <span className="block truncate typography-ui-label text-foreground">
             {conversationSessionTitle(session, untitled)}
@@ -88,7 +90,9 @@ export const ThreadSwitcherDropdown: React.FC<ThreadSwitcherDropdownProps> = ({
 }) => {
   const { t } = useI18n();
   const { activeSessions: sessions, attentionBySession } = useSidebarCatalog();
-  const currentSessionId = useThreadStore(state => state.selectedIdentity?.threadId ?? null);
+  const nativeSelectedId = useThreadStore(state => state.selectedIdentity?.threadId ?? null);
+  const externalSelectedId = useExternalAgentStore(state => state.selectedId);
+  const currentSessionId = externalSelectedId ?? nativeSelectedId;
   const pinnedIds = React.useMemo(() => new Set(sessions.filter(session => session.pinned).map(session => session.id)), [sessions]);
   const projects = useProjectsStore((state) => state.projects);
   const untitled = t('sessions.sidebar.session.untitled');
@@ -109,7 +113,7 @@ export const ThreadSwitcherDropdown: React.FC<ThreadSwitcherDropdownProps> = ({
 
   const select = React.useCallback(async (session: SessionSummary) => {
     try {
-      await openThreadFromNavigation({ directory: session.cwd, threadId: session.id });
+      await openConversationFromNavigation({ directory: session.cwd, threadId: session.id });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }

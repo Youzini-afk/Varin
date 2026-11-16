@@ -474,6 +474,9 @@ fn capture_roots(db: &Connection, check: &dyn Fn() -> WorkResult<()>, at_root: &
             UNION ALL SELECT json_extract(p.value,'$.body') FROM run_launches l,json_each(l.body,'$.selection.policy_models') p");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.snapshot_ref') FROM calendar_projects UNION ALL SELECT json_extract(body,'$.instruction_ref') FROM calendar_definitions UNION ALL SELECT json_extract(body,'$.input_ref') FROM calendar_definitions UNION ALL SELECT json_extract(body,'$.instruction_ref') FROM calendar_occurrences");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.inputRef') FROM external_turns UNION ALL SELECT body FROM external_items UNION ALL SELECT json_extract(body,'$.input_ref') FROM external_children UNION ALL SELECT json_extract(body,'$.report') FROM external_children");
+        // External items may be updated while streaming. The original reader's typed,
+        // held snapshot retains exactly the observed versions for fixed pagination.
+        roots.push_str(" UNION ALL SELECT json_extract(target,'$.snapshotRef') FROM model_references WHERE owner='external_history' AND EXISTS(SELECT 1 FROM model_reference_holders h WHERE h.reference_id=model_references.id)");
         roots.push_str(" UNION ALL SELECT json_extract(data,'$.host_job_stop.receipt.result_ref') FROM events WHERE kind='operation.executor_stopped' AND json_extract(data,'$.host_job_stop') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(data,'$.content_ref') FROM events WHERE kind='followup.source_observed' AND json_extract(data,'$.content_ref') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT content_ref FROM followup_events WHERE content_ref IS NOT NULL");

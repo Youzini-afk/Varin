@@ -533,7 +533,7 @@ fn context_observation_family_original_is_historical_data_not_current_source_aut
         .load(&|| false)
         .is_ok()
     );
-    db.create_thread("unrelated", "unrelated-main").unwrap();
+    db.create_thread_with_principal("unrelated", "unrelated-main", Some("other-user")).unwrap();
     assert!(
         db.capture_family_read("unrelated", Some("thread"), Some("main"))
             .unwrap()

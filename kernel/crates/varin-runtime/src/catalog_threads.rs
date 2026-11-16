@@ -169,11 +169,46 @@ pub(super) fn require_branch_available(db: &Connection, branch: &str) -> Result<
     Ok(())
 }
 
-/// Internal investigations are controlled through their parent Operation.
+/// Internal investigations are controlled through their parent Operation. Existing
+/// lifecycle/input callers retain this narrower guard; product access is separate below.
 pub(super) fn require_public(db:&Connection,thread:&str)->Result<()> {
     let internal:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM child_tasks c JOIN operations o ON o.id=c.id WHERE c.child_thread_id=?1 AND json_extract(o.body,'$.executor')='code_retrieval')",
         [thread],|row|row.get(0))?;
     if internal {return Err(RuntimeError::Conflict("Internal retrieval belongs to its original code_retrieval Operation; use retrieval_control to inspect, wait or stop it".into()));}
+    Ok(())
+}
+
+/// Summary, memory and context maintenance also stay outside product collaboration.
+pub(super) fn require_product_caller(db: &Connection, caller: &str) -> Result<()> {
+    require_available(db, caller)?;
+    let hidden: Option<String> = db.query_row(
+        "SELECT hidden_kind FROM threads WHERE id=?1", [caller], |row| row.get(0),
+    )?;
+    if hidden.is_some() {
+        return Err(RuntimeError::Conflict("Internal work is not a product conversation; use its original owner to inspect or control it".into()));
+    }
+    Ok(())
+}
+
+/// Collaboration follows the existing authenticated product scope, not delegation ancestry.
+/// NULL is the local/public scope, not authority to read another authenticated principal.
+/// This grants conversation reads and message delivery only, never resource or lifecycle rights.
+pub(super) fn accessible_conversation(db: &Connection, caller: &str, target: &str) -> Result<bool> {
+    db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM threads caller JOIN threads target ON target.id=?2
+         WHERE caller.id=?1 AND caller.principal_id IS target.principal_id
+         AND caller.hidden_kind IS NULL AND target.hidden_kind IS NULL
+         AND caller.deleted_at_ms IS NULL AND target.deleted_at_ms IS NULL)",
+        params![caller, target], |row| row.get(0),
+    ).map_err(Into::into)
+}
+
+pub(super) fn require_conversation_access(db: &Connection, caller: &str, target: &str) -> Result<()> {
+    require_product_caller(db, caller)?;
+    require_product_caller(db, target)?;
+    if !accessible_conversation(db, caller, target)? {
+        return Err(RuntimeError::Conflict("Conversation is outside the caller's accessible product scope".into()));
+    }
     Ok(())
 }
 

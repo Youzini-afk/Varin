@@ -114,6 +114,8 @@ export interface ThreadDraft {
   externalPreparationKey?: string;
   externalConversationHost?: number;
   externalInput?: import('@varin/application-client').ExternalInput & { key: string };
+  /** Keep the original delivery target when reconciling an uncertain send. */
+  externalInputOptions?: import('@varin/application-client').ExternalSendOptions;
   externalInputSnapshot?: { editorText: string; markerObjectIds?: readonly string[]; markerOccurrenceIds?: readonly string[]; images: readonly ImageAttachment[]; fileIds?: readonly string[] };
   externalModels?: Record<string, string>;
   externalOptions?: Record<string, { thinking?: string; mode?: string; config?: Record<string, string> }>;

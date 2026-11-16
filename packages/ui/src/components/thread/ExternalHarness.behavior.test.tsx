@@ -10,6 +10,7 @@ import { ExternalModelControls, ExternalModeControls, ExternalChoiceValidation, 
 import type { ExternalSessionChoice } from './externalSessionChoice';
 import { MessageHandoff } from '@/components/conversation/messageHandoff';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { insertDraftMarker, referenceMarkerObject, freezeDraftContentReferences } from '@/lib/agent-editor/contentReferences';
 import { externalAgentEn } from '@/lib/i18n/messages/external-agents';
 
@@ -113,6 +114,7 @@ let root: Root, container: HTMLDivElement, handoff: MessageHandoff;
 const nativeApi = { listModels: async () => [] } as unknown as ThreadsAPI;
 beforeEach(() => {
   vi.clearAllMocks(); f.host++; useThreadDraftStore.setState({ drafts: {} });
+  useMessageQueueStore.setState({ followUpBehavior: 'queue' });
   f.settings = { revision: 1, defaultAgent: null, agents: [
     { id: 'agent', name: 'Agent', harness: 'acp', enabled: true, command: 'agent', args: [] },
     { id: 'other', name: 'Other', harness: 'acp', enabled: true, command: 'other', args: [] },
@@ -720,4 +722,130 @@ it('retains the original draft source and preparation key until source-switch cl
   expect(useThreadDraftStore.getState().drafts.draft?.sourceSelection?.resourceOwner).toMatchObject({ kind: 'managed_host', hostId: 'source-host' });
   expect(useThreadDraftStore.getState().drafts.draft?.externalPreparationKey).toBeUndefined();
   expect(api.create).toHaveBeenCalledOnce();
+});
+
+
+function activeConversation(steering = true) {
+  const result = fixture(), view = result.views.get('prepared')!;
+  view.connected = true; view.capabilities = { ...capabilities(), steering };
+  view.conversation.activeTurn = 'active';
+  view.turns.push({ id: 'active', conversationId: 'prepared', key: 'active-key', status: 'running', createdAt: 1, updatedAt: 1 });
+  const draftKey = `external-draft:${f.host}:prepared`;
+  useThreadDraftStore.getState().patch(draftKey, { text: 'Supplement', externalModels: { agent: 'first' },
+    externalOptions: { agent: { thinking: 'high', mode: 'auto', config: { verbosity: 'long' } } } });
+  return { ...result, view, draftKey };
+}
+
+it('uses the saved queue preference and an explicit next-turn choice without changing the active turn', async () => {
+  const { api } = activeConversation();
+  await renderConversation();
+  expect(f.composer!.external!.delivery).toEqual({ mode: 'next_turn', canSteer: true });
+  await submit();
+  expect(api.send).toHaveBeenCalledWith('prepared', expect.any(String), expect.objectContaining({ text: 'Supplement', model: 'first', thinking: 'high', mode: 'auto', config: { verbosity: 'long' } }), { mode: 'next_turn' });
+  expect(api.stop).not.toHaveBeenCalled();
+});
+
+it('steers only the captured live turn and keeps model, thinking, mode and config selections for the next turn', async () => {
+  const { api, draftKey } = activeConversation();
+  useMessageQueueStore.setState({ followUpBehavior: 'steer' });
+  api.send.mockImplementationOnce(async (id, key) => ({ id: 'supplement', conversationId: id, key, status: 'running', createdAt: 1, updatedAt: 1,
+    consumedByTurnId: 'active', steering: { state: 'appended', targetTurnId: 'active' } }));
+  await renderConversation();
+  expect(f.composer!.external!.delivery).toEqual({ mode: 'steer', canSteer: true });
+  await submit();
+  const request = api.send.mock.calls[0]![2];
+  expect(request.text).toBe('Supplement');
+  for (const field of ['model', 'thinking', 'mode', 'config']) expect(request).not.toHaveProperty(field);
+  expect(api.send.mock.calls[0]![3]).toEqual({ mode: 'steer', expectedTurnId: 'active' });
+  expect(useThreadDraftStore.getState().drafts[draftKey]).toMatchObject({ text: '', externalModels: { agent: 'first' }, externalOptions: { agent: { thinking: 'high', mode: 'auto', config: { verbosity: 'long' } } } });
+  await act(async () => useThreadDraftStore.getState().patch(draftKey, { text: 'Separate next task' }));
+  f.composer!.prepareSendMode!('next_run');
+  await submit();
+  expect(api.send.mock.calls[1]![3]).toEqual({ mode: 'next_turn' });
+  expect(api.send.mock.calls[1]![2]).toMatchObject({ model: 'first', thinking: 'high', mode: 'auto', config: { verbosity: 'long' } });
+});
+
+it.each(['unsupported', 'cached', 'stopping'] as const)('does not advertise or silently queue an explicit supplement when capabilities are %s', async condition => {
+  const { api, view, draftKey } = activeConversation(condition !== 'unsupported');
+  if (condition === 'cached') view.capabilitiesSource = 'cached';
+  if (condition === 'stopping') view.turns[0]!.status = 'stopping';
+  useMessageQueueStore.setState({ followUpBehavior: 'steer' });
+  await renderConversation();
+  expect(f.composer!.external!.delivery).toEqual({ mode: 'next_turn', canSteer: false });
+  f.composer!.prepareSendMode!('boundary');
+  await submit();
+  expect(api.send).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('choose Send next turn');
+  expect(useThreadDraftStore.getState().drafts[draftKey]!.text).toBe('Supplement');
+});
+
+it('preserves a rejected supplement and allows explicitly queueing the original draft with its next-turn options', async () => {
+  const { api, draftKey } = activeConversation();
+  api.send.mockImplementationOnce(async (id, key) => ({ id: 'rejected', conversationId: id, key, status: 'failed', createdAt: 1, updatedAt: 1,
+    steering: { state: 'rejected', targetTurnId: 'active', error: 'The original turn ended' } }));
+  await renderConversation(); f.composer!.prepareSendMode!('boundary'); await submit();
+  expect(container.textContent).toContain('The original turn ended');
+  expect(api.send).toHaveBeenCalledOnce();
+  expect(useThreadDraftStore.getState().drafts[draftKey]).toMatchObject({ text: 'Supplement', externalInput: undefined, externalInputOptions: undefined });
+  f.composer!.prepareSendMode!('next_run'); await submit();
+  expect(api.send.mock.calls[1]![1]).not.toBe(api.send.mock.calls[0]![1]);
+  expect(api.send.mock.calls[1]![3]).toEqual({ mode: 'next_turn' });
+  expect(api.send.mock.calls[1]![2]).toMatchObject({ text: 'Supplement', model: 'first' });
+});
+
+it.each(['lost-response', 'unknown'] as const)('keeps the exact supplement identity and target after %s until its native receipt is reconciled', async failure => {
+  const { api, view, draftKey, emit } = activeConversation();
+  api.send.mockImplementationOnce(async (id, key) => {
+    if (failure === 'lost-response') throw new Error('Connection lost');
+    return { id: 'unconfirmed', conversationId: id, key, status: 'interrupted', createdAt: 1, updatedAt: 1,
+      steering: { state: 'unknown', targetTurnId: 'active' } };
+  });
+  await renderConversation(); f.composer!.prepareSendMode!('boundary'); await submit();
+  const original = api.send.mock.calls[0]!;
+  expect(useThreadDraftStore.getState().drafts[draftKey]).toMatchObject({ text: 'Supplement', externalInput: { key: original[1] }, externalInputOptions: original[3] });
+  expect(button('Send').disabled).toBe(true);
+  api.send.mockImplementationOnce(async (id, key) => ({ id: 'unconfirmed', conversationId: id, key, status: 'running', createdAt: 1, updatedAt: 1,
+    steering: { state: 'dispatching', targetTurnId: 'active' } }));
+  view.connected = false; view.conversation.needsReview = true; await emit();
+  expect(button('Confirm the previous send').disabled).toBe(false);
+  await click('Confirm the previous send');
+  expect(api.connect).not.toHaveBeenCalled();
+  expect(api.send.mock.calls[1]).toEqual(original);
+  expect(useThreadDraftStore.getState().drafts[draftKey]!.text).toBe('Supplement');
+  view.turns.push({ id: 'supplement', conversationId: 'prepared', key: original[1], status: 'running', createdAt: 1, updatedAt: 1,
+    consumedByTurnId: 'active', steering: { state: 'appended', targetTurnId: 'active' } });
+  await emit();
+  expect(useThreadDraftStore.getState().drafts[draftKey]).toMatchObject({ text: '', externalInput: undefined, externalInputOptions: undefined });
+  expect(api.send).toHaveBeenCalledTimes(2);
+});
+
+it('shows a supplement as a normal message without delivery copy or a separate completion', async () => {
+  const { view } = activeConversation();
+  view.turns.push({ id: 'supplement', conversationId: 'prepared', key: 'supplement-key', status: 'completed', createdAt: 1, updatedAt: 1,
+    consumedByTurnId: 'active', steering: { state: 'queued', targetTurnId: 'active' } });
+  view.items.push({ id: 'user-supplement', turnId: 'supplement', kind: 'user', text: 'Additional detail', complete: true });
+  await renderConversation();
+  expect(container.textContent).toContain('Additional detail');
+  expect(container.textContent).not.toContain('Supplement queued by the Agent');
+  expect(container.textContent).not.toContain('Shares the result of the turn that consumed this input.');
+  expect(container.textContent).not.toContain('Completed');
+});
+
+it('opens a supplementary input together with the actual shared execution result in scoped task details', async () => {
+  const { view } = activeConversation();
+  view.turns[0]!.status = 'completed'; view.conversation.activeTurn = undefined;
+  view.turns.push({ id: 'supplement', conversationId: 'prepared', key: 'supplement-key', status: 'completed', createdAt: 1, updatedAt: 1,
+    consumedByTurnId: 'active', steering: { state: 'appended', targetTurnId: 'active' } });
+  view.items.push({ id: 'original-user', turnId: 'active', kind: 'user', text: 'Original work', complete: true },
+    { id: 'user-supplement', turnId: 'supplement', kind: 'user', text: 'Additional detail', complete: true },
+    { id: 'shared-answer', turnId: 'active', kind: 'assistant', text: 'Actual shared answer', complete: true },
+    { id: 'unrelated-answer', turnId: 'other-turn', kind: 'assistant', text: 'Unrelated historical answer', complete: true });
+  await act(async () => root.render(<ExternalConversationView id="prepared" turnId="supplement" />));
+  expect(container.textContent).toContain('Additional detail');
+  expect(container.textContent).toContain('Actual shared answer');
+  expect(container.textContent).not.toContain('Unrelated historical answer');
+  expect(container.textContent).not.toContain('Shares the result of the turn that consumed this input.');
+  expect(container.querySelector('form')).toBeNull();
+  expect(container.textContent?.match(/Completed/g)).toHaveLength(1);
+  expect(container.textContent!.indexOf('Completed')).toBeGreaterThan(container.textContent!.indexOf('Actual shared answer'));
 });

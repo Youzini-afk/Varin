@@ -14,7 +14,7 @@ export type AttachmentOwnerRequest =
   | { kind: 'attachment_report'; refs: string[]; sourceThreadId?: string; sourceBranchId?: string }
   | { kind: 'attachment_release'; operationId: string; targetThreadId: string; targetBranchId?: string }
   | { kind: 'attachment'; ref: string; view?: 'path' | 'content' | 'bytes'; offset?: number; limit?: number };
-export interface OrganizationOwnerRequest { kind: 'organization'; operationId: string; action: 'create_bot_conversation' | 'external_metadata' | 'labels' | 'create_conversation' | 'ensure_initialized'; input: Record<string, unknown> }
+export interface OrganizationOwnerRequest { kind: 'organization'; operationId: string; action: 'executors' | 'create_bot_conversation' | 'external_metadata' | 'labels' | 'create_conversation' | 'ensure_initialized'; input: Record<string, unknown> }
 export interface ResourceQuery extends Omit<ResourceSnapshotParams, 'activationId' | 'resourceCheckpointId'> { resourceCheckpointId?: string | null; request: AgentResourceRequest | AttachmentOwnerRequest | OrganizationOwnerRequest }
 export type ResourceToolResult = (AgentResourceRead | ({ status: 'ready' } & Record<string, unknown>)) & { snapshotId?: string; resourceCheckpointId?: string };
 export type ResourceOwner = (query: ResourceQuery, signal: AbortSignal) => Promise<ResourceToolResult>;

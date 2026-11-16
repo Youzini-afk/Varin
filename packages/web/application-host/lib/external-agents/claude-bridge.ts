@@ -377,12 +377,13 @@ export class ClaudeBridge {
         const turnId = this.turnId;
         if (!turnId) continue;
         const user = text(event.user_message_uuid);
-        if (user)
-          this.boundTurn =
-            user === turnId ||
-            (Array.isArray(event.user_message_uuids) && event.user_message_uuids.includes(turnId))
-              ? turnId
-              : user;
+        const users = (Array.isArray(event.user_message_uuids) ? event.user_message_uuids : [])
+          .filter((value): value is string => typeof value === 'string' && Boolean(value));
+        // Batched native input evidence can contain only the plural field.
+        // It must also supersede an earlier binding when it identifies a
+        // foreign execution, rather than inheriting the previous input.
+        if (user || users.length)
+          this.boundTurn = user === turnId || users.includes(turnId) ? turnId : user || users[0];
         if (!this.boundTurn) {
           if (
             !this.unprovenNotice &&

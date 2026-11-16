@@ -13,6 +13,28 @@ export interface HarnessInput extends Omit<ExternalInput, 'attachments'> {
   files?: Array<{ attachment: import('@varin/protocol').Attachment; path: string }>;
 }
 
+/** A native acknowledgement, never a claim that the model has read the input. */
+export interface HarnessSteeringReceipt {
+  inputId: string;
+  disposition: 'appended' | 'queued' | 'handled';
+  nativeId?: string;
+}
+export interface HarnessSteeringOptions {
+  inputId: string;
+  expectedNativeId?: string;
+  /** Must commit the dispatch intent before a native effect is possible. */
+  beforeDispatch(nativeId?: string): Promise<void>;
+}
+/** Only this explicit negative receipt is safe to retry as a different delivery. */
+export class HarnessSteeringRejected extends Error {
+  constructor(message: string) { super(message); this.name = 'HarnessSteeringRejected'; }
+}
+export function assertSteeringContent(input: HarnessInput) {
+  if (input.model !== undefined || input.thinking !== undefined || input.mode !== undefined ||
+      Object.keys(input.config ?? {}).length)
+    throw new HarnessSteeringRejected('Current-turn supplements cannot change model, thinking, mode or configuration; send those options with the next turn');
+}
+
 export interface HarnessSink {
   /** Durably record delivery intent after configuration succeeds and before sending input. */
   beforeDispatch?(): Promise<void>;
@@ -46,6 +68,8 @@ export interface HarnessConnection {
     error?: string | undefined;
     nativeId?: string | undefined;
   }>;
+  /** Optional until the native protocol can safely append to the owned execution. */
+  steer?(input: HarnessInput, options: HarnessSteeringOptions): Promise<HarnessSteeringReceipt>;
   stop(): Promise<void>;
   close(): Promise<void>;
 }

@@ -31,6 +31,7 @@ import { createPlanOwner } from './plan-owner.js';
 import { PlanService } from './plan-service.js';
 import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
 import { createKernelClient } from './kernel-client.js';
+import { KernelRequestError } from './kernel-error.js';
 import { bindDocumentTextCodec } from '../documents/inspect.js';
 import { createNativeWorkspaceOwner, type NativeWorkspaceOwner } from './native-workspaces.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
@@ -55,6 +56,8 @@ import { createLanguageOwner } from './language-owner.js';
 import { createStructureSource } from '../structure/source.js';
 import { createTreeSitterStructureProvider } from '../structure/tree-sitter-provider.js';
 import { ExternalAgentsService } from '../external-agents/service.js';
+import { createResourceOwner } from './resource-owner.js';
+import { inspectExecutors } from '../external-agents/executor-discovery.js';
 import { createExternalSourceOwner } from '../external-agents/source.js';
 import { createKernelProcessService } from './process-service.js';
 import { createExtensionTools } from './extension-tool-owner.js';
@@ -106,7 +109,7 @@ function complete(response: ServerResponse, output: unknown[]) {
 function tool(name: string, args: unknown, id: string) {
   // The provider decoder and gateway select the admitted schema. The fixture only
   // chooses whether a tool is directly disclosed or invoked through discovery.
-  const discovered = ['wait_child', 'child_status', 'child_cancel', 'child_report', 'threads', 'read_thread', 'send', 'memory'];
+  const discovered = ['executors', 'wait_child', 'child_status', 'child_cancel', 'child_report', 'threads', 'read_thread', 'send', 'memory'];
   if (discovered.includes(name) || CODE_EXCHANGE_TOOL_DECLARATIONS.some(d => d.tool?.name === name)) {
     args = { name, arguments: args }; name = 'tool_invoke';
   }
@@ -315,6 +318,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
     if (external) {
       const executable = path.join(root, 'external-fixture.mjs');
       await fs.writeFile(executable, `import {createInterface} from 'node:readline';import {writeFileSync} from 'node:fs';
+if(process.argv.includes('--version')){process.stdout.write('fixture 1\\n');process.exit(0);}
 const send=v=>process.stdout.write(JSON.stringify(v)+'\\n');
 createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);const reply=result=>send({jsonrpc:'2.0',id:m.id,result});
 if(m.method==='initialize')reply({});if(m.method==='thread/start'||m.method==='thread/resume')reply({thread:{id:'external-native-session'}});
@@ -323,6 +327,10 @@ send({method:'item/completed',params:{threadId:'external-native-session',turnId:
 send({method:'turn/completed',params:{threadId:'external-native-session',turn:{id:'external-native-turn',status:'completed'}}});}});`);
       const configuration = await external.settings();
       await external.configure({ defaultAgent: null, agents: [{ id: 'fixture', name: 'External fixture', harness: 'codex', enabled: true, command: process.execPath, args: [executable] }] }, configuration.revision, 'external-fixture');
+      kernel.setResourceOwner(createResourceOwner({runtime,resources,organization:async(request,_run,signal)=>{
+        if(request.action==='executors')return {result:await inspectExecutors(external,request.input,signal)};
+        throw new Error('Unsupported fixture organization query');
+      }}));
       external.startChildren(createExternalSourceOwner({ kernel, storage, ...(managedRegistry?{managed:{coordinatorHostId:runtime.coordinatorHostId,source:runtime.managedSource.bind(runtime)}}:{}), capture: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => ({ kind: 'directory' }) } }));
     }
     const profiles = createAgentProfilesAPI({ settings, contextAgentDefinition: signal => runtime.contextAgentDefinition(signal), capabilities: signal => runtime.childCapabilities(signal) });
@@ -486,11 +494,73 @@ function waitArguments(body: Record<string, unknown>) {
 
 it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses its real %s source, returns its report and resumes the parent without a synthetic child Run', async workMode => {
   let operationId = '', executionRef = ''; let step = 0; let preset = '';
+  let discoveryRequested=false, executorRef='';
+  let phase = 'fixture', providerPhase = 'not_started', detection = 'not_started';
+  let verified = false;
+  const observed: { host?: FixtureHost; requests?: RecordedRequest[]; runId?: string } = {};
+  const diagnosticToken = (value: unknown) => typeof value === 'string' && /^[a-z][a-z0-9_.-]{0,95}$/i.test(value) ? value : 'invalid';
+  const errorSummary = (error: unknown) => error instanceof KernelRequestError ? {
+    type: 'KernelRequestError', method: diagnosticToken(error.method), code: diagnosticToken(error.code),
+    settlement: error.settlement === 'not_dispatched' || error.settlement === 'response' ? error.settlement : 'invalid',
+    category: typeof error.message === 'string' && error.message.startsWith('operation error: conflict:') ? 'conflict' : 'other',
+  } : { type: error instanceof Error ? diagnosticToken(error.name) : typeof error };
+  let diagnostic: Promise<void> | undefined;
+  const diagnose = () => diagnostic ??= (async () => {
+    // Log local progress before RPCs, still inside the unchanged 45s budget.
+    console.error('External dispatch stage', { workMode, phase, providerPhase, step, discoveryRequested, discovered: Boolean(executorRef), detection,
+      requests: observed.requests?.length, hostErrors: observed.host?.errors.map(errorSummary) });
+    if (!observed.host || !observed.runId) return;
+    const signal = AbortSignal.timeout(1_000);
+    const bounded = <T,>(promise: Promise<T>) => waitWithSignal(promise, signal).catch(() => undefined);
+    // runtime.run() also releases terminal owners; diagnostics only inspect.
+    const [run, children, launch] = await Promise.all([
+      bounded(observed.host.kernel.agentRuntimeRequest<import('./protocol.generated.js').Run, 'runtime.run.inspect'>(
+        'runtime.run.inspect', { runId: observed.runId }, signal)),
+      operationId ? bounded(observed.host.kernel.agentRuntimeRequest<import('./protocol.generated.js').ExternalChild[], 'runtime.external.command'>(
+        'runtime.external.command', { command: { action: 'child_list', activeOnly: false } }, signal)) : undefined,
+      bounded(observed.host.runtime.launch(observed.runId, signal)),
+    ]);
+    const child = children?.find(value => value.operation_id === operationId);
+    const preparationFailure = launch?.preparation_failure;
+    console.error('External dispatch Run', { observed: Boolean(run), state: run?.state, waiting: Boolean(run?.waiting_on),
+      launchObserved: Boolean(launch), startable: launch?.startable, requiresRebind: launch?.requires_rebind, paused: Boolean(launch?.pause),
+      preparationFailure: preparationFailure && diagnosticToken(preparationFailure) !== 'invalid' ? preparationFailure : Boolean(preparationFailure),
+      childObserved: Boolean(child), childState: child ? diagnosticToken(child.state) : undefined, hasTurn: Boolean(child?.turn_id),
+      hasReport: Boolean(child?.report), resourcesReleased: child?.resources_released, receiptPublished: child?.receipt_published });
+  })();
+  const watchdog = setTimeout(() => { void diagnose(); }, 40_000);
+  watchdog.unref();
+  cleanup.push(async () => { clearTimeout(watchdog); });
   const parentReply = gate();
   const f = await fixture(async ({ body, response }) => {
+    providerPhase = 'pairing';
     assertPairing(body);
-    if (++step === 1) complete(response, [tool('dispatch', { preset, task: 'Write a result and report', workMode }, 'external-dispatch')]);
-    else if (step === 2) { ({ operationId, executionRef } = await acceptedDispatch(h, body)); complete(response, [tool('wait_child', { target: executionRef }, 'external-wait')]); }
+    if(workMode==='shared' && !discoveryRequested){
+      // Add a configuration after the native request catalog was frozen. Discovery
+      // and dispatch must use its real owner, not require a new native Run/preset.
+      const declaredTools = (body.tools as Array<{ name: string }>).map(tool => tool.name);
+      expect(declaredTools).toContain('tool_invoke');
+      expect(declaredTools).not.toContain('executors');
+      providerPhase = 'late-configuration';
+      const settings=await h.external!.settings();
+      const fixture=settings.agents.find(agent=>agent.id==='fixture')!;
+      await h.external!.configure({defaultAgent:null,agents:[...settings.agents,{...fixture,id:'late-fixture',name:'Late configured executor'}]},settings.revision,'late-executor');
+      discoveryRequested=true;
+      providerPhase = 'discovery';
+      return complete(response,[tool('executors',{action:'inspect',executor:'late-fixture'},'discover-executor')]);
+    }
+    if(workMode==='shared' && !executorRef){
+      providerPhase = 'discovery-result';
+      const discovered=result(body,'executors');
+      expect(discovered,JSON.stringify(discovered)).toMatchObject({outcome:'succeeded'});
+      const content=discovered!.content as {executors:Array<{ref:string;configurationId:string;installation:{status:string};authentication:string}>};
+      expect(content.executors).toHaveLength(1);
+      expect(content.executors[0]).toMatchObject({configurationId:'late-fixture',installation:{status:'installed'},authentication:'unknown'});
+      executorRef=content.executors[0]!.ref;
+    }
+    providerPhase = ['dispatch', 'accept-dispatch', 'passive-send', 'request-reply', 'update', 'submit-code', 'final-answer'][step] ?? 'final-report';
+    if (++step === 1) complete(response, [tool('dispatch', { ...(workMode === 'shared' ? {executor:executorRef} : {preset}), task: 'Write a result and report', workMode }, 'external-dispatch')]);
+    else if (step === 2) { ({ operationId, executionRef } = await acceptedDispatch(h, body)); providerPhase = 'wait-child'; complete(response, [tool('wait_child', { target: executionRef }, 'external-wait')]); }
     else if (step === 3) { expect(JSON.stringify(body.input)).toContain('EXTERNAL_HARNESS_RESULT'); complete(response, [tool('send', { targetThreadId: executionRef, kind: 'inform', text: 'PASSIVE_EXTERNAL_NOTE' }, 'external-inform')]); }
     else if (step === 4) { expect(JSON.stringify(result(body, 'send'))).toContain('next_input'); complete(response, [tool('send', { targetThreadId: executionRef, kind: 'request', text: 'CONTINUE_EXTERNAL_TASK', wait: {} }, 'external-request')]); }
     else if (step === 5) complete(response, [tool('update', { source: executionRef, files: ['external-result.txt'] }, 'external-update')]);
@@ -502,7 +572,29 @@ it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses i
     else if (step === 7) { expect(result(body, 'submit_code'), JSON.stringify(result(body, 'submit_code'))).toMatchObject({ outcome: 'succeeded' }); expect(JSON.stringify(result(body, 'submit_code'))).toContain(workMode === 'shared' ? 'shared_source' : 'applied'); complete(response, [answer('Delegation received', 'external-parent-answer')]); parentReply.release(); }
     else { expect(JSON.stringify(body.input)).toContain('EXTERNAL_HARNESS_RESULT'); complete(response, [answer('Delegation received', 'external-parent-answer')]); parentReply.release(); }
   });
+  observed.requests = f.requests;
+  phase = 'host';
   const h = await f.openHost({ external: true });
+  observed.host = h;
+  cleanup.push(async () => { clearTimeout(watchdog); if (!verified) await diagnose(); });
+  const detect = h.external!.detect.bind(h.external);
+  h.external!.detect = async (...args) => {
+    detection = 'pending';
+    try {
+      const result = await detect(...args);
+      // Inspect hides the original failure. Keep only a category from this same
+      // probe, never its paths/environment/error payload or a second probe.
+      detection = result.status !== 'failed' ? result.status
+        : /unconfirmed/i.test(result.message ?? '') ? 'failed:unconfirmed_exit_or_release'
+        : /did not finish|timeout|timed out/i.test(result.message ?? '') ? 'failed:timeout'
+        : /no version/i.test(result.message ?? '') ? 'failed:empty_version'
+        : /spawn|failed to start/i.test(result.message ?? '') ? 'failed:spawn_or_start' : 'failed:other';
+      return result;
+    } catch (error) { detection = 'threw'; throw error; }
+  };
+  // The shared case has no external preset at all: configuration selection is sufficient.
+  if (workMode === 'isolated_write') {
+  phase = 'preset';
   const profiles = await h.profiles.read({ runtime: 'agent' });
   const saved = await h.profiles.save({ runtime: 'agent', expectedRevision: profiles.revision, config: { kind: 'custom', key: '', agent: {
     name: 'External fixture', description: 'External worker', instructions: '', enabled: true, workFocus: [], external: { configurationId: 'fixture' },
@@ -510,14 +602,23 @@ it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses i
   const profile = saved.snapshot.profiles.find(profile => profile.id === saved.profileId)!;
   if (profile.config.kind !== 'custom') throw new Error('Expected an external custom preset');
   preset = `custom:${profile.config.key}`;
+  }
+  phase = 'thread';
   const identity = await h.api.create(`external-${workMode}`);
+  phase = 'workspace';
   const workspaceId = (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId;
+  phase = 'source';
   const prepared = await h.api.prepareSource({ ...identity, key: 'external-source', resourceOwner: { kind: 'local' }, workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  phase = 'submit';
   const parent = await h.api.submit({ ...identity, key: 'external-parent', expectedHead: null, text: 'Delegate this task to the external fixture and wait', model, source: prepared.source });
+  observed.runId = parent.run_id;
+  phase = 'provider-exchanges';
   // The model exchanges and code transfers belong to the test's execution
   // budget. Check durable completion after the actual final provider response.
   await parentReply.promise;
-  await expect.poll(async () => (await h.runtime.run(parent.run_id)).state).toBe('completed').catch(async error => { console.error('External dispatch state', await h.external!.children(), h.errors); throw error; });
+  phase = 'durable-completion';
+  await expect.poll(async () => (await h.runtime.run(parent.run_id)).state).toBe('completed').catch(async error => { await diagnose(); throw error; });
+  phase = 'result-assertions';
   const child = (await h.external!.children()).find(child => child.operation_id === operationId)!;
   expect(child.state).toBe('completed'); expect(child.resources_released).toBe(true);
   expect(await h.runtime.childExecutions()).toHaveLength(0);
@@ -545,10 +646,13 @@ it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses i
     } finally { db.close(); }
   }
   expect(h.errors).toEqual([]);
+  phase = 'delete-conversation';
   await h.external!.update(conversation.id, conversation.revision, { deleted: true });
   expect((await h.external!.list()).some(c => c.id === conversation.id)).toBe(false);
   if (workMode === 'isolated_write') await expect(fs.access(conversation.cwd)).rejects.toThrow();
   else expect(await fs.readFile(path.join(f.workspace, 'external-result.txt'), 'utf8')).toBe('External harness wrote this');
+  verified = true;
+  clearTimeout(watchdog);
 });
 function blockChild(original: ContextPreparer, entered: ReturnType<typeof gate>, release: ReturnType<typeof gate>): ContextPreparer {
   const prepare: ContextPreparer = Object.assign(async (...args: Parameters<ContextPreparer>) => {
@@ -639,8 +743,13 @@ it('family tools and public views read original and fork-inherited conversations
   expect(inheritedRuns.runs).toContainEqual(expect.objectContaining({ runId: original.runId, branchId: child.child_branch_id }));
   const selected = { threadId: fork.threadId, branchId: fork.branchId, runId: original.runId, query: { kind: 'recent' as const } };
   expect((await h.api.family!.read(identity, selected)).items.some(item => item.id === original.id)).toBe(true);
+  // Conversation access follows the authenticated product scope, not ancestry.
+  // An independent public conversation is readable, but another principal is not.
   const unrelated = await h.api.create('unrelated-family');
-  await expect(h.api.family!.read(identity, { threadId: unrelated.threadId, branchId: unrelated.branchId, query: { kind: 'recent' } })).rejects.toMatchObject({ status: 409 });
+  expect(await h.api.family!.read(identity, { threadId: unrelated.threadId, branchId: unrelated.branchId, query: { kind: 'recent' } }))
+    .toMatchObject({ threadId: unrelated.threadId, branchId: unrelated.branchId, items: [] });
+  const foreign = await h.runtime.createThread('thread:foreign-family', 'branch:foreign-family', undefined, 'foreign-principal');
+  await expect(h.api.family!.read(identity, { ...foreign, query: { kind: 'recent' } })).rejects.toMatchObject({ status: 409 });
   const requestCount = f.requests.length;
   await h.close();
   const reopened = await f.openHost();
@@ -2954,3 +3063,47 @@ it('a real remote external failure reaches the parent model with its original st
   });
   expect(step).toBe(3);expect((await h.runtime.run(parent.run_id)).state).toBe('completed');
 },45_000);
+
+it('an ordinary independent requester discovers, reads and reuses a manual external session without adopting it', async () => {
+  let step = 0, conversationId = '';
+  const f = await fixture(async ({ body, response }) => {
+    assertPairing(body);
+    if (++step === 1) return complete(response, [tool('threads', { backend: 'external', query: 'Existing manual Codex' }, 'find-manual-external')]);
+    if (step === 2) {
+      expect(JSON.stringify(result(body, 'threads'))).toContain('Existing manual Codex');
+      return complete(response, [tool('read_thread', { threadId: conversationId, query: { kind: 'recent', limit: 10 } }, 'read-manual-external')]);
+    }
+    if (step === 3) {
+      expect(JSON.stringify(result(body, 'read_thread'))).toContain('ORIGINAL_MANUAL_USER_TASK');
+      expect(JSON.stringify(result(body, 'read_thread'))).toContain('EXTERNAL_HARNESS_RESULT');
+      return complete(response, [tool('send', { targetThreadId: conversationId, kind: 'request', text: 'CONTINUE_THE_ORIGINAL_SESSION', afterCurrent: true, wait: {} }, 'reuse-manual-external')]);
+    }
+    expect(step).toBe(4);
+    expect(JSON.stringify(body.input)).toContain('EXTERNAL_HARNESS_RESULT');
+    return complete(response, [answer('Existing external result received', 'manual-reuse-final')]);
+  });
+  const h = await f.openHost({ external: true });
+  const original = await h.external!.create({ key: 'manual-external-before-request', configurationId: 'fixture', cwd: f.workspace, title: 'Existing manual Codex' });
+  conversationId = original.id;
+  const first = await h.external!.send(original.id, 'original-user-turn', { text: 'ORIGINAL_MANUAL_USER_TASK' });
+  await expect.poll(async () => (await h.external!.read(original.id)).turns.find(turn => turn.id === first.id)?.status).toBe('completed');
+  const initial = (await h.external!.read(original.id)).conversation;
+  expect(initial.parent).toBeUndefined();
+  const identity = await h.api.create('independent-external-requester');
+  const parent = await h.api.submit({ ...identity, key: 'independent-request', expectedHead: null, text: 'Find and continue the existing external work', model });
+  await combinedFixtureTerminal(h.runtime, parent.run_id);
+  expect((await h.runtime.run(parent.run_id)).state).toBe('completed');
+  expect(step).toBe(4);
+  const final = await h.external!.read(original.id);
+  expect(final.turns).toHaveLength(2);
+  expect(final.conversation.sessionId).toBe(initial.sessionId);
+  expect(final.conversation.cwd).toBe(initial.cwd);
+  expect(final.conversation.parent).toBeUndefined();
+  const requests = await h.external!.children();
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({ message_kind: 'request', parent_run_id: parent.run_id, parent_thread_id: identity.threadId,
+    parent_branch_id: identity.branchId, conversation_id: original.id, dispatch_operation_id: null, resources_released: true });
+  expect(requests[0]!.report).toMatchObject({ status: 'completed', turnId: requests[0]!.turn_id, executionTurnId: requests[0]!.turn_id });
+  expect(await h.runtime.childExecutions()).toHaveLength(0);
+  expect(h.errors).toEqual([]);
+}, 45_000);

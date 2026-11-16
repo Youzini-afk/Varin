@@ -5,7 +5,7 @@ import { registerExternalAgentRoutes } from './routes.js';
 import type { ExternalAgentsService } from './service.js';
 function fixture() {
   const conversations = [{ id: 'mine', principalId: 'alice' }, { id: 'foreign', principalId: 'bob' }, { id: 'public', principalId: null }, { id: 'deleted', principalId: 'alice', deleted: true }];
-  const children = [{ operation_id: 'mine-op', parent_run_id: 'mine-run', conversation_id: 'pending', binding: {} }, { operation_id: 'foreign-op', parent_run_id: 'foreign-run', conversation_id: 'foreign', binding: {} }];
+  const children = [{ operation_id: 'mine-op', parent_run_id: 'mine-run', conversation_id: 'pending', binding: { harness: 'acp', configuration_id: 'opencode' } }, { operation_id: 'foreign-op', parent_run_id: 'foreign-run', conversation_id: 'foreign', binding: {} }];
   const service = { inspect: vi.fn(async (id: string) => conversations.find(item => item.id === id)), list: vi.fn(async () => conversations),
     children: vi.fn(async () => children), childPrincipal: vi.fn(async (child: typeof children[number]) => child.parent_run_id === 'mine-run' ? 'alice' : 'bob'),
     childPresentation: vi.fn(async () => ({ name: 'Own pending delegate' })), read: vi.fn(async (id: string) => ({ id })),
@@ -26,7 +26,7 @@ it('scopes external directory and pending child presentations to trusted request
   const f = fixture();
   expect((await f.call('list')).body).toEqual([{ id: 'mine', principalId: 'alice' }, { id: 'deleted', principalId: 'alice', deleted: true }]);
   expect((await f.call('list', {}, null)).body).toEqual([{ id: 'public', principalId: null }]);
-  expect((await f.call('children')).body).toMatchObject([{ operationId: 'mine-op', conversationId: 'pending' }]);
+  expect((await f.call('children')).body).toMatchObject([{ operationId: 'mine-op', conversationId: 'pending', harness: 'acp', configurationId: 'opencode' }]);
   expect((await f.call('child-presentation', { operationId: 'foreign-op' })).status).toBe(403);
   expect(f.service.childPresentation).not.toHaveBeenCalled();
   expect((await f.call('child-presentation', { operationId: 'mine-op' })).status).toBe(200);

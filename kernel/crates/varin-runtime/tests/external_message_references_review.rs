@@ -27,7 +27,7 @@ fn external_send_acceptance_replays_its_original_projection_before_tool_settleme
             }
             launch.tools.push(ToolSchema{requirements:None,name:"send".into(),version:"1".into(),description:String::new(),schema:json!({"type":"object"}),output_schema:None,metadata:None});
             launch.child_dispatch.as_mut().unwrap().presets.push(ChildPreset{
-                work_focus:vec![],external:Some(ExternalChildBinding{configuration_id:"codex".into(),harness:"codex".into(),model:None,
+                work_focus:vec![],external:Some(ExternalChildBinding{configuration_id:"codex".into(),harness:"codex".into(),model:None,config:None,thinking:None,mode:None,resource_owner:Some(varin_runtime::catalog::launches::SourceResourceOwner::Local),
                     launch:ExternalLaunch{command:"codex".into(),args:vec![]}}),description:None,avatar:None,id:"external".into(),name:"External worker".into(),instructions:String::new(),tools:vec![],
                 tools_source:ChildPresetToolsSource::Explicit,retired_work_mode:None,model_source:ChildModelSource::Inherit,inherit_base:None,model:None,unavailable:None,
             });

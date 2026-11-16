@@ -6,6 +6,7 @@ import { mkdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import { finished } from 'node:stream/promises';
 import {
   ExternalAgentError,
   isExternalInteractionValueValid,
@@ -15,6 +16,7 @@ import {
   type ExternalConversation,
   type ExternalConversationSnapshot,
   type ExternalInput,
+  type ExternalSendOptions,
   type ExternalInteraction,
   type ExternalInteractionResponse,
   type ExternalItem,
@@ -28,6 +30,7 @@ import type { createKernelProcessService } from '../kernel/process-service.js';
 import { createPlatformEnvironmentRuntime } from '../platform/environment-runtime.js';
 import { HarnessTransport, record, text } from './transport.js';
 import type { HarnessConnection } from './adapter.js';
+import { HarnessSteeringRejected } from './adapter.js';
 import { ACP_DEFAULTS, ACP_PROFILES, getAcpProfile } from './profiles.js';
 import { assertProfilePlatform, profileVersionArguments } from './profile-launch.js';
 import { findInstalledExternalExecutable } from './installed-executable.js';
@@ -89,6 +92,8 @@ export class ExternalAgentsService {
   private readonly projectedItems = new Map<string, Map<string, ExternalItem>>();
   private readonly revisions = new Map<string, number>();
   private readonly environment = createPlatformEnvironmentRuntime();
+  private readonly detectionGenerations = new Map<string, number>();
+  private readonly detections = new Map<string, { configuration: string; result: import('@varin/application-client').ExternalAgentDetection }>();
   private stopping = false;
   private readonly connectionStates = new Map<string, NonNullable<ExternalConversationSnapshot['connection']>>();
   private readonly reclaiming = new Map<string, Promise<void>>();
@@ -256,8 +261,10 @@ export class ExternalAgentsService {
       const turn = (await this.read(id)).turns.find((t) => t.id === child.turn_id);
       if (!turn) throw new Error('The original external delegated turn is unavailable');
       if (!ended(turn)) {
-        if (child.cancel_requested) await this.stop(id, turn.id);
-        else this.advance(id);
+        if (child.cancel_requested) {
+          // A request sharing another execution is not authority to stop it.
+          if (!turn.steering && child.message_kind !== 'inform') await this.stop(id, turn.id);
+        } else if (!(await this.steerChildInput(child, turn, signal))) this.advance(id);
         return;
       }
       // The protocol ended this turn. The external conversation still owns its connection,
@@ -268,9 +275,18 @@ export class ExternalAgentsService {
       this.notify(id);
       return;
     }
+    if (child.message_kind) {
+      // Existing-session messages never create a conversation or own its source.
+      // A cancelled passive input can finish without fabricating a dispatch parent.
+      await this.command({ action: 'child_finish', operationId: child.operation_id, released: true,
+        failure: child.cancel_requested ? 'External message cancelled before input delivery' : 'Original accepted external message turn is unavailable' });
+      this.notify(id);
+      return;
+    }
     try {
       if (child.cancel_requested) throw new Error('External delegation cancelled before input delivery');
       let source = record(child.source);
+      let preparedConfiguration: ExternalAgentConfiguration | undefined;
       if (!text(source.cwd)) {
         source = (child.handoff || child.project_source)
           ? await this.sources!.prepare(child, signal)
@@ -311,6 +327,7 @@ export class ExternalAgentsService {
             configurationId: child.binding.configuration_id, harness: child.binding.harness as ExternalAgentConfiguration['harness']}, signal);
           if (launch.configuration.id !== child.binding.configuration_id || launch.configuration.harness !== child.binding.harness || !launch.configuration.enabled)
             throw new Error('Original target external Harness configuration changed');
+          preparedConfiguration = launch.configuration;
           source = {...source, executionBinding: {resourceOwner:targetOwner,configurationId:child.binding.configuration_id,
             harness:child.binding.harness,configurationIdentity:launch.configurationIdentity,
             launch:{command:launch.configuration.command,args:[...launch.configuration.args]}}};
@@ -341,10 +358,15 @@ export class ExternalAgentsService {
           operationId: child.operation_id,
         },
       });
-      const input = await this.command<ExternalInput>({
+      let input = await this.command<ExternalInput>({
         action: 'child_input',
         operationId: child.operation_id,
       });
+      // Only a new dispatch takes current target defaults; subsequent send requests
+      // preserve the existing session and their own explicitly admitted overrides.
+      const targetOwner = record(record(source).executionSource).resource_owner ?? child.binding.resource_owner;
+      const configuration = preparedConfiguration ?? await this.configuration(child.binding.configuration_id, targetOwner as import('@varin/protocol').SourceResourceOwner | undefined);
+      input = { ...configuration.defaults, ...input };
       signal.throwIfAborted();
       const turn = await this.command<ExternalTurn>({ action: 'admit', id, key: child.operation_id, input });
       await this.command({ action: 'child_link', operationId: child.operation_id, turnId: turn.id });
@@ -366,7 +388,7 @@ export class ExternalAgentsService {
         } catch (error) {
           cleanup = error;
         }
-      if (!child.turn_id && !child.dispatch_operation_id)
+      if (!child.turn_id && !child.message_kind && !child.dispatch_operation_id)
         try {
           await this.sources!.remove(child, true);
         } catch (error) {
@@ -511,7 +533,7 @@ export class ExternalAgentsService {
     return {
       ...value,
       profiles: [...ACP_PROFILES],
-      agents: [...value.agents, ...defaults.filter((d) => !value.agents.some((a) => a.id === d.id))],
+      agents: [...value.agents, ...defaults.filter((d) => !value.agents.some((a) => a.id === d.id)).map(d => ({ ...d, availability: 'auto' as const, enabled: true }))],
     };
   }
   async configure(value: Pick<ExternalAgentSettings, 'agents' | 'defaultAgent'>, expectedRevision: number, key: string) {
@@ -525,13 +547,14 @@ export class ExternalAgentsService {
       if (
         !a ||
         Object.keys(a).some(
-          (key) => !['id', 'name', 'harness', 'enabled', 'command', 'args', 'defaults'].includes(key),
+          (key) => !['id', 'name', 'harness', 'enabled', 'availability', 'command', 'args', 'defaults'].includes(key),
         ) ||
         !text(a.id).trim() ||
         !text(a.name).trim() ||
         !text(a.command).trim() ||
         !['codex', 'claude', 'pi', 'acp'].includes(a.harness) ||
         typeof a.enabled !== 'boolean' ||
+        (a.availability !== undefined && !['auto', 'enabled', 'disabled'].includes(a.availability)) ||
         !Array.isArray(a.args) ||
         !a.args.every((v) => typeof v === 'string') ||
         (a.defaults !== undefined && (!a.defaults || typeof a.defaults !== 'object' || Array.isArray(a.defaults) ||
@@ -590,17 +613,24 @@ export class ExternalAgentsService {
     await mkdir(cwd, { recursive: true });
     // This deadline bounds only a version query, never a model turn or native effect.
     const timeout = AbortSignal.timeout(15_000);
+    const probeSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
     const args = profileVersionArguments(launch.args, profile);
     const child = await this.deps.spawn(launch.command, args, {
       cwd, env: launch.env, stdio: ['ignore', 'pipe', 'pipe'],
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout, windowsHide: true,
+      signal: probeSignal, windowsHide: true,
     });
     const stdout: Buffer[] = [];
+    // Native completion confirms capture and exit, not delivery of already
+    // buffered Readable bytes to this consumer. Observe errors immediately, but
+    // keep native completion first so output cannot mask unconfirmed ownership.
+    const stdoutDrained = finished(child.stdout, { cleanup: true, writable: false, signal: probeSignal });
+    void stdoutDrained.catch(() => {});
     child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
     child.stderr.resume();
     try {
       await child.completion;
       if (!child.exitConfirmed) throw new Error('Program version query exit is unconfirmed');
+      await stdoutDrained;
       signal?.throwIfAborted();
       if (timeout.aborted) throw new ExternalAgentError('probe_timeout', 'Program version query did not finish');
       if (child.exitCode !== 0) throw new Error(`Program version check exited with ${child.exitCode}`);
@@ -609,13 +639,26 @@ export class ExternalAgentsService {
       return version;
     } catch (error) {
       if (!child.exitConfirmed) throw new AggregateError([error], 'Program version query failed and process exit is unconfirmed');
+      signal?.throwIfAborted();
+      if (timeout.aborted) throw new ExternalAgentError('probe_timeout', 'Program version query did not finish');
       throw error;
     } finally {
       if (child.exitConfirmed) await child.release();
     }
   }
-  async detect(id: string, signal?: AbortSignal) {
+  async detect(id: string, signal?: AbortSignal, resourceOwner?:import('@varin/protocol').SourceResourceOwner): Promise<import('@varin/application-client').ExternalAgentDetection> {
+    if (resourceOwner?.kind === 'managed_host') {
+      if (!this.deps.managed) throw new Error('Managed external Source transport is unavailable');
+      const owner = this.deps.managed();
+      return (await owner.source(resourceOwner, signal)).externalDetect({coordinatorHostId:owner.coordinatorHostId,configurationId:id}, signal);
+    }
     const config = await this.configuration(id);
+    const detectionGeneration = (this.detectionGenerations.get(id) ?? 0) + 1;
+    this.detectionGenerations.set(id, detectionGeneration);
+    const saveDetection = (result: import('@varin/application-client').ExternalAgentDetection) => {
+      if (this.detectionGenerations.get(id) === detectionGeneration)
+        this.detections.set(id, { configuration: JSON.stringify(capabilityConfiguration(config)), result });
+    };
     // Observe before external work; a slow old probe must not obtain a newer claim and
     // invalidate capabilities established by a later connection while it was running.
     const observed = await this.command<{ generation: number; agentVersion?: string } | null>({
@@ -626,19 +669,42 @@ export class ExternalAgentsService {
       const version = await this.probeVersion(launch, signal, getAcpProfile(config.id));
       if (observed?.agentVersion && observed.agentVersion !== version)
         await this.invalidateCapabilities(config, observed.generation);
-      return { id, status: 'available' as const, executable: launch.executable, version };
+      const result = { id, status: 'available' as const, executable: launch.executable, version, checkedAt: Date.now() };
+      saveDetection(result);
+      return result;
     } catch (error) {
       if (signal?.aborted) throw error;
       if (observed) await this.invalidateCapabilities(config, observed.generation);
-      return {
-        id,
+      const result = {
+        id, checkedAt: Date.now(),
         status:
           error instanceof ExternalAgentError && error.code === 'program_missing'
             ? ('missing' as const)
             : ('failed' as const),
         message: error instanceof Error ? error.message : String(error),
       };
+      saveDetection(result);
+      return result;
     }
+  }
+  /** Reads configuration/install observations, never initializes a harness or claims authentication. */
+  async inspectExecutor(id: string, refresh = false, signal?: AbortSignal, resourceOwner?:import('@varin/protocol').SourceResourceOwner): Promise<import('@varin/application-client').ExternalExecutorInspection> {
+    if (resourceOwner?.kind === 'managed_host') {
+      if (!this.deps.managed) throw new Error('Managed external Source transport is unavailable');
+      const owner = this.deps.managed();
+      return (await owner.source(resourceOwner, signal)).externalInspect({coordinatorHostId:owner.coordinatorHostId,configurationId:id,refresh}, signal);
+    }
+    const config = await this.configuration(id);
+    const cached = this.detections.get(id);
+    // Disabled configurations stay passive unless detect was explicitly requested.
+    const known = cached?.configuration === JSON.stringify(capabilityConfiguration(config)) ? cached.result : undefined;
+    const detection = !refresh && known ? known : !refresh && !config.enabled ? undefined : await this.detect(id, signal);
+    const live = [...this.connections.values()].find(live => live.configuration.id === id && JSON.stringify(capabilityConfiguration(live.configuration)) === JSON.stringify(capabilityConfiguration(config)) && !live.closing && !live.failure);
+    const capabilityCache = (await this.settings(signal)).capabilityCache?.[id];
+    return { configurationId:id, name:config.name, harness:config.harness, availability:config.availability ?? (config.enabled ? 'enabled' : 'disabled'),
+      installation: detection ? { status:detection.status === 'available' ? 'installed' : detection.status, ...(detection.checkedAt === undefined ? {} : {checkedAt:detection.checkedAt}), ...(detection.version ? {version:detection.version} : {}), ...(detection.status === 'missing' ? {message:'Program was not found on this execution Host'} : detection.status === 'failed' ? {message:'Program detection failed on this execution Host'} : {}) } : {status:'unknown'},
+      defaults:config.defaults ?? {}, connection:live ? 'connected' : 'not_connected', authentication:'unknown',
+      ...(live ? {capabilities:live.connection.capabilities,capabilitySource:'connection'} : capabilityCache ? {capabilities:capabilityCache.capabilities,capabilitySource:'cache',capabilitiesCheckedAt:capabilityCache.cachedAt} : {capabilitySource:'unknown'}) };
   }
   list(signal?: AbortSignal) {
     return this.command<ExternalConversation[]>({ action: 'list' }, signal);
@@ -888,24 +954,12 @@ export class ExternalAgentsService {
     const prepared = await (async () => {
       if (c.executionSource?.resource_owner.kind === 'managed_host') {
         if (!this.deps.managed) throw new Error('Managed external Source transport is unavailable');
-        if (c.parent?.operationId) {
-          // Reconnect/capture/user-send must use the same prepared child owner,
-          // not reinterpret its profile from current settings after a restart.
-          const original = await this.command<{_launch:NonNullable<typeof frozenLaunch>}>({action:'child_input',operationId:c.parent.operationId});
-          if (!original._launch?.configurationIdentity) throw new Error('Original target executable preparation is unavailable');
-          frozenLaunch = original._launch;
-        }
-        const remote = await openManagedExternalTransport(this.deps.managed(),c,input=>this.command(input),error=>this.deps.onError?.(id,error),signal,frozenLaunch);
+        const remote = await openManagedExternalTransport(this.deps.managed(),c,input=>this.command(input),error=>this.deps.onError?.(id,error),signal);
         return {config:remote.launch.configuration, capabilityGeneration:null, launch:remote.launch,
           version:remote.launch.version,child:remote.child,executionCwd:remote.executionCwd,start:remote.start,close:remote.close,capture:remote.capture,attachments:this.attachments ? remote.attachmentOwner(this.attachments) : undefined};
       }
-      const selected =
-      (await this.settings()).agents.find((agent) => agent.id === c.configurationId) ??
-      (frozenLaunch
-        ? { ...frozenLaunch, id: c.configurationId, name: c.harness, harness: c.harness, enabled: false }
-        : await this.configuration(c.configurationId));
-    const config = frozenLaunch ? { ...selected, ...frozenLaunch, harness: c.harness } : selected;
-    if (!config.enabled && !frozenLaunch)
+      const config = await this.configuration(c.configurationId);
+    if (!config.enabled)
       throw new ExternalAgentError('agent_disabled', 'Enable this external Agent to reconnect');
     if (config.harness !== c.harness)
       throw new ExternalAgentError('backend_changed', 'This configuration now points to another harness');
@@ -1006,7 +1060,15 @@ export class ExternalAgentsService {
       throw error;
     }
   }
-  async send(id: string, key: string, input: ExternalInput): Promise<ExternalTurn> {
+  async send(id: string, key: string, input: ExternalInput, options: ExternalSendOptions = {}): Promise<ExternalTurn> {
+    if (!options || typeof options !== 'object' || Array.isArray(options) ||
+        Object.keys(options).some(key => !['mode', 'expectedTurnId'].includes(key)) ||
+        (options.mode !== undefined && !['steer', 'next_turn'].includes(options.mode)) ||
+        (options.expectedTurnId !== undefined && (typeof options.expectedTurnId !== 'string' || !options.expectedTurnId.trim())) ||
+        (options.mode === 'steer' && !options.expectedTurnId) ||
+        (options.mode !== 'steer' && options.expectedTurnId !== undefined))
+      throw new ExternalAgentError('invalid_delivery', 'Select next turn, or supplement with the exact active turn identity');
+    const delivery = options.mode === 'steer' ? { mode: 'steer', expectedTurnId: options.expectedTurnId } : undefined;
     const reclaim = this.reclaiming.get(id);
     if (reclaim) await reclaim;
     if (this.retiring.has(id) || this.authenticating.has(id)) throw new ExternalAgentError('conversation_busy', 'This conversation is authenticating, disconnecting or being deleted');
@@ -1040,7 +1102,7 @@ export class ExternalAgentsService {
     const snapshot = await this.read(id);
     const previous = snapshot.turns.find((turn) => turn.key === key);
     if (previous) {
-      const { _launch: _frozen, _attachmentSelections, attachments: frozenAttachments, ...saved } = await this.command<AcceptedExternalInput & { _launch?: unknown }>({
+      const { _launch: _frozen, _delivery, _attachmentSelections, attachments: frozenAttachments, ...saved } = await this.command<AcceptedExternalInput & { _launch?: unknown; _delivery?: unknown }>({
         action: 'input',
         id,
         turnId: previous.id,
@@ -1048,13 +1110,22 @@ export class ExternalAgentsService {
       });
       const original = { ...saved, ...(_attachmentSelections !== undefined ? { attachments: _attachmentSelections } : frozenAttachments !== undefined ? { attachments: frozenAttachments } : {}) };
       if (original.contentReferences) original.contentReferences = original.contentReferences.map(({ attachmentRef: _prepared, ...reference }) => reference);
-      if (!isDeepStrictEqual(original, input))
+      if (!isDeepStrictEqual(original, input) || !isDeepStrictEqual(_delivery, delivery))
         throw new ExternalAgentError(
           'input_changed',
           'This request key already belongs to another input',
           409,
         );
       return previous;
+    }
+    if (delivery) {
+      const live = this.connections.get(id);
+      if (!live || !live.connection.capabilities.steering || !live.connection.steer)
+        throw new ExternalAgentError('steering_unsupported', 'This connection cannot supplement the current turn; choose next turn instead');
+      if (snapshot.conversation.activeTurn !== delivery.expectedTurnId)
+        throw new ExternalAgentError('steering_target_ended', 'The selected execution ended; the input was not queued or resent', 409);
+      if (input.model !== undefined || input.thinking !== undefined || input.mode !== undefined || Object.keys(input.config ?? {}).length)
+        throw new ExternalAgentError('steering_options', 'Current-turn supplements keep the active model and settings; choose next turn to change them');
     }
     const config = await this.configuration(snapshot.conversation.configurationId,snapshot.conversation.executionSource?.resource_owner);
     if (!config.enabled)
@@ -1069,14 +1140,86 @@ export class ExternalAgentsService {
       if (snapshot.conversation.deleted) throw new ExternalAgentError('conversation_deleted', 'This conversation no longer accepts input');
       const prepared = selections?.length ? await this.requireAttachments().prepareExternal(snapshot.conversation, key, selections, signal) : undefined;
       signal.throwIfAborted();
+      const { attachments: _selectedAttachments, ...content } = input;
+      const admitted = { ...content, ...quoted.bind(prepared ?? []), ...(selections ? { attachments: prepared ?? [], _attachmentSelections: selections } : {}), _launch: { command: config.command, args: config.args }, ...(delivery ? { _delivery: delivery } : {}) };
       const receipt = await this.command<ExternalTurn>({
-        action: 'admit', id, key,
-        input: { ...input, ...quoted.bind(prepared ?? []), ...(prepared ? { attachments: prepared, _attachmentSelections: selections } : {}), _launch: { command: config.command, args: config.args } },
+        action: delivery ? 'steer_admit' : 'admit', id, key,
+        ...(delivery ? { targetTurnId: delivery.expectedTurnId } : {}), input: admitted,
       });
       this.notify(id, true);
+      if (delivery) return this.deliverSteering(snapshot.conversation, receipt, admitted, signal);
       this.advance(id);
       return receipt;
     });
+  }
+  private async steerChildInput(child: ExternalChild, turn: ExternalTurn, signal: AbortSignal): Promise<boolean> {
+    if (child.message_kind !== 'request' || turn.status !== 'queued' || turn.steering) return false;
+    const id = child.conversation_id, live = this.connections.get(id);
+    if (!live?.connection.capabilities.steering || !live.connection.steer) return false;
+    const input = await this.command<AcceptedExternalInput & { _preferSteering?: boolean }>({ action: 'input', id, turnId: turn.id, original: true });
+    if (input._preferSteering !== true) return false;
+    const snapshot = await this.read(id), target = snapshot.conversation.activeTurn;
+    if (!target || snapshot.conversation.needsReview) return false;
+    signal.throwIfAborted();
+    let receipt: ExternalTurn;
+    try {
+      receipt = await this.command<ExternalTurn>({ action: 'steer_prepare', id, turnId: turn.id, targetTurnId: target });
+    } catch {
+      // Definitive Catalog non-admission is still the original queue entry.
+      // A lost command response may have committed: never turn it back to queued.
+      const current = (await this.read(id)).turns.find(candidate => candidate.id === turn.id);
+      if (current?.steering) return true;
+      return false;
+    }
+    await this.withInputAdmission(id, active => this.deliverSteering(snapshot.conversation, receipt, input, active), signal);
+    return true;
+  }
+  private async deliverSteering(conversation: ExternalConversation, receipt: ExternalTurn, input: AcceptedExternalInput & { senderThreadId?: string; task?: string }, signal: AbortSignal): Promise<ExternalTurn> {
+    const id = conversation.id, targetTurnId = receipt.steering!.targetTurnId;
+    const live = this.connections.get(id);
+    let dispatched = false;
+    const observe = async (state: string, error?: string, nativeId?: string) => {
+      const result = await this.command<ExternalTurn>({ action: 'steer_receipt', id, turnId: receipt.id, state,
+        ...(error ? { error } : {}), ...(nativeId ? { nativeId } : {}) });
+      this.notify(id, true);
+      return result;
+    };
+    try {
+      if (!live || !live.connection.capabilities.steering || !live.connection.steer)
+        throw new HarnessSteeringRejected('The original connection no longer supports current-turn supplements');
+      const harnessInput = await prepareHarnessInput(input, conversation, live.connection.capabilities, live.attachments ?? this.attachments, signal);
+      signal.throwIfAborted();
+      await this.command({ action: 'item', id, turnId: receipt.id, itemId: 'user', content: {
+        id: `${receipt.id}:user`, turnId: receipt.id, kind: 'user', text: input.task ?? input.text,
+        ...(input.senderThreadId ? { senderThreadId: input.senderThreadId } : {}),
+        ...(input.images?.length ? { images: input.images } : {}),
+        ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+        ...(input.contentReferences === undefined ? {} : { contentReferences: input.contentReferences }),
+        ...(input.contentReferenceOccurrences === undefined ? {} : { contentReferenceOccurrences: input.contentReferenceOccurrences }),
+        ...(input.attachmentImageReferences === undefined ? {} : { attachmentImageReferences: input.attachmentImageReferences }),
+      } });
+      const target = (await this.read(id)).turns.find(turn => turn.id === targetTurnId);
+      const native = await live.connection.steer(harnessInput, {
+        inputId: receipt.id,
+        ...(target?.nativeId ? { expectedNativeId: target.nativeId } : {}),
+        beforeDispatch: async nativeId => {
+          signal.throwIfAborted();
+          if (this.connections.get(id) !== live || live.connection.failure)
+            throw new HarnessSteeringRejected('The original external connection ended before supplement delivery');
+          if (nativeId) await this.command({ action: 'native_turn', id, turnId: targetTurnId, nativeId });
+          await this.command({ action: 'steer_dispatch', id, turnId: receipt.id });
+          dispatched = true;
+        },
+      });
+      if (native.inputId !== receipt.id) throw new Error('The native supplement receipt has a different input identity');
+      return await observe(native.disposition, undefined, native.nativeId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // No fallback queue, cancellation of another input, or automatic retry.
+      // Once the pipe may have received input, only an explicit negative native
+      // receipt proves rejection. A persistence failure also leaves it unknown.
+      return await observe(!dispatched || error instanceof HarnessSteeringRejected ? 'rejected' : 'unknown', message);
+    }
   }
   private withInputAdmission<T>(id: string, action: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
     if (this.retiring.has(id) || this.stopping) return Promise.reject(new ExternalAgentError('conversation_busy', 'This conversation is closing'));
@@ -1214,6 +1357,8 @@ export class ExternalAgentsService {
             _eventHistory?: unknown;
             _userInput?: boolean;
             senderThreadId?: string;
+            senderBranchId?: string;
+            _preferSteering?: boolean;
             messages?: Array<{ task: string; senderThreadId?: string; _arrangement?: boolean; attachments?: import('@varin/protocol').Attachment[] }>;
             _launch?: (Pick<ExternalAgentConfiguration, 'command' | 'args'> & {configurationIdentity?:string});
           }
@@ -1246,7 +1391,7 @@ export class ExternalAgentsService {
           throw new Error('External Agent startup cancelled');
         if (input.images?.length && !live.connection.capabilities.images)
           throw new ExternalAgentError('images_unsupported', 'This Agent does not accept image input');
-        const { _launch: _launch, _arrangement: _arrangement, _eventHistory: _eventHistory, _userInput: _userInput, messages: _messages, task: _task, senderThreadId: _sender, ...admitted } = input;
+        const { _launch: _launch, _arrangement: _arrangement, _eventHistory: _eventHistory, _userInput: _userInput, messages: _messages, task: _task, senderThreadId: _sender, senderBranchId: _senderBranch, _preferSteering: _steeringPreference, ...admitted } = input;
         const preparation = { turnId: turn.id, controller: new AbortController() };
         this.attachmentPreparations.set(id, preparation);
         let harnessInput: Awaited<ReturnType<typeof prepareHarnessInput>>;
@@ -1349,6 +1494,7 @@ export class ExternalAgentsService {
     const turn = snapshot.turns.find((t) => t.id === turnId);
     if (!turn) throw new ExternalAgentError('turn_missing', 'External turn is unavailable');
     if (ended(turn)) return;
+    if (turn.steering) throw new ExternalAgentError('steering_not_withdrawable', 'A delivered supplement cannot be withdrawn individually; stop its original execution instead');
     if (turn.status === 'queued' || turn.status === 'awaiting_input') {
       await this.command({ action: 'observe', id, turnId, status: 'cancelled' });
       this.notify(id);

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ExternalAgentSettings } from '@varin/application-client';
+import type { ExternalAgentSettings, ExternalHarness } from '@varin/application-client';
 import { useExternalAgents } from '@/stores/useExternalAgentStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 type HarnessSelectorProps = {
-  value?: string | null; disabled?: boolean; onChange?(id: string | null): void;
+  value?: string | null; harness?: ExternalHarness; disabled?: boolean; onChange?(id: string | null): void;
   settings?: ExternalAgentSettings | null; loading?: boolean; error?: string; onRetry?(): void;
   onOpenChange?(open: boolean): void; sourceRemote?: boolean;
 };
@@ -28,6 +28,7 @@ function LocalHarnessSelector(props: HarnessSelectorProps) {
 }
 function HarnessSelectorContent({
   value,
+  harness,
   disabled,
   onChange, settings, loading, error, onRetry, onOpenChange, sourceRemote,
 }: HarnessSelectorProps) {
@@ -37,7 +38,7 @@ function HarnessSelectorContent({
   const content = (
     <>
       {value ? (
-        <HarnessIcon harness={agent?.harness} profileId={agent?.id} className="size-3.5" />
+        <HarnessIcon harness={agent?.harness ?? harness} configurationId={agent?.id ?? value ?? undefined} className="size-3.5" />
       ) : (
         <VarinLogo decorative width={14} height={14} />
       )}
@@ -78,7 +79,7 @@ function HarnessSelectorContent({
           .filter((v) => v.enabled || v.id === value)
           .map((v) => (
             <DropdownMenuItem key={v.id} disabled={!v.enabled} onSelect={() => onChange(v.id)}>
-              <HarnessIcon harness={v.harness} profileId={v.id} />
+              <HarnessIcon harness={v.harness} configurationId={v.id} />
               <span className="flex-1">{v.name}</span>
               {v.id === value && <Icon name="check" className="size-3.5" />}
             </DropdownMenuItem>

@@ -594,3 +594,17 @@ it('bridges session background levels without an active turn and queries only na
   expect(f.frames.filter(frame => frame.method === 'message')).toHaveLength(0);
   f.bridge.close();
 });
+
+it('correlates plural-only native input UUIDs and does not inherit an old binding for foreign batches', async () => {
+  const f = fixture();
+  await f.initialize();
+  await f.bridge.handle({ method: 'prompt', params: { uuid: first, text: 'first' } });
+  await f.emit({ type: 'assistant', user_message_uuids: [first], message: { id: 'batch', content: [{ type: 'text', text: 'owned' }] } });
+  expect(f.frames.filter(frame => frame.method === 'message')).toHaveLength(1);
+  await f.emit({ type: 'result', user_message_uuids: [second], is_error: false });
+  expect(f.frames.filter(frame => frame.method === 'message')).toHaveLength(1);
+  await f.emit({ type: 'result', user_message_uuids: [first], is_error: false });
+  expect(f.frames.filter(frame => frame.method === 'message')).toHaveLength(2);
+  expect(f.frames.filter(frame => frame.method === 'message').map(frame => record(frame.params).turnId)).toEqual([first, first]);
+  f.bridge.close();
+});

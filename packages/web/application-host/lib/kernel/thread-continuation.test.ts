@@ -586,15 +586,17 @@ it('subtree cancellation carries the original parent scope and never loads child
   expect(runtime.cancelTree.mock.calls).toHaveLength(accepted);
 });
 
-it('an unrelated observation error remains visible without blocking original saved-launch discovery or event replay', async () => {
+it.each(['observation', 'unaccepted dependency'] as const)('an unrelated %s error remains visible without blocking original saved-launch discovery or event replay', async stage => {
   const f = fixture(); f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable'; f.run.waiting_on = null;
-  const failure = new Error('Original child report content is unavailable');
-  const reconcileObservations = vi.fn(async (): Promise<string[]> => { throw failure; });
+  const failure = new Error(`Original ${stage} content is unavailable`);
+  const reconcileObservations = vi.fn(async (): Promise<string[]> => { if (stage === 'observation') throw failure; return []; });
+  const unacceptedChildDependencies = vi.fn(async () => { if (stage === 'unaccepted dependency') throw failure; return []; });
+  const releaseUnacceptedChildDependencies = vi.fn();
   let listener!: (event: AgentRuntimeStreamEvent) => void;
   const events: RuntimeEvent[] = [];
   const runtime = Object.assign(f.runtime, {
     onEvent: (handler: typeof listener) => { listener = handler; return () => {}; }, onExit: () => () => {}, onReady: () => () => {},
-    reconcileObservations, children: async () => [], unacceptedChildDependencies: async () => [],
+    reconcileObservations, children: async () => [], unacceptedChildDependencies, releaseUnacceptedChildDependencies,
     status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
   });
   const continueRun = vi.fn(async (runId: string, signal: AbortSignal) => f.adapter.continueLaunch(runId, { signal }));
@@ -614,8 +616,48 @@ it('an unrelated observation error remains visible without blocking original sav
     expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce();
     expect(f.runtime.pendingLaunches).toHaveBeenCalledOnce();
     expect(reconcileObservations).toHaveBeenCalledTimes(2);
+    expect(unacceptedChildDependencies).toHaveBeenCalledTimes(2);
+    expect(releaseUnacceptedChildDependencies).not.toHaveBeenCalled();
     expect(f.errors).toEqual([failure, failure]);
   } finally { collaboration.stop(); }
+});
+
+it.each(['active', 'stopped'] as const)('a failed dependency scan preserves reconciled Run delivery only for the %s Host epoch', async state => {
+  const f = fixture(); f.launch.startable = true; f.launch.pause = null; f.run.state = 'runnable'; f.run.waiting_on = null;
+  const failure = new Error('Original dependency discovery failed');
+  let reject!: (error: unknown) => void;
+  const scan = new Promise<never>((_resolve, fail) => { reject = fail; });
+  const unacceptedChildDependencies = vi.fn(async () => scan);
+  const releaseUnacceptedChildDependencies = vi.fn();
+  const runtime = Object.assign(f.runtime, {
+    onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {},
+    reconcileObservations: async () => [f.run.id], children: async () => [], unacceptedChildDependencies, releaseUnacceptedChildDependencies,
+    status: async () => ({ eventCursor: 0 }), events: async () => [],
+  });
+  const continueRun = vi.fn(async (runId: string, signal: AbortSignal) => f.adapter.continueLaunch(runId, { signal }));
+  // No saved-launch scan or event can deliver this Run; only the original reconciliation result can.
+  const recoverLaunches = vi.fn(async () => {}), recoverColdBotWork = vi.fn(async () => {});
+  const collaboration = new ThreadCollaboration({ kernel: { reconcileChildToolHandoffs() {}, releaseChildToolHandoff() {} } as never,
+    storageAdapter: {} as never, resolveLiveSource: async () => { throw new Error('Unexpected source'); }, sourceCaptureOwners: {} as never,
+    runtime: runtime as unknown as AgentRuntimeClient, prepareContext: {} as never,
+    continueRun, recoverLaunches, recoverColdBotWork, onError: (_id, error) => f.errors.push(error) });
+  try {
+    const recovery = collaboration.recover();
+    await vi.waitFor(() => expect(unacceptedChildDependencies).toHaveBeenCalledOnce());
+    if (state === 'stopped') collaboration.stop();
+    reject(failure); await recovery;
+    if (state === 'active') {
+      await vi.waitFor(() => expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce());
+      expect(continueRun).toHaveBeenCalledExactlyOnceWith(f.run.id, expect.any(AbortSignal));
+      expect(recoverLaunches).toHaveBeenCalledOnce(); expect(recoverColdBotWork).toHaveBeenCalledOnce();
+      expect(f.errors).toEqual([failure]);
+    } else {
+      expect(continueRun).not.toHaveBeenCalled(); expect(f.runtime.rebindLaunch).not.toHaveBeenCalled();
+      expect(recoverLaunches).not.toHaveBeenCalled(); expect(recoverColdBotWork).not.toHaveBeenCalled();
+      expect(f.errors).toEqual([]);
+    }
+    expect(releaseUnacceptedChildDependencies).not.toHaveBeenCalled();
+  } finally { reject(failure); collaboration.stop(); }
 });
 
 it('public source failure projection accepts typed owners and rejects forged reserved error codes', async () => {

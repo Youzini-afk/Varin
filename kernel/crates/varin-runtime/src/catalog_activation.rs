@@ -53,6 +53,9 @@ pub enum MessageActivationHold {
     DependencyWait,
     Preparing,
     SourceUnsettled,
+    ModelUnavailable,
+    SourceUnavailable,
+    BotSuspended,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(
@@ -142,6 +145,9 @@ pub(in crate::catalog) fn run_hold(
     db: &Connection,
     run: &Run,
 ) -> Result<Option<MessageActivationHold>> {
+    if !super::bot::run_permitted(db, run)? {
+        return Ok(Some(MessageActivationHold::BotSuspended));
+    }
     if goal_hold(db, run)? {
         return Ok(Some(MessageActivationHold::GoalBlocked));
     }
@@ -260,6 +266,19 @@ pub(in crate::catalog) fn project(
                         hold = Some(MessageActivationHold::SourceUnsettled)
                     }
                 }
+            }
+            if !super::bot::thread_permitted(db, &row.thread_id, super::bot::current_epoch(db)?)? {
+                hold = Some(MessageActivationHold::BotSuspended);
+            } else if latest_run(db, &row.branch_id)?.is_none() {
+                let reason: Option<String> = db.query_row(
+                    "SELECT json_extract(data,'$.reason') FROM events WHERE subject=?1 AND kind='ingress.preparation_hold' ORDER BY cursor DESC LIMIT 1",
+                    [&row.id], |row| row.get(0),
+                ).optional()?.flatten();
+                hold = match reason.as_deref() {
+                    Some("model_unavailable") => Some(MessageActivationHold::ModelUnavailable),
+                    Some("source_unavailable") => Some(MessageActivationHold::SourceUnavailable),
+                    _ => hold,
+                };
             }
             MessageActivation::Pending {
                 execution_id: execution_id.clone(),
@@ -797,7 +816,8 @@ impl Catalog {
                     return Ok(());
                 }
                 let Some(run) = latest_run(&self.db, &row.branch_id)? else {
-                    if matches!(row.origin, InputOrigin::WorkEvent { .. } | InputOrigin::Followup { .. } | InputOrigin::Calendar { .. }) && super::bot::thread_bot(&self.db, &row.thread_id)?.is_some() {
+                    if (matches!(row.origin, InputOrigin::Message { .. }) && self.child_task_for_thread(&row.thread_id)?.is_none())
+                        || (matches!(row.origin, InputOrigin::WorkEvent { .. } | InputOrigin::Followup { .. } | InputOrigin::Calendar { .. }) && super::bot::thread_bot(&self.db, &row.thread_id)?.is_some()) {
                         // Its first launch needs the actual Host model/source preparation.
                         // Keep the original ingress pending for that owner.
                         return Ok(());

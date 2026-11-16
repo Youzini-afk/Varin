@@ -23,22 +23,11 @@ pub(super) fn authorize(
             [&reference.branch_id],
             |row| row.get(0),
         )?;
-        if owner != reference.thread_id
-            || (scheduling::thread_family(db, caller)? != scheduling::thread_family(db, &owner)?
-                && !super::bot_work::readable_conversation(db, caller, &owner)?
-                && !super::bot_work::linked(
-                    db,
-                    caller,
-                    &owner,
-                    Some(&reference.branch_id),
-                    false,
-                    false,
-                )?)
-        {
-            return Err(RuntimeError::Conflict(
-                "background is outside the caller's readable work".into(),
-            ));
+        if owner != reference.thread_id {
+            return Err(RuntimeError::Conflict("background branch belongs to another conversation".into()));
         }
+        threads::require_branch_available(db, &reference.branch_id)?;
+        threads::require_conversation_access(db, caller, &owner)?;
         if reference.head_id.is_empty() || reference.item_ids.is_empty() {
             return Err(RuntimeError::Invalid(
                 "background requires a fixed head and selected item IDs".into(),

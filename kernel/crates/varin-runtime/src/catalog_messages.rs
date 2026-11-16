@@ -45,6 +45,8 @@ pub enum MessageActor {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MessageInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_options: Option<dispatch::ExecutorOptions>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<super::attachments::AttachmentSelection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -221,6 +223,7 @@ fn branch_owner(db: &Connection, thread: &str, branch: &str) -> Result<()> {
             "message branch does not belong to the specified Thread".into(),
         ));
     }
+    super::threads::require_branch_available(db, branch)?;
     super::context_jobs::require_regular_branch(db, branch)
 }
 pub(super) fn message_identity(input: &QueuedInputMetadata) -> Result<&MessageIdentity> {
@@ -258,7 +261,8 @@ fn route(
         }
         super::user_dispatch::validate_relation(db, &child)?;
     }
-    if !super::retrieval::is_result_sender(db,sender,actor,input)? { super::threads::require_public(db,sender)?; }
+    let internal_result = super::retrieval::is_result_sender(db, sender, actor, input)?;
+    if !internal_result { super::threads::require_product_caller(db, sender)?; }
     let (target, target_branch) = if let Some(reply) = &input.reply_to {
         let original: QueuedInputMetadata = record(db, "input_queue", reply)?;
         let original = message_identity(&original)?;
@@ -267,11 +271,6 @@ fn route(
             return Err(RuntimeError::Conflict(
                 "replyTo was not received by this exact Thread and branch".into(),
             ));
-        }
-        if super::scheduling::thread_family(db, &original.sender_thread_id)?
-            != super::scheduling::thread_family(db, sender)?
-            && !super::bot_work::can_message(db, sender, branch, &original.sender_thread_id, &original.sender_branch_id)? {
-            return Err(RuntimeError::Conflict("reply is outside the caller's task family".into()));
         }
         let (reply_thread, reply_branch) = if matches!(actor, MessageActor::User)
             && input.target_thread_id.as_ref().map(|target| super::threads::resolve(db, target)).transpose()?
@@ -301,21 +300,24 @@ fn route(
         let branch = input.target_branch_id.clone().map(Ok).unwrap_or_else(||super::threads::branch(db,&target))?;
         (target,branch)
     };
-    if sender == target && !matches!(actor, MessageActor::User) {
+    if sender == target && branch == target_branch && !matches!(actor, MessageActor::User) {
         return Err(RuntimeError::Invalid(
-            "messages must target another task-family member".into(),
+            "messages must target another conversation or branch".into(),
         ));
     }
     branch_owner(db, &target, &target_branch)?;
     super::threads::require_available(db,&target)?;
     super::threads::require_public(db,&target)?;
-    if super::scheduling::thread_family(db, sender)?
-        != super::scheduling::thread_family(db, &target)?
-        && !super::bot_work::can_message(db, sender, branch, &target, &target_branch)?
-    {
-        return Err(RuntimeError::Conflict(
-            "message target is outside the sender's task family".into(),
-        ));
+    if !internal_result {
+        super::threads::require_conversation_access(db, sender, &target)?;
+    }
+    if input.name.is_some() && !matches!(actor, MessageActor::User)
+        && super::scheduling::thread_family(db, sender)? != super::scheduling::thread_family(db, &target)? {
+        return Err(RuntimeError::Conflict("Contacting an independent conversation does not authorize renaming it; omit name".into()));
+    }
+    let archived: bool = db.query_row("SELECT archived FROM threads WHERE id=?1", [&target], |row| row.get(0))?;
+    if archived {
+        return Err(RuntimeError::Conflict("Target conversation is archived; restore that conversation before sending".into()));
     }
     Ok((target, target_branch))
 }
@@ -404,6 +406,9 @@ impl Catalog {
         invocation: Option<(ToolInvocationRead, ToolCall, ToolSchema)>,
         operation: Option<Operation>,
     ) -> Result<MessagePreparation> {
+        if input.executor_options.is_some() {
+            return Err(RuntimeError::Invalid("executorOptions applies only to an existing external conversation's next turn".into()));
+        }
         let previous: Option<(String, String)> = self
             .db
             .query_row(
@@ -457,7 +462,7 @@ impl Catalog {
         let reply=identity.reply_to.as_deref().map(|id|self.message_reference(id,&identity.message_id)).transpose()?;
         let model_identity=json!({"ref":reference,"sender":format!("{} [{}]",sender["name"].as_str().unwrap_or("Agent"),sender["agentId"].as_str().unwrap_or("")),
             "recipient":format!("{} [{}]",recipient["name"].as_str().unwrap_or("Agent"),recipient["agentId"].as_str().unwrap_or("")),
-            "kind":identity.kind,"replyTo":reply,"nextRead":{"tool":"read_thread","arguments":{"ref":reference}}});
+            "senderBranchId":identity.sender_branch_id,"recipientBranchId":identity.target_branch_id,"kind":identity.kind,"replyTo":reply,"nextRead":{"tool":"read_thread","arguments":{"ref":reference}}});
         Ok(MessagePreparation {
             report_receiver_tools: None, report_model_read: None,
             model_identity: Some(model_identity),
@@ -525,10 +530,10 @@ impl Catalog {
             threads::require_available(&tx, &identity.sender_thread_id)?;
             threads::require_available(&tx, &identity.target_thread_id)?;
         }
-        // Recheck the actual family and original reverse route after body preparation.
-        let routing = MessageInput { attachments: Vec::new(), after_current: None,
+        // Recheck product access and the original reverse route after body preparation.
+        let routing = MessageInput { executor_options: None, attachments: Vec::new(), after_current: None,
             source_agent: identity.source_agent.clone(),
-            name: None,
+            name: prepared.name.clone(),
             wait: None,
             target_thread_id: Some(identity.target_thread_id.clone()),
             target_branch_id: Some(identity.target_branch_id.clone()),
@@ -807,10 +812,10 @@ impl MessagePreparation {
             self.input.text
         );
         let envelope = if let Some(display) = &self.model_identity {
-            format!("Task message {}\nSender: {}\nTarget: {}\nKind: {}\nReply to: {}\n\n{}",
-                display["ref"].as_str().unwrap_or("message"),display["sender"].as_str().unwrap_or("Agent"),
-                display["recipient"].as_str().unwrap_or("Agent"),if self.identity.kind==MessageKind::Request {"request"} else {"inform"},
-                display["replyTo"].as_str().unwrap_or("none"),self.input.text)
+            format!("Task message {}\nSender: {} / {}\nTarget: {} / {}\nKind: {}\nReply to: {}\nIf replying, send replyTo={} preserves this exact route.\n\n{}",
+                display["ref"].as_str().unwrap_or("message"),display["sender"].as_str().unwrap_or("Agent"),self.identity.sender_branch_id,
+                display["recipient"].as_str().unwrap_or("Agent"),self.identity.target_branch_id,if self.identity.kind==MessageKind::Request {"request"} else {"inform"},
+                display["replyTo"].as_str().unwrap_or("none"),display["ref"].as_str().unwrap_or("message"),self.input.text)
         } else {envelope};
         let receiver_tools: Option<Vec<ToolSchema>> = self.report_receiver_tools.as_ref()
             .map(|reference| -> Result<Vec<ToolSchema>> { Ok(serde_json::from_value(self.content.load(reference)?)?) }).transpose()?;

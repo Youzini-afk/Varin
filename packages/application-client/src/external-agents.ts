@@ -18,6 +18,8 @@ export interface ExternalAgentConfiguration {
   name: string;
   harness: ExternalHarness;
   enabled: boolean;
+  /** Installation discovery intent; enabled remains the compatibility projection. */
+  availability?: 'auto' | 'enabled' | 'disabled';
   command: string;
   args: string[];
   defaults?: ExternalAgentDefaults;
@@ -61,11 +63,26 @@ export interface ExternalAgentCapabilityCache {
   cachedAt: number;
 }
 export interface ExternalAgentDetection {
+  checkedAt?: number;
   id: string;
   status: 'available' | 'missing' | 'failed';
   executable?: string;
   version?: string;
   message?: string;
+}
+/** Installation, configuration intent and negotiated session facts are independent. */
+export interface ExternalExecutorInspection {
+  configurationId: string;
+  name: string;
+  harness: ExternalHarness;
+  availability: 'auto' | 'enabled' | 'disabled';
+  installation: { status: 'installed' | 'missing' | 'failed' | 'unknown'; checkedAt?: number; version?: string; message?: string };
+  defaults: ExternalAgentDefaults;
+  connection: 'connected' | 'not_connected';
+  authentication: 'unknown';
+  capabilitySource: 'connection' | 'cache' | 'unknown';
+  capabilities?: ExternalAgentCapabilities;
+  capabilitiesCheckedAt?: number;
 }
 export interface ExternalAgentModel {
   id: string;
@@ -134,12 +151,23 @@ export interface ExternalInput extends ContentReferenceInput {
   thinking?: string;
   mode?: string;
 }
+/** Delivery intent is separate from the next turn's model and session options. */
+export interface ExternalSendOptions {
+  mode?: 'steer' | 'next_turn';
+  /** Product turn identity captured when the user chose to supplement that turn. */
+  expectedTurnId?: string;
+}
 export interface ExternalTurn {
   arrangementOccurrenceId?: string;
   arrangementLaunch?: Pick<ExternalAgentConfiguration, 'command' | 'args'>;
   arrangementHoldReason?: string;
   blockedReason?: string;
   consumedByTurnId?: string;
+  steering?: {
+    state: 'accepted' | 'dispatching' | 'appended' | 'queued' | 'handled' | 'rejected' | 'unknown';
+    targetTurnId: string;
+    error?: string;
+  };
   id: string;
   conversationId: string;
   key: string;
@@ -262,6 +290,8 @@ export type ExternalObservationChange =
   | { kind: 'unavailable'; message: string };
 export type ExternalObservation = { epoch: string; revision: number } & ExternalObservationChange;
 export interface ExternalDelegation {
+  /** Original execution configuration, independent of the task name or role avatar. */
+  configurationId?: string;
   messageKind?: 'inform' | 'request';
   operationId: string;
   conversationId: string;
@@ -283,7 +313,7 @@ export interface ExternalAgentsAPI {
     expectedRevision: number,
     key: string,
   ): Promise<ExternalAgentSettings>;
-  detect(id: string, signal?: AbortSignal): Promise<ExternalAgentDetection>;
+  detect(id: string, signal?: AbortSignal, resourceOwner?: import('@varin/protocol').SourceResourceOwner): Promise<ExternalAgentDetection>;
   list(signal?: AbortSignal): Promise<ExternalConversation[]>;
   children(signal?: AbortSignal): Promise<ExternalDelegation[]>;
   childPresentation(
@@ -299,7 +329,7 @@ export interface ExternalAgentsAPI {
     organization?: import('./conversation-organization.js').ConversationOrganizationPlacement;
   }): Promise<ExternalConversation>;
   read(id: string, before?: number, signal?: AbortSignal): Promise<ExternalConversationSnapshot>;
-  send(id: string, key: string, input: ExternalInput): Promise<ExternalTurn>;
+  send(id: string, key: string, input: ExternalInput, options?: ExternalSendOptions): Promise<ExternalTurn>;
   uploadAttachment(id: string, request: { key: string; filename: string; mimeType: string; data: Blob }, signal?: AbortSignal): Promise<Attachment>;
   readAttachment(id: string, ref: string, signal?: AbortSignal): Promise<Blob>;
   connect(id: string, signal?: AbortSignal): Promise<ExternalAgentCapabilities>;
@@ -356,16 +386,17 @@ export function createExternalAgentsHttpAPI(generation = getRuntimeEndpointGener
   return {
     settings: (signal, resourceOwner) => request('settings', resourceOwner ? {resourceOwner} : {}, signal),
     configure: (value, expectedRevision, key) => request('configure', { value, expectedRevision, key }),
-    detect: (id, signal) => request('detect', { id }, signal),
+    detect: (id, signal, resourceOwner) => request('detect', { id, ...(resourceOwner ? { resourceOwner } : {}) }, signal),
     list: (signal) => request('list', {}, signal),
     children: (signal) => request('children', {}, signal),
     childPresentation: (operationId, signal) => request('child-presentation', { operationId }, signal),
     create: (input) => request('create', input),
     read: (id, before, signal) => request('read', { id, before }, signal),
-    send: (id, key, input) =>
+    send: (id, key, input, options) =>
       request('send', {
         id,
         key,
+        ...(options === undefined ? {} : { options }),
         input: {
           text: input.text,
           ...(input.config === undefined ? {} : { config: input.config }),

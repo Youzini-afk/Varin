@@ -80,7 +80,6 @@ export const ConversationOrganizationTree = React.forwardRef<OrganizationNavigat
   const threads = useThreadStore(s => s.threads);
   const botEntry = useBotNavigation(s => s.entry);
   const selected = useThreadStore(s => s.selectedIdentity);
-  const externalChildren = useExternalAgentStore(s => s.children);
   const external = useExternalAgentStore(s => s.conversations);
   const externalSelected = useExternalAgentStore(s => s.selectedId);
   const sidebar = useSidebarCatalog(viewKey === 'bot');
@@ -290,7 +289,6 @@ export const ConversationOrganizationTree = React.forwardRef<OrganizationNavigat
   const name = (node: OrganizationNode) => node.container?.name ?? node.conversation?.title ?? t('organization.untitled');
   const threadById = new Map(threads.map(thread => [thread.thread_id, thread]));
   const externalById = new Map(external.map(conversation => [conversation.id, conversation]));
-  const delegationById = new Map(externalChildren.map(child => [child.conversationId, child]));
   const summaryByKey = new Map(sidebar.summaries.map(summary => [organizationObjectKey({ kind: summary.harness ? 'external' : 'native', id: summary.id }), summary]));
   const confirmDelete = useUIStore(store => store.showDeletionDialog);
   const [confirming, setConfirming] = React.useState<typeof confirmation>(null);
@@ -385,7 +383,7 @@ export const ConversationOrganizationTree = React.forwardRef<OrganizationNavigat
         {container?.kind === 'project' && <Item onClick={() => setConfirmation({ title: t('organization.removeProject'), description: t('organization.removeDescription'), action: t('organization.removeAction'), run: async () => { await useProjectsStore.getState().removeProject(container.projectId!); await refreshConversationOrganization(); } })}>{t('organization.removeProject')}</Item>}
       </>;
     };
-    const rowIcon = container ? <OrganizationContainerIcon container={container} project={project} /> : entry?.origin.directBotId ? <ConversationOrigin origin={entry.origin} main /> : ext ? ext.parent ? <AgentAvatar identity={node.object.id} avatar={delegationById.get(node.object.id)?.avatar} size={20} /> : <HarnessIcon harness={ext.harness} /> : <AgentAvatar identity={node.object.id} avatar={thread?.avatar} size={20} {...(thread && isLeadThread(thread, threadById) ? { role: 'lead' as const } : {})} />;
+    const rowIcon = container ? <OrganizationContainerIcon container={container} project={project} /> : entry?.origin.directBotId ? <ConversationOrigin origin={entry.origin} main /> : entry?.conversation.kind === 'external' ? <HarnessIcon harness={ext?.harness} configurationId={ext?.configurationId} className="size-5" /> : <AgentAvatar identity={node.object.id} avatar={thread?.avatar} size={20} {...(thread && isLeadThread(thread, threadById) ? { role: 'lead' as const } : {})} />;
     const busy = !!(thread?.branches.some(branch => branch.active_run_id) || ext?.activeTurn);
     const waiting = !!thread?.branches.some(branch => isWaitingStatus(runStatus(branch.latest_run)));
     const attention = thread?.unread && !active && !busy ? { kind: thread.branches.some(branch => branch.latest_run?.state === 'failed') ? 'error' as const : 'complete' as const, updatedAt: thread.updated_at_ms } : undefined;

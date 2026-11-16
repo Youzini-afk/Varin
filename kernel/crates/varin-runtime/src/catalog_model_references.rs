@@ -688,7 +688,8 @@ impl Catalog {
             .ok_or_else(|| RuntimeError::NotFound("External Agent has no admitted work".into()))
     }
 }
-/// Small references never keep resource bytes alive. Retire their holders with the original
+/// References grant no resource authority. External-history snapshot refs retain only the
+/// observed immutable versions on behalf of their original holders. Retire holders with the original
 /// Catalog records and keep SQLite's allocation high water so an old name can never be reused.
 pub(super) fn collect_unheld(
     db: &Connection,

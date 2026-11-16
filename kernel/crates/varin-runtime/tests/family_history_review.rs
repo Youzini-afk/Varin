@@ -150,7 +150,7 @@ fn real_main_sibling_nested_discovery_survives_terminal_and_never_grants_control
         let list =
             f.db.capture_family_read(caller, None, None)
                 .unwrap()
-                .list(false, &|| false)
+                .list_page(false, FamilyListQuery { relationship: Some("family".into()), scope: Some("all".into()), ..Default::default() }, &|| false)
                 .unwrap();
         assert_eq!(list.root_thread_id, "thread:parent");
         assert_eq!(list.members.len(), 3);
@@ -161,7 +161,7 @@ fn real_main_sibling_nested_discovery_survives_terminal_and_never_grants_control
         let all =
             f.db.capture_family_read(caller, None, None)
                 .unwrap()
-                .list(true, &|| false)
+                .list_page(true, FamilyListQuery { relationship: Some("family".into()), scope: Some("all".into()), ..Default::default() }, &|| false)
                 .unwrap();
         assert_eq!(all.members.len(), 4);
         assert!(f
@@ -169,7 +169,7 @@ fn real_main_sibling_nested_discovery_survives_terminal_and_never_grants_control
             .capture_family_read(caller, Some("unrelated"), Some("unrelated-branch"))
             .unwrap()
             .read(request(recent(2)), &|| false)
-            .is_err());
+            .is_ok());
     }
     let page = read(
         &f,
@@ -1409,7 +1409,9 @@ fn external_directory_pages_use_real_owners_without_opening_item_bodies() {
     let second=f.db.capture_family_read("thread:parent",None,None).unwrap().directory_page(false,FamilyListQuery{cursor:first.next_cursor.clone(),..options},&||false).unwrap();
     assert_eq!(second.members.len(),1);assert_ne!(first.members[0].thread_id,second.members[0].thread_id);assert!(second.next_cursor.is_none());
     f.db.create_thread("unrelated-owner","unrelated-branch").unwrap();
-    assert!(f.db.capture_family_read("unrelated-owner",None,None).unwrap().directory_page(false,FamilyListQuery{scope:Some("all".into()),..Default::default()},&||false).unwrap().members.is_empty());
+    let accessible=f.db.capture_family_read("unrelated-owner",None,None).unwrap().directory_page(false,FamilyListQuery{scope:Some("all".into()),..Default::default()},&||false).unwrap();
+    assert_eq!(accessible.members.iter().filter(|member|member.backend=="external").count(),2);
+    assert!(f.db.capture_family_read("unrelated-owner",None,None).unwrap().directory_page(false,FamilyListQuery{scope:Some("all".into()),relationship:Some("family".into()),..Default::default()},&||false).unwrap().members.is_empty());
     let root=f.root.clone();drop(f);std::fs::remove_dir_all(root).unwrap();
 }
 

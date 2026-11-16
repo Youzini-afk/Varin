@@ -12,6 +12,7 @@ type Send = Parameters<ThreadMessagesAPI['send']>[1];
 const holdLabels: Record<MessageActivationHold, I18nKey> = {
   manual_pause: 'chat.messages.paused', question: 'chat.messages.question', goal_blocked: 'chat.messages.goal',
   dependency_wait: 'chat.messages.dependency', preparing: 'chat.messages.preparing', source_unsettled: 'chat.messages.source',
+  model_unavailable: 'chat.messages.modelUnavailable', source_unavailable: 'chat.messages.sourceUnavailable', bot_suspended: 'chat.messages.botSuspended',
 };
 function activationText(activation: MessageActivation, t: ReturnType<typeof useI18n>['t']): string {
   const held = 'holdReason' in activation && activation.holdReason ? ` · ${t(holdLabels[activation.holdReason])}` : '';

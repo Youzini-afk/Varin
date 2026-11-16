@@ -1,6 +1,8 @@
 //! Durable product records for independently executing harnesses; no synthetic model Run.
 use super::*;
 use serde::Deserialize;
+#[path = "catalog_external_history.rs"]
+pub mod history;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(
@@ -107,6 +109,11 @@ pub enum ExternalCommand {
         key: String,
         input: Value,
     },
+    /// Additional input has its own durable identity, not an independent execution.
+    SteerAdmit { id: String, key: String, input: Value, target_turn_id: String },
+    SteerPrepare { id: String, turn_id: String, target_turn_id: String },
+    SteerDispatch { id: String, turn_id: String },
+    SteerReceipt { id: String, turn_id: String, state: String, native_id: Option<String>, error: Option<String> },
     Begin {
         id: String,
         turn_id: String,
@@ -156,6 +163,51 @@ mod tests {
     }
     fn create(c: &mut Catalog, id: &str) {
         call(c,json!({"action":"create","id":id,"key":id,"configurationId":"codex","harness":"codex","title":"Task","cwd":"/workspace"})).unwrap();
+    }
+    #[test]
+    fn external_steering_has_a_durable_input_receipt_and_one_real_execution() {
+        let directory = Fixture::new();
+        let mut c = Catalog::open(directory.path()).unwrap();
+        create(&mut c, "external:steer");
+        let original = call(&mut c, json!({"action":"admit","id":"external:steer","key":"first","input":{"text":"work"}})).unwrap();
+        let target = original["id"].as_str().unwrap();
+        call(&mut c, json!({"action":"begin","id":"external:steer","turnId":target})).unwrap();
+        call(&mut c, json!({"action":"observe","id":"external:steer","turnId":target,"status":"running"})).unwrap();
+        call(&mut c, json!({"action":"native_turn","id":"external:steer","turnId":target,"nativeId":"native"})).unwrap();
+        let admission = json!({"action":"steer_admit","id":"external:steer","key":"extra","targetTurnId":target,"input":{"text":"supplement"}});
+        let extra = call(&mut c, admission.clone()).unwrap();
+        assert_eq!(extra, call(&mut c, admission.clone()).unwrap());
+        assert_eq!(extra["steering"]["state"], "accepted");
+        assert!(extra.get("consumedByTurnId").is_none());
+        assert_eq!(call(&mut c,json!({"action":"read","id":"external:steer"})).unwrap()["conversation"]["activeTurn"], target);
+        let dispatch = json!({"action":"steer_dispatch","id":"external:steer","turnId":extra["id"]});
+        call(&mut c, dispatch.clone()).unwrap();
+        assert!(call(&mut c, dispatch).is_err(), "durable intent cannot dispatch twice");
+        call(&mut c, json!({"action":"observe","id":"external:steer","turnId":target,"status":"completed","nativeId":"native"})).unwrap();
+        assert!(call(&mut c,json!({"action":"steer_receipt","id":"external:steer","turnId":extra["id"],"state":"appended","nativeId":"other"})).is_err());
+        let accepted = call(&mut c,json!({"action":"steer_receipt","id":"external:steer","turnId":extra["id"],"state":"appended","nativeId":"native"})).unwrap();
+        assert_eq!(accepted["consumedByTurnId"], target);
+        assert_eq!(accepted["status"], "completed", "late ack belongs to the completed original, not a new execution");
+        drop(c);
+        let mut c = Catalog::open(directory.path()).unwrap();
+        let snapshot = call(&mut c,json!({"action":"read","id":"external:steer"})).unwrap();
+        assert!(snapshot["conversation"]["activeTurn"].is_null());
+        assert_eq!(snapshot["turns"].as_array().unwrap().iter().find(|t|t["key"]=="extra").unwrap()["consumedByTurnId"], target);
+    }
+    #[test]
+    fn external_steering_recovery_never_queues_an_uncertain_native_effect() {
+        let directory=Fixture::new();let mut c=Catalog::open(directory.path()).unwrap();create(&mut c,"external:steer");
+        let original=call(&mut c,json!({"action":"admit","id":"external:steer","key":"first","input":{"text":"work"}})).unwrap();
+        call(&mut c,json!({"action":"begin","id":"external:steer","turnId":original["id"]})).unwrap();
+        call(&mut c,json!({"action":"observe","id":"external:steer","turnId":original["id"],"status":"running"})).unwrap();
+        let extra=call(&mut c,json!({"action":"steer_admit","id":"external:steer","key":"extra","targetTurnId":original["id"],"input":{"text":"supplement"}})).unwrap();
+        call(&mut c,json!({"action":"steer_dispatch","id":"external:steer","turnId":extra["id"]})).unwrap();
+        drop(c);let mut c=Catalog::open(directory.path()).unwrap();
+        let snapshot=call(&mut c,json!({"action":"read","id":"external:steer"})).unwrap();
+        let restored=snapshot["turns"].as_array().unwrap().iter().find(|t|t["key"]=="extra").unwrap();
+        assert_eq!(restored["status"],"interrupted");assert_eq!(restored["steering"]["state"],"unknown");
+        assert!(restored.get("consumedByTurnId").is_none());
+        assert!(call(&mut c,json!({"action":"steer_dispatch","id":"external:steer","turnId":extra["id"]})).is_err());
     }
     #[test]
     fn external_creation_receipt_preserves_legacy_identity_after_principal_claim() {
@@ -461,6 +513,29 @@ mod tests {
         assert!(call(&mut c, json!({"action":"read","id":"external:files"})).unwrap()["turns"].as_array().unwrap().is_empty());
     }
 
+    #[test]
+    fn persisted_executor_availability_migrates_once_without_enabling_old_disabled_defaults() {
+        let directory = Fixture::new();
+        let c = Catalog::open(directory.path()).unwrap();
+        let original = json!({"revision":7,"defaultAgent":"codex","agents":[
+            {"id":"codex","harness":"codex","command":"my-codex","args":[],"enabled":false},
+            {"id":"pi","harness":"pi","command":"pi","args":[],"enabled":true}
+        ]});
+        c.db.execute("UPDATE external_settings SET body=?1 WHERE id='settings'",[original.to_string()]).unwrap();
+        c.db.pragma_update(None,"user_version",99).unwrap();
+        drop(c);
+        let mut reopened = Catalog::open(directory.path()).unwrap();
+        let settings = call(&mut reopened,json!({"action":"settings"})).unwrap();
+        assert_eq!(settings["revision"],7);
+        assert_eq!(settings["agents"][0]["availability"],"disabled");
+        assert_eq!(settings["agents"][0]["enabled"],false);
+        assert_eq!(settings["agents"][0]["command"],"my-codex");
+        assert_eq!(settings["agents"][1]["availability"],"enabled");
+        assert_eq!(settings["agents"].as_array().unwrap().len(),2); // No synthetic templates persisted.
+        drop(reopened);
+        let mut reopened = Catalog::open(directory.path()).unwrap();
+        assert_eq!(call(&mut reopened,json!({"action":"settings"})).unwrap(),settings);
+    }
 }
 fn now() -> u64 {
     std::time::SystemTime::now()
@@ -539,7 +614,7 @@ impl ExternalPreparation {
         use sha2::{Digest, Sha256};
         let intent = hex::encode(Sha256::digest(serde_json::to_vec(&self.command)?));
         let body = match &self.command {
-            ExternalCommand::Admit { input, .. } => {
+            ExternalCommand::Admit { input, .. } | ExternalCommand::SteerAdmit { input, .. } => {
                 let files: Vec<super::attachments::Attachment> = input.get("attachments").cloned()
                     .map(serde_json::from_value).transpose()?.unwrap_or_default();
                 for file in &files { file.validate()?; }
@@ -674,6 +749,14 @@ fn next_capability_generation(tx: &Transaction<'_>) -> Result<u64> {
     save_capability_metadata(tx, "capability_sequence", &generation)?;
     Ok(generation)
 }
+pub(super) fn upgrade_availability(tx: &Transaction<'_>) -> Result<()> {
+    let mut settings: Value = record(tx, "external_settings", "settings")?;
+    for agent in settings["agents"].as_array_mut().into_iter().flatten() {
+        agent["availability"] = json!(if agent["enabled"] == true { "enabled" } else { "disabled" });
+    }
+    put(tx, "external_settings", "settings", &settings)?;
+    Ok(())
+}
 fn external_settings(db: &Connection) -> Result<Value> {
     let mut settings: Value = record(db, "external_settings", "settings")?;
     let cache = capability_cache(db)?;
@@ -727,6 +810,15 @@ pub(super) fn admit_turn(tx: &Transaction<'_>, id: &str, key: &str, input_ref: &
     touch(tx,&mut c)?;
     Ok(turn)
 }
+fn steering_target(db: &Connection, id: &str, target: &str, epoch: u64) -> Result<Value> {
+    let c = conversation(db, id)?;
+    let t = turn(db, id, target)?;
+    if c["activeTurn"] != target || c["needsReview"] == true || t["epoch"].as_u64() != Some(epoch) ||
+        !matches!(t["status"].as_str(), Some("running" | "waiting_user")) || !t["steering"].is_null() {
+        return Err(RuntimeError::Conflict("the selected external execution is no longer accepting supplements".into()));
+    }
+    Ok(t)
+}
 pub(super) fn assign_legacy_principals(tx: &Transaction<'_>) -> Result<()> {
     tx.execute("UPDATE external_conversations SET body=json_set(body,'$.principalId',(SELECT principal_id FROM threads WHERE id=json_extract(external_conversations.body,'$.parent.threadId'))) WHERE json_type(body,'$.principalId') IS NULL AND json_type(body,'$.parent.threadId')='text'",[])?;
     tx.execute("UPDATE external_conversations SET body=json_set(body,'$.principalId',(SELECT owner_principal_id FROM catalog_principal_owner WHERE id=1 AND claim_legacy=1)) WHERE json_type(body,'$.principalId') IS NULL",[])?;
@@ -766,7 +858,7 @@ impl Catalog {
             ExternalCommand::Configure { key, .. } => Some(format!("configure:{key}")),
             ExternalCommand::Create { key, principal_id: Some(Some(principal)), .. } => Some(format!("create:{}", serde_json::to_string(&(principal,key))?)),
             ExternalCommand::Create { key, .. } => Some(format!("create:{key}")),
-            ExternalCommand::Admit { id, key, .. } => Some(format!("admit:{id}:{key}")),
+            ExternalCommand::Admit { id, key, .. } | ExternalCommand::SteerAdmit { id, key, .. } => Some(format!("admit:{id}:{key}")),
             ExternalCommand::Update { id, key:Some(key), .. } => Some(format!("update:{id}:{key}")),
             _ => None,
         };
@@ -936,6 +1028,16 @@ impl Catalog {
                     return Err(RuntimeError::Invalid(
                         "invalid external Agent settings".into(),
                     ));
+                }
+                for agent in value["agents"].as_array_mut().unwrap() {
+                    // Old clients still submit enabled; current clients submit the explicit intent.
+                    let availability = agent.get("availability").and_then(Value::as_str).map(str::to_owned)
+                        .unwrap_or_else(|| if agent["enabled"] == true { "enabled".into() } else { "disabled".into() });
+                    if !["auto", "enabled", "disabled"].contains(&availability.as_str()) {
+                        return Err(RuntimeError::Invalid("Invalid external executor availability".into()));
+                    }
+                    agent["enabled"] = json!(availability != "disabled");
+                    agent["availability"] = json!(availability);
                 }
                 // Clients configure defaults, never metadata. Retain only cache belonging to
                 // unchanged launch identities; defaults/name/enabled edits are independent.
@@ -1245,6 +1347,76 @@ impl Catalog {
                 t
             }
             ExternalCommand::Admit { id, key, .. } => admit_turn(&tx,&id,&key,&p.body.unwrap(),self.epoch)?,
+            ExternalCommand::SteerAdmit { id, key, target_turn_id, .. } => {
+                steering_target(&tx, &id, &target_turn_id, self.epoch)?;
+                let mut t = admit_turn(&tx, &id, &key, &p.body.unwrap(), self.epoch)?;
+                t["status"] = json!("preparing");
+                t["steering"] = json!({"state":"accepted","targetTurnId":target_turn_id});
+                put(&tx, "external_turns", t["id"].as_str().unwrap(), &t)?;
+                t
+            }
+            ExternalCommand::SteerPrepare { id, turn_id, target_turn_id } => {
+                let mut v = conversation(&tx, &id)?;
+                steering_target(&tx, &id, &target_turn_id, self.epoch)?;
+                let mut t = turn(&tx, &id, &turn_id)?;
+                if t["status"] != "queued" || !t["steering"].is_null() || !t["consumedByTurnId"].is_null() || !t["arrangementOccurrenceId"].is_null() {
+                    return Err(RuntimeError::Conflict("this input is no longer available for native steering".into()));
+                }
+                t["status"] = json!("preparing");
+                t["epoch"] = json!(self.epoch);
+                t["steering"] = json!({"state":"accepted","targetTurnId":target_turn_id});
+                t["updatedAt"] = json!(now());
+                put(&tx, "external_turns", &turn_id, &t)?;
+                touch(&tx, &mut v)?;
+                t
+            }
+            ExternalCommand::SteerDispatch { id, turn_id } => {
+                let mut v = conversation(&tx, &id)?;
+                let mut t = turn(&tx, &id, &turn_id)?;
+                if t["epoch"].as_u64() != Some(self.epoch) || t["steering"]["state"] != "accepted" {
+                    return Err(RuntimeError::Conflict("this supplement has already been dispatched or is no longer deliverable".into()));
+                }
+                steering_target(&tx, &id, t["steering"]["targetTurnId"].as_str().unwrap_or_default(), self.epoch)?;
+                t["steering"]["state"] = json!("dispatching");
+                t["status"] = json!("running");
+                t["updatedAt"] = json!(now());
+                put(&tx, "external_turns", &turn_id, &t)?;
+                touch(&tx, &mut v)?;
+                t
+            }
+            ExternalCommand::SteerReceipt { id, turn_id, state, native_id, error } => {
+                let mut v = conversation(&tx, &id)?;
+                let mut t = turn(&tx, &id, &turn_id)?;
+                let old = t["steering"]["state"].as_str().unwrap_or_default();
+                if t["epoch"].as_u64() != Some(self.epoch) || !matches!(old, "accepted" | "dispatching") {
+                    return Err(RuntimeError::Conflict("this supplement already has a receipt or belongs to an earlier Host".into()));
+                }
+                if !matches!(state.as_str(), "appended" | "queued" | "handled" | "rejected" | "unknown") ||
+                    (old == "accepted" && state != "rejected") {
+                    return Err(RuntimeError::Invalid("invalid external steering receipt".into()));
+                }
+                let target_id = t["steering"]["targetTurnId"].as_str().unwrap_or_default().to_owned();
+                let target = turn(&tx, &id, &target_id)?;
+                t["steering"]["state"] = json!(state);
+                t["updatedAt"] = json!(now());
+                if let Some(message) = error { t["error"] = json!(message); t["steering"]["error"] = t["error"].clone(); }
+                match state.as_str() {
+                    "appended" => {
+                        let native = native_id.filter(|s| !s.trim().is_empty()).ok_or_else(|| RuntimeError::Invalid("appended input needs its native turn receipt".into()))?;
+                        if target["nativeId"] != native { return Err(RuntimeError::Conflict("steering receipt does not identify the original native turn".into())); }
+                        t["nativeId"] = json!(native);
+                        t["consumedByTurnId"] = json!(target_id);
+                        t["status"] = target["status"].clone();
+                    }
+                    "handled" => t["status"] = json!("completed"),
+                    "queued" => t["status"] = json!("running"),
+                    "rejected" => t["status"] = json!("failed"),
+                    _ => { t["status"] = json!("interrupted"); v["needsReview"] = json!(true); }
+                }
+                put(&tx, "external_turns", &turn_id, &t)?;
+                touch(&tx, &mut v)?;
+                t
+            }
             ExternalCommand::Begin { id, turn_id } => {
                 let mut v = conversation(&tx, &id)?;
                 let mut t = turn(&tx, &id, &turn_id)?;
@@ -1410,6 +1582,9 @@ impl Catalog {
     }
     pub(super) fn recover_external(&mut self) -> Result<()> {
         let tx = self.db.transaction()?;
+        tx.execute("UPDATE external_conversations SET body=json_set(body,'$.needsReview',json('true')) WHERE id IN (SELECT conversation_id FROM external_turns WHERE json_extract(body,'$.steering.state')='dispatching')",[])?;
+        tx.execute("UPDATE external_turns SET body=json_set(body,'$.steering.state','unknown','$.steering.error','The Host ended before the native steering receipt was confirmed; do not resend automatically.') WHERE json_extract(body,'$.steering.state')='dispatching'",[])?;
+        tx.execute("UPDATE external_turns SET body=json_set(body,'$.steering.state','rejected','$.status','failed','$.steering.error','The Host ended before supplement dispatch.','$.error','The Host ended before supplement dispatch.') WHERE json_extract(body,'$.steering.state')='accepted'",[])?;
         let interrupted={let mut q=tx.prepare("SELECT id FROM external_turns WHERE json_extract(body,'$.status') IN ('preparing','running','waiting_user','stopping') AND json_extract(body,'$.consumedByTurnId') IS NULL")?;
             let ids=q.query_map([],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?; ids};
         tx.execute("UPDATE external_turns SET body=json_set(body,'$.status','interrupted','$.error','The Host connection ended before this turn was confirmed complete. Reconnect to inspect the original session.') WHERE json_extract(body,'$.status') IN ('preparing','running','waiting_user','stopping')",[])?;
@@ -1463,13 +1638,18 @@ impl Catalog {
         }
         Ok(self.db.query_row("SELECT id FROM external_conversations WHERE id=?1 OR id=(SELECT owner_id FROM model_agents WHERE owner_kind='external' AND agent_code=?2 COLLATE NOCASE)",params![identity,identity.to_uppercase()],|r|r.get(0)).optional()?)
     }
+    pub fn require_external_conversation_access(&self, caller_run: &str, id: &str) -> Result<Value> {
+        let caller = self.run(caller_run)?;
+        super::threads::require_product_caller(&self.db, &caller.thread_id)?;
+        let conversation = conversation(&self.db, id)?;
+        if caller.principal_id.as_deref() != conversation["principalId"].as_str() {
+            return Err(RuntimeError::Invalid("external conversation is outside this principal's accessible conversations".into()));
+        }
+        Ok(conversation)
+    }
     pub fn capture_external_conversation_overview(&self,caller_run:&str,identity:&str)->Result<ExternalOverviewRead> {
-        let caller=self.run(caller_run)?;
         let id=self.resolve_external_agent(identity)?.ok_or_else(||RuntimeError::NotFound("External Agent".into()))?;
-        let conversation=conversation(&self.db,&id)?;
-        let root=super::scheduling::thread_family(&self.db,&caller.thread_id)?;
-        let readable:bool=self.db.query_row("WITH RECURSIVE family(id) AS (SELECT ?5 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id) SELECT EXISTS(SELECT 1 FROM bot_thread_bindings WHERE thread_id=?1) AND ?2 IS ?3 OR EXISTS(SELECT 1 FROM external_children c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id WHERE json_extract(c.body,'$.conversation_id')=?4)",params![caller.thread_id,caller.principal_id,conversation["principalId"].as_str(),id,root],|r|r.get(0))?;
-        if !readable {return Err(RuntimeError::Invalid("External conversation is outside this Agent's readable work".into()));}
+        let conversation=self.require_external_conversation_access(caller_run,&id)?;
         let exact=if identity.contains('/') {Some(self.resolve_execution_reference(identity)?)}else{None};
         let selected_turn=exact.as_ref().and_then(|e|match &e.target{super::model_references::ExecutionTarget::External{turn_id,..}=>turn_id.clone(),_=>None});
         let turns:Vec<Value>=if let Some(turn_id)=selected_turn.as_deref(){vec![turn(&self.db,&id,turn_id)?]}else{
@@ -1488,6 +1668,6 @@ impl Catalog {
         let items={let mut query=self.db.prepare("SELECT body,kind,tool_status FROM external_items WHERE conversation_id=?1 AND (?2 IS NULL OR turn_id IN(SELECT value FROM json_each(?2))) AND (kind IS NULL OR kind IN('assistant','tool')) ORDER BY rowid DESC")?;
             let rows=query.query_map(params![id,if turn_ids.is_empty(){None}else{Some(encode(&turn_ids)?)}],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,Option<String>>(2)?)))?;
             rows.map(|row|{let (reference,kind,status)=row?;Ok((serde_json::from_str(&reference)?,kind,status))}).collect::<Result<Vec<_>>>()?};
-        Ok(ExternalOverviewRead{overview:json!({"agentId":self.external_agent_reference(&id)?,"name":conversation["title"],"harness":conversation["harness"],"state":executions.first().map(|e|e["state"].clone()).unwrap_or(json!("idle")),"executions":executions,"read":{"tool":super::family::READ_TOOL,"arguments":{"threadId":identity,"query":{"kind":"overview"}}}}),items,content:self.content.clone(),_publication:self.content.begin_publication()})
+        Ok(ExternalOverviewRead{overview:json!({"agentId":self.external_agent_reference(&id)?,"name":conversation["title"],"harness":conversation["harness"],"configurationId":conversation["configurationId"],"cwd":conversation["cwd"],"executionSource":conversation["executionSource"],"createdBy":conversation["parent"],"archived":conversation["archived"],"state":executions.first().map(|e|e["state"].clone()).unwrap_or(json!("idle")),"executions":executions,"read":{"tool":super::family::READ_TOOL,"arguments":{"threadId":identity,"query":{"kind":"overview"}}}}),items,content:self.content.clone(),_publication:self.content.begin_publication()})
     }
 }

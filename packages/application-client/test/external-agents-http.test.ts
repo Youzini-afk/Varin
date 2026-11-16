@@ -33,3 +33,21 @@ it('retains a safe authentication challenge rather than replacing it with generi
       && JSON.stringify(error.details?.authentication) === JSON.stringify(authentication));
   } finally { globalThis.fetch = original; }
 });
+
+it('sends explicit current-turn and next-turn intents separately from model options', async () => {
+  const original = globalThis.fetch;
+  const calls: unknown[] = [];
+  globalThis.fetch = async (_url, init) => {
+    calls.push(JSON.parse(String(init?.body)));
+    return Response.json({});
+  };
+  try {
+    const api = createExternalAgentsHttpAPI();
+    await api.send('external:a', 'supplement', { text: 'Keep this constraint' }, { mode: 'steer', expectedTurnId: 'active-turn' });
+    await api.send('external:a', 'next-task', { text: 'Separate task', model: 'next-model', thinking: 'high', mode: 'plan' }, { mode: 'next_turn' });
+    assert.deepEqual(calls, [
+      { id: 'external:a', key: 'supplement', input: { text: 'Keep this constraint' }, options: { mode: 'steer', expectedTurnId: 'active-turn' } },
+      { id: 'external:a', key: 'next-task', input: { text: 'Separate task', model: 'next-model', thinking: 'high', mode: 'plan' }, options: { mode: 'next_turn' } },
+    ]);
+  } finally { globalThis.fetch = original; }
+});

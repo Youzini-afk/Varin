@@ -488,6 +488,7 @@ impl Fixture {
             db.create_thread("thread:parent", "branch:parent").unwrap();
         }
         let mut input = DispatchInput {
+            executor: None, executor_options: None,
             organization: None,
             attachments: Vec::new(),
             model: None,
@@ -549,7 +550,7 @@ impl Fixture {
             credential_scope: launch.credential_scope.clone(),
         };
         launch.connection_identity = model.connection_identity().unwrap();
-        launch.child_dispatch = Some(varin_runtime::catalog::dispatch::ChildDispatchCatalog { model_selection_preparation:false,projects:input.project_id.as_ref().map(|id|varin_runtime::catalog::dispatch::ChildProjectSource{selection:None,id:id.clone(),name:"Project B".into(),path:"/registered/project-B".into(),resource_owner:varin_runtime::catalog::launches::SourceResourceOwner::Local}).into_iter().collect(),
+        launch.child_dispatch = Some(varin_runtime::catalog::dispatch::ChildDispatchCatalog { executors: Vec::new(), model_selection_preparation:false,projects:input.project_id.as_ref().map(|id|varin_runtime::catalog::dispatch::ChildProjectSource{selection:None,id:id.clone(),name:"Project B".into(),path:"/registered/project-B".into(),resource_owner:varin_runtime::catalog::launches::SourceResourceOwner::Local}).into_iter().collect(),
             native_capabilities: launch.tools.iter().map(|tool| {
                 use varin_runtime::catalog::dispatch::{ChildCapabilityDescriptor, ChildSourceRequirement};
                 ChildCapabilityDescriptor { process: matches!(tool.name.as_str(), "process_spawn" | "process_inspect" | "process_read" | "process_write" | "process_resize" | "wait_process"), name: tool.name.clone(), version: tool.version.clone(),

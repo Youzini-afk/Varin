@@ -1,5 +1,5 @@
 import { calendarErrorCode } from './lib/scheduled-tasks/preparation-error.js';
-import { freezeProjectSourceSelection } from '@varin/application-client';
+import { defaultConversationModel, freezeProjectSourceSelection } from '@varin/application-client';
 import {createManagedTerminalOwner} from './lib/terminal/managed-owner.js';
 import {authorizeManagedTerminal,registerManagedTerminalRoutes} from './lib/terminal/managed-routes.js';
 import { createManagedProjectManagementOwner } from './lib/projects/managed-project-management.js';
@@ -2307,6 +2307,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   registerInteractiveUiRoutes(app, interactiveUi, uiAuthController.requireAuth);
   kernelClient.setResourceOwner(createResourceOwner({ runtime: agentRuntime, resources: threadResources, ui: interactiveUi, attachments: threadAttachments,
     organization: async (request, run, signal) => {
+      if (request.action === 'executors') {
+        const { inspectExecutors } = await import('./lib/external-agents/executor-discovery.js');
+        return {result:await inspectExecutors(externalAgents, request.input, signal)};
+      }
       if (request.action === 'ensure_initialized') {
         if (Object.keys(request.input).length) throw new Error('Invalid organization initialization request');
         await ensureOrganization(run.principal_id ?? null);
@@ -2382,7 +2386,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       onError: () => console.error('[Thread] Original process terminal requires attention'),
     }), createChildProfilePreparer({ models: modelAuthority,
       projects: async () => (sanitizeProjects((await readSettingsFromDisk()).projects) ?? []).map(project => ({ id: project.id, name: typeof project.label === 'string' && project.label || project.path, path: project.path, selection: freezeProjectSourceSelection(project), resource_owner: project.source?.resourceOwner ?? { kind: 'local' as const } })),
-      externalAgents: () => externalAgents.settings(),
+      externalAgents: owner => externalAgents.settings(undefined, owner),
       settings: () => modelsService.readGlobalInferenceSettings(),
       capabilities: signal => agentRuntime.childCapabilities(signal),
     }));
@@ -2423,6 +2427,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (!bot || !await botService.canExecute(botId)) return null;
     const model = await botAgentModel(bot);
     return model ? { homeDir: bot.homeDir, model } : null;
+  });
+  threads.bindConversationWorkModel(async (identity, signal) => {
+    const defaults = await agentRuntime.organizationCreationDefaults(identity.threadId, signal);
+    const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
+    const project = defaults?.projectId ? projects.find(value => value.id === defaults.projectId) : undefined;
+    const localProject = project && (!project.source?.resourceOwner || project.source.resourceOwner.kind === 'local') ? project : undefined;
+    const settings = await modelsService.settings.snapshot(localProject?.path, localProject?.id);
+    signal.throwIfAborted();
+    return defaultConversationModel({ ...settings.global, ...settings.project }, await modelAuthority.listModels());
   });
   threads.bindInteractiveUiFork(interactiveUi.captureBranch);
   threads.bindTitles(threadTitles);
@@ -2576,6 +2589,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       capture:{documents:documentsAuthority,prepareResources:threadResources.prepareSourceCapture,inspectInventory:(directory,signal)=>inspectSourceInventory(directory,signal)}})}),
     externalProjectSource:createManagedExternalProjectSourceOwner({kernel:kernelClient,storage:kernelStorageAdapter,hostId}),
     externalSettings: signal=>externalAgents.settings(signal),
+    externalDetect: (id,signal)=>externalAgents.detect(id,signal),
+    externalInspect: (id,refresh,signal)=>externalAgents.inspectExecutor(id,refresh,signal),
     prepareExternalLiveSource: liveSources.prepare,
     externalLaunch: (id, harness, sessionId, signal) => externalAgents.managedLaunch(id,harness,sessionId,signal),
     workspaceFiles: resourceFiles,

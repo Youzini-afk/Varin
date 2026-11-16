@@ -79,7 +79,7 @@ fn adjacent_frozen_requests_append_original_collaboration_message_and_report_wit
             "collaboration-update".into(),
             child.child_thread_id.clone(),
             child.child_branch_id.clone(),
-            MessageInput {
+            MessageInput { executor_options: None,
                 attachments: vec![],
                 after_current: None,
                 source_agent: None,

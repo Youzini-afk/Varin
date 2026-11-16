@@ -1598,8 +1598,10 @@ fn unaccepted_child_dependency_owner(db: &Connection, op: &Operation) -> Result<
     {
         return Ok(false);
     }
+    // Accepted native and external children retain their own release protocol,
+    // including after the original dispatch operation becomes terminal.
     let owned: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM child_tasks WHERE id=?1) OR EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='child.dependencies_released')",
+        "SELECT EXISTS(SELECT 1 FROM child_tasks WHERE id=?1) OR EXISTS(SELECT 1 FROM external_children WHERE id=?1) OR EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='child.dependencies_released')",
         [&op.id], |row| row.get(0),
     )?;
     Ok(!owned)
