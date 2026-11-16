@@ -3869,7 +3869,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.composer.add": "추가",
   "conversationTools.title": "대화 도구",
   "conversationTools.switch": "대화 도구 전환",
-  "conversationTools.activity": "실행 세부 정보",
   "conversationTools.taskInstruction": "작업 지시",
   "conversationTools.supplement": "추가 메시지",
   "chat.composer.reference": "파일 또는 에이전트 참조",

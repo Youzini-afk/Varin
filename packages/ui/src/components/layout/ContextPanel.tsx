@@ -115,7 +115,6 @@ const getModeLabel = (
 ): string => {
   if (mode === 'chat') return t('contextPanel.mode.chat');
   if (mode === 'threads') return t('collaboration.title');
-  if (mode === 'activity') return t('conversationTools.activity');
   if (mode === 'tree') return t('chat.tree.title');
   if (mode === 'file') return t('contextPanel.mode.files');
   if (mode === 'diff') return t('contextPanel.mode.diff');
@@ -190,7 +189,6 @@ const getTabLabel = (
 const getTabIcon = (tab: { thread?: ThreadIdentity; mode: ContextPanelMode; targetPath: string | null }): React.ReactNode | undefined => {
   if (tab.mode === 'material') return <Icon name="book-2" className="h-3.5 w-3.5" />;
   if (tab.mode === 'threads') return <Icon name="chat-1" className="h-3.5 w-3.5" />;
-  if (tab.mode === 'activity') return <Icon name="stack" className="h-3.5 w-3.5" />;
   if (tab.mode === 'tree') return <Icon name="conversation-tree" className="h-3.5 w-3.5" />;
   if (tab.mode === 'file') {
     return tab.targetPath
@@ -402,9 +400,9 @@ export const ContextPanel: React.FC<{
   surfaceModes?: readonly ContextPanelMode[];
   /** Shell-owned selection for a newly opened context. Existing exact tabs stay pinned. */
   contextOwner?: { identity: ThreadIdentity | null; readOnly: boolean };
-  renderConversationDetails?: (mode: 'activity' | 'recovery') => React.ReactNode;
+  renderConversationRecovery?: () => React.ReactNode;
   embedded?: boolean;
-}> = ({ layoutScope, surfaceModes, contextOwner, renderConversationDetails, embedded = false }) => {
+}> = ({ layoutScope, surfaceModes, contextOwner, renderConversationRecovery, embedded = false }) => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
@@ -451,7 +449,7 @@ export const ContextPanel: React.FC<{
   const contextRailOrder = useUIStore(state => state.contextRailOrder);
   const planModeEnabled = useFeatureFlagsStore(state => state.planModeEnabled);
   const surfaces = React.useMemo(() => surfaceModes
-    ? surfaceModes.flatMap(mode => CONTEXT_SURFACES.filter(surface => surface.mode === mode && (surface.availability === 'always' || mode === 'activity' || tabs.some(tab => tab.mode === mode))))
+    ? surfaceModes.flatMap(mode => CONTEXT_SURFACES.filter(surface => surface.mode === mode && (surface.availability === 'always' || tabs.some(tab => tab.mode === mode))))
     : availableContextSurfaces(contextRailOrder, tabs, planModeEnabled), [contextRailOrder, tabs, planModeEnabled, surfaceModes]);
   const selectedTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
   const activeTab = selectedTab && (!surfaceModes || surfaceModes.includes(selectedTab.mode)) ? selectedTab : null;
@@ -850,8 +848,8 @@ export const ContextPanel: React.FC<{
     };
   }), [activeModeTabs, effectiveDirectory, sessionTitleById, t]);
 
-  const activeNonChatContent = (activeTab?.mode === 'activity' || activeTab?.mode === 'recovery') && renderConversationDetails
-        ? contextOwner?.identity ? renderConversationDetails(activeTab.mode) : <p className="p-4 typography-meta text-muted-foreground">{t('contextSidebar.empty.openSession')}</p>
+  const activeNonChatContent = activeTab?.mode === 'recovery' && renderConversationRecovery
+        ? contextOwner?.identity ? renderConversationRecovery() : <p className="p-4 typography-meta text-muted-foreground">{t('contextSidebar.empty.openSession')}</p>
         : activeTab?.mode === 'context'
         ? contextOwner && !activeTab.thread
           ? <div className="p-6 typography-ui-label text-muted-foreground">{t('contextSidebar.empty.openSession')}</div>
@@ -931,7 +929,7 @@ export const ContextPanel: React.FC<{
               }
               state.openContextSurface(panelKey, surface.mode);
             }}>
-            <Icon name={surface.icon} className="size-3.5 shrink-0" /><span className="flex-1">{t(renderConversationDetails && surface.mode === 'recovery' ? 'chat.recovery.title' : surface.labelKey)}</span>
+            <Icon name={surface.icon} className="size-3.5 shrink-0" /><span className="flex-1">{t(renderConversationRecovery && surface.mode === 'recovery' ? 'chat.recovery.title' : surface.labelKey)}</span>
             {activeTab && getContextRailMode(activeTab.mode) === surface.mode ? <Icon name="check" className="size-3.5" /> : null}
           </DropdownMenuItem>)}
         </DropdownMenuContent>
@@ -963,7 +961,7 @@ export const ContextPanel: React.FC<{
         <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3">
           {activeTab ? getTabIcon(activeTab) : null}
           <span className="truncate typography-ui-label text-foreground">
-            {activeTab ? renderConversationDetails && activeTab.mode === 'recovery' ? t('chat.recovery.title') : getModeLabel(activeTab.mode, t) : null}
+            {activeTab ? renderConversationRecovery && activeTab.mode === 'recovery' ? t('chat.recovery.title') : getModeLabel(activeTab.mode, t) : null}
           </span>
         </div>
       )}

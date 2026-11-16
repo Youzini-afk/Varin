@@ -4497,7 +4497,6 @@ export const dict = {
   "chat.composer.add": "Add",
   "conversationTools.title": "Conversation tools",
   "conversationTools.switch": "Switch conversation tool",
-  "conversationTools.activity": "Execution details",
   "conversationTools.taskInstruction": "Task instruction",
   "conversationTools.supplement": "Follow-up message",
   "chat.composer.reference": "Reference files or agents",

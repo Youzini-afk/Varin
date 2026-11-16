@@ -3938,7 +3938,6 @@ export const dict = {
   "chat.composer.add": "Ajouter",
   "conversationTools.title": "Outils de conversation",
   "conversationTools.switch": "Changer d’outil de conversation",
-  "conversationTools.activity": "Détails d’exécution",
   "conversationTools.taskInstruction": "Instruction de tâche",
   "conversationTools.supplement": "Message complémentaire",
   "chat.composer.reference": "Référencer des fichiers ou agents",

@@ -135,19 +135,19 @@ it('keeps ordinary workbench context tied to its selected Thread when no shell o
   expect(vi.mocked(runtime.api!.snapshot).mock.calls.map(([identity]) => identity)).toEqual([ordinary]);
 });
 
-it('shares the scoped tool switcher on mobile and follows the Bot selection for collaboration and details', async () => {
+it('shares the scoped tool switcher on mobile and follows the Bot selection for collaboration and recovery', async () => {
   openConversationTree('bot');
   const show = (identity: ThreadIdentity) => act(async () => root.render(<ContextPanel embedded layoutScope={BOT_CONVERSATION_PANEL_SCOPE}
     surfaceModes={CONVERSATION_TOOL_MODES} contextOwner={{ identity, readOnly: false }}
-    renderConversationDetails={mode => <div data-conversation-details={mode} data-owner={identity.threadId} />} />));
+    renderConversationRecovery={() => <div data-conversation-details="recovery" data-owner={identity.threadId} />} />));
   await show(bot);
   await switchTo('collaboration.title');
   expect(container.querySelector('[data-collaboration-owner]')?.getAttribute('data-collaboration-owner')).toBe(bot.threadId);
   await show({ ...bot, threadId: 'next-bot', branchId: 'next-branch' });
   expect(container.querySelector('[data-collaboration-owner]')?.getAttribute('data-collaboration-branch')).toBe('next-branch');
-  await switchTo('conversationTools.activity');
-  expect(container.querySelector('[data-conversation-details]')?.getAttribute('data-owner')).toBe('next-bot');
+  expect(container.textContent).not.toContain('conversationTools.activity');
   await switchTo('chat.recovery.title');
+  expect(container.querySelector('[data-conversation-details]')?.getAttribute('data-owner')).toBe('next-bot');
   expect(container.querySelector('[data-conversation-details]')?.getAttribute('data-conversation-details')).toBe('recovery');
   expect(container.querySelector('[aria-label="contextPanel.actions.resizePanelAria"]')).toBeNull();
   expect(container.querySelector('[data-context-panel]')?.getAttribute('style')).toContain('width:100%');

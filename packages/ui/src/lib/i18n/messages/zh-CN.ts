@@ -4471,7 +4471,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.composer.add": "添加",
   "conversationTools.title": "会话工具",
   "conversationTools.switch": "切换会话工具",
-  "conversationTools.activity": "执行详情",
   "conversationTools.taskInstruction": "任务指令",
   "conversationTools.supplement": "补充消息",
   "chat.composer.reference": "引用文件或智能体",

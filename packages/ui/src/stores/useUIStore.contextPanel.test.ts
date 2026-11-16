@@ -20,16 +20,16 @@ describe('useUIStore context panel tabs', () => {
     store.closeContextPanelTab('', 'tree');
     expect(useUIStore.getState().contextPanelByDirectory['']?.isOpen).toBe(false);
   });
-  test('restores supported tabs and discards the retired preview surface', () => {
+  test('restores supported tabs and discards retired surfaces', () => {
     const directory = '/repo';
     useUIStore.getState().openContextBrowser(directory, 'http://localhost:3000');
     const current = useUIStore.getState();
     const browser = current.contextPanelByDirectory[directory]!.tabs[0]!;
     const restored = useUIStore.persist.getOptions().merge!({
-      contextRailOrder: ['preview', 'browser'],
+      contextRailOrder: ['preview', 'activity', 'browser'],
       contextPanelByDirectory: {
-        [directory]: { isOpen: true, activeTabId: 'preview:old', tabs: [browser, { mode: 'preview', targetPath: 'http://localhost:5173' }] },
-        '/empty': { isOpen: true, activeTabId: 'preview:empty', tabs: [{ mode: 'preview' }] },
+        [directory]: { isOpen: true, activeTabId: 'activity', tabs: [browser, { mode: 'preview', targetPath: 'http://localhost:5173' }, { mode: 'activity' }] },
+        '/empty': { isOpen: true, activeTabId: 'activity', tabs: [{ mode: 'activity' }] },
       },
     }, current);
     expect(restored.contextPanelByDirectory[directory]?.tabs).toEqual([browser]);

@@ -83,19 +83,6 @@ const full = () => host.querySelector<HTMLElement>('[data-harness-overview-panel
 const compact = () => host.querySelector<HTMLElement>('[data-harness-overview-peek]')!;
 const main = () => host.querySelector<HTMLElement>('.thread-conversation-main')!;
 
-it('embeds detail content in the existing sidebar without another launcher or resizable frame', async () => {
-  const back = vi.fn();
-  await act(async () => root.render(<WorkOverviewControl embedded open compactOpen={false} attention={false} rows={[]}
-    onSelect={() => {}} onOpenChange={() => {}} onCompactChange={() => {}} detailTitle="Execution details" onBack={back}>
-    <p>Existing details</p>
-  </WorkOverviewControl>));
-  expect(host.querySelector('[data-harness-overview-controls]')).toBeNull();
-  expect(host.querySelector('[role="separator"]')).toBeNull();
-  expect(full().textContent).toContain('Existing details');
-  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="harness.overview.back"]')!.click());
-  expect(back).toHaveBeenCalledOnce();
-});
-
 it('keeps the closing surface painted and reverses without resetting its geometry or editor', async () => {
   await render('closed'); await advance(16);
   await render('full');

@@ -597,11 +597,11 @@ Showing a resource or history view does not launch work. A follow-up registratio
 Job/source and cursor; it never stops the observed Job or uses a renderer timer as a scheduler.
 
 The Bot shell's title-bar Conversation tools button opens the shared right-hand surface and remembers its last view.
-Timeline, Collaboration, Context, Execution details and Conversation recovery use the same selector on desktop and mobile.
+Timeline, Collaboration, Context and Conversation recovery use the same selector on desktop and mobile.
 The Add menu contains input actions. Bot profile/work management retains its own panel; switching between it and conversation
-tools preserves both layouts. The mounted conversation portals its existing recovery and overview into the shell's detail slot,
-so opening the panel does not create another execution controller or snapshot reader. The overview still exposes files, products
-and operation details; interactive products open in the Bot's own panel scope.
+tools preserves both layouts. The mounted conversation portals its existing recovery into the shell's detail slot,
+so opening the panel does not create another execution controller or snapshot reader. Tool-call details remain in the conversation;
+interactive products open in the Bot's own panel scope.
 
 The right-hand Collaboration surface reads original family dispatches, peer messages and final reports in one native
 event-cursor feed. Reports project the last assistant response from immutable execution history as child-to-organizer

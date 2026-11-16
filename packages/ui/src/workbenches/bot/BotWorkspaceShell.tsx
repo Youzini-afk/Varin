@@ -738,7 +738,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
 
   const conversationTools = (embedded = false) => <ContextPanel layoutScope={BOT_CONVERSATION_PANEL_SCOPE} surfaceModes={CONVERSATION_TOOL_MODES}
     embedded={embedded} contextOwner={{ identity: ownsConversation && !activeDraftKey ? selectedEntry : null, readOnly: readOnly || conversationArchived }}
-    renderConversationDetails={() => <div ref={setConversationTarget} className="h-full min-h-0" />} />;
+    renderConversationRecovery={() => <div ref={setConversationTarget} className="h-full min-h-0" />} />;
 
   const navigator = () => <BotNavigator bots={bots} organization={organization} selectedId={selectedId} sessions={sessionsWithWork} current={!activeDraftKey && ownsConversation ? selectedEntry : null}
     figures={figures} busy={busy || actionBusy !== null} showArchived={showArchived} isMobile={isMobile} sessionTitle={sessionTitleOf}
@@ -823,7 +823,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       onOpenChange={open => { if (floating) setNarrowPanelOpen(open); else setPanelOpen(open); }}>{workspaceArea(!conversationTab && panelVisible)}</BotPanel>
       {conversationPanelMounted && !isMobile && <React.Suspense fallback={null}>{conversationTools()}</React.Suspense>}</>;
 
-  return <ConversationToolsContext.Provider value={{ identity: ownsConversation && !activeDraftKey ? selectedEntry : null, target: conversationTarget, mode: selectedConversationTab?.mode, active: Boolean(conversationTab), bots: bots ?? [], bot: selected ?? undefined }}><BotWorkspaceNavigationContext.Provider value={spaces}><MainLayout renderNavigator={navigator} renderConversation={conversation} renderSecondaryPanel={secondaryPanel}
+  return <ConversationToolsContext.Provider value={{ identity: ownsConversation && !activeDraftKey ? selectedEntry : null, target: conversationTarget, mode: selectedConversationTab?.mode, bots: bots ?? [], bot: selected ?? undefined }}><BotWorkspaceNavigationContext.Provider value={spaces}><MainLayout renderNavigator={navigator} renderConversation={conversation} renderSecondaryPanel={secondaryPanel}
     secondaryPanelFocus={spaces.activeKey ? `${spaces.activeKey}:${spaces.focusRevision}` : null}
     secondaryPanelLabel={t('bot.panel.aria')} secondaryPanelToggleLabels={{ open: t('bot.panel.open'), close: t('bot.panel.close') }}
     navigationTitle={navigationTitle} navigationSubtitle={navigationSubtitle} headerPanelControl={panelControl} sidebarAttention={sidebarAttention}

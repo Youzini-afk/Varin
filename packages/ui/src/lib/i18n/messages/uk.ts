@@ -3871,7 +3871,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.composer.add": "Додати",
   "conversationTools.title": "Інструменти розмови",
   "conversationTools.switch": "Змінити інструмент розмови",
-  "conversationTools.activity": "Деталі виконання",
   "conversationTools.taskInstruction": "Інструкція завдання",
   "conversationTools.supplement": "Додаткове повідомлення",
   "chat.composer.reference": "Посилання на файли або агентів",

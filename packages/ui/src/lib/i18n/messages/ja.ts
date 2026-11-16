@@ -3642,7 +3642,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.composer.add": "追加",
   "conversationTools.title": "会話ツール",
   "conversationTools.switch": "会話ツールを切り替え",
-  "conversationTools.activity": "実行の詳細",
   "conversationTools.taskInstruction": "タスク指示",
   "conversationTools.supplement": "追加メッセージ",
   "chat.composer.reference": "ファイルやエージェントを参照",

@@ -4246,9 +4246,19 @@ it('Bot thread recovery reveals interrupted operations on demand without replayi
   const interrupted = { ...recovery.operation, state: 'files-restored' as const, conversationState: 'unchanged' as const };
   f.view.recovery = { navigation: null, operations: [interrupted] };
   recovery.getCombinedOperation.mockResolvedValueOnce({ status: 'ready', operation: interrupted });
-  await act(async () => root.render(<ThreadConversation surface="bot" api={f.api} identity={identity} />));
+  function Conversation() {
+    const [target, setTarget] = React.useState<HTMLDivElement | null>(null);
+    const panel = useUIStore(state => state.contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE]);
+    const mode = panel?.tabs.find(tab => tab.id === panel.activeTabId)?.mode;
+    return <ConversationToolsContext.Provider value={{ identity, target, mode, bots: [] }}>
+      <div ref={setTarget} data-tools-content /><ThreadConversation surface="bot" api={f.api} identity={identity} />
+    </ConversationToolsContext.Provider>;
+  }
+  await act(async () => root.render(<Conversation />));
   expect(container.querySelector('[aria-label="Conversation recovery"]')).toBeNull();
   await act(async () => button('View recovery').click());
+  expect(container.querySelector('[data-tools-content] [aria-label="Conversation recovery"]')).not.toBeNull();
+  expect(container.querySelector('[data-harness-overview-panel]')).toBeNull();
   await edit('[aria-label="Message thread"]', 'New draft while reviewing recovery');
   expect(button('Send').disabled).toBe(true);
   expect(recovery.applyCombinedRecovery).not.toHaveBeenCalled();
