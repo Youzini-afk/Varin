@@ -13,6 +13,7 @@ const editor = vi.hoisted(() => ({ showMenus: false, props: undefined as React.C
 vi.mock('@/lib/commands/surface-command-registry', () => ({ useWorkbenchCommandRegistrations: () => editor.registrations }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('./useComposerHeightGlide', () => ({ useComposerHeightGlide: () => {} }));
+vi.mock('./useComposerExpansion', () => ({ useComposerExpansion: () => ({ slotRef: React.useRef(null), radius: 'var(--radius-composer)' }) }));
 vi.mock('../conversation/useFileDropField', () => ({ useFileDropField: () => {} }));
 vi.mock('@/hooks/usePrefersReducedMotion', () => ({ usePrefersReducedMotion: () => true }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));

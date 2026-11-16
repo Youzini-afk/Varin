@@ -143,6 +143,8 @@
   --composer-focus-shadow: 0 0 12px 2px color-mix(in srgb, var(--interactive-focus, var(--ring)) 26%, transparent),
     0 0 30px 6px color-mix(in srgb, var(--interactive-focus, var(--ring)) 14%, transparent);
 }
+[data-conversation-composer-input-frame][data-composer-layout] { overflow: clip; }
+[data-composer-layout] [data-chat-input-footer] { background: var(--muted); }
 [data-conversation-composer-input-frame]:focus-within {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .04), var(--composer-elevation-shadow), var(--composer-focus-shadow);
 }

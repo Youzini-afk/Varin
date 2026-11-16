@@ -52,7 +52,7 @@ const presentation: ConversationPresentation = {
 interface SendSample {
   t: number;
   /** The composer input frame; `gliding` while the height glide holds it. */
-  frame: { top: number; height: number; gliding: boolean } | null;
+  frame: { top: number; height: number; gliding: boolean; footerBottom: number; lineHeight: number } | null;
   /** The real heading, not a departing copy. */
   title: boolean;
   /** Departing copies and the mean opacity of what is still visible in them. */
@@ -102,7 +102,9 @@ export function SendLab() {
         const button = document.querySelector('[data-conversation-composer-primary-action]');
         recording.push({
           t: performance.now(),
-          frame: input instanceof HTMLElement ? { top: input.getBoundingClientRect().top, height: input.getBoundingClientRect().height, gliding: Boolean(input.style.height) } : null,
+          frame: input instanceof HTMLElement ? { top: input.getBoundingClientRect().top, height: input.getBoundingClientRect().height, gliding: Boolean(input.style.height),
+            footerBottom: input.querySelector('[data-chat-input-footer]')?.getBoundingClientRect().bottom ?? 0,
+            lineHeight: input.querySelector('.cm-line')?.getBoundingClientRect().height ?? 0 } : null,
           title: Boolean(document.querySelector('h1')),
           copies: copies.length,
           copyOpacity: parts.length ? parts.reduce((sum, part) => sum + Number(getComputedStyle(part).opacity), 0) / parts.length : 0,
@@ -117,6 +119,10 @@ export function SendLab() {
     frame = requestAnimationFrame(sample);
     const lab = {
       setMotion(preference: MotionPreference) { useUIStore.getState().setMotionPreference(preference); },
+      expand(value: boolean) { useUIStore.getState().setExpandedInput(value); },
+      select(start: number, end: number) { editor.current?.focus(); editor.current?.setSelection(start, end); },
+      selection() { return editor.current?.getSelection(); },
+      draft() { return textRef.current; },
       configure(next: Partial<typeof options.current>) { Object.assign(options.current, next); },
       record() { recording = []; },
       stopRecording() { const result = recording ?? []; recording = null; return result; },
@@ -187,7 +193,7 @@ export function SendLab() {
             <ThreadComposer editorRef={editor} value={text} onChange={setText} identityKey={SESSION} placement={empty ? 'center' : 'bottom'}
               models={[]} providerId="" modelId="" thinkingLevel="off" onModelChange={noop}
               modelDisabled={false} attachmentDisabled={false} imageDisabled={false} sendDisabled={!text.trim() || pending}
-              pending={pending} active={Boolean(activeRunId)} retrying={false} delivery="boundary" onDeliveryChange={noop} allowNextRun={false}
+              pending={pending} active={Boolean(activeRunId)} retrying={false}
               onFiles={noop} onAttachImages={noop} onAttachPdfs={noop} onGoal={noop} onStop={activeRunId ? noop : undefined}
               hasInput={Boolean(text.trim())} onWorkspace={noop} workspaceLabel="lab" attachmentNames={[]} skills={[]} />
           </form>

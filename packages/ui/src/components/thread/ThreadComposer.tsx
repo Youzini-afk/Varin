@@ -23,8 +23,9 @@ import { AnimatePresence, motion } from 'motion/react';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { SwapIcon } from '@/components/motion/SwapIcon';
 import { SwapText } from '@/components/motion/SwapText';
-import { INSTANT_TRANSITION, springTransition } from '@/lib/motion/tokens';
+import { INSTANT_TRANSITION, springTransition, TWEENS } from '@/lib/motion/tokens';
 import { useComposerHeightGlide } from './useComposerHeightGlide';
+import { useComposerExpansion } from './useComposerExpansion';
 import { useFileDropField } from '../conversation/useFileDropField';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
@@ -40,6 +41,8 @@ import { WorkbenchContributionSlot } from '@/lib/extensions/workbench-registry';
 import { externalThinkingOptions } from './externalSessionChoice';
 import { ExternalModelControls, ExternalModeControls, ExternalOptionMenu, ExternalChoiceValidation, type ExternalComposerOptions } from './ExternalComposerControls';
 import { ThreadPermissionControl } from './ThreadPermissionControl';
+
+const COMPOSER_LAYOUT_TRANSITION = { layout: springTransition('travel') };
 
 export function ThreadComposer({ editorRef, value, onChange, interactions, models, providerId, modelId, thinkingLevel, onModelChange,
   modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, stopping = false, retrying, suggestion, suggestionError, onSuggestionDismiss, prepareSendMode,
@@ -88,6 +91,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   const frameRef = React.useRef<HTMLDivElement>(null);
   const inputFrameRef = React.useRef<HTMLDivElement>(null);
   const inputContentRef = React.useRef<HTMLDivElement>(null);
+  const expansion = useComposerExpansion(frameRef, inputFrameRef, isExpandedInput, reducedMotion);
   useComposerHeightGlide(inputFrameRef, inputContentRef, value === '');
   // Files dragged over the conversation raise the drop field; anywhere in it takes them.
   useFileDropField(inputFrameRef, { disabled: attachmentDisabled || Boolean(external && !external.capabilities?.files && !external.capabilities?.images), onFiles: files => acceptFiles(files) });
@@ -358,18 +362,33 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   };
 
   return (
-    <motion.div ref={frameRef} layout={reducedMotion ? false : 'position'} layoutId={motionId}
-      layoutDependency={`${placement}:${isExpandedInput}:${attachmentNames.length}`}
-      initial={false} transition={{ layout: reducedMotion ? INSTANT_TRANSITION : springTransition('travel') }}
+    <div ref={expansion.slotRef}>
+    <AnimatePresence initial={false}>
+      {isExpandedInput && <motion.div aria-hidden="true" className="pointer-events-none fixed inset-0 z-30 bg-background/95"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        transition={reducedMotion ? INSTANT_TRANSITION : TWEENS.fade} />}
+    </AnimatePresence>
+    <motion.div ref={frameRef} layout={reducedMotion ? false : 'position'}
+      layoutDependency={`${placement}:${attachmentNames.length}`}
+      initial={false} transition={COMPOSER_LAYOUT_TRANSITION}
       className={cn(
-      'bottom-safe-area varin-mobile-composer shrink-0 bg-background pb-3',
-      isExpandedInput && 'fixed inset-0 z-40 flex items-end bg-background/95',
+      'bottom-safe-area varin-mobile-composer relative z-40 shrink-0 bg-background pb-3',
+      isExpandedInput && 'fixed inset-0 flex items-end bg-transparent',
     )} data-conversation-composer-shell="true">
       <div className={cn('chat-input-column', isExpandedInput && 'flex h-full flex-col justify-end py-6')}>
         {queue}
 
-        <div
+        {/* Expansion projects this frame; docking and ordinary height glides keep their existing owners. */}
+        <motion.div
           ref={inputFrameRef}
+          layout={!reducedMotion}
+          layoutId={motionId}
+          layoutDependency={isExpandedInput}
+          initial={false}
+          transition={reducedMotion ? { layout: INSTANT_TRANSITION } : COMPOSER_LAYOUT_TRANSITION}
+          style={{ borderRadius: expansion.radius }}
+          onLayoutAnimationStart={() => { if (inputFrameRef.current) inputFrameRef.current.dataset.composerLayout = ''; }}
+          onLayoutAnimationComplete={() => { if (inputFrameRef.current) delete inputFrameRef.current.dataset.composerLayout; }}
           className={cn(
             'relative flex flex-col overflow-visible corner-continuous rounded-composer border border-border bg-muted',
             sending && 'opacity-80',
@@ -387,7 +406,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
           }}
         >
         {/* Measured by the height glide; the frame around it is what animates. */}
-        <div ref={inputContentRef} className="flex min-w-0 shrink-0 flex-col" data-conversation-composer-input-content="true">
+        <motion.div layout={reducedMotion ? false : 'position'} layoutDependency={isExpandedInput} transition={COMPOSER_LAYOUT_TRANSITION} ref={inputContentRef} className="flex min-w-0 shrink-0 flex-col" data-conversation-composer-input-content="true">
         {children}
         {external && <ExternalChoiceValidation key={backendIdentity} options={external} />}
         {external?.delivery && <p className="px-3 pt-1 typography-micro text-muted-foreground" data-external-delivery-mode={external.delivery.mode}>
@@ -486,7 +505,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
             onFileSelect={handleFileSelect} onClose={closeMenu} /> : null}
           </AnimatePresence>
 
-          <div data-chat-input-footer="true" className="conversation-composer-footer px-2 pb-2 pt-0.5">
+          <motion.div layout={reducedMotion ? false : 'position'} layoutDependency={isExpandedInput} transition={COMPOSER_LAYOUT_TRANSITION} data-chat-input-footer="true" className="conversation-composer-footer px-2 pb-2 pt-0.5">
             <div className="conversation-composer-options">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -613,15 +632,16 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                 </TooltipContent>
               </Tooltip>
             </div>
-          </div>
-        </div>
-        </div>
-        {(onWorkspace || connectionStatus) && <div className="flex min-w-0 items-center justify-between gap-2 px-1 pt-1" data-conversation-composer-status="true">
+          </motion.div>
+        </motion.div>
+        </motion.div>
+        {(onWorkspace || connectionStatus) && <motion.div layout={reducedMotion ? false : 'position'} layoutDependency={isExpandedInput} transition={COMPOSER_LAYOUT_TRANSITION} className="flex min-w-0 items-center justify-between gap-2 px-1 pt-1" data-conversation-composer-status="true">
           <div className="min-w-0">{onWorkspace && <button type="button" onClick={onWorkspace} className="flex min-w-0 items-center gap-1 rounded-md px-1 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover" title={workspaceLabel}><Icon name="folder" className="size-3.5" /><span className="max-w-28 truncate">{workspaceLabel}</span></button>}</div>
           {connectionStatus}
-        </div>}
+        </motion.div>}
       </div>
       {markerPreview && identityKey && <DraftMarkerPreview object={markerPreview} draftKey={identityKey} onClose={() => setMarkerPreview(undefined)} />}
     </motion.div>
+    </div>
   );
 };
