@@ -333,6 +333,9 @@ impl Catalog {
             .map(|value| serde_json::from_value::<Run>(value.clone()))
             .transpose()?;
         let shown_run = active_run.as_ref().or(latest_run.as_ref());
+        let model_activity = active_run.as_ref()
+            .map(|run| super::generation::read_model_activity(&self.db, run, self.epoch))
+            .transpose()?.flatten();
         let run_failure = shown_run
             .filter(|run| run.state == RunState::Failed)
             .map(|run| {
@@ -383,7 +386,7 @@ impl Catalog {
             "inputs":inputs,"operations":operations,
             "context":{"checkpoint":checkpoint,"jobs":jobs},"followups":followups,"goals":goals,
             "children":children,"childExecutions":child_executions,"childDirectory":directory,"childActivity":child_activity,
-            "delegatedExecutions":delegated_executions,"activeRun":active_run,"runFailure":run_failure,
+            "delegatedExecutions":delegated_executions,"activeRun":active_run,"modelActivity":model_activity,"runFailure":run_failure,
             "launch":launch,"modelSelection":model_selection,"policySelection":policy_selection}),
         )
     }

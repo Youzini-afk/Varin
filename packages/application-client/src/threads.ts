@@ -480,6 +480,13 @@ export interface ThreadSnapshot {
   eventCursor: number;
   thread: ThreadSummary;
   activeRun: Run | null;
+  /** Current model request observations, captured in the same Catalog view as the Run. */
+  modelActivity?: {
+    requestId: string;
+    dispatched: boolean;
+    phase: 'reasoning' | 'output' | 'tool-call' | null;
+    retry: ThreadAttentionRun['retry'] | null;
+  } | null;
   /** Original Catalog terminal failure for the displayed Run; never inferred from missing output. */
   runFailure?: import('@varin/protocol').RunFailure | null;
   history: ThreadHistoryItem[];

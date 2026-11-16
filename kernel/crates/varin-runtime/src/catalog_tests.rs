@@ -4455,12 +4455,15 @@ fn generation_phase_attention_is_current_fenced_content_free_and_observed() {
         let wire = serde_json::to_value(snapshot).unwrap();
         wire["branches"].as_array().unwrap().iter().find(|branch| branch["branchId"] == "main").unwrap()["currentRun"]["generation"].clone()
     };
+    let activity = |db: &Catalog| db.thread_view("thread", "main", 20, None).unwrap()["modelActivity"].clone();
     assert!(generation(&db).is_null());
+    assert_eq!(activity(&db), json!({"requestId":"model-1","dispatched":true,"phase":null,"retry":null}));
     db.record_generation_phase(&receipt.run_id, epoch, "model-1", Some(GenerationPhase::Reasoning)).unwrap();
     receive.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
     let first = generation(&db);
     assert_eq!(first["phase"], "reasoning");
     assert_eq!(first["requestId"], "model-1");
+    assert_eq!(activity(&db)["phase"], "reasoning");
     let cursor = db.event_cursor().unwrap();
     assert_eq!(first["revision"], cursor);
     db.record_generation_phase(&receipt.run_id, epoch, "model-1", Some(GenerationPhase::Reasoning)).unwrap();
@@ -4470,8 +4473,10 @@ fn generation_phase_attention_is_current_fenced_content_free_and_observed() {
     assert_eq!(generation(&db), first);
     db.record_generation_phase(&receipt.run_id, epoch, "model-1", Some(GenerationPhase::Output)).unwrap();
     assert_eq!(generation(&db)["phase"], "output");
+    assert_eq!(activity(&db)["phase"], "output");
     db.record_generation_phase(&receipt.run_id, epoch, "model-1", None).unwrap();
     assert!(generation(&db).is_null());
+    assert!(activity(&db)["phase"].is_null());
     db.record_generation_phase(&receipt.run_id, epoch, "model-1", Some(GenerationPhase::Reasoning)).unwrap();
     db.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::ModelFinished {
         request_id: "model-1".into(), outcome: ModelOutcome::Failed, finish_reason: None, items: vec![],
@@ -4483,11 +4488,14 @@ fn generation_phase_attention_is_current_fenced_content_free_and_observed() {
     let mut retry = request_snapshot(&receipt); retry.view.request_id = "model-2".into();
     independent_prepare(&mut db, &receipt, retry);
     assert!(generation(&db).is_null()); // Never replay previous request's last phase.
+    assert_eq!(activity(&db), json!({"requestId":"model-2","dispatched":true,"phase":null,"retry":null}));
     assert!(db.record_generation_phase(&receipt.run_id, epoch, "model-1", Some(GenerationPhase::Reasoning)).is_err());
     db.record_generation_phase(&receipt.run_id, epoch, "model-2", Some(GenerationPhase::ToolCall)).unwrap();
     assert_eq!(generation(&db)["phase"], "tool-call");
+    assert_eq!(activity(&db)["phase"], "tool-call");
     db.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::StateChanged { state: RunState::Executing, waiting_on: None }).unwrap();
     assert!(generation(&db).is_null());
+    assert!(activity(&db).is_null());
     assert!(db.record_generation_phase(&receipt.run_id, epoch, "model-2", Some(GenerationPhase::Reasoning)).is_err());
     db.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::StateChanged { state: RunState::Runnable, waiting_on: None }).unwrap();
     db.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::StateChanged { state: RunState::Generating, waiting_on: None }).unwrap();
@@ -4495,6 +4503,7 @@ fn generation_phase_attention_is_current_fenced_content_free_and_observed() {
     db.record_generation_phase(&receipt.run_id, epoch, "model-2", Some(GenerationPhase::Reasoning)).unwrap();
     db.request_cancel_run(&receipt.run_id).unwrap();
     assert!(generation(&db).is_null());
+    assert!(activity(&db).is_null());
     assert!(db.record_generation_phase(&receipt.run_id, epoch, "model-2", Some(GenerationPhase::Reasoning)).is_err());
     let events = db.events_after(0, 1000).unwrap();
     for entry in events.iter().filter(|event| event.kind == "generation.phase_changed") {
@@ -4504,6 +4513,7 @@ fn generation_phase_attention_is_current_fenced_content_free_and_observed() {
     drop(db);
     let db = fixture.open();
     assert!(generation(&db).is_null());
+    assert!(activity(&db).is_null());
 }
 
 #[test]
@@ -4525,6 +4535,9 @@ fn retry_attention_requires_original_scheduled_wait_and_never_infers_resume_from
     assert!(retry(&db).is_null());
     db.record_retry_schedule(&receipt.run_id, epoch, "model-1", Some((1, 0))).unwrap();
     let observed = retry(&db); assert_eq!(observed["attempt"], 1); assert_eq!(observed["requestId"], "model-1");
+    let activity = db.thread_view("thread", "main", 20, None).unwrap()["modelActivity"].clone();
+    assert_eq!(activity["retry"], observed);
+    assert_eq!(activity["dispatched"], false);
     assert_eq!(observed["scheduledAtMs"], observed["retryAtMs"]);
     assert!(!retry(&db).is_null()); // An elapsed deadline is not execution evidence.
     assert!(db.record_retry_schedule(&receipt.run_id, epoch + 1, "model-1", Some((2, 1))).is_err());
@@ -4533,6 +4546,7 @@ fn retry_attention_requires_original_scheduled_wait_and_never_infers_resume_from
     db.record_retry_schedule(&receipt.run_id, epoch, "model-1", Some((2, 100))).unwrap();
     let mut next = request_snapshot(&receipt); next.view.request_id = "model-2".into(); independent_prepare(&mut db, &receipt, next);
     assert!(retry(&db).is_null());
+    assert!(db.thread_view("thread", "main", 20, None).unwrap()["modelActivity"]["retry"].is_null());
     assert!(db.record_retry_schedule(&receipt.run_id, epoch, "model-1", Some((3, 100))).is_err());
     assert!(!serde_json::to_string(&db.capture_attention_read().load(&|| false).unwrap()).unwrap().contains("private failure body"));
 }

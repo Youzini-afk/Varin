@@ -248,6 +248,9 @@ Catalog 事务保存短元数据和不可变内容引用。历史正文、请求
 
 [thread.view](../kernel/crates/varin-runtime/src/catalog_thread_view.rs)在同一快照返回当前历史窗口、队列、Operation、
 上下文、子任务、Goal 与原 event cursor，Host 只补自己拥有的策略准备、默认值与恢复状态。
+`modelActivity` 在同一快照读取当前请求的派发、输出阶段和重试安排，与 attention 共用原生投影。
+聊天标题行据此区分准备请求、等待模型响应、思考、正文与工具参数生成；重连与工具续轮仍读取当前请求，
+不按等待时长猜测模型在思考，也不另建状态轮询。
 `afterHeadId` 仍在可证明的当前窗口内时返回增量，否则回到完整窗口；它不限制历史长度，也不改变显式的旧历史分页。
 列表变化通过 `inspectMany` 读取受影响的身份；隐藏、删除或不存在的条目不伪造空记录。
 [上下文检查](../kernel/crates/varin-runtime/src/catalog_context_inspection.rs)也由 Rust 组合读取：

@@ -9,6 +9,7 @@ import { uiSession, notifyUiSessions } from '@/lib/interactive-ui/sessions';
 import type { ThreadIdentity, ThreadSnapshot, ThreadsAPI, ThreadMemoryAPI } from '@varin/application-client';
 import type { ThreadHistoryItem as HistoryItem } from '@varin/application-client';
 import { ChatTimeline } from './ChatTimeline';
+import { presentAssistantWaiting } from './chatAssistantWaiting';
 import type { ChatTimelineProps } from './ChatTimelineEntries';
 import { ConversationContext, type UiCardProjection } from './ConversationContext';
 import type { ChatToolCall, ChatUserMessage, ChatSessionSubmissionStatus } from './types';
@@ -214,7 +215,7 @@ function Timeline({ api, identity, snapshot, history, runUsage, historyReady, hi
     onScrollContainerChange={onScrollContainerChange}
     entries={entries} toolExecutions={view.toolExecutions} liveAssistant={liveAssistant} liveUser={liveUser} liveUserStatus={liveUserStatus} leafId={head}
     activeRunId={working ? snapshot?.activeRun?.id : undefined}
-    assistantWaiting={working && !snapshot?.activeRun?.waiting_on?.startsWith('context-wait:') ? { retry: progress.find(part => part.type === 'retry') } : undefined} onFork={onFork ? forkEntry : undefined}
+    assistantWaiting={working ? presentAssistantWaiting(snapshot) : undefined} onFork={onFork ? forkEntry : undefined}
     onRecover={onRecover ? recoverEntry : undefined} header={header} footer={footer} />}
     <InlineUiViews prefix={`${key}:`} />
   </ConversationContext.Provider>;

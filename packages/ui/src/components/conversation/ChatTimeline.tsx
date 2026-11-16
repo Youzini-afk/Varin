@@ -151,7 +151,8 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     projection.items,
     props.assistantWaiting !== undefined,
     projection.liveItem,
-  ), [projection.items, projection.liveItem, props.assistantWaiting]);
+    props.activeRunId,
+  ), [projection.items, projection.liveItem, props.assistantWaiting, props.activeRunId]);
 
   const [activityRevision, updateActivity] = React.useReducer(value => value + 1, 0);
   const preview = React.useContext(ConversationPreviewContext);
@@ -191,7 +192,9 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   const blocks = projectChatTimelineBlocks(projection, { sorted: sortedMessages, dialogue: dialogueMessages, expanded: id => isActivityExpanded(id) || activityTransitions.get(id)?.phase === 'closing', previous: blocksRef.current, customIds, showThinking, aliases: blockAliases, executions: props.toolExecutions });
   blocksRef.current = blocks;
   const stickyHeaders = React.useMemo(() => !isMobile && stickyUserHeader ? blocks.items.flatMap((block, index) => block.kind === 'user' ? [index] : []) : [], [blocks.items, isMobile, stickyUserHeader]);
-  const waitingGroupId = [...blocks.groups.values()].reverse().find(group => group.ownerId === assistantWaitingTurnId)?.id;
+  const latestGroups = [...blocks.groups.values()].reverse();
+  const waitingGroupId = (props.activeRunId ? latestGroups.find(group => group.runId === props.activeRunId) : undefined)?.id
+    ?? latestGroups.find(group => group.ownerId === assistantWaitingTurnId)?.id;
 
   const timelineView = useTimelineViewStore(useShallow((state) => (
     state.views[props.sessionId] ?? DEFAULT_CHAT_TIMELINE_VIEW

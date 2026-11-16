@@ -22,6 +22,15 @@ pub struct AttentionGeneration {
     pub revision: u64,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelActivity {
+    request_id: String,
+    dispatched: bool,
+    phase: Option<GenerationPhase>,
+    retry: Option<AttentionRetry>,
+}
+
 fn latest_step(db: &Connection, run_id: &str) -> Result<Option<ModelStep>> {
     let raw: Option<String> = db.query_row(
         "SELECT body FROM model_steps WHERE run_id=?1 ORDER BY rowid DESC LIMIT 1",
@@ -73,10 +82,13 @@ impl Catalog {
 pub(super) fn read_generation(db: &Connection, run: &Run, epoch: u64) -> Result<Option<AttentionGeneration>> {
     if run.state != RunState::Generating || run.cancel_requested || run.epoch != epoch { return Ok(None); }
     let Some(step) = latest_step(db, &run.id)? else { return Ok(None); };
+    generation_for_step(db, run, epoch, &step)
+}
+fn generation_for_step(db: &Connection, run: &Run, epoch: u64, step: &ModelStep) -> Result<Option<AttentionGeneration>> {
     if step.epoch != epoch || step.state != ModelStepState::Dispatched { return Ok(None); }
     let Some((cursor, fact)) = last_phase(db, &run.id)? else { return Ok(None); };
     if fact.request_id != step.id || fact.owner_generation != epoch || fact.run_revision != run.revision { return Ok(None); }
-    Ok(fact.phase.map(|phase| AttentionGeneration { request_id: step.id, phase, revision: cursor }))
+    Ok(fact.phase.map(|phase| AttentionGeneration { request_id: step.id.clone(), phase, revision: cursor }))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,10 +136,26 @@ impl Catalog {
 pub(super) fn read_retry(db: &Connection, run: &Run, epoch: u64) -> Result<Option<AttentionRetry>> {
     if run.state != RunState::Generating || run.cancel_requested || run.epoch != epoch { return Ok(None); }
     let Some(step) = latest_step(db, &run.id)? else { return Ok(None); };
+    retry_for_step(db, run, epoch, &step)
+}
+fn retry_for_step(db: &Connection, run: &Run, epoch: u64, step: &ModelStep) -> Result<Option<AttentionRetry>> {
     if step.epoch != epoch || !matches!(step.state, ModelStepState::Failed | ModelStepState::Interrupted) { return Ok(None); }
     let raw: Option<(u64,String)> = db.query_row("SELECT cursor,data FROM events WHERE subject=?1 AND kind='generation.retry_changed' ORDER BY cursor DESC LIMIT 1", [&run.id], |row| Ok((read_number(row,0)?,row.get(1)?))).optional()?;
     let Some((revision, raw)) = raw else { return Ok(None); };
     let fact: RetryFact = serde_json::from_str(&raw)?;
     if fact.request_id != step.id || fact.owner_generation != epoch || fact.run_revision != run.revision { return Ok(None); }
-    Ok(fact.scheduled.map(|schedule| AttentionRetry { request_id: step.id, attempt: schedule.attempt, scheduled_at_ms: schedule.scheduled_at_ms, retry_at_ms: schedule.retry_at_ms, revision }))
+    Ok(fact.scheduled.map(|schedule| AttentionRetry { request_id: step.id.clone(), attempt: schedule.attempt, scheduled_at_ms: schedule.scheduled_at_ms, retry_at_ms: schedule.retry_at_ms, revision }))
+}
+
+/// The conversation and attention views read the same request-owned facts.
+pub(super) fn read_model_activity(db: &Connection, run: &Run, epoch: u64) -> Result<Option<ModelActivity>> {
+    if run.state != RunState::Generating || run.cancel_requested || run.epoch != epoch { return Ok(None); }
+    let Some(step) = latest_step(db, &run.id)? else { return Ok(None); };
+    if step.epoch != epoch { return Ok(None); }
+    Ok(Some(ModelActivity {
+        phase: generation_for_step(db, run, epoch, &step)?.map(|generation| generation.phase),
+        retry: retry_for_step(db, run, epoch, &step)?,
+        dispatched: step.state == ModelStepState::Dispatched,
+        request_id: step.id,
+    }))
 }

@@ -1,5 +1,6 @@
 import React from 'react';
 import { BusyDots } from '@/components/chat/message/parts/BusyDots';
+import { SwapText } from '@/components/motion/SwapText';
 import { useI18n } from '@/lib/i18n';
 import { ModelLogo } from '@/components/ui/ModelLogo';
 import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
@@ -50,7 +51,9 @@ export const ChatTurnAssistantChrome: React.FC<{
       {modelLabel ? <span className="flex min-w-0 items-center gap-1.5" title={modelLabel}><ModelLogo requestModelId={last?.responseModel || configured?.requestModelId} modelId={modelId} displayName={configured?.name} /><span className="truncate">{configured?.name || last?.responseModel || modelId}</span></span> : null}
       {working ? (
         <span className="min-w-0 truncate text-muted-foreground/80">
-          · {waiting?.retry ? t(waiting.retry.retryAt > now ? 'settings.retry.waiting' : 'settings.retry.running', { attempt: waiting.retry.attempt, seconds: Math.max(0, Math.ceil((waiting.retry.retryAt - now) / 1000)) }) : t('chat.assistant.working')}<BusyDots />
+          · <SwapText text={waiting?.retry
+            ? t(waiting.retry.retryAt > now ? 'settings.retry.waiting' : 'settings.retry.running', { attempt: waiting.retry.attempt, seconds: Math.max(0, Math.ceil((waiting.retry.retryAt - now) / 1000)) })
+            : t(waiting?.stage === 'stopping' ? 'chat.timeline.tools.stopping' : `chat.assistant.${waiting?.stage ?? 'working'}`)} hold={0} /><BusyDots />
         </span>
       ) : null}
     </header>
