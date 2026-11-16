@@ -1654,6 +1654,20 @@ impl Catalog {
             {
                 continue;
             }
+            // A completed executor receipt can precede caller settlement and survive
+            // an interrupted ToolSettled commit. Consume that recorded fact before
+            // classifying lost workers as unknown; no execution is repeated.
+            if op.phase != OperationPhase::Terminal || op.outcome == Some(Outcome::Indeterminate) {
+                if let Some(receipt) = op.external_receipt.clone().filter(|receipt| receipt.executor_stopped) {
+                    if execution_persistence::apply_external_terminal(&mut op, &receipt) {
+                        op.revision += 1;
+                        put(&tx, "operations", &op.id, &op)?;
+                        event(&tx, &op.id, op.revision, "operation.recovered", serde_json::to_value(&op)?)?;
+                    }
+                    tx.execute("DELETE FROM resource_occupancy WHERE operation_id=?1", [&op.id])?;
+                    continue;
+                }
+            }
             // Only an explicitly kernel-owned Result ends with this process. Host/broker and
             // remote calls may survive it, even when their caller contract returns a Result.
             // This is stop evidence only; it never resolves an unknown business effect.

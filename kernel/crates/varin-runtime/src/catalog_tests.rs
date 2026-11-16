@@ -791,13 +791,13 @@ fn external_terminal_before_explicit_handoff_is_not_lost() {
         .unwrap();
     let receipt = external("job", Outcome::Succeeded, Effect::Confirmed);
     let early = db.record_external_receipt("job", receipt.clone()).unwrap();
-    assert_eq!(early.phase, OperationPhase::Running);
+    assert_eq!(early.phase, OperationPhase::Terminal);
     db.handoff_operation("job", epoch).unwrap();
     let settled = db.operation("job").unwrap();
     assert_eq!(
         settled.phase,
         OperationPhase::Terminal,
-        "early terminal was buffered but never applied at explicit handoff"
+        "explicit handoff retains the executor's completed result"
     );
     assert_eq!(settled.outcome, Some(Outcome::Succeeded));
     assert_eq!(db.record_external_receipt("job", receipt).unwrap(), settled);
@@ -1073,9 +1073,9 @@ fn later_external_confirmation_resolves_lost_acceptance_receipt_without_handoff(
                 let early = db.record_external_receipt("job", receipt.clone()).unwrap();
                 assert_eq!(
                     (early.phase, early.effect),
-                    (OperationPhase::Running, Effect::Dispatched)
+                    (OperationPhase::Terminal, effect)
                 );
-                assert!(db.pending_resumptions().unwrap().is_empty());
+                assert!(!db.pending_resumptions().unwrap().is_empty());
                 drop(db);
                 db = f.open();
             } else {
@@ -1092,14 +1092,14 @@ fn later_external_confirmation_resolves_lost_acceptance_receipt_without_handoff(
             assert!(!interrupted.handed_off);
             assert_eq!(
                 (interrupted.outcome, interrupted.effect),
-                (Some(Outcome::Indeterminate), Effect::Unknown)
+                if persisted_before_crash { (Some(outcome), effect) } else { (Some(Outcome::Indeterminate), Effect::Unknown) }
             );
             let confirmed = db.record_external_receipt("job", receipt.clone()).unwrap();
             assert_eq!(
                 (confirmed.phase, confirmed.outcome, confirmed.effect),
                 (OperationPhase::Terminal, Some(outcome), effect)
             );
-            assert_eq!(confirmed.revision, interrupted.revision + 1);
+            assert_eq!(confirmed.revision, interrupted.revision + u64::from(!persisted_before_crash));
             assert_eq!(
                 db.capture_operation_read(confirmed.clone())
                     .load()
@@ -3615,7 +3615,7 @@ fn original_mcp_resource_holder_cleanup_and_late_ack_preserve_invocation() {
                 result: json!({"operationId":context.operation_id,"server":"original","uri":"original:resource","acknowledgement":ack}).into(),
             }).unwrap();
             let accepted = db.accept_mcp_resource(&binding, "original-listener", data, receipt).unwrap();
-            assert_eq!(accepted.phase, OperationPhase::Running);
+            assert_eq!(accepted.phase, OperationPhase::Terminal);
             assert!(accepted.external_receipt.unwrap().executor_stopped);
         }
         let unknown = ToolCompletion::Result { outcome: Outcome::Indeterminate, effect: Effect::Unknown,

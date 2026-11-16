@@ -1,6 +1,7 @@
 //! Original cancelled exchanges use the same unlocked staging and Catalog CAS as execution.
 use super::*;
 use crate::execution::*;
+use crate::catalog::attachments::Attachment;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc, Arc, Mutex,
@@ -116,6 +117,123 @@ fn exchange_with_tools(
             .unwrap();
     }
     (receipt, operation)
+}
+
+fn document_output() -> crate::output::OutputBody {
+    crate::output::OutputBody { data: json!({"markdown":"Weekly report","paragraphs":["Work completed"]}), model_data: None,
+        parts: vec![crate::output::OutputPart::Attachment { attachment: Attachment {
+            reference: "attachment:report".into(), model_ref: None, filename: "weekly.docx".into(),
+            mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document".into(), byte_length: 4096,
+        } }] }
+}
+
+#[test]
+fn document_receipt_keeps_original_evidence_while_projecting_model_attachments() {
+    let fixture = Fixture::new();
+    let mut catalog = fixture.open();
+    let (run, operation) = exchange_with_contract(&mut catalog, true, ToolContract {
+        name: "document_read".into(), schema_version: "1".into(), read_only: false,
+        completion: CompletionKind::Result, lifetime: Lifetime::Run, resources: vec![],
+    });
+    let epoch = catalog.epoch();
+    let context = ToolExecutionContext { run_id: run.run_id.clone(), operation_id: operation.clone(),
+        origin: ToolOrigin::ModelStep { request_id: "model-1".into() } };
+    let owner = ExecutorOwner::External { identity: "document-owner".into(), epoch: "document-epoch".into() };
+    catalog.commit_execution(&run.run_id, epoch, &ExecutionRecord::ToolDispatched {
+        context: context.clone(), executor_owner: owner.clone(),
+    }).unwrap();
+    let output = document_output();
+    let original = ExternalReceipt { executor: "document_read".into(), identity: operation.clone(), epoch: "document-epoch".into(),
+        outcome: Outcome::Succeeded, effect: Effect::None, result: output.clone() };
+    let prepared = catalog.prepare_result_content().write_external_receipt(original.clone()).unwrap();
+    catalog.record_external_tool_receipt_prepared(&operation, &owner, prepared, true).unwrap();
+    let original_ref = catalog.operation(&operation).unwrap().external_receipt.unwrap().result_ref;
+    let catalog = Mutex::new(catalog);
+    let mut forged = output.clone(); forged.data["markdown"] = json!("changed result");
+    assert!(catalog.settle_tool(&context, epoch, ToolExecutionReceipt { executor_stopped: true,
+        completion: ToolCompletion::Result { outcome: Outcome::Succeeded, effect: Effect::None, content: forged } }).is_err());
+    let settled = catalog.settle_tool(&context, epoch, ToolExecutionReceipt { executor_stopped: true,
+        completion: ToolCompletion::Result { outcome: Outcome::Succeeded, effect: Effect::None, content: output.clone() } }).unwrap();
+    let ToolCompletion::Result { content, .. } = &settled.completion else { panic!("document result required") };
+    assert_eq!(content.data, output.data);
+    assert!(matches!(&content.parts[0], crate::output::OutputPart::Attachment { attachment } if attachment.model_ref.as_deref().is_some_and(|reference| reference.starts_with("file:"))));
+    let mut catalog = catalog.into_inner().unwrap();
+    let op = catalog.operation(&operation).unwrap();
+    assert_eq!(op.external_receipt.as_ref().unwrap().result_ref, original_ref);
+    assert_eq!(op.result.as_ref().unwrap().reference().unwrap(), &original_ref);
+    catalog.commit_execution(&run.run_id, epoch, &ExecutionRecord::ToolBatchCommitted { request_id: "model-1".into(),
+        results: vec![ToolResult { request_id: "model-1".into(), call_id: "original".into(), completion: settled.completion }] }).unwrap();
+    let prepared = catalog.prepare_result_content().write_external_receipt(original).unwrap();
+    assert_eq!(catalog.record_external_tool_receipt_prepared(&operation, &owner, prepared, true).unwrap(), op);
+}
+
+#[test]
+fn saved_document_receipts_recover_old_unpaired_runs_and_finish_cancellation() {
+    for (cancelled, previously_reopened) in [(false, false), (true, false), (true, true)] {
+        let fixture = Fixture::new();
+        let mut catalog = fixture.open();
+        let (run, operation) = exchange_with_contract(&mut catalog, true, ToolContract {
+            name: "document_read".into(), schema_version: "1".into(), read_only: false,
+            completion: CompletionKind::Result, lifetime: Lifetime::Run, resources: vec![],
+        });
+        let epoch = catalog.epoch();
+        let context = ToolExecutionContext { run_id: run.run_id.clone(), operation_id: operation.clone(),
+            origin: ToolOrigin::ModelStep { request_id: "model-1".into() } };
+        let owner = ExecutorOwner::External { identity: "document-owner".into(), epoch: "document-epoch".into() };
+        catalog.commit_execution(&run.run_id, epoch, &ExecutionRecord::ToolDispatched {
+            context, executor_owner: owner.clone(),
+        }).unwrap();
+        let output = document_output();
+        let prepared = catalog.prepare_result_content().write_external_receipt(ExternalReceipt {
+            executor: "document_read".into(), identity: operation.clone(), epoch: "document-epoch".into(),
+            outcome: Outcome::Succeeded, effect: Effect::None, result: output.clone(),
+        }).unwrap();
+        let mut legacy = catalog.record_external_tool_receipt_prepared(&operation, &owner, prepared, true).unwrap();
+        let original_receipt = legacy.external_receipt.clone();
+        // Persist the actual old boundary: executor receipt exists, ToolSettled did
+        // not commit. Older restarts could already have labelled the work unknown.
+        legacy.phase = if previously_reopened { OperationPhase::Terminal } else { OperationPhase::Running };
+        legacy.outcome = previously_reopened.then_some(Outcome::Indeterminate);
+        legacy.effect = if previously_reopened { Effect::Unknown } else { Effect::Dispatched };
+        legacy.result = None;
+        catalog.db.execute("UPDATE operations SET body=?2 WHERE id=?1", params![operation, encode(&legacy).unwrap()]).unwrap();
+        catalog.pause_failed_execution(&run.run_id, epoch, "policy_graph", "tool receipt lacks dispatch/no-send evidence").unwrap();
+        if cancelled { catalog.request_cancel_run(&run.run_id).unwrap(); }
+        drop(catalog);
+        let mut catalog = fixture.open();
+        let restored = catalog.operation(&operation).unwrap();
+        assert_eq!((restored.phase, restored.outcome, restored.effect), (OperationPhase::Terminal, Some(Outcome::Succeeded), Effect::None));
+        assert_eq!(restored.external_receipt, original_receipt);
+        assert_eq!(restored.epoch, epoch);
+        if cancelled {
+            let supervisor = crate::supervisor::RunSupervisor::new(catalog);
+            supervisor.reconcile_message_requests().unwrap();
+            supervisor.shutdown().unwrap();
+            assert!(supervisor.execution_failure(&run.run_id).unwrap().is_none());
+            let owner = supervisor.catalog();
+            let mut catalog = owner.lock().unwrap();
+            assert_eq!(catalog.run(&run.run_id).unwrap().state, RunState::Cancelled);
+            let history = catalog.execution_history("main").unwrap();
+            assert!(matches!(&history.last().unwrap().content, Content::ToolResult { result }
+                if matches!(&result.completion, ToolCompletion::Result { outcome: Outcome::Succeeded, content, .. }
+                    if content == &output)));
+            let mut next = command(); next.key = "after-document-cancel".into(); next.expected_head = catalog.head("main").unwrap();
+            assert_ne!(catalog.submit(&next).unwrap().run_id, run.run_id);
+        } else {
+            let snapshot: RequestSnapshot = serde_json::from_value(catalog.model_step("model-1").unwrap().request).unwrap();
+            let (_, recovered) = catalog.prepare_recovered_execution(&run.run_id, snapshot.view.binding, DefaultAgentPolicy.identity(), Value::Null).unwrap();
+            let recovered = recovered.unwrap();
+            let completion = &recovered.receipts["original"].completion;
+            assert!(matches!(completion, ToolCompletion::Result { outcome: Outcome::Succeeded, effect: Effect::None, content } if content.data == output.data));
+            assert_eq!(catalog.run(&run.run_id).unwrap().state, RunState::Runnable);
+            catalog.commit_execution(&run.run_id, catalog.epoch(), &ExecutionRecord::ToolBatchCommitted {
+                request_id: "model-1".into(), results: recovered.receipts.into_values().collect(),
+            }).unwrap();
+            assert!(matches!(&catalog.execution_history("main").unwrap().last().unwrap().content, Content::ToolResult { result }
+                if matches!(&result.completion, ToolCompletion::Result { content, .. }
+                    if content == &output)));
+        }
+    }
 }
 
 #[test]

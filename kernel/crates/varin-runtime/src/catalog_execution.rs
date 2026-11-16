@@ -151,11 +151,9 @@ impl Persistence for Mutex<Catalog> {
         epoch: u64,
         receipt: ToolExecutionReceipt,
     ) -> std::result::Result<ToolExecutionReceipt, ExecutionError> {
-        let mut completion=receipt.completion;
-        self.lock().map_err(catalog_lock_error)?.project_completion_attachments(&mut completion,&context.run_id).map_err(policy_error)?;
         let record = ExecutionRecord::ToolSettled {
             context: context.clone(),
-            completion,
+            completion: receipt.completion,
             executor_stopped: receipt.executor_stopped,
         };
         let preparation = self
@@ -163,7 +161,6 @@ impl Persistence for Mutex<Catalog> {
             .map_err(catalog_lock_error)?
             .prepare_execution_bodies(&record)
             .map_err(policy_error)?;
-        let prepared = preparation.write(&record).map_err(policy_error)?;
         // Domain owners can publish their raw acceptance before the tool bridge adds its
         // stable typed projection. Compare actual bodies outside the Catalog lock; a
         // projection may refine presentation exactly once, never effect or raw evidence.
@@ -173,10 +170,12 @@ impl Persistence for Mutex<Catalog> {
                 (metadata.clone(), result_content::ToolCompletionRead { completion:metadata, content:db.content.clone(), _publication:db.content.begin_publication() })
             })
         };
-        let projection = if let (Some((metadata,read)),ExecutionRecord::ToolSettled{completion,..})=(original,&record) {
+        let projected_record = preparation.projected_record.as_ref().unwrap_or(&record);
+        let projection = if let (Some((metadata,read)),ExecutionRecord::ToolSettled{completion,..})=(original,projected_record) {
             let before=read.load().map_err(policy_error)?;
             raw_equivalent_projection(&before,completion).then_some(metadata)
         } else {None};
+        let prepared = preparation.write(&record).map_err(policy_error)?;
         let (read, stopped) = {
             let mut db = self.lock().map_err(catalog_lock_error)?;
             let op = db.operation(&context.operation_id).map_err(policy_error)?;
@@ -964,6 +963,13 @@ pub(super) struct PreparedExecutionBodies {
 impl ExecutionBodyPreparation {
     pub(super) fn write(self, record: &ExecutionRecord) -> Result<PreparedExecutionBodies> {
         let projected_record=self.projected_record;
+        // Executor evidence belongs to the original output. Model-facing attachment
+        // references are a projection and must never change that output's identity.
+        let original_completion = match (record, projected_record.as_ref()) {
+            (ExecutionRecord::ToolSettled { completion, .. }, Some(_)) =>
+                Some(ToolCompletionMetadata::write(&self.content, completion)?),
+            _ => None,
+        };
         let record=projected_record.as_ref().unwrap_or(record);
         let request = match record {
             ExecutionRecord::RequestPrepared { snapshot } => {
@@ -1138,8 +1144,9 @@ impl ExecutionBodyPreparation {
         }
         let completion = if let ExecutionRecord::ToolSettled { completion, .. } = record {
             let receipt = ToolCompletionMetadata::write(&self.content, completion)?;
+            let evidence = original_completion.as_ref().unwrap_or(&receipt);
             let body = match completion {
-                ToolCompletion::Result { .. } => match &receipt {
+                ToolCompletion::Result { .. } => match evidence {
                     ToolCompletionMetadata::Result { content_ref, .. } => {
                         OperationResultMetadata::Content {
                             reference: content_ref.clone(),
@@ -1156,7 +1163,7 @@ impl ExecutionBodyPreparation {
                     operation_id,
                     phase,
                     ..
-                } => match &receipt {
+                } => match evidence {
                     ToolCompletionMetadata::JobAccepted {
                         content_ref: Some(reference),
                         ..
@@ -1227,11 +1234,16 @@ impl Catalog {
         };
         // Register only newly published typed output parts. Old history/request snapshots
         // are never scanned or rewritten when a later request is compiled.
-        let projected_record = if let ExecutionRecord::ToolSettled{context,completion,executor_stopped}=record {
-            let mut projected=completion.clone();
-            self.project_completion_attachments(&mut projected,&context.run_id)?;
-            (projected != *completion).then_some(ExecutionRecord::ToolSettled{context:context.clone(),completion:projected,executor_stopped:*executor_stopped})
-        } else {None};
+        let projected_record = match record {
+            ExecutionRecord::ToolSettled { context, completion, executor_stopped } => {
+                let mut projected = completion.clone();
+                self.project_completion_attachments(&mut projected, &context.run_id)?;
+                (projected != *completion).then_some(ExecutionRecord::ToolSettled {
+                    context: context.clone(), completion: projected, executor_stopped: *executor_stopped,
+                })
+            }
+            _ => None,
+        };
         Ok(ExecutionBodyPreparation {
             projected_record,
             content: self.content.clone(),
@@ -1957,11 +1969,18 @@ impl Catalog {
                             && op.executor.as_deref()==Some(receipt.executor.as_str())
                             && receipt.outcome==*outcome && receipt.effect==*effect
                             && prepared_result.reference().is_ok_and(|content|receipt.result_ref==*content));
+                        let dispatch_proven = match op.phase {
+                            OperationPhase::Running => true,
+                            // An observer can lose its response after the executor
+                            // has settled. Its Unknown completion preserves that
+                            // observation; a definite result must match the receipt.
+                            OperationPhase::Terminal => *outcome == Outcome::Indeterminate || confirmed_terminal,
+                            _ => *outcome != Outcome::Succeeded,
+                        };
                         if (*effect == Effect::None
                             && op.effect != Effect::None
                             && !confirmed_no_effect)
-                            || (*outcome == Outcome::Succeeded
-                                && op.phase != OperationPhase::Running && !confirmed_terminal)
+                            || !dispatch_proven
                         {
                             return Err(RuntimeError::Invalid(
                                 "tool receipt lacks dispatch/no-send evidence".into(),
@@ -2775,13 +2794,17 @@ fn record_executor_stopped(
     Ok(())
 }
 
-pub(super) fn apply_external_terminal(op: &mut Operation, receipt: &ExternalReceiptMetadata) {
+pub(super) fn apply_external_terminal(op: &mut Operation, receipt: &ExternalReceiptMetadata) -> bool {
+    let result = Some(OperationResultMetadata::Content { reference: receipt.result_ref.clone() });
+    if op.phase == OperationPhase::Terminal && op.outcome == Some(receipt.outcome)
+        && op.effect == receipt.effect && op.result == result {
+        return false;
+    }
     op.phase = OperationPhase::Terminal;
     op.outcome = Some(receipt.outcome);
     op.effect = receipt.effect;
-    op.result = Some(OperationResultMetadata::Content {
-        reference: receipt.result_ref.clone(),
-    });
+    op.result = result;
+    true
 }
 /// Existing receipt mutation shared with domain publications that must commit
 /// their short facet and finite-executor evidence in the same transaction.
@@ -2813,7 +2836,10 @@ pub(super) fn record_external_receipt_in(
             "unknown external effect requires indeterminate outcome".into(),
         ));
     }
-    let settle = op.host_job.is_some()
+    // The original executor's stop receipt settles the Operation even when its
+    // caller has not yet paired the tool result into conversation history.
+    let settle = executor_stopped
+        || op.host_job.is_some()
         || op.handed_off
         || (op.phase == OperationPhase::Terminal && op.outcome == Some(Outcome::Indeterminate));
     if let Some(previous) = &op.external_receipt {
@@ -2830,15 +2856,7 @@ pub(super) fn record_external_receipt_in(
             }
             // The receipt can precede ToolSettled/handoff and survive a crash. Recovery's
             // uncertain Operation is not proof that this already-known fact was applied.
-            let applied = op.phase == OperationPhase::Terminal
-                && op.outcome == Some(receipt.outcome)
-                && op.effect == receipt.effect
-                && op.result.as_ref()
-                    == Some(&OperationResultMetadata::Content {
-                        reference: receipt.result_ref.clone(),
-                    });
-            if settle && !applied {
-                apply_external_terminal(&mut op, &receipt);
+            if settle && apply_external_terminal(&mut op, &receipt) {
                 op.revision += 1;
                 put(tx, "operations", operation_id, &op)?;
                 event(
