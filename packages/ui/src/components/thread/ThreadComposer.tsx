@@ -80,7 +80,6 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   const motionId = React.useId();
   const isMobile = useUIStore(state => state.isMobile);
   const isExpandedInput = useUIStore(state => state.isExpandedInput);
-  const toggleExpandedInput = useUIStore(state => state.toggleExpandedInput);
   const goalEnabled = useUIStore(state => state.sessionGoalEnabled);
   const spellCheck = useUIStore(state => state.inputSpellcheckEnabled);
   const shortcuts = useUIStore(state => state.shortcutOverrides);
@@ -527,10 +526,6 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                   </DropdownMenuItem>
                   {onOpenHistory && <DropdownMenuItem onClick={onOpenHistory}><Icon name="git-branch" className="size-4" />{t('chat.timeline.title')}</DropdownMenuItem>}
                   {onOpenRecovery && <DropdownMenuItem onClick={onOpenRecovery}><Icon name="history" className="size-4" />{t('chat.recovery.title')}</DropdownMenuItem>}
-                  <DropdownMenuItem onClick={toggleExpandedInput} className="gap-2.5 py-1.5">
-                    <Icon name={isExpandedInput ? 'fullscreen-exit' : 'fullscreen'} className="size-4" />
-                    {isExpandedInput ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
-                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
               {external && <ExternalModeControls key={backendIdentity} options={external} />}
