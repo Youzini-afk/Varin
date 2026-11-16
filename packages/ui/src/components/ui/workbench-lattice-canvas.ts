@@ -83,7 +83,9 @@ void main(){
     if (!buffer || !vao) throw new Error('Unable to allocate lattice geometry');
     g.bindVertexArray(vao); g.bindBuffer(g.ARRAY_BUFFER, buffer);
     g.enableVertexAttribArray(0); g.vertexAttribPointer(0, 3, g.FLOAT, false, 12, 0); g.vertexAttribDivisor(0, 1);
-    g.enable(g.BLEND); g.blendFunc(g.SRC_ALPHA, g.ONE_MINUS_SRC_ALPHA);
+    g.enable(g.BLEND);
+    // Source-over alpha keeps opaque coverage opaque when a neighbouring antialiased edge overlaps it.
+    g.blendFuncSeparate(g.SRC_ALPHA, g.ONE_MINUS_SRC_ALPHA, g.ONE, g.ONE_MINUS_SRC_ALPHA);
     const uniform = (name: string) => g.getUniformLocation(program!, name);
     const u = { viewport: uniform('viewport'), edge: uniform('edge'), elapsed: uniform('elapsed'),
       phase: uniform('phase'), inward: uniform('inward'), easing: uniform('easing'), renderScale: uniform('renderScale') };
