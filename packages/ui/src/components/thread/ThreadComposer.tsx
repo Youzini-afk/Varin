@@ -15,7 +15,7 @@ import { Icon } from '@/components/icon/Icon';
 import { ComposerEditor, type ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
@@ -106,6 +106,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
     if (identityKey && inputRef.current) return registerUiComposer(identityKey, inputRef.current);
   }, [identityKey]);
   const [autocomplete, setAutocomplete] = React.useState<AutocompleteTrigger | null>(null);
+  const returnToEditor = React.useRef(false);
   const [knownAgentNames, setKnownAgentNames] = React.useState<Set<string>>(() => new Set());
   const [confirmedMentions, setConfirmedMentions] = React.useState<Set<string>>(() => new Set());
   const commandRef = React.useRef<CommandAutocompleteHandle>(null);
@@ -258,6 +259,22 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
     setAutocomplete(trigger);
     if (!trigger) setLayer(undefined);
   }, [autocomplete, value]);
+  const openPicker = (kind: AutocompleteTrigger['kind']) => {
+    const editor = inputRef.current;
+    if (!editor) return;
+    external?.onInteract('menu');
+    dismissed.current = undefined; setLayer(undefined); setCommandError(undefined);
+    returnToEditor.current = true;
+    const text = editor.getValue(), cursor = editor.getSelection().end;
+    const current = resolveAutocompleteTrigger(text, cursor, { inputMode: 'normal' });
+    if (current?.kind === kind) { setAutocomplete(current); return; }
+    // Keep surrounding draft text outside the query, including insertion inside a sentence.
+    const prefix = cursor > 0 && !/\s/.test(text[cursor - 1]!) ? ' ' : '';
+    const suffix = cursor < text.length && !/\s/.test(text[cursor]!) ? ' ' : '';
+    const from = cursor + prefix.length;
+    editor.replaceRange(cursor, cursor, `${prefix}${kind === 'mention' ? '@' : '/'}${suffix}`, from + 1);
+    setAutocomplete({ kind, query: '', from, to: from + 1 });
+  };
   const handleCommandSelect = (command: CommandInfo, mode: 'confirm' | 'complete') => {
     if (!autocomplete || commandBusy || scope !== currentIdentity.current || commandContext.composer?.host !== getRuntimeEndpointGeneration() || inputRef.current?.getValue() !== value) return;
     if (command.source === 'backend') {
@@ -443,9 +460,8 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
             maxLines={isExpandedInput ? 24 : 9}
           />
 
-          <div className="conversation-composer-hints" data-empty={!value.trim()} data-suggestion={availableSuggestion || suggestionError ? 'true' : undefined}>
+          <div className="conversation-composer-hints" data-suggestion={!autocomplete && (availableSuggestion || suggestionError) ? 'true' : undefined}>
             <div className="conversation-composer-hint-row min-h-0 overflow-hidden px-3 typography-micro">
-              <p>{backendControls === undefined ? t(botWorkbench ? 'chat.composer.botHint' : 'chat.composer.hint') : t('external.inputHint')}</p>
               <p aria-live="polite">
               {availableSuggestion && !autocomplete ? <button type="button" className="text-inherit transition-colors hover:text-primary"
                 title={availableSuggestion} aria-label={`${t('chat.suggestion.applyAria')}: ${availableSuggestion}`}
@@ -479,13 +495,29 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                   <button
                     type="button"
                     className={footerIconButtonClass}
-                    aria-label={t('chat.chatInput.actions.addAttachment')}
-                    title={t('chat.chatInput.actions.addAttachment')}
+                    aria-label={t('chat.composer.add')}
+                    title={t('chat.composer.add')}
                   >
                     <Icon name="add" className="size-4" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent side="top" align="start" className="min-w-48">
+                <DropdownMenuContent side="top" align="start" className="min-w-48" finalFocus={() => {
+                  if (!returnToEditor.current) return true;
+                  returnToEditor.current = false;
+                  inputRef.current?.focus({ preventScroll: true });
+                  return false;
+                }}>
+                  <DropdownMenuItem onSelect={() => openPicker('mention')} className="gap-2.5 py-1.5">
+                    <Icon name="file" className="size-4" />
+                    {t(backendControls !== undefined ? 'chat.composer.referenceAttachment' : botWorkbench ? 'chat.composer.botReference' : 'chat.composer.reference')}
+                    <span className="ml-auto pl-4 text-muted-foreground" aria-hidden="true">@</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => openPicker('command')} className="gap-2.5 py-1.5">
+                    <Icon name="command" className="size-4" />
+                    {t(backendControls !== undefined ? 'chat.chatInput.actions.commands' : 'chat.composer.commands')}
+                    <span className="ml-auto pl-4 text-muted-foreground" aria-hidden="true">/</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem disabled={attachmentDisabled || imageDisabled} title={external && imageDisabled ? t(external.capabilities ? 'external.imagesUnsupported' : 'external.capabilitiesUnknown') : undefined} onClick={onAttachImages} className="gap-2.5 py-1.5">
                     <Icon name="attachment-2" className="size-4" />
                     {t('chat.fileAttachment.actions.chooseImages')}

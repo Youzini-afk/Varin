@@ -24,7 +24,7 @@ vi.mock('@/components/motion/SwapIcon', () => ({ SwapIcon: ({ children }: React.
 vi.mock('@/components/motion/SwapText', () => ({ SwapText: () => null }));
 vi.mock('motion/react', () => ({ useIsPresent: () => true, AnimatePresence: ({ children }: React.PropsWithChildren) => children, motion: { div: React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ children, ...props }, ref) => <div {...props} ref={ref}>{children}</div>) } }));
 vi.mock('@/components/ui/tooltip', () => ({ Tooltip: ({ children }: React.PropsWithChildren) => children, TooltipTrigger: ({ children }: React.PropsWithChildren) => children, TooltipContent: () => null }));
-vi.mock('@/components/ui/dropdown-menu', () => ({ DropdownMenu: ({ children }: React.PropsWithChildren) => children, DropdownMenuTrigger: ({ children }: React.PropsWithChildren) => children, DropdownMenuContent: ({ children }: React.PropsWithChildren) => editor.showMenus ? <div role="menu">{children}</div> : null, DropdownMenuItem: ({ children, onSelect }: React.PropsWithChildren<{ onSelect?(): void }>) => <button type="button" onClick={onSelect}>{children}</button> }));
+vi.mock('@/components/ui/dropdown-menu', () => ({ DropdownMenu: ({ children }: React.PropsWithChildren) => children, DropdownMenuTrigger: ({ children }: React.PropsWithChildren) => children, DropdownMenuContent: ({ children }: React.PropsWithChildren) => editor.showMenus ? <div role="menu">{children}</div> : null, DropdownMenuItem: ({ children, onSelect }: React.PropsWithChildren<{ onSelect?(): void }>) => <button type="button" onClick={onSelect}>{children}</button>, DropdownMenuSeparator: () => <hr /> }));
 vi.mock('@/components/chat/CommandAutocomplete', () => ({ CommandAutocomplete: React.forwardRef((props: NonNullable<typeof editor.commandProps>, ref) => { editor.commandProps = props; React.useEffect(() => () => { editor.commandProps = undefined; }, []); React.useImperativeHandle(ref, () => ({ handleKeyDown: editor.menuKey })); return props.children; }) }));
 vi.mock('@/components/chat/FileMentionAutocomplete', () => ({ FileMentionAutocomplete: React.forwardRef((_props, ref) => { React.useImperativeHandle(ref, () => ({ handleKeyDown: editor.menuKey })); return null; }) }));
 // Exercise the real composer keyboard/form routing through the existing editor port.
@@ -46,7 +46,7 @@ vi.mock('@/components/chat/composer/editor/ComposerEditor', () => ({ ComposerEdi
       const next = props.value.slice(0, editor.selection.start) + text + props.value.slice(editor.selection.end);
       const position = editor.selection.start + text.length; editor.selection = { start: position, end: position };
       props.onChange({ value: next, selection: editor.selection, references: [], interactions: [], markerObjects: [], fromPaste: false, insertedText: text });
-    }, focus: () => {}, blur: () => {}, isFocused: () => true, caretCoords: () => null, replaceRange: (from, to, insert) => { editor.selection = { start: from + insert.length, end: from + insert.length }; props.onChange({ value: props.value.slice(0, from) + insert + props.value.slice(to), selection: editor.selection, references: [], interactions: [], markerObjects: [], fromPaste: false, insertedText: insert }); }, selectAll: () => {},
+    }, focus: () => {}, blur: () => {}, isFocused: () => true, caretCoords: () => null, replaceRange: (from, to, insert, caret = from + insert.length) => { editor.selection = { start: caret, end: caret }; props.onChange({ value: props.value.slice(0, from) + insert + props.value.slice(to), selection: editor.selection, references: [], interactions: [], markerObjects: [], fromPaste: false, insertedText: insert }); }, selectAll: () => {},
     setSelection: (start, end = start) => { editor.selection = { start, end }; },
   }));
   return <textarea aria-label="editor" value={props.value} placeholder={props.suggestion ?? props.placeholder}
@@ -157,13 +157,30 @@ it('preserves IME confirmation, Shift+Tab focus navigation, and normal draft sub
   expect(sent).toEqual(['我自己写的']);
 });
 
-it.each(['/tre', '@file'])('preserves both hints and gives the %s menu Tab priority', async value => {
+it.each(['/tre', '@file'])('shows only the suggestion hint and gives the %s menu Tab priority', async value => {
   await act(async () => root.render(<Harness />));
-  expect(container.textContent).toContain('chat.composer.hint');
+  expect(container.textContent).not.toContain('chat.composer.hint');
   expect(container.textContent).toContain('chat.suggestion.acceptAndSendHint');
   await act(async () => editor.props!.onChange({ value, selection: { start: value.length, end: value.length }, references: [], interactions: [], markerObjects: [], fromPaste: false, insertedText: value }));
   expect(container.textContent).not.toContain('chat.suggestion.insertHint');
   await key('Tab'); expect(editor.menuKey).toHaveBeenCalledWith('Tab'); expect(editor.props!.value).toBe(value);
+});
+
+it.each([['reference', '@'], ['commands', '/']] as const)('opens the %s picker from Add at the caret without replacing the draft', async (label, sigil) => {
+  editor.showMenus = true;
+  await act(async () => root.render(<Harness initial="前文后文" />));
+  editor.selection = { start: 0, end: 2 };
+  const open = async () => act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="menu"] button')]
+    .find(button => button.textContent?.startsWith(`chat.composer.${label}`))!.click());
+  await open();
+  expect(editor.props!.value).toBe(`前文 ${sigil} 后文`);
+  expect(editor.selection).toEqual({ start: 4, end: 4 });
+  expect(editor.props!.autocomplete).toBeDefined();
+  expect(Boolean(editor.commandProps)).toBe(sigil === '/');
+  // Choosing the same entry reopens the current query rather than inserting another sigil.
+  await open();
+  expect(editor.props!.value).toBe(`前文 ${sigil} 后文`);
+  expect(sent).toEqual([]);
 });
 
 it('keeps an explicitly dismissed suggestion closed', async () => {

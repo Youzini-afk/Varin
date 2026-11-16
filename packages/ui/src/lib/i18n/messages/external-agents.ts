@@ -77,7 +77,6 @@ export const externalAgentEn = {
   'external.steeringUnavailable': 'This turn cannot accept a supplement now. Your draft is preserved; choose Send next turn to queue it.',
   'external.steeringRejected': 'The supplement was not accepted. Your draft is preserved; choose Send next turn to queue it.',
   'external.confirmSend': 'Confirm the previous send',
-  'external.inputHint': 'Messages use this Agent’s own configuration and tools.',
   'external.review':
     'The previous connection ended without a confirmed result. Reconnect, then explicitly continue queued messages. Interrupted input is never replayed.',
   'external.cached': 'Cache read',
@@ -218,7 +217,6 @@ export const externalAgentZh: Record<keyof typeof externalAgentEn, string> = {
   'external.steeringUnavailable': '当前轮次暂不能接收补充，草稿已保留。可选择“下一轮发送”排队处理。',
   'external.steeringRejected': '补充尚未被受理，草稿已保留。可选择“下一轮发送”排队处理。',
   'external.confirmSend': '确认上次发送',
-  'external.inputHint': '消息由这个 Agent 使用自己的配置和工具处理。',
   'external.review': '上一轮连接中断，结果尚未确认。重连后，需明确继续排队消息；不会重放已中断的输入。',
   'external.cached': '缓存读取',
   'external.cacheRate': '缓存率',

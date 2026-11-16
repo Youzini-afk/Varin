@@ -152,7 +152,6 @@
   opacity: 0;
   transition: grid-template-rows var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--wb-state-duration) var(--wb-ease);
 }
-[data-conversation-composer-input-frame]:focus-within .conversation-composer-hints[data-empty="true"],
 .conversation-composer-hints[data-suggestion="true"] {
   grid-template-rows: 1fr;
   opacity: 1;
@@ -163,8 +162,7 @@
 }
 .conversation-composer-hints p { margin: 0; }
 .conversation-composer-hint-row {
-  display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 16px; row-gap: 3px;
-  color: color-mix(in oklab, var(--primary) 65%, var(--surface-muted-foreground));
+  color: var(--surface-muted-foreground);
 }
 .conversation-composer-hint-row > p:empty { display: none; }
 .conversation-composer-hint-row button { text-align: start; }
