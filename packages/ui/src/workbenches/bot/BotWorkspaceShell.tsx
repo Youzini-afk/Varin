@@ -724,7 +724,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const panelControl = <>
     {selectedEntry && !activeDraftKey && <Tooltip><TooltipTrigger asChild><button type="button" aria-label={t('conversationTools.title')} aria-expanded={Boolean(conversationTab)}
       className={`workbench-icon-button app-region-no-drag flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${conversationTab ? 'bg-interactive-selection text-foreground' : ''}`}
-      onClick={toggleBotConversationTools}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="size-4" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M13 4v16M16 8h2M16 12h2M16 16h2" /></svg></button></TooltipTrigger><TooltipContent>{t('conversationTools.title')}</TooltipContent></Tooltip>}
+      onClick={toggleBotConversationTools}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="size-4" aria-hidden="true"><path d="M7 18 3 21V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H7Z" /><path d="M7.5 9h9M7.5 13h6" /></svg></button></TooltipTrigger><TooltipContent>{t('conversationTools.title')}</TooltipContent></Tooltip>}
     {!isMobile && <Tooltip>
     <TooltipTrigger asChild>
       <button type="button" aria-label={panelLabel} aria-expanded={botPanelShown} onClick={togglePanel}
