@@ -10,6 +10,8 @@ import type {
 } from "@varin/protocol";
 
 export type CollaborationMember = MessageParticipant & {
+  botId?: string;
+  bot?: Pick<import('@varin/application-client').BotSummary, 'id' | 'name' | 'appearance'>;
   detail?: FamilyMember;
   /** Presentation from the current Host's thread directory, not a new runtime role. */
   lead?: boolean;

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { dict } from '@/lib/i18n/messages/en';
 import { CollaborationMessage, CollaborationMessageBody } from './CollaborationMessage';
 import type { CollaborationFeedItem, CollaborationMember } from './collaborationFeed';
+import { presentCollaborationMember } from './collaborationPresentation';
 
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: keyof typeof dict, values?: Record<string, unknown>) =>
   Object.entries(values ?? {}).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, String(value)), dict[key]) }) }));
@@ -21,6 +22,7 @@ vi.mock('@/components/ui/dropdown-menu', () => ({
   DropdownMenuContent: () => null, DropdownMenuItem: () => null,
 }));
 vi.mock('./CollaborationExchange', () => ({ CollaborationExchangeCard: () => null }));
+vi.mock('@/workbenches/bot/BotFigure', () => ({ BotFigure: ({ botId }: { botId?: string }) => <span data-bot-avatar={botId} /> }));
 
 let root: Root, container: HTMLDivElement, height: number;
 const observations = new Set<() => void>();
@@ -66,9 +68,40 @@ const members: CollaborationMember[] = [
   { threadId: 'parent', name: 'Main Agent', agentId: 'V1', avatar: null },
   { threadId: 'worker', name: 'Layout review', agentId: 'V2', avatar: null },
 ];
+it('keeps a Bot-owned task as an Agent while giving the Bot conversation its profile identity', () => {
+  const bot = { id: 'bot', name: 'Varin', appearance: { kind: 'varin' as const, color: 'theme' } };
+  const directory = new Map([
+    ['parent', { thread_id: 'parent', parent_thread_id: null, bot_id: 'bot' }],
+    ['worker', { thread_id: 'worker', parent_thread_id: 'parent', bot_id: 'bot' }],
+  ]);
+  expect(presentCollaborationMember(members[0]!, directory, [bot])).toMatchObject({ name: 'Varin', botId: 'bot', lead: false });
+  expect(presentCollaborationMember(members[1]!, directory, [bot])).toMatchObject({ name: 'Layout review', botId: undefined, lead: true });
+  expect(presentCollaborationMember(members[0]!, new Map(), [bot], { threadId: 'parent', bot })).toMatchObject({ name: 'Varin', botId: 'bot' });
+});
 const dispatch: CollaborationFeedItem = { id: 'dispatch:original', kind: 'dispatch', acceptedCursor: 1, acceptedAtMs: 1000,
   dispatch: { attachments: [], operationId: 'original', executionId: 'original-execution', senderThreadId: 'parent', senderBranchId: 'original-parent-branch',
     targetThreadId: 'worker', targetBranchId: 'original-worker-branch', acceptedCursor: 1, acceptedAtMs: 1000, task: 'Original delegated task', preset: 'worker' } };
+it('shows a Bot task instruction and its linked work report using original conversation routes', async () => {
+  const participants = members.map(member => member.threadId === 'parent' ? { ...member, name: 'Varin', botId: 'bot' } : member);
+  const message: import('@varin/protocol').MessageFeedEntry = { messageId: 'instruction', senderThreadId: 'parent', senderBranchId: 'bot-branch', targetThreadId: 'worker', targetBranchId: 'work-branch',
+    actor: { kind: 'agent', runId: 'bot-run', operationId: 'send', origin: { kind: 'model_step', request_id: 'model' } }, kind: 'request', replyTo: null,
+    text: 'Review the implementation', attachments: [], acceptedCursor: 1, acceptedAtMs: 1000, state: 'delivered', activation: { state: 'passive' },
+    replyWait: null, deliveredCursor: 2, deliveredRunId: 'task-run' };
+  const onMember = vi.fn();
+  const render = (entry: import('@varin/protocol').MessageFeedEntry, original?: import('@varin/protocol').MessageFeedEntry) => act(async () => root.render(
+    <CollaborationMessage item={{ kind: 'message', id: entry.messageId, acceptedCursor: entry.acceptedCursor, message: entry }} original={original} members={participants}
+      expanded={false} onExpandedChange={() => {}} onMember={onMember} onReply={() => {}} onCopy={() => {}} onExchange={() => {}} />));
+  await render(message);
+  expect(container.textContent).toContain('Task instruction');
+  expect(container.querySelector('[data-bot-avatar]')?.getAttribute('data-bot-avatar')).toBe('bot');
+  await render({ ...message, messageId: 'report', senderThreadId: 'worker', senderBranchId: 'work-branch', targetThreadId: 'parent', targetBranchId: 'bot-branch',
+    actor: { kind: 'work_report', runId: 'finished-run', requestMessageId: message.messageId }, replyTo: message.messageId, text: 'Review complete' }, message);
+  expect(container.textContent).toContain('Review complete');
+  expect(container.textContent).toContain('Review the implementation');
+  expect(container.textContent).toContain(dict['collaboration.report']);
+  await act(async () => container.querySelector<HTMLButtonElement>(`[aria-label="${dict['collaboration.viewMember'].replace('{name}', 'Varin')}"]`)!.click());
+  expect(onMember).toHaveBeenCalledWith('parent', 'bot-branch');
+});
 it('shows dispatch participants and the original task, with navigation bound to the original branches', async () => {
   const onMember = vi.fn();
   await act(async () => root.render(<CollaborationMessage item={dispatch} members={members.map(member => ({ ...member, lead: member.threadId === 'parent' }))} expanded={false}

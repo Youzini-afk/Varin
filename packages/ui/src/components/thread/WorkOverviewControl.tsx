@@ -17,11 +17,12 @@ export interface OverviewPeekRow {
 
 /** Disclosure and geometry stay outside the streaming timeline's subscriptions. */
 export function WorkOverviewControl({ open, compactOpen, attention, onOpenChange, onCompactChange, rows, onSelect, children,
-  status, compactContent, detailTitle, onBack, headerActions }: {
+  status, compactContent, detailTitle, onBack, headerActions, embedded = false }: {
   open: boolean; compactOpen: boolean; attention: boolean;
   onOpenChange(open: boolean): void; onCompactChange(open: boolean): void;
   rows: readonly OverviewPeekRow[]; onSelect(section: OverviewPeekSection): void; children?: React.ReactNode;
   status?: React.ReactNode; compactContent?: React.ReactNode; detailTitle?: string; onBack?(): void; headerActions?: React.ReactNode;
+  embedded?: boolean;
 }) {
   const { t } = useI18n();
   const id = React.useId();
@@ -53,6 +54,13 @@ export function WorkOverviewControl({ open, compactOpen, attention, onOpenChange
   const label = t(open ? 'harness.overview.collapse' : 'harness.overview.expand');
   const openFull = (section?: OverviewPeekSection) => changeView(() => { if (section) onSelect(section); else onOpenChange(true); });
   const iconButton = 'workbench-icon-button flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  if (embedded) return <section className="flex h-full min-h-0 flex-col" data-harness-overview-panel="true">
+    {(detailTitle || headerActions) && <header className="flex min-h-10 shrink-0 items-center gap-1 px-3">
+      {onBack && detailTitle && <button type="button" className={iconButton} onClick={onBack} aria-label={t('harness.overview.back')}><Icon name="arrow-left" className="size-4" /></button>}
+      <span className="min-w-0 flex-1 truncate typography-ui-label font-medium">{detailTitle}</span>{headerActions}
+    </header>}
+    <ScrollableOverlay ref={detailViewport} preventOverscroll disableHorizontal userIntentOnly className="thread-work-overview min-h-0 min-w-0 flex-1 px-3 pb-3">{children}</ScrollableOverlay>
+  </section>;
   return <aside ref={root} className="workbench-overview-control pointer-events-none relative flex min-h-0 shrink-0 flex-col items-end"
     style={{ '--wb-overview-panel-width': width + 'px' } as React.CSSProperties} data-view={view}
     onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (onBack && open && detailTitle) onBack(); else close(); } }}>

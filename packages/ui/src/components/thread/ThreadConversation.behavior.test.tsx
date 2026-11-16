@@ -29,6 +29,7 @@ import { ContextPanelContent } from '@/components/layout/ContextSidebarTab';
 import { CommandAutocomplete } from '@/components/chat/CommandAutocomplete';
 import { WorkbenchProfileContext } from '@/lib/workbench/profile-context';
 import { BOT_CONVERSATION_PANEL_SCOPE } from '@/lib/openConversationTree';
+import { ConversationToolsContext } from '@/lib/conversationTools';
 import { dict as en } from '@/lib/i18n/messages/en';
 import { ChildTaskMenu } from '../conversation/ChildTaskMenu';
 import { useTimelineViewStore } from '../conversation/timelineViewStore';
@@ -130,7 +131,6 @@ vi.mock('./ThreadComposer', () => ({ ThreadComposer: (props: React.ComponentProp
   <button type="button" disabled={props.attachmentDisabled} onClick={props.onAttachPdfs}>chat.fileAttachment.actions.attachPdfs</button>
   <button type="button" disabled={!props.onCompact} onClick={() => { void Promise.resolve(props.onCompact?.()).catch(() => {}); }}>Generate context summary</button>
   <button type="button" onClick={props.onOpenHistory}>Open conversation history</button>
-  {props.onOpenRecovery && <button type="button" onClick={props.onOpenRecovery}>Open conversation recovery</button>}
   <button type="submit" disabled={props.sendDisabled}>{props.retrying ? 'Retry delivery' : props.active ? 'Queue message' : 'Send'}</button>
   {props.onStop && <button type="button" onClick={props.onStop} aria-busy={props.stopping}>Stop run</button>}
   <ComposerCommandFixture actions={props.commandActions} />
@@ -4194,19 +4194,29 @@ it.each([
   { surface: 'bot' as const, combinedUnavailable: true },
 ])('thread recovery rebuilds independent navigation Undo in $surface with combined recovery unavailable=$combinedUnavailable', async ({ surface, combinedUnavailable }) => {
   const f = navigationFixture();
-  await act(async () => root.render(<ThreadConversation surface={surface} api={f.api} identity={identity} />));
-  await act(async () => button('Open conversation recovery').click());
+  function Conversation() {
+    const [target, setTarget] = React.useState<HTMLDivElement | null>(null);
+    const [opened, setOpened] = React.useState(false);
+    return surface === 'bot' ? <ConversationToolsContext.Provider value={{ identity, target, mode: opened ? 'recovery' : undefined, bots: [] }}>
+      <button onClick={() => setOpened(true)}>Open conversation tools</button><div ref={setTarget} data-tools-content />
+      <ThreadConversation surface={surface} api={f.api} identity={identity} />
+    </ConversationToolsContext.Provider> : <ThreadConversation api={f.api} identity={identity} />;
+  }
+  const openRecovery = () => surface === 'bot' ? act(async () => button('Open conversation tools').click()) : openOverview('recovery');
+  await act(async () => root.render(<Conversation />));
+  await openRecovery();
   await act(async () => button('Restore before this message').click());
   const receipt = await f.navigate.mock.results[0]!.value;
   f.view.recovery = { navigation: receipt, operations: [], ...(combinedUnavailable ? { combinedUnavailable: 'Managed file recovery is unavailable. Conversation navigation remains available.' } : {}) };
   await act(async () => { root.unmount(); }); root = createRoot(container);
-  await act(async () => root.render(<ThreadConversation surface={surface} api={f.api} identity={identity} />));
+  await act(async () => root.render(<Conversation />));
   if (surface === 'bot') {
     expect(container.querySelector('[aria-label="Conversation recovery"]')).toBeNull();
     expect(button('Undo conversation recovery')).toBeUndefined();
   }
-  await act(async () => button('Open conversation recovery').click());
+  await openRecovery();
   expect(container.querySelectorAll('[aria-label="Conversation recovery"]')).toHaveLength(1);
+  if (surface === 'bot') expect(container.querySelector('[data-tools-content] [aria-label="Conversation recovery"]')).not.toBeNull();
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('Original user instruction');
   expect(f.navigate).toHaveBeenCalledOnce();
   await edit('[aria-label="Message thread"]', 'Fresh draft after reopening');

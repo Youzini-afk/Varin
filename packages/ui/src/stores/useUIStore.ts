@@ -28,7 +28,7 @@ export type { MotionPreference } from '@/lib/motion/preference';
 export type CalendarConversationContext = { identity?: ThreadIdentity; model?: ThreadModel };
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged';
-export type ContextPanelMode = 'tree' | 'threads' | 'diff' | 'file' | 'context' | 'recovery' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal' | 'computer' | 'ui' | 'material';
+export type ContextPanelMode = 'tree' | 'threads' | 'activity' | 'diff' | 'file' | 'context' | 'recovery' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal' | 'computer' | 'ui' | 'material';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live' | 'dialogue';
@@ -306,7 +306,7 @@ const sanitizeContextPanelTabs = (tabs: unknown, restoringLayout = false): Conte
       touchedAt?: unknown;
     };
 
-    if (candidate.mode !== 'tree' && candidate.mode !== 'threads' && candidate.mode !== 'diff' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'recovery' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'notes' && candidate.mode !== 'terminal' && candidate.mode !== 'computer' && candidate.mode !== 'ui' && candidate.mode !== 'material') {
+    if (candidate.mode !== 'tree' && candidate.mode !== 'threads' && candidate.mode !== 'activity' && candidate.mode !== 'diff' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'recovery' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'notes' && candidate.mode !== 'terminal' && candidate.mode !== 'computer' && candidate.mode !== 'ui' && candidate.mode !== 'material') {
       continue;
     }
 

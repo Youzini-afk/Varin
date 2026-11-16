@@ -38,6 +38,16 @@ it('keeps the room attached to the selected chat and scopes member links to thei
 
     await act(async () => useThreadStore.setState({ selectedIdentity: null }));
     expect(container.textContent).toBe('collaboration.openConversation');
+    const bot = { ...source, threadId: 'bot-session', branchId: 'bot-branch' };
+    await act(async () => {
+      useThreadStore.setState({ selectedIdentity: source });
+      root.render(<ThreadFamilyPanel owner={bot} source={bot} member={member} />);
+    });
+    expect(container.textContent).toBe('bot-session/bot-branch → audit-a-child/child-branch');
+    await act(async () => root.render(<ThreadFamilyPanel owner={{ ...bot, branchId: 'bot-fork' }} source={bot} member={member} />));
+    expect(container.textContent).toBe('bot-session/bot-fork');
+    await act(async () => root.render(<ThreadFamilyPanel owner={null} />));
+    expect(container.textContent).toBe('collaboration.openConversation');
   } finally {
     await act(async () => root.unmount());
     useThreadStore.setState({ selectedIdentity });

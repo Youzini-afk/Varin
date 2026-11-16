@@ -1,5 +1,17 @@
 import type { MessageFeedEntry } from '@varin/protocol';
 import type { CollaborationMember } from './collaborationFeed';
+import { isLeadThread, type CatalogThreadRole } from '@/lib/agent-runtime/threadRole';
+
+export function presentCollaborationMember(member: CollaborationMember, directory: ReadonlyMap<string, CatalogThreadRole>,
+  bots: readonly NonNullable<CollaborationMember['bot']>[], current?: { threadId: string; bot?: CollaborationMember['bot'] }): CollaborationMember {
+  const thread = directory.get(member.threadId);
+  const currentBot = current?.threadId === member.threadId ? current.bot : undefined;
+  // Bot ownership also flows to tasks. Only the Bot's own conversation uses its identity.
+  const botId = currentBot?.id ?? (thread && !thread.parent_thread_id ? thread.bot_id : undefined) ?? undefined;
+  const bot = currentBot ?? bots.find(bot => bot.id === botId);
+  return { ...member, botId, bot, name: bot?.name ?? member.name, agentId: botId ? 'Bot' : member.agentId,
+    lead: thread ? isLeadThread(thread, directory) : false };
+}
 
 export function memberBranch(member: CollaborationMember | undefined, preferred?: string): string | undefined {
   const branches = member?.detail?.branches ?? [];

@@ -11,7 +11,8 @@ import {
 } from "@varin/application-client";
 import type { MessageFeedEntry } from "@varin/protocol";
 import { Icon } from "@/components/icon/Icon";
-import { AgentAvatar } from "@/components/ui/AgentAvatar";
+import { CollaborationAvatar } from './CollaborationAvatar';
+import { ConversationToolsContext } from '@/lib/conversationTools';
 import { FlipList } from "@/components/conversation/FlipList";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,7 +26,6 @@ import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useThreadDraftStore } from "@/stores/useThreadDraftStore";
 import { useThreadStore, threadHostKey, threadComposerKey } from "@/stores/useThreadStore";
-import { isLeadThread } from '@/lib/agent-runtime/threadRole';
 import { openThreadFromNavigation } from "@/lib/agent-runtime/threadNavigation";
 import { ChildState } from "../conversation/childPresentation";
 import { ChildNavigationContext } from "../conversation/childNavigation";
@@ -37,7 +37,7 @@ import {
 import { CollaborationComposer } from "./CollaborationComposer";
 import { CollaborationMemberMenu } from './CollaborationMemberMenu';
 import { CollaborationExchangeQueue } from './CollaborationExchangeQueue';
-import { memberBranch } from "./collaborationPresentation";
+import { memberBranch, presentCollaborationMember } from "./collaborationPresentation";
 import { CollaborationMessage } from "./CollaborationMessage";
 import {
   CollaborationExchange,
@@ -116,16 +116,32 @@ function CollaborationRoomContent({
     feed.getSnapshot,
   );
   const threads = useThreadStore(value => value.threads);
+  const tools = React.useContext(ConversationToolsContext);
   const directoryHost = useThreadStore(value => value.hostKey);
   const directory = React.useMemo(() => new Map(
     (directoryHost === threadHostKey() && host === getRuntimeEndpointGeneration() ? threads : []).map(thread => [thread.thread_id, thread]),
   ), [threads, directoryHost, host]);
   const state = React.useMemo(() => {
-    return { ...observed, members: observed.members.map(member => {
-      const thread = directory.get(member.threadId);
-      return { ...member, lead: thread ? isLeadThread(thread, directory) : false };
-    }) };
-  }, [observed, directory]);
+    return { ...observed, members: observed.members.map(member => presentCollaborationMember(member, directory, tools?.bots ?? [],
+      tools?.identity ? { threadId: tools.identity.threadId, bot: tools.bot } : undefined)) };
+  }, [observed, directory, tools]);
+  const roomMembers = React.useMemo(() => {
+    if (tools?.identity?.threadId !== identity.threadId) return state.members;
+    const related = new Set([identity.threadId, state.rootThreadId]);
+    for (const item of state.items) {
+      const record = item.kind === 'message' ? item.message : item.kind === 'dispatch' ? item.dispatch : item.report;
+      related.add(record.senderThreadId); related.add(record.targetThreadId);
+    }
+    // Current tasks remain visible even when their dispatch is on an older feed page.
+    let added = true;
+    while (added) {
+      added = false;
+      for (const member of state.members) if (member.detail?.parentThreadId && related.has(member.detail.parentThreadId) && !related.has(member.threadId)) {
+        related.add(member.threadId); added = true;
+      }
+    }
+    return state.members.filter(member => related.has(member.threadId));
+  }, [tools?.identity?.threadId, identity.threadId, state]);
   const [selection, setSelection] = React.useState<Selection>();
   const selectionRequest = React.useRef(0);
   const select = (next?: Selection) => {
@@ -144,10 +160,10 @@ function CollaborationRoomContent({
   const root = state.members.find(
     (member) => member.threadId === state.rootThreadId,
   );
-  const current = state.members
+  const current = roomMembers
     .filter(
       (member) =>
-        member.detail?.current || member.threadId === state.rootThreadId,
+        !member.detail || member.detail.current || member.threadId === state.rootThreadId,
     )
     .sort((a, b) =>
       a.threadId === state.rootThreadId
@@ -156,7 +172,7 @@ function CollaborationRoomContent({
           ? 1
           : 0,
     );
-  const ended = state.members.filter(
+  const ended = roomMembers.filter(
     (member) =>
       member.detail &&
       !member.detail.current &&
@@ -277,12 +293,7 @@ function CollaborationRoomContent({
       key={member.threadId}
       onClick={() => openMember(member.threadId)}
     >
-      <AgentAvatar
-        identity={member.threadId}
-        avatar={member.avatar}
-        role={member.lead ? 'lead' : undefined}
-        size={28}
-      />
+      <CollaborationAvatar identity={member.threadId} member={member} size={28} />
       <div className="min-w-0 flex-1">
         <p className="truncate typography-meta">
           {member.name || member.agentId}
@@ -298,10 +309,10 @@ function CollaborationRoomContent({
   useExternalAgents();
   const externalChildren = useExternalAgentStore(value => value.children);
   type FeedItem = CollaborationFeedItem | { id: string; kind: 'external'; child: ExternalDelegation; report: boolean; acceptedAtMs: number };
-  const feedItems = React.useMemo<FeedItem[]>(() => [...state.items, ...externalChildren.filter(child => child.parentThreadId === identity.threadId || state.members.some(m => m.threadId === child.parentThreadId)).flatMap(child => [
+  const feedItems = React.useMemo<FeedItem[]>(() => [...state.items, ...externalChildren.filter(child => child.parentThreadId === identity.threadId || roomMembers.some(m => m.threadId === child.parentThreadId)).flatMap(child => [
     { id: `external-dispatch:${child.operationId}`, kind: 'external' as const, child, report: false, acceptedAtMs: child.acceptedAtMs },
     ...(child.messageKind !== 'inform' && child.reportReady && child.finishedAtMs !== undefined ? [{ id: `external-report:${child.operationId}`, kind: 'external' as const, child, report: true, acceptedAtMs: child.finishedAtMs }] : []),
-  ])].sort((a, b) => (a.acceptedAtMs ?? 0) - (b.acceptedAtMs ?? 0)), [state.items, state.members, externalChildren, identity.threadId]);
+  ])].sort((a, b) => (a.acceptedAtMs ?? 0) - (b.acceptedAtMs ?? 0)), [state.items, roomMembers, externalChildren, identity.threadId]);
   const renderMessage = ({ item, index }: { item: FeedItem; index: number }) => {
     if (item.kind === 'external') return <div className="px-3 pb-4 sm:px-4"><ExternalDelegationMessage child={item.child} report={item.report} /></div>;
     const day = item.acceptedAtMs === undefined ? undefined : new Date(item.acceptedAtMs).toLocaleDateString();
@@ -385,12 +396,7 @@ function CollaborationRoomContent({
               >
                 <Icon name="arrow-left" className="size-4" />
               </Button>
-              <AgentAvatar
-                identity={selection.identity.threadId}
-                avatar={selectedMember?.avatar}
-                role={selectedMember?.lead ? 'lead' : undefined}
-                size={30}
-              />
+              <CollaborationAvatar identity={selection.identity.threadId} member={selectedMember} size={30} />
               <div className="min-w-0 flex-1">
                 <p className="truncate typography-ui-label">
                   {name(selection.identity.threadId)}
@@ -459,12 +465,7 @@ function CollaborationRoomContent({
                     className="flex max-w-full items-center gap-1.5 rounded-lg py-1 pl-0.5 pr-2 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
                     onClick={() => openMember(member.threadId)}
                   >
-                    <AgentAvatar
-                      identity={member.threadId}
-                      avatar={member.avatar}
-                      role={member.lead ? 'lead' : undefined}
-                      size={27}
-                    />
+                    <CollaborationAvatar identity={member.threadId} member={member} size={27} />
                     <span className="max-w-32 truncate">
                       {member.name || member.agentId}
                     </span>

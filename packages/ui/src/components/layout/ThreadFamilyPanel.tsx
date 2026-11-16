@@ -3,12 +3,13 @@ import { useThreadStore } from '@/stores/useThreadStore';
 import { ThreadCollaboration } from '@/components/thread/ThreadCollaboration';
 import { useI18n } from '@/lib/i18n';
 import type { ThreadIdentity } from '@varin/application-client';
-export function ThreadFamilyPanel({ active = true, source, member, navigationKey }: {
-  active?: boolean; source?: ThreadIdentity; member?: ThreadIdentity; navigationKey?: number;
+export function ThreadFamilyPanel({ active = true, source, member, navigationKey, owner }: {
+  active?: boolean; source?: ThreadIdentity; member?: ThreadIdentity; navigationKey?: number; owner?: ThreadIdentity | null;
 }) {
   const { t } = useI18n();
   const api = useRuntimeAPIs().threads;
-  const identity = useThreadStore(state => state.selectedIdentity);
+  const selected = useThreadStore(state => state.selectedIdentity);
+  const identity = owner === undefined ? selected : owner;
   if (!active) return null;
   const initialMember = identity && source?.threadId === identity.threadId && source.branchId === identity.branchId
     ? member : undefined;

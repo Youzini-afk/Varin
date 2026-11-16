@@ -3,7 +3,7 @@ import React from 'react';
 import { ThreadRequestError, getRuntimeEndpointGeneration, type ThreadIdentity, type ThreadsAPI } from '@varin/application-client';
 import type { AttachmentSelection, MessageFeedEntry } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
-import { AgentAvatar } from '@/components/ui/AgentAvatar';
+import { CollaborationAvatar } from './CollaborationAvatar';
 import { Button } from '@/components/ui/button';
 import { ComposerEditor, type ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
 import { freezeDraftContentReferences, acknowledgeDraftMarkers, composerDraftChange, saveComposerState, draftAttachmentImageReferences } from '@/lib/agent-editor/contentReferences';
@@ -239,7 +239,7 @@ export function CollaborationComposer({
                           )
                         }
                       >
-                        <AgentAvatar identity={member.threadId} avatar={member.avatar} role={member.lead ? 'lead' : undefined} size={23} />
+                        <CollaborationAvatar identity={member.threadId} member={member} size={23} />
                         <span className="min-w-0 flex-1 truncate">
                           {member.name || member.agentId}
                           {(member.detail?.branches.length ?? 0) > 1

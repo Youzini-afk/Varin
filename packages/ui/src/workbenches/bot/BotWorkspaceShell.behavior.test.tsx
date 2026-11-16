@@ -51,8 +51,14 @@ vi.mock('./BotWorkDetail', async () => {
 vi.mock('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => undefined }));
 vi.mock('@/components/layout/ContextSidebarTab', () => ({ ContextPanelContent: ({ identity, jobRunId, readOnly }: { identity?: { threadId: string; branchId: string }; jobRunId?: string; readOnly?: boolean }) => <aside data-context-thread={identity?.threadId} data-context-branch={identity?.branchId} data-context-job={jobRunId} data-context-readonly={String(readOnly)} /> }));
 vi.mock('@/components/thread/ConversationTreePanel', () => ({ ConversationTreePanel: () => <aside data-mobile-tree /> }));
-vi.mock('@/components/layout/ContextPanel', () => ({ ContextPanel: ({ layoutScope, surfaceModes, contextOwner }: { layoutScope?: string; surfaceModes?: readonly string[]; contextOwner?: { identity: { threadId: string; branchId: string } | null; readOnly: boolean } }) => <aside data-conversation-tree={layoutScope} data-surface-modes={surfaceModes?.join(',')}
-  data-initial-context-thread={contextOwner?.identity?.threadId} data-initial-context-branch={contextOwner?.identity?.branchId} data-initial-context-readonly={String(contextOwner?.readOnly)} /> }));
+vi.mock('@/components/layout/ContextPanel', () => ({ ContextPanel: ({ layoutScope, surfaceModes, contextOwner, embedded }: React.ComponentProps<typeof import('@/components/layout/ContextPanel').ContextPanel>) => {
+  const panel = useUIStore(state => state.contextPanelByDirectory[layoutScope!]);
+  const tab = panel?.tabs.find(tab => tab.id === panel.activeTabId);
+  return <aside data-conversation-tree={layoutScope} data-embedded={String(embedded)} data-surface-modes={surfaceModes?.join(',')}
+    data-initial-context-thread={contextOwner?.identity?.threadId} data-initial-context-branch={contextOwner?.identity?.branchId} data-initial-context-readonly={String(contextOwner?.readOnly)}>
+    {embedded && tab?.mode === 'context' && (tab.thread ? <aside data-context-thread={tab.thread.threadId} data-context-branch={tab.thread.branchId} data-context-readonly={String(tab.readOnly)} /> : <p>contextSidebar.empty.openSession</p>)}
+  </aside>;
+} }));
 // Shell navigation is driven by the Bot API fixture; stream transport has its
 // own tests and must not create a real observation connection for this DOM.
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
@@ -222,7 +228,7 @@ describe('Bot workbench', () => {
     useUIStore.getState().openContextPanelTab('', { mode: 'context' });
     const ordinaryPanel = useUIStore.getState().contextPanelByDirectory[''];
     await render();
-    const toggle = container.querySelector<HTMLButtonElement>('[aria-label="chat.tree.title"]')!;
+    const toggle = container.querySelector<HTMLButtonElement>('[aria-label="conversationTools.title"]')!;
     expect(toggle).not.toBeNull();
     await act(async () => toggle.click());
     expect(useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE]?.isOpen).toBe(true);
@@ -246,9 +252,10 @@ describe('Bot workbench', () => {
     expect(container.querySelector('[data-surface-modes]')?.getAttribute('data-surface-modes')?.split(',')).toContain('context');
     expect(useUIStore.getState().contextPanelByDirectory['']).toBe(ordinaryPanel);
     expect(useThreadStore.getState().selectedIdentity).toBe(identity);
-    await click('chat.tree.title');
-    const tree = useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE];
-    expect(tree?.tabs.find(tab => tab.id === tree.activeTabId)?.mode).toBe('tree');
+    await click('conversationTools.title');
+    expect(useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE]?.isOpen).toBe(false);
+    await click('conversationTools.title');
+    expect(useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE]?.activeTabId).toBe(tab?.id);
     await click('Open context');
     expect(useUIStore.getState().contextPanelByDirectory[BOT_CONVERSATION_PANEL_SCOPE]?.activeTabId).toBe(tab?.id);
     await act(async () => useUIStore.getState().closeContextPanel(BOT_CONVERSATION_PANEL_SCOPE));
@@ -266,7 +273,7 @@ describe('Bot workbench', () => {
     expect(inspector?.getAttribute('data-context-thread')).toBe('entry-a');
     expect(inspector?.getAttribute('data-context-branch')).toBe('branch-a');
     expect(inspector?.getAttribute('data-context-readonly')).toBe('true');
-    expect(container.querySelector('[data-conversation-tree]')).toBeNull();
+    expect(container.querySelector('[data-conversation-tree]')?.getAttribute('data-embedded')).toBe('true');
     await act(async () => useUIStore.getState().closeContextPanel(BOT_CONVERSATION_PANEL_SCOPE));
     expect(container.querySelector('[data-context-thread]')).toBeNull();
   });
@@ -274,7 +281,7 @@ describe('Bot workbench', () => {
   it('supplies the current archived Bot Thread when the desktop tree first opens the context surface', async () => {
     state.sessions.mockImplementation(async (id: string) => [sessionOf(id, `entry-${id}`, `branch-${id}`, { archived: true }, true)]);
     await render();
-    await click('chat.tree.title');
+    await click('conversationTools.title');
     const panel = container.querySelector('[data-conversation-tree]');
     expect(panel?.getAttribute('data-initial-context-thread')).toBe('entry-a');
     expect(panel?.getAttribute('data-initial-context-branch')).toBe('branch-a');

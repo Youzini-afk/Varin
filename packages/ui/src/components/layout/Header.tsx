@@ -1107,6 +1107,7 @@ export const Header: React.FC<HeaderProps> = ({
               </DropdownMenuContent>
             </DropdownMenu>
 
+            {panelControl}
             {onToggleRightDrawer && !mobileTitle ? (
               <Tooltip>
                 <TooltipTrigger asChild>

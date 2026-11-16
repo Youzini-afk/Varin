@@ -14,6 +14,7 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import { useUIStore } from '@/stores/useUIStore';
+import { BOT_CONVERSATION_PANEL_SCOPE } from '@/lib/openConversationTree';
 import { contextUsageKey, useThreadContextUsageStore } from '@/stores/useThreadContextUsageStore';
 import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
 import { ChildTasks } from '../conversation/ChildTasks';
@@ -33,6 +34,8 @@ import { useThreadProducts, type ThreadProduct } from './useThreadProducts';
 
 type Section = OverviewPeekSection;
 type Props = {
+  embedded?: boolean;
+  visible?: boolean;
   api: ThreadsAPI; identity: ThreadIdentity; sessionKey: string; snapshot?: ThreadSnapshot;
   request?: { section: Section }; details: Partial<Record<Section, React.ReactNode>>;
   pending: boolean; readOnly: boolean; workspacePath?: string; hasComputer: boolean;
@@ -57,13 +60,15 @@ const emptyPlan: PlanSummary = { items: [], total: 0, done: 0, blocked: 0 };
 
 /** A compact projection of current work. Detail editors keep their existing API owners. */
 export function ThreadOverview({ api, identity, sessionKey, snapshot, request, details, pending, readOnly, workspacePath,
-  hasComputer, error, recoveryAttention, onAttention, refresh, act, openProcess }: Props) {
+  hasComputer, error, recoveryAttention, onAttention, refresh, act, openProcess, embedded = false, visible = true }: Props) {
   const { t } = useI18n();
   const openThreadContext = useOpenThreadContext();
   const botWorkbench = useWorkbenchProfileId() === VARIN_WORKBENCH_BOT_PROFILE_ID;
   const externalChildren = useExternalAgentStore(state => state.children);
-  const open = useWorkOverviewStore(state => state.bySession[sessionKey]?.overview ?? false);
-  const compact = useWorkOverviewStore(state => state.bySession[sessionKey]?.compact ?? false);
+  const storedOpen = useWorkOverviewStore(state => state.bySession[sessionKey]?.overview ?? false);
+  const storedCompact = useWorkOverviewStore(state => state.bySession[sessionKey]?.compact ?? false);
+  const open = embedded || storedOpen;
+  const compact = !embedded && storedCompact;
   const disclosure = useWorkOverviewStore(state => state.setDisclosure);
   const usage = useThreadContextUsageStore(state => state.views[contextUsageKey(identity)]?.usage);
   const contextPhase = useThreadContextUsageStore(state => state.views[contextUsageKey(identity)]?.phase);
@@ -84,7 +89,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
   const runningChildren = currentChildren.filter(row => !childEnded(row.state));
   const failedChildren = currentChildren.filter(row => row.state === 'failed' || row.state === 'preparation_failed');
   const hasChildren = Boolean(rows.length || snapshot?.childDirectory?.members.some(member => member.parentThreadId === identity.threadId) || externalChildren.some(c => c.parentThreadId === identity.threadId));
-  const products = useThreadProducts(api, identity, snapshot, open || compact);
+  const products = useThreadProducts(api, identity, snapshot, visible && (open || compact));
   const { history: productHistory, loadEarlier } = products;
   const currentFiles = products.products.filter(item => item.kind === 'file' && item.runId === run?.id);
   const uiProducts = products.products.filter(item => item.kind === 'ui');
@@ -116,7 +121,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
   const inspectProduct = (value: ThreadProduct) => {
     if (value.kind === 'ui') {
       const key = `${sessionKey}:${value.call.id}`;
-      useUIStore.getState().openContextPanelTab(workspacePath ?? '', { mode: 'ui', targetPath: key, thread: identity, contentRef: value.receipt.ref, label: value.receipt.title, dedupeKey: key });
+      useUIStore.getState().openContextPanelTab(botWorkbench ? BOT_CONVERSATION_PANEL_SCOPE : workspacePath ?? '', { mode: 'ui', targetPath: key, thread: identity, contentRef: value.receipt.ref, label: value.receipt.title, dedupeKey: key });
     } else { show('outputs'); setProduct(value); }
   };
   const currentScope = React.useRef(true);
@@ -144,8 +149,8 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
     {(products.products.some(value => value.kind === 'file' && value.runId !== run?.id) || products.history.previous) && action('outputs', 'history', t('harness.overview.earlierProducts'))}
     {products.history.error && <button type="button" className="thread-overview-action typography-meta text-status-warning" onClick={() => void products.loadEarlier(true)}>{t('chat.context.retry')}</button>}
   </>;
-  const menuSections: Section[] = ['plan', 'goals', ...(api.collaboration || snapshot?.delegatedExecutions?.length ? ['threads' as const] : []), 'sources', 'context', 'memory', 'followups', 'recovery', ...(api.research ? ['research' as const] : []), ...(hasComputer ? ['computer' as const] : []), 'operations'];
-  const more = <DropdownMenu><DropdownMenuTrigger asChild><button type="button" aria-label={t('harness.overview.more')} className="rounded-md p-1.5 text-muted-foreground hover:bg-interactive-hover"><Icon name="more" className="size-4" /></button></DropdownMenuTrigger><DropdownMenuContent align="end">{menuSections.filter(section => section === 'plan' ? Boolean(api.plan) : section === 'operations' || Boolean(details[section])).map(section => <DropdownMenuItem key={section} onSelect={() => show(section)}>{t(section === 'followups' && botWorkbench ? 'arrangements.title' : titles[section]!)}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>;
+  const menuSections: Section[] = ['outputs', 'plan', 'goals', ...(api.collaboration || snapshot?.delegatedExecutions?.length ? ['threads' as const] : []), 'sources', 'context', 'memory', 'followups', 'recovery', ...(api.research ? ['research' as const] : []), ...(hasComputer ? ['computer' as const] : []), 'operations'];
+  const more = <DropdownMenu><DropdownMenuTrigger asChild><button type="button" aria-label={t('harness.overview.more')} className="rounded-md p-1.5 text-muted-foreground hover:bg-interactive-hover"><Icon name="more" className="size-4" /></button></DropdownMenuTrigger><DropdownMenuContent align="end">{menuSections.filter(section => section === 'plan' ? Boolean(api.plan) : section === 'operations' || section === 'outputs' || Boolean(details[section])).map(section => <DropdownMenuItem key={section} onSelect={() => show(section)}>{t(section === 'followups' && botWorkbench ? 'arrangements.title' : titles[section]!)}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>;
   const selectedOperation = operations.find(operation => operation.id === operationId);
   const back = () => { if (product || operationId) { setProduct(undefined); setOperationId(undefined); } else { setDetail(undefined); setChildId(undefined); } };
   const childTasks = snapshot && <ChildTasks api={api} identity={identity} children={snapshot.children ?? []} executions={snapshot.childExecutions ?? []} activity={snapshot.childActivity} directory={snapshot.childDirectory} pending={pending} readOnly={readOnly} onChanged={refresh} selectedId={childId}
@@ -157,13 +162,13 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
     const observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) void loadEarlier(); }, { root: sentinel.current.closest('.thread-work-overview'), rootMargin: '200px' });
     observer.observe(sentinel.current); return () => observer.disconnect();
   }, [open, detail, product, productHistory, loadEarlier]);
-  return <WorkOverviewControl open={open} compactOpen={compact} attention={attention} rows={[]} onSelect={show} status={status}
+  return <WorkOverviewControl embedded={embedded} open={open} compactOpen={compact} attention={attention} rows={[]} onSelect={show} status={status}
     onOpenChange={value => { disclosure(sessionKey, 'overview', value); if (value) { setDetail(undefined); setChildId(undefined); } }} onCompactChange={value => disclosure(sessionKey, 'compact', value)}
-    detailTitle={detail ? t(detail === 'followups' && botWorkbench ? 'arrangements.title' : titles[detail] ?? 'harness.overview.title') : undefined} onBack={back} headerActions={more}
+    detailTitle={detail ? t(detail === 'followups' && botWorkbench ? 'arrangements.title' : titles[detail] ?? 'harness.overview.title') : undefined} onBack={back} headerActions={!embedded || detail ? more : undefined}
     compactContent={<>{hasPlan && action('plan', 'task', plan.items.find(item => item.status === 'in_progress')?.text ?? t('harness.overview.plan'), plan.total ? <span className="shrink-0 typography-micro text-muted-foreground">{plan.done}/{plan.total}</span> : undefined)}
       {runningChildren.map(row => <button type="button" key={row.child.operation_id} className="thread-overview-action typography-meta" onClick={() => show('threads')}><AgentAvatar identity={row.child.child_thread_id} avatar={row.child.avatar} size={22} /><span className="min-w-0 flex-1 truncate">{row.child.name || row.child.input.name || row.task}</span><ChildState state={row.state} /></button>)}{outputSummary}</>}>
     <ConversationOrganizationDetails reference={{ kind: 'native', id: identity.threadId }} active={open && !compact} />
-    <div hidden={Boolean(detail)}>{status}</div>
+    <div hidden={Boolean(detail)}>{embedded ? <div className="flex items-start gap-2"><div className="min-w-0 flex-1">{status}</div>{more}</div> : status}</div>
     <div hidden={Boolean(detail && detail !== 'plan')}>{api.plan && <ThreadPlan api={api.plan} identity={identity} readOnly={readOnly} contextRevision={snapshot?.context.checkpoint?.revision} onContentChange={setHasPlan} onSummaryChange={setPlan}
       summaryView={detail === 'plan' ? undefined : { onInspect: () => show('plan') }} />}</div>
     {!detail && goal && <div className="thread-overview-section">{action('goals', 'target', goal.objective, <ChildState state={goal.state} />)}</div>}

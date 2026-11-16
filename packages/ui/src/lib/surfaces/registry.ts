@@ -14,6 +14,7 @@ export type ContextSurfaceId =
   | 'notes'
   | 'context'
   | 'threads'
+  | 'activity'
   | 'recovery'
   | 'browser'
   | 'ui'
@@ -45,6 +46,7 @@ export type ContextSurfaceDescriptor = {
 };
 
 export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
+  { id: 'activity', mode: 'activity', icon: 'stack', labelKey: 'conversationTools.activity', descriptionKey: 'conversationTools.activity', availability: 'has-content', defaultWidthFraction: 0.4 },
   {
     id: 'context',
     descriptionKey: 'contextRail.surface.context.description',

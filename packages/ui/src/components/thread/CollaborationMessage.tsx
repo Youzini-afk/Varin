@@ -3,7 +3,7 @@ import type { ThreadIdentity, ThreadsAPI } from '@varin/application-client';
 import { ThreadAttachments } from './ThreadAttachments';
 import type { MessageFeedEntry } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
-import { AgentAvatar } from '@/components/ui/AgentAvatar';
+import { CollaborationAvatar } from './CollaborationAvatar';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
@@ -83,7 +83,7 @@ export function CollaborationMessage({ api, identity, item, members, original, e
     className="collaboration-message-member" title={name(threadId)}
     aria-label={t('collaboration.viewMember', { name: name(threadId) })}
     onClick={() => onMember(threadId, branchId)}>
-    {avatar && <AgentAvatar identity={threadId} avatar={find(threadId)?.avatar} role={find(threadId)?.lead ? 'lead' : undefined} size={16} />}
+    {avatar && <CollaborationAvatar identity={threadId} member={find(threadId)} size={16} />}
     <span>{name(threadId)}</span>
   </button>;
   const replyLabel = t(item.kind === 'message' ? 'chat.messages.reply' : 'collaboration.send');
@@ -93,7 +93,7 @@ export function CollaborationMessage({ api, identity, item, members, original, e
         {outgoing ? <span className="collaboration-message-user-avatar">{t('collaboration.you')}</span>
           : <button type="button" className="collaboration-message-avatar" onClick={() => onMember(sourceId, sourceBranch)}
             aria-label={t('collaboration.viewMember', { name: name(sourceId) })}>
-            <AgentAvatar identity={sourceId} avatar={find(sourceId)?.avatar} role={find(sourceId)?.lead ? 'lead' : undefined} size={30} />
+            <CollaborationAvatar identity={sourceId} member={find(sourceId)} size={30} />
           </button>}
         <div className="collaboration-message-column">
           <div className="collaboration-message-route">
@@ -102,6 +102,10 @@ export function CollaborationMessage({ api, identity, item, members, original, e
             {memberLink(targetId, targetBranch, true)}
           </div>
           <div className="collaboration-message-bubble">
+            {message?.actor.kind === 'agent' && find(sourceId)?.botId && <div className="collaboration-dispatch-label">
+              <Icon name={message.kind === 'request' ? 'task' : 'chat-1'} className="size-3.5" />
+              <span>{t(message.kind === 'request' ? 'conversationTools.taskInstruction' : 'conversationTools.supplement')}</span>
+            </div>}
             {item.kind === 'dispatch' && <div className="collaboration-dispatch-label">
               <Icon name="git-branch" className="size-3.5" />
               <span>{t('collaboration.dispatch')}</span>

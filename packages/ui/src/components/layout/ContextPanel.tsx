@@ -34,7 +34,7 @@ import {
   type EmbeddedSessionChatURLCacheEntry,
   type EmbeddedSessionRuntimeBootstrap,
 } from './contextPanelEmbeddedChat';
-import { availableContextSurfaces, getContextRailMode, getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
+import { CONTEXT_SURFACES, availableContextSurfaces, getContextRailMode, getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
@@ -115,6 +115,7 @@ const getModeLabel = (
 ): string => {
   if (mode === 'chat') return t('contextPanel.mode.chat');
   if (mode === 'threads') return t('collaboration.title');
+  if (mode === 'activity') return t('conversationTools.activity');
   if (mode === 'tree') return t('chat.tree.title');
   if (mode === 'file') return t('contextPanel.mode.files');
   if (mode === 'diff') return t('contextPanel.mode.diff');
@@ -189,6 +190,7 @@ const getTabLabel = (
 const getTabIcon = (tab: { thread?: ThreadIdentity; mode: ContextPanelMode; targetPath: string | null }): React.ReactNode | undefined => {
   if (tab.mode === 'material') return <Icon name="book-2" className="h-3.5 w-3.5" />;
   if (tab.mode === 'threads') return <Icon name="chat-1" className="h-3.5 w-3.5" />;
+  if (tab.mode === 'activity') return <Icon name="stack" className="h-3.5 w-3.5" />;
   if (tab.mode === 'tree') return <Icon name="conversation-tree" className="h-3.5 w-3.5" />;
   if (tab.mode === 'file') {
     return tab.targetPath
@@ -400,7 +402,9 @@ export const ContextPanel: React.FC<{
   surfaceModes?: readonly ContextPanelMode[];
   /** Shell-owned selection for a newly opened context. Existing exact tabs stay pinned. */
   contextOwner?: { identity: ThreadIdentity | null; readOnly: boolean };
-}> = ({ layoutScope, surfaceModes, contextOwner }) => {
+  renderConversationDetails?: (mode: 'activity' | 'recovery') => React.ReactNode;
+  embedded?: boolean;
+}> = ({ layoutScope, surfaceModes, contextOwner, renderConversationDetails, embedded = false }) => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
@@ -446,15 +450,16 @@ export const ContextPanel: React.FC<{
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
   const contextRailOrder = useUIStore(state => state.contextRailOrder);
   const planModeEnabled = useFeatureFlagsStore(state => state.planModeEnabled);
-  const surfaces = React.useMemo(() => availableContextSurfaces(contextRailOrder, tabs, planModeEnabled)
-    .filter(surface => !surfaceModes || surfaceModes.includes(surface.mode)), [contextRailOrder, tabs, planModeEnabled, surfaceModes]);
+  const surfaces = React.useMemo(() => surfaceModes
+    ? surfaceModes.flatMap(mode => CONTEXT_SURFACES.filter(surface => surface.mode === mode && (surface.availability === 'always' || mode === 'activity' || tabs.some(tab => tab.mode === mode))))
+    : availableContextSurfaces(contextRailOrder, tabs, planModeEnabled), [contextRailOrder, tabs, planModeEnabled, surfaceModes]);
   const selectedTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
   const activeTab = selectedTab && (!surfaceModes || surfaceModes.includes(selectedTab.mode)) ? selectedTab : null;
   const gitPageMode = activeTab?.mode === 'git' || activeTab?.mode === 'pr' || activeTab?.mode === 'diff'
     ? activeTab.mode : null;
   const activeGitDirectory = activeTab?.mode === 'git' ? gitDirectory : activeTab?.targetDirectory ?? gitDirectory;
   const isOpen = Boolean(panelState?.isOpen && activeTab);
-  const isExpanded = Boolean(isOpen && panelState?.expanded);
+  const isExpanded = Boolean(!embedded && isOpen && panelState?.expanded);
   const [availablePanelAreaWidth, setAvailablePanelAreaWidth] = React.useState<number | null>(null);
   const activeModeForWidth = activeTab?.mode ?? null;
   const manualWidth = activeModeForWidth ? panelState?.widthByMode?.[activeModeForWidth] : undefined;
@@ -483,7 +488,7 @@ export const ContextPanel: React.FC<{
   const resizingWidthRef = React.useRef<number | null>(null);
   const activeResizePointerIDRef = React.useRef<number | null>(null);
   const panelRef = React.useRef<HTMLElement | null>(null);
-  useMainColumnGlide(panelRef, isOpen, !isExpanded && !panelState?.expanded && !isResizing, width);
+  useMainColumnGlide(panelRef, isOpen, !embedded && !isExpanded && !panelState?.expanded && !isResizing, width);
   const chatFrameRefs = React.useRef<Map<string, HTMLIFrameElement>>(new Map());
   const chatFrameSrcByTabIDRef = React.useRef<Map<string, EmbeddedSessionChatURLCacheEntry>>(new Map());
   const wasOpenRef = React.useRef(false);
@@ -845,18 +850,20 @@ export const ContextPanel: React.FC<{
     };
   }), [activeModeTabs, effectiveDirectory, sessionTitleById, t]);
 
-  const activeNonChatContent = activeTab?.mode === 'context'
+  const activeNonChatContent = (activeTab?.mode === 'activity' || activeTab?.mode === 'recovery') && renderConversationDetails
+        ? contextOwner?.identity ? renderConversationDetails(activeTab.mode) : <p className="p-4 typography-meta text-muted-foreground">{t('contextSidebar.empty.openSession')}</p>
+        : activeTab?.mode === 'context'
         ? contextOwner && !activeTab.thread
           ? <div className="p-6 typography-ui-label text-muted-foreground">{t('contextSidebar.empty.openSession')}</div>
           : <ContextPanelContent active={isOpen} identity={activeTab.thread} jobRunId={activeTab.targetPath ?? undefined} readOnly={activeTab.readOnly} />
         : activeTab?.mode === 'threads'
-            ? <ThreadFamilyPanel active={isOpen} source={activeTab.thread} member={activeTab.member} navigationKey={activeTab.touchedAt} />
+            ? <ThreadFamilyPanel active={isOpen} owner={contextOwner?.identity} source={activeTab.thread} member={activeTab.member} navigationKey={activeTab.touchedAt} />
         : activeTab?.mode === 'tree'
             ? <ConversationTreePanel active={isOpen} />
         : activeTab?.mode === 'ui' && activeTab.targetPath
-            ? <InteractiveUiPanel sessionKey={activeTab.targetPath} identity={activeTab.thread} contentRef={activeTab.contentRef} directory={directoryKey} onReturn={() => closeContextPanelTab(directoryKey, activeTab.id)} />
+            ? <InteractiveUiPanel sessionKey={activeTab.targetPath} identity={activeTab.thread} contentRef={activeTab.contentRef} directory={panelKey} onReturn={() => closeContextPanelTab(panelKey, activeTab.id)} />
         : activeTab?.mode === 'material' && activeTab.targetPath && activeTab.thread
-            ? isOpen && <MaterialReaderPanel key={activeTab.id} identity={activeTab.thread} snapshotId={activeTab.targetPath} line={activeTab.materialLine} title={activeTab.label || t('chat.tools.materials')} readOnly={activeTab.readOnly} onClose={() => closeContextPanelTab(directoryKey, activeTab.id)} />
+            ? isOpen && <MaterialReaderPanel key={activeTab.id} identity={activeTab.thread} snapshotId={activeTab.targetPath} line={activeTab.materialLine} title={activeTab.label || t('chat.tools.materials')} readOnly={activeTab.readOnly} onClose={() => closeContextPanelTab(panelKey, activeTab.id)} />
         : activeTab?.mode === 'recovery'
             ? <WorkspaceRecoveryPanel />
         : activeTab?.mode === 'git'
@@ -908,14 +915,14 @@ export const ContextPanel: React.FC<{
     <header className="flex h-10 items-stretch border-b border-border">
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
-          <button type="button" aria-label={t('workbench.material.switchResource')} title={t('workbench.material.switchResource')}
+          <button type="button" aria-label={t(contextOwner ? 'conversationTools.switch' : 'workbench.material.switchResource')} title={t(contextOwner ? 'conversationTools.switch' : 'workbench.material.switchResource')}
             className="workbench-icon-button flex shrink-0 items-center gap-1 rounded-md px-2 text-muted-foreground hover:bg-interactive-hover hover:text-foreground">
             <Icon name="stack" className="size-3.5" /><Icon name="arrow-down-s" className="size-3" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="min-w-48">
           {surfaces.map(surface => <DropdownMenuItem key={surface.id} className="gap-2"
-            disabled={surface.mode === 'context' && contextOwner !== undefined && !contextOwner.identity && !tabs.some(tab => tab.mode === 'context' && tab.thread)}
+            disabled={contextOwner !== undefined && !contextOwner.identity && (!['context', 'ui'].includes(surface.mode) || !tabs.some(tab => tab.mode === surface.mode && tab.thread))}
             onSelect={() => {
               const state = useUIStore.getState();
               if (surface.mode === 'context' && contextOwner && !state.contextPanelByDirectory[panelKey]?.tabs.some(tab => tab.mode === 'context' && tab.thread)) {
@@ -924,7 +931,7 @@ export const ContextPanel: React.FC<{
               }
               state.openContextSurface(panelKey, surface.mode);
             }}>
-            <Icon name={surface.icon} className="size-3.5 shrink-0" /><span className="flex-1">{t(surface.labelKey)}</span>
+            <Icon name={surface.icon} className="size-3.5 shrink-0" /><span className="flex-1">{t(renderConversationDetails && surface.mode === 'recovery' ? 'chat.recovery.title' : surface.labelKey)}</span>
             {activeTab && getContextRailMode(activeTab.mode) === surface.mode ? <Icon name="check" className="size-3.5" /> : null}
           </DropdownMenuItem>)}
         </DropdownMenuContent>
@@ -934,13 +941,13 @@ export const ContextPanel: React.FC<{
           items={tabItems}
           activeId={activeTab?.id ?? null}
           onSelect={(tabID) => {
-            setActiveContextPanelTab(directoryKey, tabID);
+            setActiveContextPanelTab(panelKey, tabID);
           }}
           onClose={(tabID) => {
-            closeContextPanelTab(directoryKey, tabID);
+            closeContextPanelTab(panelKey, tabID);
           }}
           onReorder={(activeTabID, overTabID) => {
-            reorderContextPanelTabs(directoryKey, activeTabID, overTabID);
+            reorderContextPanelTabs(panelKey, activeTabID, overTabID);
           }}
           layoutMode="scrollable"
           variant="default"
@@ -956,7 +963,7 @@ export const ContextPanel: React.FC<{
         <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3">
           {activeTab ? getTabIcon(activeTab) : null}
           <span className="truncate typography-ui-label text-foreground">
-            {activeTab ? getModeLabel(activeTab.mode, t) : null}
+            {activeTab ? renderConversationDetails && activeTab.mode === 'recovery' ? t('chat.recovery.title') : getModeLabel(activeTab.mode, t) : null}
           </span>
         </div>
       )}
@@ -976,7 +983,7 @@ export const ContextPanel: React.FC<{
             <Icon name="layout-right" className="h-3.5 w-3.5" />
           </Button>
         ) : null}
-        <Button
+        {!embedded && <Button
           type="button"
           variant="ghost"
           size="sm"
@@ -986,7 +993,7 @@ export const ContextPanel: React.FC<{
           aria-label={isExpanded ? t('contextPanel.actions.collapsePanel') : t('contextPanel.actions.expandPanel')}
         >
           {isExpanded ? <Icon name="fullscreen-exit" className="h-3.5 w-3.5" /> : <Icon name="fullscreen" className="h-3.5 w-3.5" />}
-        </Button>
+        </Button>}
         <Button
           type="button"
           variant="ghost"
@@ -1004,7 +1011,7 @@ export const ContextPanel: React.FC<{
 
   // width/min/max stay interpolable across open/close (no instant min/max
   // jumps) so the glide width transition matches the sidebars.
-  const panelStyle: React.CSSProperties = !isOpen
+  const panelStyle: React.CSSProperties = embedded ? { width: '100%', height: '100%', '--varin-context-panel-width': '100%' } as React.CSSProperties : !isOpen
     ? {
         ['--varin-context-panel-width' as string]: `${width}px`,
         width: 0,
@@ -1040,7 +1047,7 @@ export const ContextPanel: React.FC<{
         // Right-anchored while expanded: `inset-0` would teleport the left
         // edge instantly (position does not transition), so only the width
         // animates and the panel grows leftwards from its docked position.
-        isExpanded
+        isExpanded && !embedded
           ? 'absolute inset-y-0 right-0 z-20 min-w-0'
           : 'relative h-full flex-shrink-0',
         !isOpen && 'pointer-events-none',
@@ -1053,10 +1060,10 @@ export const ContextPanel: React.FC<{
       {/* Painted divider instead of border-l: a real border eats 1px of the
           content box only while collapsed, shifting the header controls by
           1px between the collapsed and expanded states. */}
-      {isOpen && !isExpanded && (
+      {isOpen && !isExpanded && !embedded && (
         <div aria-hidden="true" className="absolute left-0 top-0 z-40 h-full w-px bg-border" />
       )}
-      {!isExpanded && (
+      {!isExpanded && !embedded && (
         <div
           className={cn(
             'absolute left-0 top-0 z-50 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',

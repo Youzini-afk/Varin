@@ -329,6 +329,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                         navigationTitle={navigationTitle}
                         navigationSubtitle={navigationSubtitle}
                         rightDrawerLabels={secondaryPanelToggleLabels}
+                        panelControl={headerPanelControl}
                         mobileTitle={renderMobileTitle?.({ open: mobileRightSidebarOpen, toggle: handleToggleMobileRightDrawer })}
                         onToggleLeftDrawer={() => {
                             const nextOpen = !mobileLeftDrawerOpen;

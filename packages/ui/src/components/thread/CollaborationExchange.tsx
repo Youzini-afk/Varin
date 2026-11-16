@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { useI18n, type I18nKey } from "@/lib/i18n";
 import { getLanguageFromExtension } from "@/lib/toolHelpers";
 import { cn } from "@/lib/utils";
-import { AgentAvatar } from "@/components/ui/AgentAvatar";
+import { CollaborationAvatar } from './CollaborationAvatar';
 import type { CollaborationMember } from "./collaborationFeed";
 import { exchangeSummary } from "./collaborationPresentation";
 
@@ -181,7 +181,7 @@ export function CollaborationExchange({
         className="flex min-w-0 items-center gap-1.5 hover:text-primary"
         onClick={() => onMember(id)}
       >
-        <AgentAvatar identity={id} avatar={item?.avatar} role={item?.lead ? 'lead' : undefined} size={25} />
+        <CollaborationAvatar identity={id} member={item} size={25} />
         <span className="truncate">{item?.name || item?.agentId || id}</span>
       </button>
     );

@@ -596,6 +596,13 @@ the list. Renaming uses the Thread catalog owner, and an uncertain instruction r
 Showing a resource or history view does not launch work. A follow-up registration observes its original
 Job/source and cursor; it never stops the observed Job or uses a renderer timer as a scheduler.
 
+The Bot shell's title-bar Conversation tools button opens the shared right-hand surface and remembers its last view.
+Timeline, Collaboration, Context, Execution details and Conversation recovery use the same selector on desktop and mobile.
+The Add menu contains input actions. Bot profile/work management retains its own panel; switching between it and conversation
+tools preserves both layouts. The mounted conversation portals its existing recovery and overview into the shell's detail slot,
+so opening the panel does not create another execution controller or snapshot reader. The overview still exposes files, products
+and operation details; interactive products open in the Bot's own panel scope.
+
 The right-hand Collaboration surface reads original family dispatches, peer messages and final reports in one native
 event-cursor feed. Reports project the last assistant response from immutable execution history as child-to-organizer
 replies, preserving multipart text and original outcome. Each continuation retains its own execution identity;
@@ -603,7 +610,11 @@ reading the room never publishes another message or invokes a model. Dispatches 
 continuations never substitute their input. Internal code retrieval stays outside the room. Its virtual
 list prefetches older entries and merges by original message/dispatch/execution identity, including dispatch-only and report-only pages.
 `CollaborationMessage` shows explicit sender/recipient routes and message bubbles. User messages align
-right; Agents retain their avatars. Rendered body height determines long-message folding, including later
+right; Agents retain their avatars. In the Bot shell the room follows its selected Bot Thread/branch, independently of the ordinary
+workbench selection. Bot conversations use their existing profile name/figure; Bot-owned tasks retain their Agent identity.
+Task instructions and linked `work_report` messages reuse the original message feed and reply identity. The room's participant
+strip shows the current conversation's exchanges; the recipient picker retains the existing full directory.
+Rendered body height determines long-message folding, including later
 font/image/reflow changes. Expansion remains keyed to the entry in its room, animates in place and pauses
 automatic following; copy uses original full text. Messages retain native reply identities; dispatches and reports
 open a new send to the exact child branch without inventing a reply-to message ID.

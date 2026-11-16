@@ -20,6 +20,8 @@ import { MessageHandoff } from '../conversation/messageHandoff';
 import { useTimelineViewStore } from '../conversation/timelineViewStore';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { openConversationTree } from '@/lib/openConversationTree';
+import { ConversationToolsContext, openBotConversationTools } from '@/lib/conversationTools';
+import { createPortal } from 'react-dom';
 import { useBotNavigation } from '@/lib/bots';
 import { currentWorkbenchProfileId } from '@/lib/agent-runtime/threadNavigation';
 import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
@@ -111,6 +113,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   onActivity?: (activity: ThreadLiveActivity | null) => void;
   preferredModel?: ThreadModel | null; inheritWorkbenchModel?: boolean; configurationReady?: boolean; readOnly?: boolean; api: ThreadsAPI; identity: ThreadIdentity; onBranchCreated?: (identity: ThreadIdentity) => void; initialWorkspacePath?: string }) {
   const botSurface = surface === 'bot';
+  const conversationTools = React.useContext(ConversationToolsContext);
+  const ownsTools = botSurface && conversationTools?.identity?.threadId === identity.threadId && conversationTools.identity.branchId === identity.branchId;
+  const toolsTarget = ownsTools && (conversationTools.mode === 'activity' || conversationTools.mode === 'recovery') ? conversationTools.target : null;
   const { t } = useI18n();
   const openThreadContext = useOpenThreadContext();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
@@ -487,8 +492,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const showOverview = React.useCallback((section: OverviewPeekSection) => {
     if (section === 'context') { openThreadContext(identity, initialWorkspacePath, undefined, readOnly); return; }
     setFocusedOverview({ owner: contentOwner, section });
+    if (ownsTools) openBotConversationTools(section === 'recovery' ? 'recovery' : 'activity');
     disclosure(overviewKey, 'overview', true);
-  }, [identity, initialWorkspacePath, readOnly, contentOwner, disclosure, overviewKey, openThreadContext]);
+  }, [identity, initialWorkspacePath, readOnly, contentOwner, disclosure, overviewKey, openThreadContext, ownsTools]);
   const treeNavigation = useConversationTreeStore(state => state.navigation[draftKey]);
   React.useEffect(() => () => {
     queueMicrotask(() => {
@@ -519,8 +525,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     refresh: async () => { await projection.current?.refresh(); }, onSources: () => showOverview('sources') });
   const workflows = useThreadComposerWorkflows({ api, identity, snapshot, draftKey, draftText: text, referenceScope: JSON.stringify([host, draftKey, launch?.selection.source ?? workspacePath]), onMemoryOpen: () => showOverview('memory'),
     refresh: () => { void projection.current?.refresh(); }, disabled: pending || readOnly ? t('composer.menu.unavailable') : undefined });
-  const overview = (!botSurface || focusedOverview?.owner === contentOwner) && <ThreadOverview key={contentOwner} api={api} identity={identity} sessionKey={overviewKey} snapshot={snapshot}
-    request={focusedOverview?.owner === contentOwner ? focusedOverview : undefined} pending={pending} readOnly={readOnly}
+  const overviewRequest = focusedOverview?.owner === contentOwner && (!toolsTarget || focusedOverview.section !== 'recovery') ? focusedOverview : undefined;
+  const embeddedOverview = Boolean(toolsTarget && conversationTools?.mode === 'activity');
+  const overview = (!botSurface || embeddedOverview) && <ThreadOverview key={contentOwner} embedded={embeddedOverview} visible={!embeddedOverview || conversationTools?.active !== false} api={api} identity={identity} sessionKey={overviewKey} snapshot={snapshot}
+    request={overviewRequest} pending={pending} readOnly={readOnly}
     workspacePath={emptyWorkspacePath} hasComputer={hasComputer} error={error}
     recoveryAttention={recovery.error || recovery.unavailable || undefined}
     onAttention={() => {
@@ -733,7 +741,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         agentControls={!botSurface && !snapshot?.thread.bot_id && !delegated ? <ThreadAgentControls workFocus={workFocus} pending={active} disabled={pending || Boolean(draft.firstSend || draft.pendingInput)}
           onWorkFocusChange={workFocus => useThreadDraftStore.getState().patch(draftKey, { workFocus })} /> : undefined}
         messageHistory={visibleHistory.filter(item => item.source === 'user').slice().reverse().map(item => typeof item.content === 'string' ? item.content : typeof (item.content as { userText?: unknown })?.userText === 'string' ? (item.content as { userText: string }).userText : typeof (item.content as { text?: unknown })?.text === 'string' ? (item.content as { text: string }).text : '')}
-        onOpenRecovery={snapshot ? () => showOverview('recovery') : undefined}
         onCompact={branch?.head && !active && providerId && modelId ? async () => { showOverview('context'); await compactThrough(branch.head!); } : undefined}
         editorRef={messageInput} value={text} onChange={(text, references, interactions) => useThreadDraftStore.getState().patch(draftKey, { text, references, interactions })} references={draft.references} interactions={draft.interactions} api={api} identity={identity} source={preparedSource?.source} models={models}
         suggestion={nextStep.text} suggestionError={nextStep.error} onSuggestionDismiss={nextStep.dismiss}
@@ -794,7 +801,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     {empty && <div className="min-h-6 flex-1" />}
     </div>
     </div>
-    {overview}
+    {toolsTarget ? createPortal(conversationTools?.mode === 'recovery'
+      ? <div className="h-full overflow-y-auto p-3"><ThreadRecovery recovery={recovery} disabled={readOnly || active || actionPending} /></div>
+      : overview, toolsTarget) : overview}
     {!empty && scrollViewport?.owner === scrollbarOwner && <ConversationScrollbar key={scrollbarOwner} viewport={scrollViewport.element} trackRef={scrollbarTrack} />}
     </div>
   </section></ReferenceNavigationContext.Provider></ThreadMaterials>;
