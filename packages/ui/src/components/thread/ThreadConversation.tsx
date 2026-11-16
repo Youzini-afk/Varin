@@ -206,12 +206,14 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const loadingTitle = useThreadStore(state => state.threads.find(thread => thread.thread_id === identity.threadId)?.title);
   const resourceFailure = React.useRef<{ snapshotId: string | null; message: string } | null>(null);
   const [actionPending, setPending] = React.useState(false);
+  const [stopRequest, setStopRequest] = React.useState<{ scope: typeof viewScope; runId: string }>();
   const pendingAction = React.useRef<object | null>(null);
   const projection = React.useRef<ThreadProjection | undefined>(undefined);
   React.useEffect(() => {
     identityGeneration.current += 1; forkKeys.current.clear(); compactionKeys.current.clear();
     setPreparingSource(false);
     pendingAction.current = null; resourceFailure.current = null; setPending(false); setError(undefined);
+    setStopRequest(undefined);
     setSnapshot(undefined); streaming.reset();
     const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; historyWindow.accept(value); handoff.observe(value); setSnapshot(value); setLoadFailure(undefined); }, value => setLoadFailure({ scope: viewScope, message: value instanceof Error ? value.message : 'Thread unavailable' }), streaming.publishProgress, streaming.publishTools, streaming.publishToolProgress);
     projection.current = view; view.start();
@@ -277,6 +279,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const runFailure = snapshot?.runFailure?.runId === run?.id ? snapshot?.runFailure : null;
   const samplingModel = threadConfigurationModel(snapshot?.modelSelection.active?.configuration ?? run?.configuration);
   const active = Boolean(branch?.active_run_id);
+  const stopping = active && Boolean(run?.cancel_requested
+    || stopRequest?.scope === viewScope && stopRequest.runId === branch?.active_run_id);
   const delegated = Boolean(snapshot?.delegatedExecutions?.length);
   const selectedModel = useThreadModelSelection({ draftKey, draft, ready: Boolean(snapshot), active, delegated,
     runId: run?.id, runModel: threadConfigurationModel(snapshot?.modelSelection.desired?.configuration ?? snapshot?.modelSelection.active?.configuration ?? run?.configuration),
@@ -740,7 +744,15 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         goalArmed={!botSurface && draft.goalArmed} onGoal={botSurface ? undefined : () => {
           if (active || delegated || snapshot?.goals.some(goal => goal.control !== 'complete' && goal.control !== 'cancelled')) showOverview('goals');
           else if (!draft.pendingInput) useThreadDraftStore.getState().patch(draftKey, { goalArmed: !draft.goalArmed });
-        }} onStop={active && branch?.active_run_id ? () => void act(() => api.cancelRun(branch.active_run_id!), true) : undefined}
+        }} stopping={stopping} onStop={active && branch?.active_run_id ? () => {
+          if (stopping) return;
+          const request = { scope: viewScope, runId: branch.active_run_id! };
+          setStopRequest(request);
+          void act(async () => {
+            try { await api.cancelRun(request.runId); }
+            catch (error) { setStopRequest(current => current === request ? undefined : current); throw error; }
+          }, true);
+        } : undefined}
         imageReferences={draftImageReferences(draft)} attachmentNames={[...images.map(() => ''), ...materials.map(material => material.filename), ...(draft.files ?? []).map(file => file.filename)]}
         hasInput={hasComposerInput}
         prepareSendMode={botSession ? mode => { submitMode.current = mode; } : undefined}

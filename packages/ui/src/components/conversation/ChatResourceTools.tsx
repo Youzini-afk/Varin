@@ -157,7 +157,7 @@ export function ChatRecoveryTools({ call, execution, result, status, generating,
   const restoring = call.name === 'file_restore';
   const points = values(data.points).map(toolRecord), files = values(data.files).map(toolRecord);
   const applied = values(data.appliedPaths), conflicts = values(data.conflictPaths);
-  return <ToolDisclosure id={'tool:' + call.id} className="tool-recovery-activity group" initiallyExpanded={restoring && status !== 'running'}>
+  return <ToolDisclosure id={'tool:' + call.id} className="tool-recovery-activity group" initiallyExpanded={restoring && status !== 'running' && status !== 'stopping'}>
     <summary className="tool-resource-summary"><Icon name="history" className="size-3.5" />
       <ToolHeadingText label={t(restoring ? 'chat.tools.restoreFiles' : 'chat.tools.recoveryPoints')} subject={toolSubject(call, data, t)} />
       {restoring && typeof data.status === 'string' && <span className={'typography-micro ' + (data.status === 'partial' || data.status === 'failed' ? 'text-destructive' : 'text-muted-foreground')}>{toolValueLabel(data.status, t)}</span>}

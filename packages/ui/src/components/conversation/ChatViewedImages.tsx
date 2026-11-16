@@ -5,12 +5,12 @@ import { ThreadMedia } from '@/components/thread/ThreadMedia';
 import { useI18n } from '@/lib/i18n';
 import { useOptionalConversationPresentation } from './ConversationContext';
 import { ToolDisclosure, ToolStatus } from './ToolDisclosure';
-import type { ChatToolExecutionState } from './types';
+import type { ToolDisplayStatus } from './toolInvocation';
 import type { ViewedImage } from './viewedImages';
 import { ExpandedToolContext, ViewedImageDetailsContext } from './toolDisclosureContext';
 
 export function ChatViewedImages({ callId, images, status, children }: {
-  callId: string; images: ViewedImage[]; status: ChatToolExecutionState['status']; children: React.ReactNode;
+  callId: string; images: ViewedImage[]; status: ToolDisplayStatus; children: React.ReactNode;
 }) {
   const { t } = useI18n();
   const conversation = useOptionalConversationPresentation();

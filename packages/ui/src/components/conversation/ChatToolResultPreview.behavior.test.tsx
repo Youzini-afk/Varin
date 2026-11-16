@@ -2,8 +2,8 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { ThreadHistoryItem } from '@varin/application-client';
-import type { JsonValue, Outcome } from '@varin/protocol';
+import type { ThreadHistoryItem, ThreadSnapshot } from '@varin/application-client';
+import type { JsonValue, Outcome, Operation } from '@varin/protocol';
 import { dict } from '@/lib/i18n/messages/en';
 import { useUIStore } from '@/stores/useUIStore';
 import { ChatTimelineEntryList } from './ChatTimelineEntries';
@@ -56,6 +56,31 @@ afterEach(() => {
   } finally {
     container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals();
   }
+});
+
+it('updates a document read in its existing status slot from running through cancellation to stopped', async () => {
+  const operation = { id: 'request:tool:read', run_id: 'run:audit', phase: 'running', revision: 1,
+    cancel_requested: false, lifetime: 'run', outcome: null, intent: {} } as Operation;
+  const run = { id: 'run:audit', cancel_requested: false } as NonNullable<ThreadSnapshot['activeRun']>;
+  const projector = new HistoryPresentation('stop-document');
+  const call = history({}, 'succeeded', 'document_read', { ref: 'file:40', view: 'text' }).slice(0, 1);
+  const draw = async () => {
+    const projected = projector.project(call, { operations: [operation], activeRun: run });
+    await act(async () => root.render(<ChatTimelineEntryList cwd="" entries={projected.entries}
+      sessionId="stop-document" toolExecutions={projected.toolExecutions} />));
+    return container.querySelector<HTMLElement>('.tool-action-status');
+  };
+  const status = await draw();
+  expect(status?.dataset.status).toBe('running');
+  run.cancel_requested = true;
+  expect(await draw()).toBe(status);
+  expect(status?.dataset.status).toBe('stopping');
+  await vi.waitFor(() => expect(status?.textContent).toBe('Stopping'));
+  operation.phase = 'terminal'; operation.outcome = 'cancelled'; operation.revision++;
+  expect(await draw()).toBe(status);
+  expect(status?.dataset.status).toBe('cancelled');
+  await vi.waitFor(() => expect(status?.textContent).toBe('Stopped'));
+  expect(container.querySelectorAll('.tool-action-status')).toHaveLength(1);
 });
 
 async function render(data: JsonValue, outcome?: Outcome, name?: string, args?: JsonValue) {
@@ -170,7 +195,7 @@ it.each([
 });
 
 it.each([
-  ['failed', 'Failed'], ['cancelled', 'Cancelled'], ['indeterminate', 'Outcome unknown'],
+  ['failed', 'Failed'], ['cancelled', 'Stopped'], ['indeterminate', 'Outcome unknown'],
 ] as const)('preserves the native %s outcome and exposes structured diagnostics', async (outcome, label) => {
   const reader = await render({ error: 'source_unavailable', message: 'The original source is unavailable.' }, outcome);
   expect(reader).toBeNull();

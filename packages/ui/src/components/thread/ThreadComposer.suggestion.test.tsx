@@ -65,7 +65,8 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); vi.unstubAllGlobals(); });
 
-function Harness({ initial = '', workspace = true, actions, identityKey = 'original', composerKey, backendIdentity, backendCommands, external, onDraftChange, active = false, prepareSendMode }: {
+function Harness({ initial = '', workspace = true, actions, identityKey = 'original', composerKey, backendIdentity, backendCommands, external, onDraftChange, active = false, stopping = false, onStop, prepareSendMode }: {
+  stopping?: boolean; onStop?(): void;
   active?: boolean; prepareSendMode?: React.ComponentProps<typeof ThreadComposer>['prepareSendMode'];
   initial?: string; workspace?: boolean; actions?: Record<string, ComposerCommandAction | undefined>; identityKey?: string;
   external?: React.ComponentProps<typeof ThreadComposer>['external'];
@@ -80,11 +81,31 @@ function Harness({ initial = '', workspace = true, actions, identityKey = 'origi
     <ThreadComposer key={composerKey} commandActions={actions} identityKey={identityKey} backendIdentity={backendIdentity} backendCommands={backendCommands} external={external} backendControls={external ? <span>External harness</span> : undefined}
       editorRef={null} value={value} references={references} onChange={(next, nextReferences) => { setValue(next); setReferences(nextReferences ?? []); onDraftChange?.(next); }} suggestion={suggestion} onSuggestionDismiss={() => setSuggestion(undefined)}
       models={[]} providerId="provider" modelId="model" thinkingLevel="off" onModelChange={() => {}}
-      modelDisabled={false} attachmentDisabled={false} imageDisabled={false} sendDisabled={false} pending={false} active={active} retrying={false} prepareSendMode={prepareSendMode}
+      modelDisabled={false} attachmentDisabled={false} imageDisabled={false} sendDisabled={false} pending={false} active={active} stopping={stopping} onStop={onStop} retrying={false} prepareSendMode={prepareSendMode}
       onFiles={() => {}} onAttachImages={() => {}} onAttachPdfs={() => {}}
       onGoal={() => {}} hasInput={Boolean(value.trim())} onWorkspace={workspace ? () => {} : undefined} workspaceLabel="Project" attachmentNames={[]} skills={[]} />
   </form>;
 }
+it.each(['', 'A draft'])('keeps stopping feedback inside the existing button with draft %j', async initial => {
+  const stop = vi.fn();
+  await act(async () => root.render(<Harness initial={initial} active onStop={stop} />));
+  const selector = initial ? '[data-conversation-composer-secondary-stop]' : '[data-conversation-composer-primary-action="stop"]';
+  const original = container.querySelector<HTMLButtonElement>(selector)!;
+  await act(async () => original.click());
+  expect(stop).toHaveBeenCalledOnce();
+  await act(async () => root.render(<Harness initial={initial} active stopping onStop={stop} />));
+  const stopping = container.querySelector<HTMLButtonElement>(selector)!;
+  expect(stopping).toBe(original);
+  expect(stopping.getAttribute('aria-label')).toBe('chat.timeline.tools.stopping');
+  expect(stopping.getAttribute('aria-busy')).toBe('true');
+  expect(stopping.disabled).toBe(true);
+  expect(stopping.textContent).toBe('');
+  expect(container.querySelector<HTMLTextAreaElement>('textarea')!.disabled).toBe(false);
+  await act(async () => root.render(<Harness initial={initial} onStop={stop} />));
+  expect(container.querySelector(selector)).toBeNull();
+  expect(container.querySelector('[data-conversation-composer-primary-action="send"]')).not.toBeNull();
+});
+
 async function key(key: string, extra: Partial<KeyboardEvent> = {}) {
   let handled = false;
   await act(async () => { handled = editor.props!.onKeyDown!({ key, preventDefault() {}, stopPropagation() {}, ...extra } as KeyboardEvent); });

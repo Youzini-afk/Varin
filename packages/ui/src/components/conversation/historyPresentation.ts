@@ -102,7 +102,7 @@ export class HistoryPresentation {
         calls.set(id, { id: item.id, name: String(call.name), gateway: call.gateway });
         let operation = snapshot?.operations.find(operation => operation.run_id === item.run_id
           && operation.id === `${request}:tool:${call.call_id}`);
-        if (operation) toolExecutions[id] = projectExecution(operation, id, call);
+        if (operation) toolExecutions[id] = projectExecution(operation, id, call, snapshot?.activeRun);
         const operationId = `${request}:tool:${call.call_id}`;
         operationCalls.set(operationId, id);
         const receipt = completed.get(operationId);
@@ -110,7 +110,7 @@ export class HistoryPresentation {
         const targetOperationId = gateway?.operationId ?? operationId;
         if (gateway) {
           operation = snapshot?.operations.find(value => value.id === targetOperationId && value.run_id === item.run_id);
-          toolExecutions[id] = operation ? projectExecution(operation, id, call) : {
+          toolExecutions[id] = operation ? projectExecution(operation, id, call, snapshot?.activeRun) : {
             toolCallId: id, operationId: targetOperationId, name: String(call.name), args: json(call.arguments),
             status: gateway.completion.kind === 'job_accepted' ? 'background' : outcomeStatus(gateway.completion.outcome),
           };
@@ -121,7 +121,8 @@ export class HistoryPresentation {
         if ((!operation && !receipt && snapshot?.activeRun?.id === item.run_id) || (update && update.runId === item.run_id)) {
           const running = !receipt && snapshot?.activeRun?.id === item.run_id;
           toolExecutions[id] ??= { toolCallId: id, operationId, name: String(call.name), args: json(call.arguments),
-            status: receipt ? outcomeStatus(receipt.outcome) : running ? 'running' : 'unknown' };
+            status: receipt ? outcomeStatus(receipt.outcome) : running ? 'running' : 'unknown',
+            stopping: running && snapshot?.activeRun?.cancel_requested };
           if (update?.runId === item.run_id) toolExecutions[id]!.partialResult = json({ details: update.details });
         }
         const child = children.get(targetOperationId);
@@ -231,7 +232,7 @@ export class HistoryPresentation {
         const call = presentedCall(object(object(operation.intent).call));
         if (typeof call.name !== 'string') continue;
         operationCalls.set(operation.id, operation.id); parents.push(operation.id);
-        toolExecutions[operation.id] = { ...projectExecution(operation, operation.id, call), parentToolCallId: operationCalls.get(parent)! };
+        toolExecutions[operation.id] = { ...projectExecution(operation, operation.id, call, snapshot?.activeRun), parentToolCallId: operationCalls.get(parent)! };
         const child = children.get(operation.id);
         if (child) {
           toolExecutions[operation.id]!.agent = { threadId: child.child_thread_id, ...(child.avatar ? { avatar: child.avatar } : {}) };
@@ -291,11 +292,13 @@ export class HistoryPresentation {
   }
 }
 
-function projectExecution(operation: Operation, id: string, call: Record<string, unknown>): ChatToolExecutionState {
+function projectExecution(operation: Operation, id: string, call: Record<string, unknown>, run?: ThreadSnapshot['activeRun']): ChatToolExecutionState {
   const completion = operation.call_completion;
   const output = completion && completion.kind !== 'not_dispatched' ? completion.content : undefined;
   return { toolCallId: id, operationId: operation.id, revision: operation.revision, name: String(call.name), args: json(call.arguments),
     status: operationStatus(operation), operation,
+    stopping: operation.phase !== 'terminal' && Boolean(operation.cancel_requested
+      || run?.id === operation.run_id && run.cancel_requested && (operation.lifetime === 'call' || operation.lifetime === 'run')),
     ...(output?.data == null ? {} : { result: json(invocationData(output.data, call)) }) };
 }
 

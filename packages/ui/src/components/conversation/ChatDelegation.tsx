@@ -53,7 +53,7 @@ export function ChatDelegation({ call, execution, result, status, generating, ou
   const report = exact?.report;
   const active = execution?.operation && canCancelOperation(execution.operation);
   // A member that joins while it starts arrives with settle; history is still.
-  const [arrives] = React.useState(() => Boolean(generating) || status === 'running'
+  const [arrives] = React.useState(() => Boolean(generating) || (status === 'running' || status === 'stopping')
     || ['queued', 'preparing', 'starting', 'running'].includes(childState ?? ''));
   React.useEffect(() => {
     if (external || !expanded || !operationId || !conversation?.api.collaboration || original || result?.notDispatched

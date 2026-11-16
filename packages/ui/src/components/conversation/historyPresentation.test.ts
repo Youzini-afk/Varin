@@ -2,8 +2,23 @@ import { expect, it } from 'vitest';
 import { assistant, HistoryPresentation } from './historyPresentation';
 import { projectChatDialogue } from './chatDialogueProjection';
 import type { ThreadHistoryItem, ThreadSnapshot } from '@varin/application-client';
-import { invocationStatus, operationInvocation } from './toolInvocation';
+import { invocationStatus, operationInvocation, toolDisplayStatus } from './toolInvocation';
 import type { Operation } from '@varin/protocol';
+
+it('keeps independent work and completed receipts distinct from foreground cancellation', () => {
+  const call = { id: 'history', parent: null, thread_id: 'thread', run_id: 'run', source: 'assistant', provider: null,
+    content: { id: 'model-item:7:request:read', content: { kind: 'tool_call', call: { call_id: 'read', name: 'document_read', arguments: { ref: 'file:40' } } } } } as ThreadHistoryItem;
+  const operation = { id: 'request:tool:read', run_id: 'run', phase: 'running', lifetime: 'thread', cancel_requested: false, revision: 1 } as Operation;
+  const snapshot = { operations: [operation], activeRun: { id: 'run', cancel_requested: true } } as ThreadSnapshot;
+  const project = () => Object.values(new HistoryPresentation('cancel').project([call], snapshot).toolExecutions)[0]!;
+  expect(toolDisplayStatus(undefined, project())).toBe('running');
+  operation.cancel_requested = true;
+  expect(toolDisplayStatus(undefined, project())).toBe('stopping');
+  operation.phase = 'terminal'; operation.outcome = 'succeeded';
+  expect(toolDisplayStatus(undefined, project())).toBe('success');
+  operation.outcome = 'failed';
+  expect(toolDisplayStatus(undefined, project())).toBe('error');
+});
 
 it('keeps gateway dispatch acceptance separate from the original child execution and later work', () => {
   const base = { parent: null, thread_id: 'parent', run_id: 'run', source: 'assistant', provider: null };

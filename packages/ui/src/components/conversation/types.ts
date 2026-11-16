@@ -285,6 +285,7 @@ export type ChatSessionEntry =
 
 
 export interface ChatToolExecutionState {
+  stopping?: boolean;
   operation?: Operation;
   child?: { task: ChildTask; execution?: DelegatedExecution; activity?: { state: string; reason?: string } };
   operationId?: string;

@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { SwapText } from '@/components/motion/SwapText';
-import type { ChatToolExecutionState } from './types';
+import type { ToolDisplayStatus } from './toolInvocation';
 import { DisclosureContext, ExpandedToolContext, TimelineSessionContext, useToolDisclosureChoices } from './toolDisclosureContext';
 
 export function ToolDisclosureScope({ sessionId, children }: { sessionId: string; children: React.ReactNode }) {
@@ -35,18 +35,18 @@ export function ToolDisclosure({ id, children, className, initiallyExpanded = fa
     }}>{expanded || visited ? children : React.Children.toArray(children).slice(0, 1)}</details>;
 }
 
-export function ToolStatus({ status, stopped = false, generating = false }: { status: ChatToolExecutionState['status']; stopped?: boolean; generating?: boolean }) {
+export function ToolStatus({ status, stopped = false, generating = false }: { status: ToolDisplayStatus; stopped?: boolean; generating?: boolean }) {
   const { t } = useI18n();
   // Successful ordinary calls recede; purpose-specific components keep their
   // own effect receipts (applied, draft, branch, exit code, and so on).
   if (status === 'success' && !stopped && !generating) return null;
   return <span className={cn('tool-action-status typography-micro', status === 'error' && 'text-destructive',
     status === 'unknown' && 'text-[var(--status-warning)]')} data-status={status} role={status === 'error' || status === 'waiting' ? 'status' : undefined}>
-    <Icon name={stopped ? 'stop' : status === 'running' ? 'loader-4' : status === 'success' ? 'check' : status === 'error' || status === 'unknown'
+    <Icon name={stopped ? 'stop' : status === 'running' || status === 'stopping' ? 'loader-4' : status === 'success' ? 'check' : status === 'error' || status === 'unknown'
       ? 'error-warning' : status === 'cancelled' ? 'close' : status === 'waiting' ? 'question' : 'time'}
-      className={cn('size-3 shrink-0', status === 'running' && !stopped && 'animate-spin motion-reduce:animate-none')} />
+      className={cn('size-3 shrink-0', (status === 'running' || status === 'stopping') && !stopped && 'animate-spin motion-reduce:animate-none')} />
     {/* The status changes in place rather than remounting its entrance; a
         failure or a stop is a fact, so it shows at once without a hold. */}
-    <SwapText text={t(generating ? 'chat.tools.preparingCall' : stopped ? 'chat.children.stopping' : ('chat.timeline.tools.' + status) as I18nKey)} hold={0} />
+    <SwapText text={t(status === 'stopping' || stopped ? 'chat.timeline.tools.stopping' : generating && status === 'running' ? 'chat.tools.preparingCall' : ('chat.timeline.tools.' + status) as I18nKey)} hold={0} />
   </span>;
 }

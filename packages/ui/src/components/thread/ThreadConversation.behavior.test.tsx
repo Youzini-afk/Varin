@@ -132,7 +132,7 @@ vi.mock('./ThreadComposer', () => ({ ThreadComposer: (props: React.ComponentProp
   <button type="button" onClick={props.onOpenHistory}>Open conversation history</button>
   {props.onOpenRecovery && <button type="button" onClick={props.onOpenRecovery}>Open conversation recovery</button>}
   <button type="submit" disabled={props.sendDisabled}>{props.retrying ? 'Retry delivery' : props.active ? 'Queue message' : 'Send'}</button>
-  {props.onStop && <button type="button" onClick={props.onStop}>Stop run</button>}
+  {props.onStop && <button type="button" onClick={props.onStop} aria-busy={props.stopping}>Stop run</button>}
   <ComposerCommandFixture actions={props.commandActions} />
   {props.value === '/' && <CommandAutocomplete api={props.api} identity={props.identity} source={props.source} searchQuery="" onClose={() => props.onChange('')}
     onCommandSelect={command => props.onChange(`/${command.name} `)} />}
@@ -212,7 +212,7 @@ function fixture(active = false) {
     input.revision = revision + 1; input.content = { text }; return input;
   });
   const cancelInput = vi.fn(async (id: string) => { const input = view.inputs.find(value => value.id === id)!; input.state = 'cancelled'; return input; });
-  const cancelRun = vi.fn(async () => {
+  const cancelRun = vi.fn<() => ReturnType<ThreadsAPI['cancelRun']>>(async () => {
     const run = { ...view.activeRun!, state: 'cancelled' as const, cancel_requested: true };
     view.activeRun = null; view.thread.branches[0]!.active_run_id = null; view.thread.branches[0]!.latest_run = run;
     return run;
@@ -636,6 +636,30 @@ it('active-thread controls queue the chosen mode, save/cancel queued text, and s
   await act(async () => { button('Stop run').click(); });
   expect(f.cancelRun).toHaveBeenCalledWith('ui-run');
   expect(button('Stop run')).toBeUndefined();
+});
+
+it('acknowledges stop immediately, retains server cancellation after remount, and releases failures for retry', async () => {
+  const f = fixture(true);
+  let reject!: (error: Error) => void;
+  f.cancelRun.mockImplementationOnce(() => new Promise((_resolve, failed) => { reject = failed; }));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('Stop run').click());
+  expect(button('Stop run').getAttribute('aria-busy')).toBe('true');
+  await edit('[aria-label="Message thread"]', 'Keep this draft');
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('Keep this draft');
+  await act(async () => reject(new Error('Stop request failed')));
+  expect(button('Stop run').getAttribute('aria-busy')).toBe('false');
+  expect(container.textContent).toContain('Stop request failed');
+  f.cancelRun.mockImplementationOnce(async () => { f.view.activeRun!.cancel_requested = true; return f.view.activeRun!; });
+  await act(async () => button('Stop run').click());
+  expect(button('Stop run').getAttribute('aria-busy')).toBe('true');
+  await act(async () => root.render(<ThreadConversation key="reopened" api={f.api} identity={identity} />));
+  expect(button('Stop run').getAttribute('aria-busy')).toBe('true');
+  f.view.thread.branches[0]!.active_run_id = 'next-run';
+  f.view.activeRun = { ...f.view.activeRun!, id: 'next-run', cancel_requested: false };
+  f.view.thread.branches[0]!.latest_run = f.view.activeRun;
+  await act(async () => f.emit({ cursor: 1, subject: 'next-run', kind: 'run.accepted', revision: 1, data: {} }));
+  expect(button('Stop run').getAttribute('aria-busy')).toBe('false');
 });
 
 it.each([

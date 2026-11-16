@@ -12,7 +12,7 @@ import { FileChangeTrayContext, useFileChangeTray } from './fileChangeTray';
 
 const TRAY_GLIDE = springTransition('glide');
 import { ToolDisclosure } from './ToolDisclosure';
-import { invocationData, invocationStatus, operationInvocation, toolRecord, toolText } from './toolInvocation';
+import { invocationData, toolDisplayStatus, operationInvocation, toolRecord, toolText } from './toolInvocation';
 import { fileChangePhase, fileChangeTargets, isFileChangeTool } from './fileChangePreview';
 import { computerResultSummary } from './computerToolPresentation';
 import { toolSubject } from './toolSubject';
@@ -69,8 +69,8 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
   // collapsed row; see fileChangeTray.ts for how batches retract.
   const workingFiles = process.activities.flatMap(item => {
     if (item.kind !== 'tool' || !isFileChangeTool(item.call.name)) return [];
-    const status = invocationStatus(results.get(item.call.id), executions[item.call.id], item.streaming);
-    return item.streaming || status === 'running' || status === 'waiting' || status === 'background' ? [item.id] : [];
+    const status = toolDisplayStatus(results.get(item.call.id), executions[item.call.id], item.streaming);
+    return item.streaming || (status === 'running' || status === 'stopping') || status === 'waiting' || status === 'background' ? [item.id] : [];
   });
   const tray = useFileChangeTray(workingFiles, !(process.tail && active));
   const motionLevel = documentMotionLevel();
@@ -78,7 +78,7 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
   if (process.activities.length === 1) return <>{renderActivity(process.activities[0]!)}</>;
   const describe = (item: Extract<DialogueActivity, { kind: 'tool' }>, execution?: ChatToolExecutionState, result?: ChatToolResultMessage) => {
     const phase = isFileChangeTool(item.call.name) ? fileChangePhase(execution, result, item.streaming) : undefined;
-    const status = phase === 'failed' || phase === 'partial' ? 'error' : invocationStatus(result, execution, item.streaming);
+    const status = phase === 'failed' || phase === 'partial' ? 'error' : toolDisplayStatus(result, execution, item.streaming);
     return { item, execution, result, status, phase };
   };
   const seenOperations = new Set<string>();
@@ -114,7 +114,7 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
     } else if (status === 'success') counts.set(kind, (counts.get(kind) ?? 0) + 1);
   }
   const failures = tools.filter(row => row.status === 'error').length;
-  const pending = tools.filter(row => row.counted && ['running', 'waiting', 'background'].includes(row.status));
+  const pending = tools.filter(row => row.counted && ['running', 'stopping', 'waiting', 'background'].includes(row.status));
   const uncertain = tools.filter(row => row.status === 'unknown' || row.status === 'success' && row.phase === 'preview').length;
   const cancelled = tools.filter(row => row.status === 'cancelled').length;
   // The folded row is a reading cue. Full counts stay available in its title;
@@ -136,7 +136,7 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
     const { call } = current.item;
     const purpose = workToolLabels[call.name];
     const action = actions[call.name] ? t(actions[call.name]!) : purpose ? t(purpose) : t('chat.dialogue.invoke', { name: call.name });
-    label = t(current.item.streaming ? 'chat.dialogue.preparing'
+    label = t(current.status === 'stopping' ? 'chat.timeline.tools.stopping' : current.item.streaming ? 'chat.dialogue.preparing'
       : current.status === 'running' || current.status === 'background' ? purpose && !actions[call.name] ? 'chat.dialogue.handling' : 'chat.dialogue.running'
         : current.status === 'waiting' ? 'chat.dialogue.waiting' : current.status === 'success' ? 'chat.dialogue.finished'
           : current.status === 'error' ? 'chat.dialogue.failed' : current.status === 'cancelled' ? 'chat.dialogue.cancelled' : 'chat.dialogue.unconfirmed', { action });
@@ -146,9 +146,9 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
       || (call.name === 'script_run' ? toolText(scriptArguments(call).title) : '') || compact;
     if (subject === call.name) subject = '';
     const receipt = computerResultSummary(call.name, data, toolRecord(call.arguments), t);
-    if (receipt && !current.item.streaming && !['running', 'waiting', 'background'].includes(current.status)) label = receipt;
+    if (receipt && !current.item.streaming && !['running', 'stopping', 'waiting', 'background'].includes(current.status)) label = receipt;
   }
-  const busy = liveThinking || current?.item.streaming || pending.some(row => row.status === 'running');
+  const busy = liveThinking || current?.item.streaming || pending.some(row => row.status === 'running' || row.status === 'stopping');
   const title = current || thinking ? [label, subject].filter(Boolean).join(' · ') : fullSummary || label;
   const icons: IconName[] = thinking ? ['brain'] : current ? [categoryIcons[category(current.item.call.name)]]
     : [...new Set(featured.map(([kind]) => categoryIcons[kind]))];

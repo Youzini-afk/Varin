@@ -42,7 +42,7 @@ import { ExternalModelControls, ExternalModeControls, ExternalOptionMenu, Extern
 import { ThreadPermissionControl } from './ThreadPermissionControl';
 
 export function ThreadComposer({ editorRef, value, onChange, interactions, models, providerId, modelId, thinkingLevel, onModelChange,
-  modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, suggestion, suggestionError, onSuggestionDismiss, prepareSendMode,
+  modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, stopping = false, retrying, suggestion, suggestionError, onSuggestionDismiss, prepareSendMode,
   onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, imageReferences, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, onOpenRecovery, agentControls, backendControls, api, identity, source, references, commandActions, onReferenceSelect, backendCommands, referenceScope, pendingSource, attachmentCandidates, backendIdentity, external, connectionStatus }: {
   editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string, references?: readonly ComposerReference[], interactions?: readonly InteractionRange[]): void;
   interactions?: readonly InteractionRange[];
@@ -59,7 +59,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   models: ThreadModelInfo[]; providerId: string; modelId: string; thinkingLevel: ThreadThinkingLevel;
   onModelChange(provider: string, model: string, thinking: ThreadThinkingLevel): void | Promise<void>;
   modelDisabled: boolean; attachmentDisabled: boolean; imageDisabled: boolean; sendDisabled: boolean;
-  pending: boolean; active: boolean; retrying: boolean;
+  pending: boolean; active: boolean; stopping?: boolean; retrying: boolean;
   onFiles(files: File[]): void; onAttachImages(): void; onAttachPdfs(): void; onStop?(): void; onGoal?(): void;
   hasInput: boolean; onWorkspace?(): void; workspaceLabel: string;
   goalArmed?: boolean;
@@ -131,7 +131,8 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   }, [scope, resetHistory]);
   const sending = pending;
   const loading = false;
-  const aborting = false;
+  const aborting = active && stopping;
+  const stopLabel = t(aborting ? 'chat.timeline.tools.stopping' : 'chat.chatInput.actions.stopGeneratingAria');
   const [insertedSuggestion, setInsertedSuggestion] = React.useState<{ text: string; identity?: string }>();
   React.useEffect(() => {
     if (insertedSuggestion && (!value.length || insertedSuggestion.text !== suggestion || insertedSuggestion.identity !== identityKey)) setInsertedSuggestion(undefined);
@@ -530,16 +531,17 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                       disabled={aborting}
                       onClick={() => void handleAbort()}
                       className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:cursor-wait disabled:opacity-50"
-                      aria-label={t('chat.chatInput.actions.stopGeneratingAria')}
+                      aria-label={stopLabel}
+                      aria-busy={aborting}
                       data-conversation-composer-secondary-stop="true"
                     >
-                      <Icon
+                      <SwapIcon swapKey={aborting ? 'loader-4' : 'stop'} enter="settle"><Icon
                         name={aborting ? 'loader-4' : 'stop'}
                         className={cn('size-3.5', aborting && 'animate-spin')}
-                      />
+                      /></SwapIcon>
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="top">{t('chat.chatInput.actions.stopGeneratingAria')}</TooltipContent>
+                  <TooltipContent side="top">{stopLabel}</TooltipContent>
                 </Tooltip>
               )}
               {prepareSendMode && active && hasInput && !retrying ? <DropdownMenu>
@@ -557,7 +559,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                       if (composerActions.primary === 'stop') void handleAbort();
                       else void submit();
                     }}
-                    disabled={composerActions.primary === 'stop' ? !onStop : sendDisabled}
+                    disabled={composerActions.primary === 'stop' ? !onStop || aborting : sendDisabled}
                     className={cn(
                       'flex size-8 items-center justify-center rounded-full transition-colors',
                       composerActions.primary === 'stop'
@@ -569,7 +571,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                           : 'cursor-not-allowed bg-transparent text-muted-foreground/35',
                     )}
                     aria-label={loading ? t('common.loading') : composerActions.primary === 'stop'
-                      ? t('chat.chatInput.actions.stopGeneratingAria')
+                      ? stopLabel
                       : sendLabel}
                     aria-busy={loading || (composerActions.primary === 'stop' ? aborting : undefined)}
                     data-conversation-composer-primary-action={composerActions.primary}
@@ -582,7 +584,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                 </TooltipTrigger>
                 <TooltipContent side="top">
                   {loading ? t('common.loading') : composerActions.primary === 'stop'
-                    ? t('chat.chatInput.actions.stopGeneratingAria')
+                    ? stopLabel
                     : sendLabel}
                 </TooltipContent>
               </Tooltip>

@@ -82,7 +82,7 @@ import { ChatScriptCard } from './ChatScriptCard';
 import { assistantMessagesForTurn } from './usagePresentation';
 import { ToolDisclosure, ToolDisclosureScope } from './ToolDisclosure';
 import { ExpandedToolContext, TimelineSessionContext, useToolDisclosureChoices } from './toolDisclosureContext';
-import { presentInvocation, invocationData, invocationGateway, invocationStatus, operationInvocation, toolRecord } from './toolInvocation';
+import { presentInvocation, invocationData, invocationGateway, invocationStatus, toolDisplayStatus, type ToolDisplayStatus, operationInvocation, toolRecord } from './toolInvocation';
 import { ChatDelegation } from './ChatDelegation';
 import { ChatFileTools, ChatLanguageTools, ChatRecoveryTools } from './ChatResourceTools';
 import { ChatWebTools } from './ChatSourceTools';
@@ -332,10 +332,10 @@ const ChatToolDisclosure: React.FC<{
   return <ToolDisclosure id={disclosureId} className={className} initiallyExpanded={initiallyExpanded}>{children}</ToolDisclosure>;
 };
 
-const ChatToolStatus: React.FC<{ status: ChatToolExecutionState['status']; generating?: boolean }> = ({ status, generating }) => {
+const ChatToolStatus: React.FC<{ status: ToolDisplayStatus; generating?: boolean }> = ({ status, generating }) => {
   const { t } = useI18n();
   return <span key={status} className={cn('workbench-status-arrival shrink-0 typography-micro', status === 'success' && 'sr-only', status === 'error' && 'text-[var(--status-error)]')}>
-    {t(generating ? 'chat.tools.preparingCall' : `chat.timeline.tools.${status}`)}
+    {t(status === 'stopping' ? 'chat.timeline.tools.stopping' : generating && status === 'running' ? 'chat.tools.preparingCall' : `chat.timeline.tools.${status}`)}
   </span>;
 };
 
@@ -402,7 +402,7 @@ const ChatToolCardBody: React.FC<{
       </details>}</>;
   }
   const mutationPhase = isFileChangeTool(call.name) ? fileChangePhase(execution, result, generating) : undefined;
-  const status = mutationPhase === 'failed' || mutationPhase === 'partial' ? 'error' : invocationStatus(result, execution, generating);
+  const status = mutationPhase === 'failed' || mutationPhase === 'partial' ? 'error' : toolDisplayStatus(result, execution, generating);
   const transientOutput = execution?.result ?? execution?.partialResult;
   const details = result?.details ?? transientOutput;
   const specific = {
@@ -482,10 +482,10 @@ const ChatToolCardBody: React.FC<{
       <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 rounded-md px-1 py-1.5 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden">
         {execution?.agent && <AgentAvatar identity={execution.agent.threadId} avatar={execution.agent.avatar} size={20} />}
         <Icon
-          name={fileChanges.length ? 'code-sslash' : status === 'running' ? 'loader-4' : status === 'error' || status === 'unknown' ? 'error-warning' : status === 'cancelled' ? 'close' : status === 'background' ? 'time' : status === 'waiting' ? 'question' : 'check'}
+          name={fileChanges.length ? 'code-sslash' : (status === 'running' || status === 'stopping') ? 'loader-4' : status === 'error' || status === 'unknown' ? 'error-warning' : status === 'cancelled' ? 'close' : status === 'background' ? 'time' : status === 'waiting' ? 'question' : 'check'}
           className={cn(
             'size-3.5 shrink-0',
-            !fileChanges.length && status === 'running' && 'animate-spin',
+            !fileChanges.length && (status === 'running' || status === 'stopping') && 'animate-spin',
             status === 'error' && 'text-[var(--status-error)]',
           )}
         />
@@ -569,9 +569,9 @@ const ChatReadOnlyToolGroup: React.FC<{
   const disclosureChoices = useToolDisclosureChoices();
   const states = calls.map((call) => {
     const result = resultByCallId.get(call.id);
-    return invocationStatus(result, executionById[call.id], generatingCallIds?.has(call.id));
+    return toolDisplayStatus(result, executionById[call.id], generatingCallIds?.has(call.id));
   });
-  const status = states.includes('running') ? 'running' : states.includes('error') ? 'error' : states.includes('unknown') ? 'unknown' : states.includes('cancelled') ? 'cancelled' : states.includes('waiting') ? 'waiting' : states.includes('background') ? 'background' : 'success';
+  const status = states.includes('stopping') ? 'stopping' : states.includes('running') ? 'running' : states.includes('error') ? 'error' : states.includes('unknown') ? 'unknown' : states.includes('cancelled') ? 'cancelled' : states.includes('waiting') ? 'waiting' : states.includes('background') ? 'background' : 'success';
   const counts = { reads: 0, searches: 0, inspections: 0 };
   for (const call of calls) {
     const name = call.name.toLowerCase().replace(/:\d+$/, '');
@@ -589,15 +589,15 @@ const ChatReadOnlyToolGroup: React.FC<{
       className="group/tools my-1">
       <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 rounded-md px-1 py-1.5 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden">
         <Icon
-          name={status === 'running' ? 'loader-4' : status === 'error' || status === 'unknown' ? 'error-warning' : status === 'cancelled' ? 'close' : status === 'background' ? 'time' : status === 'waiting' ? 'question' : 'check'}
+          name={(status === 'running' || status === 'stopping') ? 'loader-4' : status === 'error' || status === 'unknown' ? 'error-warning' : status === 'cancelled' ? 'close' : status === 'background' ? 'time' : status === 'waiting' ? 'question' : 'check'}
           className={cn(
             'size-3.5 shrink-0',
-            status === 'running' && 'animate-spin',
+            (status === 'running' || status === 'stopping') && 'animate-spin',
             status === 'error' && 'text-[var(--status-error)]',
           )}
         />
         <span className="min-w-0 flex-1 truncate" title={summary}>{summary}</span>
-        {status === 'running' && states.includes('error') ? <ChatToolStatus status="error" /> : null}
+        {(status === 'running' || status === 'stopping') && states.includes('error') ? <ChatToolStatus status="error" /> : null}
         <ChatToolStatus status={status} />
         <Icon name="arrow-down-s" className="size-3.5 text-muted-foreground transition-transform group-open/tools:rotate-180" />
       </summary>

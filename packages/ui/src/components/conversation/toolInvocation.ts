@@ -53,6 +53,15 @@ export function invocationStatus(result?: ChatToolResultMessage, execution?: Cha
   return result ? result.status ?? (result.isError ? 'error' : 'success') : execution?.status ?? 'unknown';
 }
 
+export type ToolDisplayStatus = ChatToolExecutionState['status'] | 'stopping';
+
+/** Cancellation intent changes the presentation while the actual outcome stays pending. */
+export function toolDisplayStatus(result?: ChatToolResultMessage, execution?: ChatToolExecutionState, generating = false): ToolDisplayStatus {
+  const status = invocationStatus(result, execution, generating);
+  return (status === 'running' || status === 'waiting' || status === 'background')
+    && (execution?.stopping || execution?.operation?.cancel_requested) ? 'stopping' : status;
+}
+
 /** Script detail consumes the original Operation, including its retained media holder. */
 export function operationInvocation(operation: Operation, target?: Operation) {
   const source = toolRecord(toolRecord(operation.intent).call);

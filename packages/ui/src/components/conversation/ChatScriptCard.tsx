@@ -8,23 +8,23 @@ import type { ChatToolCall, ChatToolExecutionState, ChatToolResultMessage } from
 import { ToolDisclosure } from './ToolDisclosure';
 import { useToolDisclosureChoices } from './toolDisclosureContext';
 import { getToolSummary } from '@/components/chat/message/parts/toolSummary';
-import { invocationData, presentInvocation, toolRecord } from './toolInvocation';
+import { invocationData, presentInvocation, toolRecord, type ToolDisplayStatus } from './toolInvocation';
 import { computerResultSummary } from './computerToolPresentation';
 import { toolSubject } from './toolSubject';
 import { useToolTargets } from './toolTargetContext';
 import { standaloneDescendants } from './standaloneTools';
 import { orderScriptCalls, scriptArguments, scriptCallStatus, scriptDescendants, scriptOperationId, scriptTitleKey, scriptToolLabels } from './scriptPresentation';
 
-function StatusIcon({ status }: { status: ChatToolExecutionState['status'] }) {
-  return <Icon name={status === 'running' ? 'loader-4' : status === 'error' || status === 'unknown' ? 'error-warning'
+function StatusIcon({ status }: { status: ToolDisplayStatus }) {
+  return <Icon name={(status === 'running' || status === 'stopping') ? 'loader-4' : status === 'error' || status === 'unknown' ? 'error-warning'
     : status === 'cancelled' ? 'close' : status === 'success' ? 'check' : 'time'}
-    className={`size-3.5 shrink-0 ${status === 'running' ? 'animate-spin motion-reduce:animate-none' : ''} ${status === 'error' ? 'text-destructive' : ''}`} />;
+    className={`size-3.5 shrink-0 ${(status === 'running' || status === 'stopping') ? 'animate-spin motion-reduce:animate-none' : ''} ${status === 'error' ? 'text-destructive' : ''}`} />;
 }
 
 /** Presentation reads the original call lineage; scripts are never inspected by executing them. */
 export function ChatScriptCard({ call, execution, executions = {}, status, result, output, rawDetails, renderCall, preview = false, generating = false }: {
   call: ChatToolCall; execution?: ChatToolExecutionState; executions?: Record<string, ChatToolExecutionState>;
-  status: ChatToolExecutionState['status']; result?: ChatToolResultMessage; sessionId: string;
+  status: ToolDisplayStatus; result?: ChatToolResultMessage; sessionId: string;
   output: React.ReactNode; rawDetails: React.ReactNode; renderCall(operation: Operation): React.ReactNode; preview?: boolean; generating?: boolean;
 }) {
   const { t } = useI18n();
@@ -39,7 +39,7 @@ export function ChatScriptCard({ call, execution, executions = {}, status, resul
   const calls = view?.owner === owner ? view.calls : [];
   const liveCalls = scriptDescendants(call.id, executions);
   const signature = JSON.stringify(liveCalls.map(item => [item.operationId, item.status]));
-  const admitted = status !== 'running' || execution?.revision !== undefined || liveCalls.length > 0;
+  const admitted = (status !== 'running' && status !== 'stopping') || execution?.revision !== undefined || liveCalls.length > 0;
   const args = scriptArguments(call);
   const title = typeof args.title === 'string' ? args.title.replace(/\s+/g, ' ').trim() : '';
   React.useEffect(() => {
@@ -66,7 +66,7 @@ export function ChatScriptCard({ call, execution, executions = {}, status, resul
       <span className="min-w-0 flex-1 truncate" title={title || t(scriptTitleKey(call, calls))}>{title || t(scriptTitleKey(call, calls))}</span>
       {calls.length > 0 && <span className="shrink-0 typography-micro">{t('chat.timeline.tools.callCount', { count: calls.length })}</span>}
       {attention > 0 && <span className="shrink-0 typography-micro text-[var(--status-warning)]">{t('chat.script.attention', { count: attention })}</span>}
-      {active > 0 && status !== 'running' && <span className="shrink-0 typography-micro">{active} {t('chat.timeline.tools.running')}</span>}
+      {active > 0 && status !== 'running' && status !== 'stopping' && <span className="shrink-0 typography-micro">{active} {t('chat.timeline.tools.running')}</span>}
       <span className="shrink-0 rounded border border-border/50 px-1 typography-micro">JS</span>
       <span className={status === 'success' ? 'sr-only' : 'shrink-0 typography-micro'}>{t(generating ? 'chat.tools.preparingCall' : `chat.timeline.tools.${status}`)}</span>
       <Icon name="arrow-right-s" className="tool-disclosure-chevron size-3.5" />
