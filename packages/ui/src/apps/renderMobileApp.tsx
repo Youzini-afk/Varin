@@ -18,6 +18,8 @@ import { initializeAppearancePreferences, syncDesktopSettings } from '@/lib/pers
 import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startTypographyWatcher } from '@/lib/typographyWatcher';
 import { SessionAuthGate } from '@/components/auth/SessionAuthGate';
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { dismissInitialSplash } from '@/lib/splash';
 import { MobileApp } from './MobileApp';
 import { registerBuiltinSettingsWorkbench } from '@/workbenches/settings/register';
 
@@ -87,7 +89,9 @@ export function renderMobileApp(apis: RuntimeAPIs) {
           <ThemeProvider>
             <MotionProvider>
               <DiffWorkerProvider>
-                {isNativeShell ? app : <SessionAuthGate apis={resolvedApis}>{app}</SessionAuthGate>}
+                <ErrorBoundary onError={dismissInitialSplash} onReset={() => window.location.reload()}>
+                  {isNativeShell ? app : <SessionAuthGate apis={resolvedApis}>{app}</SessionAuthGate>}
+                </ErrorBoundary>
               </DiffWorkerProvider>
             </MotionProvider>
           </ThemeProvider>

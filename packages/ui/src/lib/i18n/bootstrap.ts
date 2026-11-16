@@ -9,6 +9,7 @@ type BootstrapMessages = {
   disconnected: string;
   reconnecting: string;
   initialDataLoadFailed: string;
+  startupFailed: string;
   cliNotFound: string;
   providersReady: string;
   providersLoading: string;
@@ -28,6 +29,7 @@ const EN_MESSAGES: BootstrapMessages = {
   disconnected: 'Disconnected',
   reconnecting: 'Reconnecting…',
   initialDataLoadFailed: 'Varin connected, but initial data load failed.',
+  startupFailed: 'Varin could not start. Reload the page to retry.',
   cliNotFound: 'Varin CLI not found. Please install it first.',
   providersReady: '✓ Providers',
   providersLoading: '… Providers',
@@ -47,6 +49,7 @@ const FR_MESSAGES: BootstrapMessages = {
   disconnected: 'Déconnecté',
   reconnecting: 'Reconnexion…',
   initialDataLoadFailed: 'Varin est connecté, mais le chargement initial des données a échoué.',
+  startupFailed: 'Varin n’a pas pu démarrer. Rechargez la page pour réessayer.',
   cliNotFound: 'L’interface en ligne de commande Varin est introuvable. Veuillez l’installer d’abord.',
   providersReady: '✓ Fournisseurs',
   providersLoading: '… Fournisseurs',
@@ -66,6 +69,7 @@ const ZH_CN_MESSAGES: BootstrapMessages = {
   disconnected: '已断开连接',
   reconnecting: '正在重新连接…',
   initialDataLoadFailed: 'Varin 已连接，但初始数据加载失败。',
+  startupFailed: 'Varin 启动失败，请刷新页面重试。',
   cliNotFound: '未找到 Varin CLI。请先安装它。',
   providersReady: '✓ 提供商',
   providersLoading: '… 提供商',
@@ -85,6 +89,7 @@ const ZH_TW_MESSAGES: BootstrapMessages = {
   disconnected: '已中斷連線',
   reconnecting: '正在重新連線…',
   initialDataLoadFailed: 'Varin 已連線，但初始資料載入失敗。',
+  startupFailed: 'Varin 啟動失敗，請重新整理頁面後重試。',
   cliNotFound: '找不到 Varin CLI。請先安裝。',
   providersReady: '✓ 提供者',
   providersLoading: '… 提供者',
@@ -104,6 +109,7 @@ const UK_MESSAGES: BootstrapMessages = {
   disconnected: 'Відключено',
   reconnecting: 'Повторне підключення…',
   initialDataLoadFailed: 'Varin підключено, але початкове завантаження даних не вдалося.',
+  startupFailed: 'Не вдалося запустити Varin. Оновіть сторінку, щоб повторити спробу.',
   cliNotFound: 'Varin CLI не знайдено. Спершу встановіть його.',
   providersReady: '✓ Провайдери',
   providersLoading: '… Провайдери',
@@ -123,6 +129,7 @@ const ES_MESSAGES: BootstrapMessages = {
   disconnected: 'Desconectado',
   reconnecting: 'Reconectando…',
   initialDataLoadFailed: 'Varin se conectó, pero falló la carga inicial de datos.',
+  startupFailed: 'Varin no pudo iniciarse. Recarga la página para reintentar.',
   cliNotFound: 'No se encontró Varin CLI. Instálalo primero.',
   providersReady: '✓ Proveedores',
   providersLoading: '… Proveedores',
@@ -142,6 +149,7 @@ const PT_BR_MESSAGES: BootstrapMessages = {
   disconnected: 'Desconectado',
   reconnecting: 'Reconectando…',
   initialDataLoadFailed: 'Varin conectado, mas o carregamento inicial dos dados falhou.',
+  startupFailed: 'Não foi possível iniciar o Varin. Recarregue a página para tentar novamente.',
   cliNotFound: 'Varin CLI não encontrado. Instale-o primeiro.',
   providersReady: '✓ Provedores',
   providersLoading: '… Provedores',
@@ -161,6 +169,7 @@ const KO_MESSAGES: BootstrapMessages = {
   disconnected: '연결 끊김',
   reconnecting: '다시 연결 중…',
   initialDataLoadFailed: 'Varin에 연결되었지만 초기 데이터 로드에 실패했습니다.',
+  startupFailed: 'Varin을 시작하지 못했습니다. 페이지를 새로고침하여 다시 시도하세요.',
   cliNotFound: 'Varin CLI를 찾을 수 없습니다. 먼저 설치하세요.',
   providersReady: '✓ 공급자',
   providersLoading: '… 공급자',
@@ -180,6 +189,7 @@ const PL_MESSAGES: BootstrapMessages = {
   disconnected: 'Rozłączono',
   reconnecting: 'Ponowne łączenie…',
   initialDataLoadFailed: 'Varin połączony, ale początkowe ładowanie danych nie powiodło się.',
+  startupFailed: 'Nie udało się uruchomić Varin. Odśwież stronę, aby spróbować ponownie.',
   cliNotFound: 'Nie znaleziono Varin CLI. Najpierw go zainstaluj.',
   providersReady: '✓ Dostawcy',
   providersLoading: '… Dostawcy',
@@ -199,6 +209,7 @@ const JA_MESSAGES: BootstrapMessages = {
   disconnected: '切断されました',
   reconnecting: '再接続中…',
   initialDataLoadFailed: 'Varin に接続しましたが、初期データの読み込みに失敗しました。',
+  startupFailed: 'Varin を起動できませんでした。ページを再読み込みして再試行してください。',
   cliNotFound: 'Varin CLI が見つかりません。先にインストールしてください。',
   providersReady: '✓ プロバイダ',
   providersLoading: '… プロバイダ',

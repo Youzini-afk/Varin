@@ -14,6 +14,7 @@ import { SettingsView } from '@/components/views/SettingsView';
 import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { TerminalView } from '@/components/views/TerminalView';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { dismissInitialSplash, setInitialSplashStatus } from '@/lib/splash';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { WorkbenchTransitionOverlay } from '@/components/ui/WorkbenchTransitionOverlay';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
@@ -2702,6 +2703,20 @@ export function MobileApp({ apis }: MobileAppProps) {
   // previously successful connection, keep MobileShell mounted so the
   // UI doesn't reload on every network blip.
   const isReconnecting = !catalogLoaded && catalogLoading && hasLoadedCatalog;
+  const hasRuntimeEndpoint = Boolean(getRuntimeApiBaseUrl());
+  const handleWorkbenchReady = React.useCallback((ready: boolean) => {
+    if (ready) dismissInitialSplash();
+  }, []);
+  React.useEffect(() => {
+    if (!fontsReady) return;
+    // A recovery/connect screen is usable UI too. Normal startup waits for the
+    // actual Shell paint; it must not leave index.html's cover above mobile UI.
+    if ((isNativeMobileApp && !hasRuntimeEndpoint) || (!catalogLoaded && !isReconnecting && showConnectionRecovery)) {
+      dismissInitialSplash();
+    } else {
+      setInitialSplashStatus(t(catalogLoaded ? 'splash.status.preparingWorkspace' : 'splash.status.connectingRuntime'));
+    }
+  }, [fontsReady, hasRuntimeEndpoint, catalogLoaded, isReconnecting, showConnectionRecovery, t]);
 
   // Hold a logo splash until the UI web font is loaded, so the first UI the user sees
   // already uses the real font instead of flashing the fallback and reflowing (FOUT).
@@ -2717,8 +2732,6 @@ export function MobileApp({ apis }: MobileAppProps) {
   // deleted, revoked token, unreachable). The connect screen is the only valid
   // UI then — regardless of what a stale isConnected flag claims (the store can
   // be poisoned by a bootstrap that ran against the webview's own origin).
-  const hasRuntimeEndpoint = Boolean(getRuntimeApiBaseUrl());
-
   if (isNativeMobileApp && (!hasRuntimeEndpoint || (!catalogLoaded && !isReconnecting))) {
     // A runtime endpoint is already selected (first connect or switching instances):
     // show a loader while it re-bootstraps instead of flashing the onboarding screen.
@@ -2796,7 +2809,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   }
 
   return (
-    <ErrorBoundary>
+    <ErrorBoundary onError={dismissInitialSplash}>
       <RuntimeAPIProvider apis={apis}>
         <TooltipProvider>
           <div className="h-full bg-background text-foreground">
@@ -2805,7 +2818,7 @@ export function MobileApp({ apis }: MobileAppProps) {
             <RunDebugCoordinator />
             <MobileAppUpdateToast />
             <WorkbenchProfileBridge />
-            <WorkbenchShellHost />
+            <WorkbenchShellHost onReadyChange={handleWorkbenchReady} />
             <WorkbenchTransitionOverlay />
             <Toaster position="top-center" offset="calc(var(--varin-safe-area-top, 0px) + 16px)" />
             <SearchCredentialDialog />

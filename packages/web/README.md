@@ -104,6 +104,11 @@ bun run splash:emit
 Commit the generated HTML changes with the generator changes. Splash tests cover projection and
 playback behavior; they do not freeze the generated CSS/HTML or the renderer's source text.
 
+Desktop and mobile browser startup retire this cover only after the selected workbench has painted,
+or a usable authentication/recovery/error view is present. Mobile readiness includes fonts and restored
+preferences. Module bootstrap failures write their reason to the cover; React startup failures reveal
+the existing error boundary. The handoff preserves the splash's authored exit animation.
+
 ## Cloud and remote deployment
 
 Use the Varin container images, Docker Compose, or the atomic SSH deployment helper. Image names,

@@ -15,6 +15,8 @@ interface ErrorBoundaryState {
 interface ErrorBoundaryProps {
   children: React.ReactNode;
   fallback?: React.ReactNode;
+  onError?(error: Error): void;
+  onReset?(): void;
 }
 
 interface ErrorBoundaryStrings {
@@ -46,9 +48,14 @@ class InnerErrorBoundary extends React.Component<InnerErrorBoundaryProps, ErrorB
     this.setState({ error, errorInfo, copied: false });
 
     console.error('Error caught by boundary:', error, errorInfo);
+    this.props.onError?.(error);
   }
 
   handleReset = () => {
+    if (this.props.onReset) {
+      this.props.onReset();
+      return;
+    }
     this.setState({ hasError: false, error: undefined, errorInfo: undefined });
   };
 
@@ -119,7 +126,7 @@ class InnerErrorBoundary extends React.Component<InnerErrorBoundaryProps, ErrorB
   }
 }
 
-export const ErrorBoundary: React.FC<ErrorBoundaryProps> = ({ children, fallback }) => {
+export const ErrorBoundary: React.FC<ErrorBoundaryProps> = ({ children, fallback, onError, onReset }) => {
   const { t } = useI18n();
 
   const strings: ErrorBoundaryStrings = React.useMemo(() => ({
@@ -134,7 +141,7 @@ export const ErrorBoundary: React.FC<ErrorBoundaryProps> = ({ children, fallback
   }), [t]);
 
   return (
-    <InnerErrorBoundary fallback={fallback} strings={strings}>
+    <InnerErrorBoundary fallback={fallback} strings={strings} onError={onError} onReset={onReset}>
       {children}
     </InnerErrorBoundary>
   );

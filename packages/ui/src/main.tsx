@@ -4,6 +4,8 @@ import './styles/fonts'
 import './styles/application'
 import { VarinApplication } from './apps/VarinApplication'
 import { SessionAuthGate } from './components/auth/SessionAuthGate'
+import { ErrorBoundary } from './components/ui/ErrorBoundary'
+import { dismissInitialSplash } from './lib/splash'
 import { ThemeSystemProvider } from './contexts/ThemeSystemContext'
 import { ThemeProvider } from './components/providers/ThemeProvider'
 import { MotionProvider } from './components/providers/MotionProvider'
@@ -55,9 +57,11 @@ createRoot(rootElement).render(
       <ThemeSystemProvider>
         <ThemeProvider>
           <MotionProvider>
-            <SessionAuthGate apis={runtimeAPIs}>
-              <VarinApplication apis={runtimeAPIs} />
-            </SessionAuthGate>
+            <ErrorBoundary onError={dismissInitialSplash} onReset={() => window.location.reload()}>
+              <SessionAuthGate apis={runtimeAPIs}>
+                <VarinApplication apis={runtimeAPIs} />
+              </SessionAuthGate>
+            </ErrorBoundary>
           </MotionProvider>
         </ThemeProvider>
       </ThemeSystemProvider>

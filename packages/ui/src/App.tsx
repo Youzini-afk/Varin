@@ -310,7 +310,7 @@ function App({ apis }: AppProps) {
     if (needsWorkbench && !workbenchReady) return;
     if (!canDismissInitialLoading({
       isDesktopShell: isDesktopRuntime,
-      runtimeReady: runtimeReady || desktopWorkspaceView === 'catalog-recovery',
+      runtimeReady: runtimeReady || desktopWorkspaceView === 'catalog-recovery' || (!isDesktopRuntime && Boolean(catalogError)),
       bootOutcomeKnown,
       bootViewIsMain,
     })) {
@@ -322,7 +322,7 @@ function App({ apis }: AppProps) {
     const timer = setTimeout(dismissInitialSplash, 150);
 
     return () => clearTimeout(timer);
-  }, [bootOutcomeKnown, bootViewIsMain, desktopWorkspaceView, isDesktopRuntime, runtimeReady, needsWorkbench, workbenchReady]);
+  }, [bootOutcomeKnown, bootViewIsMain, desktopWorkspaceView, isDesktopRuntime, runtimeReady, catalogError, needsWorkbench, workbenchReady]);
 
   // Deterministic malformed handling: name the failure on the splash so the user sees something
   // specific, but do NOT dismiss it. Only a valid boot outcome dismisses.
@@ -333,24 +333,10 @@ function App({ apis }: AppProps) {
     setInitialSplashStatus(t('splash.status.desktopFailed'));
   }, [isDesktopRuntime, bootInjectionStatus, t]);
 
-  // Non-desktop fallback: drop the splash after 5 seconds even if init stalls, so a hung runtime
-  // cannot hold the page behind a cover indefinitely.
-  React.useEffect(() => {
-    if (isDesktopRuntime) {
-      return;
-    }
-
-    const fallbackTimer = setTimeout(() => {
-      if (!runtimeReady) dismissInitialSplash();
-    }, 5000);
-
-    return () => clearTimeout(fallbackTimer);
-  }, [isDesktopRuntime, runtimeReady]);
-
   // The splash has no measurable progress, only a sequence of gates, so it names the gate it is
   // waiting on instead of inventing a percentage.
   React.useEffect(() => {
-    if (runtimeReady) return;
+    if (runtimeReady && (!needsWorkbench || workbenchReady)) return;
     if (isDesktopRuntime && !bootOutcomeKnown) {
       setInitialSplashStatus(t('splash.status.startingDesktop'));
       return;
@@ -358,7 +344,7 @@ function App({ apis }: AppProps) {
     setInitialSplashStatus(
       catalogLoaded ? t('splash.status.preparingWorkspace') : t('splash.status.connectingRuntime'),
     );
-  }, [bootOutcomeKnown, isDesktopRuntime, catalogLoaded, runtimeReady, t]);
+  }, [bootOutcomeKnown, isDesktopRuntime, catalogLoaded, runtimeReady, needsWorkbench, workbenchReady, t]);
 
   React.useEffect(() => {
     if (!embeddedSessionChat || typeof window === 'undefined') {
@@ -599,7 +585,7 @@ function App({ apis }: AppProps) {
   }, []);
 
   const renderDesktopOnboarding = (screen: React.ReactNode) => (
-    <ErrorBoundary>
+    <ErrorBoundary onError={dismissInitialSplash}>
       <RuntimeAPIProvider apis={apis}>
         <div className="h-full text-foreground bg-background">
           <React.Suspense fallback={<div className="h-full" />}>
@@ -651,7 +637,7 @@ function App({ apis }: AppProps) {
 
   if (embeddedSessionChat) {
     return (
-      <ErrorBoundary>
+      <ErrorBoundary onError={dismissInitialSplash}>
         <RuntimeAPIProvider apis={apis}>
           <TooltipProvider>
             <div className="h-full text-foreground bg-background">
@@ -673,7 +659,7 @@ function App({ apis }: AppProps) {
     || desktopWorkspaceView === 'catalog-recovery'
   ) {
     return (
-      <ErrorBoundary>
+      <ErrorBoundary onError={dismissInitialSplash}>
         <RuntimeInitializationRecovery
           onRetry={() => { void useThreadStore.getState().loadCatalog().catch(() => {}); }}
           isRetrying={catalogLoading}
@@ -685,7 +671,7 @@ function App({ apis }: AppProps) {
   const isBootShell = !catalogLoaded && !isDesktopRuntime;
 
   return (
-    <ErrorBoundary>
+    <ErrorBoundary onError={dismissInitialSplash}>
       <RuntimeAPIProvider apis={apis}>
         <FireworksProvider>
           <TooltipProvider>

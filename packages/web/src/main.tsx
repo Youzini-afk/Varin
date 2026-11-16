@@ -3,6 +3,8 @@ import { registerSW } from 'virtual:pwa-register';
 
 import type { RuntimeAPIs } from '@varin/application-client';
 import { getStoredMobileLayoutPreference } from '@varin/ui/lib/mobileLayoutPreference';
+import { getBootstrapMessages, readStoredLocaleForBootstrap } from '@varin/ui/lib/i18n/bootstrap';
+import { setInitialSplashStatus } from '@varin/ui/lib/splash';
 import type { HostedSurface } from '@varin/ui/lib/runtimeSurface';
 import {
   isEmbeddedSessionChat,
@@ -130,7 +132,11 @@ const start = async (): Promise<void> => {
   await Promise.all([getDesktopRelayRestoreReady(), applicationModule]);
 };
 
-void start();
+void start().catch(error => {
+  console.error('[Varin] Application startup failed:', error);
+  const messages = getBootstrapMessages(readStoredLocaleForBootstrap());
+  setInitialSplashStatus(`${messages.startupFailed} ${error instanceof Error ? error.message : String(error)}`);
+});
 
 if (import.meta.hot) {
   import.meta.hot.on('varin:theme-updated', (theme: unknown) => {
