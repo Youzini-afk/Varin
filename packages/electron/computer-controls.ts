@@ -16,20 +16,6 @@ export function createComputerControls() {
   let commands: Commands | undefined;
   let control: ComputerControlState | undefined;
   let busy = false, disposed = false, error = '';
-  const protectedWindows = new Map<BrowserWindow, boolean>();
-  const protect = (active: boolean) => {
-    if (process.platform !== 'win32') return;
-    for (const candidate of BrowserWindow.getAllWindows()) {
-      if (candidate === window || candidate.isDestroyed()) continue;
-      if (active && !protectedWindows.has(candidate)) {
-        protectedWindows.set(candidate, candidate.isContentProtected()); candidate.setContentProtection(true);
-      }
-    }
-    if (!active) {
-      for (const [candidate, prior] of protectedWindows) if (!candidate.isDestroyed()) candidate.setContentProtection(prior);
-      protectedWindows.clear();
-    }
-  };
   const bounds = () => {
     const area = screen.getPrimaryDisplay().workArea;
     const width = Math.min(560, area.width - 24), height = error ? 91 : 68;
@@ -38,7 +24,6 @@ export function createComputerControls() {
   const render = () => {
     if (disposed || process.platform !== 'win32') return;
     const visible = Boolean(control?.operator || control?.owner === 'human' || control?.transitioning || busy);
-    protect(visible);
     if (!visible) { window?.hide(); error = ''; return; }
     if (!window) {
       window = new BrowserWindow({ ...bounds(), show: false, frame: false, transparent: true, focusable: false,
@@ -46,6 +31,8 @@ export function createComputerControls() {
         webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, partition: 'varin-computer-controls' } });
       const created = window;
       created.on('closed', () => { if (window === created) window = undefined; });
+      // Exclude only this overlay. Protecting product windows also removes them
+      // from capture-based remote desktops while they still intercept input.
       window.setAlwaysOnTop(true, 'floating'); window.setContentProtection(true);
       window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
       window.webContents.on('will-navigate', (event, url) => {
@@ -95,6 +82,6 @@ export function createComputerControls() {
         const handle = candidate.getNativeWindowHandle(); return handle.length >= 8 ? Number(handle.readBigUInt64LE()) : handle.readUInt32LE();
       }).filter(Number.isSafeInteger);
     },
-    dispose() { disposed = true; protect(false); window?.destroy(); window = undefined; },
+    dispose() { disposed = true; window?.destroy(); window = undefined; },
   };
 }

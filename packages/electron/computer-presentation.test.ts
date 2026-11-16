@@ -80,12 +80,36 @@ const fixture = () => {
   const prepare = vi.fn(async () => { feedback.dispose(); controls.dispose(); });
   const requestConfirmation = vi.fn();
   const lifecycle = createQuitLifecycle({ app, state, prepare, requestConfirmation, reportError: error => { throw error; } });
-  const show = async () => { controls.update(control); feedback.show(gesture); await turn(); };
+  const show = async (state: ComputerControlState = control) => { controls.update(state); feedback.show(gesture); await turn(); };
   return { app, lifecycle, prepare, requestConfirmation, commands, show,
     blockUnload(value: boolean) { blockUnload = value; },
     dispose() { controls.dispose(); feedback.dispose(); },
   };
 };
+
+it('keeps product windows capturable when Computer controls activate or restore a disconnected human owner', async () => {
+  const main = new MockWindow({ x: 100, y: 100, width: 1280, height: 800 });
+  main.showInactive();
+  const privateWindow = new MockWindow({ x: 100, y: 100, width: 640, height: 480 });
+  privateWindow.setContentProtection(true);
+  for (const state of [control, { ...control, reachable: false }]) {
+    const f = fixture();
+    try {
+      await f.show(state);
+      expect(main.visible).toBe(true);
+      expect(main.protected).toBe(false);
+      expect(privateWindow.protected).toBe(true);
+      const overlays = MockWindow.getAllWindows().filter(window => window !== main && window !== privateWindow);
+      expect(overlays).toHaveLength(2);
+      expect(overlays.every(window => window.visible && window.protected)).toBe(true);
+      await f.show(state);
+      expect(main.protected).toBe(false);
+    } finally { f.dispose(); }
+    expect(main.isDestroyed()).toBe(false);
+    expect(main.protected).toBe(false);
+    expect(privateWindow.protected).toBe(true);
+  }
+});
 
 it('keeps Computer controls and feedback usable when the background-work quit confirmation is cancelled', async () => {
   const f = fixture();

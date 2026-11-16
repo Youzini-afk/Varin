@@ -311,6 +311,8 @@ failed actions show a failure marker rather than a successful click ripple.
 Electron renders the same presentation in nonfocusable, disabled, click-through Windows windows,
 converts physical pixels to per-display DIP, and excludes them from capture with
 [Electron content protection](https://www.electronjs.org/docs/latest/api/browser-window#winsetcontentprotectionenable).
+This exclusion applies only to the native Computer overlays. Controls never change capture protection
+on product windows: doing so hides Varin from capture-based remote desktops while its windows still receive input.
 They have no preload, credentials or privileged IPC. Linux/macOS use viewer feedback; their native
 capture paths cannot currently exclude a real-desktop overlay reliably.
 
