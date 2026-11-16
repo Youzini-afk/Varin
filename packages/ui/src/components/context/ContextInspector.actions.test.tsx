@@ -25,7 +25,7 @@ function snapshot(): ThreadSnapshot {
   return { identity, eventCursor: 1,
     thread: { thread_id: identity.threadId, main_branch_id: identity.branchId, title: 'Context actions', revision: 1, created_at_ms: 1, updated_at_ms: 1, pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 1, read_cursor: 0, unread: false, bot_id: null, parent_thread_id: null, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: 'message', active_run_id: run.id, latest_run: run }] },
     activeRun: run, history: [], historyPage: { head: 'message', previous: null }, inputs: [], operations: [], followups: [], goals: [], launch: null,
-    modelSelection: { desired: null, active: null }, policySelection: null,
+    modelSelection: { desired: null, active: null, exchange_closed: true }, policySelection: null,
     context: { checkpoint: null, jobs: [{ run: { ...run, id: 'context-job' }, job: { request: { key: 'summary', owner_run_id: run.id, branch_id: identity.branchId, through_id: 'message', expected_revision: 0, summary_recipe: { mode: 'background' } }, receipt: { run_id: 'context-job', branch_id: 'context-job-branch' } } } as ThreadSnapshot['context']['jobs'][number]] } };
 }
 let root: Root, container: HTMLElement;

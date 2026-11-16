@@ -13,7 +13,7 @@ const identity: ThreadIdentity = { runtime: 'agent', threadId: 'visible-thread',
 const snapshot = (title = 'Current context'): ThreadSnapshot => ({
   identity, eventCursor: 7, thread: threadSummary(identity.threadId, { title }), activeRun: null,
   history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], followups: [], goals: [],
-  launch: null, modelSelection: { desired: null, active: null }, policySelection: null, context: { checkpoint: null, jobs: [] },
+  launch: null, modelSelection: { desired: null, active: null, exchange_closed: true }, policySelection: null, context: { checkpoint: null, jobs: [] },
 });
 let root: Root; let container: HTMLDivElement;
 function ContextView({ active }: { active: boolean }) {

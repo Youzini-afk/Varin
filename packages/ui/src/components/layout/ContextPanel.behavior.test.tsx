@@ -52,7 +52,7 @@ beforeEach(() => {
   const api: Pick<ThreadsAPI, 'snapshot' | 'contextInspection' | 'observe'> = {
     snapshot: vi.fn<ThreadsAPI['snapshot']>(async identity => ({ identity, eventCursor: 0, thread: threadSummary(identity.threadId), activeRun: null,
       history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], followups: [], goals: [], launch: null,
-      modelSelection: { desired: null, active: null }, policySelection: null, context: { checkpoint: null, jobs: [] } } as ThreadSnapshot)),
+      modelSelection: { desired: null, active: null, exchange_closed: true }, policySelection: null, context: { checkpoint: null, jobs: [] } } as ThreadSnapshot)),
     contextInspection: async () => ({ head: null, counts: { total: 0, user: 0, assistant: 0, tool: 0 }, latestRequest: null, contextRequest: null }),
     observe: async (_cursor, _listener, { signal }) => new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true })),
   };

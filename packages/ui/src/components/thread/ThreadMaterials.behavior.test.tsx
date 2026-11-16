@@ -405,7 +405,7 @@ function artifactConversationFixture() {
   const snapshot = async (work: ThreadIdentity): Promise<ThreadSnapshot> => ({ identity: work, eventCursor: 0,
     thread: threadSummary(work.threadId, { main_branch_id: work.branchId, branches: [{ branch_id: work.branchId, head: null, active_run_id: null, latest_run: null }] }),
     activeRun: null, history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], followups: [], goals: [],
-    launch: null, modelSelection: { desired: null, active: null }, policySelection: null, context: { checkpoint: null, jobs: [] } });
+    launch: null, modelSelection: { desired: null, active: null, exchange_closed: true }, policySelection: null, context: { checkpoint: null, jobs: [] } });
   const submit = vi.fn(async (input: ThreadSubmit) => ({ thread_id: input.threadId, branch_id: input.branchId,
     run_id: 'run:submitted', input_id: 'input:submitted', cursor: 1 }));
   const api: ThreadsAPI = { inspectMany: unused, conversationTree: unused, treePreview: unused, attachments: { upload: unused, read: unused }, attention: unused, historyRuns: async (_identity, { headId }) => ({ head: headId, runs: [] }), historyRunPreview: async () => '', historyUsage: async () => [], contextHistory: unused, fileTarget: unused, usage: unused,

@@ -3,7 +3,7 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 95 as const;
+export const KERNEL_PROTOCOL_VERSION = 96 as const;
 export const KERNEL_REQUEST_WINDOW = 256 as const;
 export const KERNEL_STREAM_CREDITS = 4 as const;
 export const KERNEL_INLINE_MAX_BYTES = 262144 as const;
@@ -15,7 +15,7 @@ export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.driver.finish","runtime
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["runtime.driver.model","runtime.driver.tool","runtime.driver.wait","process.write","process.resize","runtime.tools.invoke","file.lease.wait"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.child.user.receipt":"branchId","runtime.child.user.accept":"branchId","runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId","runtime.input.sendNow":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.model_reference.export","runtime.driver.finish","runtime.driver.wait","runtime.driver.context","runtime.driver.cancel","runtime.driver.model","runtime.driver.tool","runtime.driver.checkpoint","runtime.driver.deliver","runtime.driver.receipt","runtime.context.observations.capture","runtime.context.observations.import","runtime.context.observations.admit","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.model_text.admit","runtime.model_text.read","runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v95" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v96" as const;
 
 export type KernelMethod =
   | "runtime.input.inheritedReceipt"
@@ -3321,7 +3321,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = ({v: 95; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown})) | {v: 95; kind: 'runtime-event'; stream: 'resync'; cursor: number; kernelEpoch?: string; reason: string};
+export type AgentRuntimeStreamEvent = ({v: 96; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown})) | {v: 96; kind: 'runtime-event'; stream: 'resync'; cursor: number; kernelEpoch?: string; reason: string};
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
@@ -3954,6 +3954,7 @@ export interface RunModelSelection {
 export interface RunModelSelections {
   desired: RunModelSelection | null;
   active: RunModelSelection | null;
+  exchange_closed: boolean;
 }
 
 export interface RunStartParams {

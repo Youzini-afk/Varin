@@ -124,11 +124,13 @@ export function estimateMemoryOrganizerInputTokens(system: string, prompt: strin
 }
 
 export function memoryOrganizerOutputReservation(contextWindow: number, maxTokens: number): number {
-  if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0
-    || !Number.isSafeInteger(maxTokens) || maxTokens <= 0) {
-    throw new Error("Memory organizer model has no usable context/output capacity");
+  if (!Number.isSafeInteger(contextWindow) || contextWindow <= 0) {
+    throw new Error("Memory organizer needs the model's context window. Set its context capacity in model settings.");
   }
-  return Math.min(maxTokens, Math.max(512, Math.floor(contextWindow / 4)));
+  const reservation = Math.max(512, Math.floor(contextWindow / 4));
+  // An omitted output limit uses the provider default. It is not zero capacity;
+  // reserve the same share of context used for models with a known output limit.
+  return maxTokens > 0 ? Math.min(maxTokens, reservation) : reservation;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (

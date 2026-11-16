@@ -29,7 +29,7 @@ function snapshot(identity: ThreadIdentity): ThreadSnapshot {
     branches: [{ branch_id: identity.branchId, head: null, active_run_id: null, latest_run: run }] },
     activeRun: null, history: [], historyPage: { head: null, previous: null }, inputs: [], operations: [], followups: [], goals: [],
     launch: { run_id: run.id, selection: { source, tools: [{ name: 'file_read', requirements: { source: 'source', process: false } }] } } as ThreadSnapshot['launch'],
-    modelSelection: { active: null, desired: null }, policySelection: null, context: { checkpoint: null, jobs: [] } };
+    modelSelection: { active: null, desired: null, exchange_closed: true }, policySelection: null, context: { checkpoint: null, jobs: [] } };
 }
 const assistant = (id: string, runId: string, text: string): HistoryItem => ({ id, run_id: runId, thread_id: review.threadId, parent: null, source: 'assistant', provider: null, content: { content: { kind: 'text', text } } });
 function fixture() {

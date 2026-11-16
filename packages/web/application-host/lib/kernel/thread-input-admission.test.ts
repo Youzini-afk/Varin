@@ -24,7 +24,7 @@ function fixture() {
   };
   const queued = {
     enqueueReceipt: vi.fn(async () => null), childExecutions: vi.fn(async () => []),
-    modelSelections: vi.fn(async () => ({ desired: null, active: null })), launch: vi.fn(async () => null), run: vi.fn(async () => ({ id: 'run', configuration })),
+    modelSelections: vi.fn(async () => ({ desired: null, active: null, exchange_closed: true })), launch: vi.fn(async () => null), run: vi.fn(async () => ({ id: 'run', configuration })),
     enqueue: vi.fn(async () => ({ input_id: 'queued', run_id: 'run', mode: 'boundary' as const, cursor: 2 })),
     childForThread: vi.fn(async () => ({ child_branch_id: identity.branchId, operation_id: 'child' })),
     acceptChildContinuation: vi.fn(async () => ({ execution_id: 'continued' })),

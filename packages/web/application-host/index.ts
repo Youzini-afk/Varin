@@ -245,7 +245,7 @@ import { createPromptToolCatalog } from './lib/memory/prompt-tool-catalog.js';
 
 import { createBotService } from './lib/bots/bot-service.js';
 import { createBotSessions } from './lib/bots/bot-sessions.js';
-import { botModelMatches, resolveBotModelSelection } from './lib/bots/bot-model.js';
+import { resolveBotModelSelection } from './lib/bots/bot-model.js';
 import { createBotLifecycleRuntime } from './lib/bots/bot-lifecycle-runtime.js';
 import { registerBotRoutes } from './lib/bots/bot-routes.js';
 import { createBotPresencePublisher } from './lib/bots/bot-presence.js';
@@ -1554,10 +1554,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         for (const thread of scope.threads.filter(thread => sessions.has(thread.thread_id))) {
           for (const branch of thread.branches) {
             const run = branch.latest_run;
-            if (!run || run.cancel_requested) continue;
-            const selected = await agentRuntime.modelSelections(run.id);
-            const configuration = (selected.desired?.configuration ?? run.configuration) as Parameters<typeof botModelMatches>[0];
-            if (!botModelMatches(configuration, model)) await threads.selectModel({ runtime: 'agent', threadId: thread.thread_id, branchId: branch.branch_id, runId: run.id,
+            if (!run) continue;
+            await threads.refreshBotModel({ runtime: 'agent', threadId: thread.thread_id, branchId: branch.branch_id, runId: run.id,
               key: `bot-profile:${bot.id}:${profileRevision}:${branch.branch_id}`, model });
           }
         }
@@ -2216,7 +2214,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     releaseDeletedResources: signal => threadMaterialLifetime.releaseDeleted(signal),
     releaseCollectedResources: signal => interactiveUi.releaseDeleted(signal),
     retryCollectedResources: signal => interactiveUi.releaseDeleted(signal, true),
-    onError: () => console.error('[ContentMaintenance] Deleted conversation cleanup will retry after runtime activity'),
+    onError: error => console.error('[ContentMaintenance]', errorMessage(error)),
   });
   requestSourceMaintenance=contentMaintenance.resourceIdle;
   const removeWorkspaceIdleMaintenance=kernelClient.onWorkspaceIdle(()=>contentMaintenance.resourceIdle());

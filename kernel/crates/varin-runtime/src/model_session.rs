@@ -104,16 +104,21 @@ fn build(
 ) -> Result<RunStart, ExecutionError> {
     let BoundModel { binding, provider } =
         build_provider(configuration, credentials, credential_ref, identity)?;
-    Ok(RunStart {
+    Ok(start_with_model(SelectedModel { binding, provider }))
+}
+
+/// Assemble a default execution around an already prepared model.
+pub fn start_with_model(model: SelectedModel) -> RunStart {
+    RunStart {
         driver: std::sync::Arc::new(crate::driver::DefaultRunDriver),
         context_preparation: Arc::new(NoopContextPreparation),
-        binding,
+        binding: model.binding,
         policy_state: Value::Null,
-        provider,
+        provider: model.provider,
         tools: Arc::new(NoTools),
         policy: Arc::new(DefaultAgentPolicy),
         progress: ProgressSink::default(),
-    })
+    }
 }
 pub fn build_provider(
     configuration: ModelSessionConfiguration,

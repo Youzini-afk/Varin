@@ -38,6 +38,20 @@ it('coalesces deletion requests and resumes after original execution produces it
   expect(f.removed).toHaveBeenCalledTimes(3);
 });
 
+it('reports the failed cleanup stage and preserves its actual error', async () => {
+  const error = new Error('source retirement failed: workspace is busy');
+  const f = fixture(async () => { throw error; });
+  await vi.runOnlyPendingTimersAsync();
+  expect(f.onError).toHaveBeenCalledOnce();
+  expect(f.onError.mock.calls[0]![0]).toMatchObject({
+    message: 'release deleted resources: source retirement failed: workspace is busy', cause: error,
+  });
+  expect(f.collectContent).not.toHaveBeenCalled();
+  f.activity(); await vi.runOnlyPendingTimersAsync();
+  expect(f.onError).toHaveBeenCalledOnce();
+  await f.maintenance.dispose();
+});
+
 it('retries pending source ownership only on the actual resource idle wake after history collection completes',async()=>{
   const release=vi.fn().mockResolvedValueOnce({pending:true}).mockResolvedValue({pending:false});
   const f=fixture(release);await vi.runOnlyPendingTimersAsync();

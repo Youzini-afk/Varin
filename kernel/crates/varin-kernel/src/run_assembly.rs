@@ -163,6 +163,12 @@ impl RunAssembly {
             ));
         }
         check_cancelled()?;
+        let select_model = if is_context_job {
+            false
+        } else {
+            let models = self.models.inspect(&run.id)?;
+            models.exchange_closed && models.desired.is_some()
+        };
         let mut selected_credential_scope = None;
         let mut start = if text_compaction {
             let read = runtime.catalog().lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?.capture_launch(&run.id).map_err(domain)?.ok_or_else(||KernelError::Protocol("text summary launch is missing".into()))?;
@@ -170,42 +176,24 @@ impl RunAssembly {
             selected_credential_scope = launch.selection.credential_scope.clone();
             if p.credential_scope.is_some() { return Err(KernelError::Protocol("text compaction uses its original credential identity without credential rebinding".into())); }
             Ok(varin_runtime::context_job::text_compaction_start(&launch.selection))
-        } else {
-            let configuration = serde_json::from_value(run.configuration.clone())?;
-            if let Some(scope) = p.credential_scope {
-            let scope = varin_runtime::providers::auth::CredentialScope {
-                reference: scope.reference,
-                authority: scope.authority,
-                account: scope.account,
-                generation: scope.generation.try_into().map_err(|_| {
-                    KernelError::Protocol("credential generation must be nonnegative".into())
-                })?,
-            };
-            selected_credential_scope = Some(scope.clone());
-            let active_model = runtime
-                .catalog()
-                .lock()
-                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                .model_selections(&p.run_id)
-                .map_err(domain)?
-                .active;
-            let resolver = match active_model {
-                Some(active) => credential_bridge.resolver_for_binding(
-                    &p.run_id,
-                    &active.binding_id,
-                    scope.clone(),
-                ),
-                None => credential_bridge.resolver(&p.run_id, scope.clone()),
+        } else if select_model {
+            // At a closed request boundary, cold assembly can use the prepared
+            // choice before binding a retired adapter/account from the old Run.
+            // Catalog activation rechecks that the exchange is still closed.
+            let selected = self.models
+                .select(&run.id, run.epoch, &Default::default())
+                .map_err(|error| KernelError::Operation(error.to_string()))?;
+            if let Some(model) = selected {
+                selected_credential_scope = self.models.inspect(&run.id)?
+                    .active
+                    .and_then(|selection| selection.credential_scope);
+                Ok(model_session::start_with_model(model))
+            } else {
+                self.bind_model(&run, p.credential_scope, &mut selected_credential_scope)
             }
-            .map_err(|_| {
-                KernelError::Authorization("private Host credential owner unavailable".into())
-            })?;
-            model_session::bind_with_credentials(configuration, resolver, scope)
         } else {
-            model_session::bind(configuration)
-            }
-        }
-        .map_err(|e| KernelError::Operation(e.to_string()))?;
+            self.bind_model(&run, p.credential_scope, &mut selected_credential_scope)
+        }?;
         check_cancelled()?;
         if let Some(plan) = summary_plan {
             start = varin_runtime::context_job::configure_compaction_start(start, plan);
@@ -660,6 +648,36 @@ impl RunAssembly {
             } }
         });
         Ok(PreparedLaunch::Start(start))
+    }
+    fn bind_model(
+        &self,
+        run: &varin_runtime::Run,
+        scope: Option<crate::protocol_generated::CredentialScope>,
+        selected_scope: &mut Option<varin_runtime::providers::auth::CredentialScope>,
+    ) -> Result<RunStart, KernelError> {
+        let configuration = serde_json::from_value(run.configuration.clone())?;
+        let start = if let Some(scope) = scope {
+            let scope = varin_runtime::providers::auth::CredentialScope {
+                reference: scope.reference,
+                authority: scope.authority,
+                account: scope.account,
+                generation: scope.generation.try_into().map_err(|_| {
+                    KernelError::Protocol("credential generation must be nonnegative".into())
+                })?,
+            };
+            *selected_scope = Some(scope.clone());
+            let active = self.models.inspect(&run.id)?.active;
+            let resolver = match active {
+                Some(active) => self.credentials.resolver_for_binding(&run.id, &active.binding_id, scope.clone()),
+                None => self.credentials.resolver(&run.id, scope.clone()),
+            }.map_err(|_| {
+                KernelError::Authorization("private Host credential owner unavailable".into())
+            })?;
+            model_session::bind_with_credentials(configuration, resolver, scope)
+        } else {
+            model_session::bind(configuration)
+        };
+        start.map_err(|error| KernelError::Operation(error.to_string()))
     }
     pub fn observe_completion(&self, handle: RunHandle) {
         let run_id = handle.run_id.clone();

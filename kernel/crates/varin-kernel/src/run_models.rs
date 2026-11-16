@@ -184,7 +184,7 @@ impl RunModels {
             provider: bound.provider,
         })
     }
-    fn select(
+    pub(crate) fn select(
         self: &Arc<Self>,
         run_id: &str,
         epoch: u64,

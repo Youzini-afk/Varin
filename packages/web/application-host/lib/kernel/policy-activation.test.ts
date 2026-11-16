@@ -201,7 +201,7 @@ it('revocation releases only its candidate and a stale restart cannot replace a 
 it('main-model continuation cleanup preserves all pinned policy credential generations', async () => {
   const f = fixture(); await f.runtime.preparePolicy('run'); f.route('new'); await f.runtime.refreshPolicy('run');
   f.credentials.add('model:active');
-  f.runtime.releaseMainModelCredentials('run', { active: { binding_id: 'model:active' } as never, desired: null });
+  f.runtime.releaseMainModelCredentials('run', { active: { binding_id: 'model:active' } as never, desired: null, exchange_closed: true });
   expect(f.credentials).toEqual(new Set(['policy:0:agentPlanning:configuration', 'policy:1:agentPlanning:configuration']));
   expect(f.bridge.binding('run', 0)).toBeDefined(); expect(f.bridge.binding('run', 1)).toBeDefined();
 });

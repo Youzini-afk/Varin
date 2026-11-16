@@ -42,7 +42,7 @@ function fixture() {
     familyList: vi.fn(async () => ({ rootThreadId: identity.threadId,
       members: members.map(member => ({ threadId: member.threadId, branches: [{ branchId: member.branchId }] })) })),
     launch: vi.fn(async () => null), run: vi.fn(async () => run),
-    modelSelections: vi.fn(async () => ({ desired: null, active: null })),
+    modelSelections: vi.fn(async () => ({ desired: null, active: null, exchange_closed: true })),
     submit: vi.fn<AgentRuntimeClient['submit']>(async input => ({ thread_id: input.threadId, branch_id: input.branchId, run_id: run.id, input_id: 'input:pdf', cursor: 1 })),
     enqueue: vi.fn<AgentRuntimeClient['enqueue']>(async input => ({ run_id: run.id, input_id: 'input:queued', mode: input.mode, cursor: 2 })),
     childForThread: vi.fn(async (threadId: string) => threadId === child.threadId ? { child_branch_id: child.branchId, operation_id: 'operation:child' } : null),

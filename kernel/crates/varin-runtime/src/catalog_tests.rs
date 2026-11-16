@@ -2103,6 +2103,7 @@ fn model_activation_after_a_closed_exchange_survives_reopen_without_rewriting_it
             .is_err(),
         "an active request cannot be switched"
     );
+    assert!(!db.model_selections(&receipt.run_id).unwrap().exchange_closed);
     db.commit_execution(
         &receipt.run_id,
         db.epoch(),
@@ -2133,6 +2134,7 @@ fn model_activation_after_a_closed_exchange_survives_reopen_without_rewriting_it
         .is_err(),
         "a changed binding requires a committed activation"
     );
+    assert!(db.model_selections(&receipt.run_id).unwrap().exchange_closed);
     assert!(
         db.activate_model_selection(&selection, db.epoch(), &bound.binding)
             .unwrap()

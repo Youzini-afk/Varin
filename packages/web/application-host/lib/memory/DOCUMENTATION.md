@@ -147,6 +147,11 @@ in another original MemoryWork; completed output is reused after restart. Capaci
 carry continuation offsets; partially viewed accounts cannot be destructively retired before reading them.
 There is no fixed reflection workflow or iteration limit.
 
+Organizer batching requires the selected model's context window. An unset maximum output is an
+unspecified provider limit, not zero capacity: planning reserves a quarter of the known window for
+the response, capped by the output limit when configured. A missing context window names the model
+settings requirement rather than reporting a generic context/output capacity failure.
+
 `maintainKnowledge` validates the actual observed inputs and publishes outputs, retirements, dependency
 invalidations, lineage and its receipt in one native transaction. Unrelated mutations do not invalidate
 the group. `source.predecessors` records historical rewrite inputs and retains original passages;

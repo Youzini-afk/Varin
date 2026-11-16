@@ -205,6 +205,45 @@ fn hybrid_file_read_can_be_selected_without_granting_a_source() {
 }
 
 #[test]
+fn cold_assembly_uses_selected_model_without_binding_the_removed_adapter() {
+    use varin_runtime::catalog::launches::LaunchSelection;
+    let root = std::env::temp_dir().join(format!("selected-launch-{}", uuid::Uuid::new_v4()));
+    let mut catalog = varin_runtime::Catalog::open(&root).unwrap();
+    catalog.create_thread("thread", "branch").unwrap();
+    let next: model_session::ModelSessionConfiguration = serde_json::from_value(json!({
+        "providerFamily":"openai-responses", "endpoint":"https://fixture.invalid/responses",
+        "allowAnonymous":true, "model":"current", "configurationGeneration":2,
+    })).unwrap();
+    let mut old = next.clone();
+    old.adapter_id = Some("removed-adapter".into());
+    old.model = "old".into();
+    assert!(model_session::bind(old.clone()).is_err());
+    let receipt = catalog.submit(&varin_runtime::SubmitInput {
+        key:"input".into(), thread_id:"thread".into(), branch_id:"branch".into(), expected_head:None,
+        input:json!("Continue the Bot's work"), configuration:serde_json::to_value(&old).unwrap(),
+    }).unwrap();
+    let mut binding = model_session::bind(next.clone()).unwrap().binding;
+    binding.model = old.model.clone();
+    // This is the identity persisted while the old adapter still existed.
+    binding.connection_identity = "connection-sha256-retired-fixture".into();
+    catalog.select_launch(&receipt.run_id, LaunchSelection::from_binding(
+        &binding, crate::observations::default_policy_identity(), None,
+    )).unwrap();
+    catalog.select_model(&receipt.run_id, "current-profile", next, None).unwrap();
+    let run = catalog.run(&receipt.run_id).unwrap();
+    let runtime = Arc::new(RunSupervisor::new(catalog));
+    let (assembly, _frames) = assembly(runtime.clone());
+    let params = RunPreparation::new(serde_json::from_value(json!({"runId":run.id})).unwrap(), &run).unwrap();
+    let PreparedLaunch::Start(start) = assembly.prepare(params, None, || false).unwrap() else { panic!("expected executable launch") };
+    assert_eq!(start.binding.model, "current");
+    assert_eq!(runtime.catalog().lock().unwrap().run(&run.id).unwrap().configuration["model"], "current");
+    assembly.tools.release(&run.id);
+    assembly.models.release(&run.id);
+    drop(start); drop(assembly); drop(runtime);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn calendar_and_failed_queued_rounds_use_current_builtins_without_rewriting_prior_launch() {
     use varin_runtime::catalog::{calendar, context::ContextProposal, launches::{LaunchSelection, SourceSelection}};
     use varin_runtime::{Catalog, RunState, SubmitInput};

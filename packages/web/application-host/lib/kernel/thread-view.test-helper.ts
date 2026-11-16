@@ -9,5 +9,5 @@ export function nativeThreadView(identity: ThreadIdentity, fields: Partial<Threa
       observer_project_ids: [], branches: [{ branch_id: identity.branchId, active_run_id: null, head: null, latest_run: null }] },
     activeRun: null, runFailure: null, history: [], historyPage: { head: null, previous: null },
     inputs: [], operations: [], followups: [], goals: [], launch: null,
-    modelSelection: { desired: null, active: null }, policySelection: null, context: { checkpoint: null, jobs: [] }, ...fields };
+    modelSelection: { desired: null, active: null, exchange_closed: true }, policySelection: null, context: { checkpoint: null, jobs: [] }, ...fields };
 }

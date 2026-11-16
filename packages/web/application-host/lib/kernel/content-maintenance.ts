@@ -18,6 +18,12 @@ export function createContentMaintenance(options: {
   let retry: ReturnType<typeof setTimeout> | undefined;
   let cleanupAttempts = 0;
   let cleanupOutstanding = false;
+  let lastFailure: string | undefined;
+  const reportFailure = (error: Error) => {
+    if (lastFailure === error.message) return;
+    lastFailure = error.message;
+    options.onError(error);
+  };
   let nextCleanupOnly = false;
   let lastCollection: { report: Awaited<ReturnType<AgentRuntimeClient['collectContent']>>; pendingSources: boolean; uiCollected: boolean } | undefined;
   const request = (cleanupOnly = false) => {
@@ -33,8 +39,10 @@ export function createContentMaintenance(options: {
       const cleanupOnly = nextCleanupOnly && Boolean(lastCollection?.report.status === 'completed' && options.releaseCollectedResources);
       nextCleanupOnly = false;
       let metadataCollected = false;
+      let stage = 'release deleted resources';
       running = (async () => {
         if (cleanupOnly) {
+          stage = 'retry UI resource cleanup';
           const original = lastCollection!;
           if (owner === generation) cleanupOutstanding = true;
           // A failed/unknown full UI sweep may still have records to release.
@@ -46,6 +54,7 @@ export function createContentMaintenance(options: {
           return { ...original.report, pendingSources: Boolean(original.pendingSources || collected?.pending), pendingUiCleanup: Boolean(collected?.pending) };
         }
         const resources=await options.releaseDeletedResources?.(lifetime.signal);
+        stage = 'collect conversation content';
         const report = await options.runtime.collectContent(lifetime.signal);
         metadataCollected = report.status === 'completed';
         if (owner === generation) lastCollection = { report, pendingSources: resources?.pending ?? false, uiCollected: false };
@@ -54,6 +63,7 @@ export function createContentMaintenance(options: {
         // finish the same deletion, and never sweep after failed/deferred tracing.
         const canCollect = report.status === 'completed' && Boolean(options.releaseCollectedResources);
         if (canCollect && owner === generation) cleanupOutstanding = true;
+        stage = 'release collected UI resources';
         const collected = canCollect ? await options.releaseCollectedResources!(lifetime.signal) : undefined;
         if (canCollect && owner === generation && lastCollection) lastCollection.uiCollected = true;
         const pendingUiCleanup = canCollect ? Boolean(collected?.pending) : cleanupOutstanding;
@@ -62,7 +72,8 @@ export function createContentMaintenance(options: {
         if (owner !== generation || lifetime.signal.aborted) return;
         cleanupOutstanding = report.pendingUiCleanup;
         pending = dirty || report.pendingSources || report.status !== 'completed' || (report.pendingDeletedThreads ?? 0) > 0;
-        if (report.status === 'failed') options.onError(new Error(report.reason ?? 'Content collection failed'));
+        if (report.status === 'failed') reportFailure(new Error(`collect conversation content: ${report.reason ?? 'Content collection failed'}`));
+        else if (report.status === 'completed') lastFailure = undefined;
         // A short-lived content reader/publication need not emit a durable runtime event.
         // Retry that busy admission after the same quiet period used by storage checkpoints.
         // A committed UI release can still have an OS unlink failure. Its native
@@ -78,7 +89,7 @@ export function createContentMaintenance(options: {
         }
       }).catch(error => {
         if (lifetime.signal.aborted || owner !== generation) return;
-        options.onError(error);
+        reportFailure(new Error(`${stage}: ${error instanceof Error ? error.message : String(error)}`, { cause: error }));
         // Losing a cleanup response is not evidence of completion. Retain the
         // obligation and retry its durable native receipt after transient errors.
         if (!cleanupOnly && !metadataCollected) lastCollection = undefined;
@@ -92,7 +103,7 @@ export function createContentMaintenance(options: {
     });
     scheduled.unref?.();
   };
-  const initialize = () => { ++generation; lastCollection = undefined; request(); };
+  const initialize = () => { ++generation; lastCollection = undefined; lastFailure = undefined; request(); };
   const remove = [
     options.runtime.onEvent(event => { if (pending && event.stream === 'durable') request(); }),
     options.runtime.onReady(() => { void initialize(); }),

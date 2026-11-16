@@ -47,6 +47,7 @@ describe("memory organizer (BC2)", () => {
   let materials: HistoryMemoryMaterial[];
   let autoOrganize: { user: boolean; bot: boolean };
   let contextWindow: number | null;
+  let maxTokens: number;
   let organizerConfigured: boolean;
   let organizers: Set<ReturnType<typeof createMemoryOrganizer>>;
   let releaseInference: Array<() => void>;
@@ -80,7 +81,7 @@ describe("memory organizer (BC2)", () => {
       },
       async model(selection) {
         return { ...selection, name: selection.modelId, api: "openai-completions", baseUrl: "https://inference.invalid",
-          input: ["text"], ...(contextWindow === null ? {} : { contextWindow }), maxTokens: 4_096 };
+          input: ["text"], ...(contextWindow === null ? {} : { contextWindow }), maxTokens };
       },
       async describeDecision() { return { status: "unconfigured" }; },
       async bind(selection, maxOutputTokens) {
@@ -202,6 +203,7 @@ describe("memory organizer (BC2)", () => {
     materials = [];
     autoOrganize = { user: true, bot: true };
     contextWindow = 200_000;
+    maxTokens = 4_096;
     organizerConfigured = true;
   });
 
@@ -298,6 +300,14 @@ describe("memory organizer (BC2)", () => {
   const proposal = (quote: string, content = quote) => JSON.stringify({ memories: [{ action: 'new', scope: 'bot', nature: 'decision', content, trigger: 'catalog', source: 'u0', quote }] });
   const owner: MemoryOwner = { scope: 'bot', ownerId: 'ws-1' };
   const settled = (store: KnowledgeStore) => wait(async () => (await store.listOrganizerProgress()).some(row => ['formed', 'reviewed-empty', 'failed'].includes(row.status)));
+
+  it('organizes with an omitted maximum output, budgeting against the known context window', async () => {
+    maxTokens = 0;
+    const store = await setup();
+    const org = organizer(memory()); org.noteScope('bot:ws-1'); await settled(store);
+    expect(calls.find(call => call.method === 'bind')?.params.maxOutputTokens).toBe(50_000);
+    expect(calls.some(call => call.method === 'generate')).toBe(true);
+  });
 
   it('discovers only Bot sources, without opening ordinary or user stores', async () => {
     const store = await setup(); const opened: string[] = [];

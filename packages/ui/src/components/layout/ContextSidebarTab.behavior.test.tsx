@@ -49,7 +49,7 @@ it('restores context cards and raw JSON while header usage stays independent of 
     thread: { thread_id: identity.threadId, main_branch_id: identity.branchId, title: 'Context inspection', revision: 1, created_at_ms: 1, updated_at_ms: 2, pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 10, read_cursor: 0, unread: false, bot_id: null, parent_thread_id: null, observer_project_ids: [null], branches: [{ branch_id: identity.branchId, head: 'tool:39', active_run_id: run.id, latest_run: run }] },
     activeRun: run, history: Array.from({ length: 20 }, (_, i) => ({ id: `tool:${i + 20}`, thread_id: identity.threadId, parent: `tool:${i + 19}`, source: 'tool', run_id: 'run', provider: null, content: { text: `result ${i + 20}` } })),
     historyPage: { head: 'tool:39', previous: 'tool:20' }, inputs: [], operations: [], followups: [], goals: [], launch: null,
-    modelSelection: { desired: null, active: null },
+    modelSelection: { desired: null, active: null, exchange_closed: true },
     policySelection: null, context: { checkpoint: null, jobs: [], policy: { enabled: true, backgroundPreparation: true, reserveTokens: 15000, preparationWaterline: .75, capacityTokens: 100000 } } };
   const inspection: ThreadContextInspection = { head: 'tool:39', counts: { total: 40, user: 1, assistant: 1, tool: 38 }, latestRequest: request, contextRequest: request };
   let resolve!: (value: ThreadContextInspection) => void;

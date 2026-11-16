@@ -70,7 +70,7 @@ async function fixture() {
       branches: [{ branch_id: identity.branchId, active_run_id: run.id, head: null, latest_run: run }] })),
     run: vi.fn<AgentRuntimeClient['run']>(async () => run), input: vi.fn<AgentRuntimeClient['input']>(async () => queued),
     context: vi.fn<AgentRuntimeClient['context']>(async () => checkpoint(a)), launch: vi.fn<AgentRuntimeClient['launch']>(async () => null),
-    modelSelections: vi.fn<AgentRuntimeClient['modelSelections']>(async () => ({ desired: null, active: null })),
+    modelSelections: vi.fn<AgentRuntimeClient['modelSelections']>(async () => ({ desired: null, active: null, exchange_closed: true })),
     inputReceipt: vi.fn<AgentRuntimeClient['inputReceipt']>(async () => null), enqueueReceipt: vi.fn<AgentRuntimeClient['enqueueReceipt']>(async () => null),
     submit: vi.fn<AgentRuntimeClient['submit']>(async () => submitReceipt), enqueue: vi.fn<AgentRuntimeClient['enqueue']>(async () => enqueueReceipt),
     editInput: vi.fn<AgentRuntimeClient['editInput']>(async () => ({ ...queued, revision: queued.revision + 1 })),

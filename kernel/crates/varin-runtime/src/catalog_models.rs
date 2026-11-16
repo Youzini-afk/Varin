@@ -29,6 +29,7 @@ pub struct RunModelSelection {
 pub struct RunModelSelections {
     pub desired: Option<RunModelSelection>,
     pub active: Option<RunModelSelection>,
+    pub exchange_closed: bool,
 }
 #[derive(Serialize, Deserialize)]
 struct ModelSelectionRecord {
@@ -48,6 +49,9 @@ fn decode_selection(body: &str) -> Result<RunModelSelection> {
 fn selection_record(db: &Connection, id: &str) -> Result<RunModelSelection> {
     let body: String = db.query_row("SELECT body FROM model_selections WHERE id=?1", [id], |row| row.get(0))?;
     decode_selection(&body)
+}
+fn model_exchange_open(db: &Connection, run_id: &str) -> Result<bool> {
+    Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state IN ('prepared','dispatched')) OR EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0)", [run_id], |row| row.get(0))?)
 }
 impl Catalog {
     pub fn model_selections(&self, run_id: &str) -> Result<RunModelSelections> {
@@ -72,7 +76,7 @@ impl Catalog {
             .optional()?
             .map(|body| decode_selection(&body))
             .transpose()?;
-        Ok(RunModelSelections { desired, active })
+        Ok(RunModelSelections { desired, active, exchange_closed: !model_exchange_open(&self.db, run_id)? })
     }
     pub fn select_model(
         &mut self,
@@ -248,8 +252,7 @@ impl Catalog {
         if stored.status != RunModelSelectionStatus::Ready {
             return Err(RuntimeError::Conflict("selected model is not ready".into()));
         }
-        let unresolved: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state IN ('prepared','dispatched')) OR EXISTS(SELECT 1 FROM tool_calls c JOIN model_steps m ON m.id=c.request_id WHERE m.run_id=?1 AND c.committed=0)",[&run.id],|row|row.get(0))?;
-        if unresolved {
+        if model_exchange_open(&tx, &run.id)? {
             return Err(RuntimeError::Conflict(
                 "model exchange has not closed".into(),
             ));

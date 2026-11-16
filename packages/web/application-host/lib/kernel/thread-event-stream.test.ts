@@ -7,6 +7,7 @@ import express from 'express';
 import { expect, it, vi } from 'vitest';
 import { registerThreadRoutes } from './thread-routes.js';
 import type { ThreadAdapter } from './thread-adapter.js';
+import { KERNEL_PROTOCOL_VERSION } from './protocol.generated.js';
 
 it('keeps every progress fragment and its sequence through HTTP backpressure before completion', async () => {
   let emit!: (event: unknown) => boolean;
@@ -40,7 +41,7 @@ it('keeps every progress fragment and its sequence through HTTP backpressure bef
         }
       }
     })();
-    const publish = (sequence: number, kind: string, text: string) => emit({ v: 95, kind: 'runtime-event', kernelEpoch: crypto.randomUUID(),
+    const publish = (sequence: number, kind: string, text: string) => emit({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: crypto.randomUUID(),
       stream: 'progress', streamId, threadId, branchId, runId: crypto.randomUUID(), requestId: crypto.randomUUID(), sequence,
       event: { kind: 'batch', events: [{ kind: 'provider', data: { kind, item_id: 'message', text } }] } });
     let accepted = publish(1, 'reasoning_delta', 'visible thinking');
