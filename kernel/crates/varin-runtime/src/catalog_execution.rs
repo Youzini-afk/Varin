@@ -54,9 +54,21 @@ fn publish_model_projection(db:&mut Catalog,context:&ToolExecutionContext,origin
     tx.commit()?;Ok(())
 }
 
+pub(super) fn response_id_diagnostic(code: &str) -> Option<&'static str> {
+    match code {
+        "empty_initial_chat_response_id" => Some("The Chat Completions stream started with an empty response ID."),
+        "invalid_chat_response_id" => Some("A Chat Completions chunk is missing a string response ID."),
+        "conflicting_response_id" => Some("The provider changed the response ID during streaming."),
+        _ => None,
+    }
+}
+
 /// HTTP diagnostics are prepared by the model transport, including credential redaction.
 /// Other executor failures use owner-defined wording instead of arbitrary callback text.
 fn safe_run_failure(failure: &ExecutionError) -> ExecutionError {
+    if let Some(message) = response_id_diagnostic(&failure.code) {
+        return ExecutionError::new(&failure.code, message);
+    }
     if failure.code.strip_prefix("http_").and_then(|status| status.parse::<u16>().ok()).is_some_and(|status| (400..=599).contains(&status)) {
         return ExecutionError::new(&failure.code, &failure.message);
     }

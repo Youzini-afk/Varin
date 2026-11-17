@@ -23,7 +23,7 @@ header. Host directory refreshes cannot retarget an accepted connection.
 | Family | Adapter and important protocol boundary |
 | --- | --- |
 | `openai-responses` | [responses.rs](responses.rs): complete Responses events and original encrypted/reasoning items |
-| `openai-completions` | [chat.rs](chat.rs): one choice; complete tool finish plus `[DONE]`; trailing usage retained |
+| `openai-completions` | [chat.rs](chat.rs): one choice; complete tool finish plus `[DONE]`; trailing usage retained. After the first chunk establishes a nonempty response ID, empty IDs inherit it and a different nonempty ID fails the stream. |
 | `azure-openai-responses` | [azure.rs](azure.rs): distinct continuation family, explicit deployment and API version |
 | `anthropic-messages` | [anthropic.rs](anthropic.rs): validated block order/types and retained signed/server-tool originals |
 | `google-generative-ai`, `google-vertex` | [google.rs](google.rs): GenerateContent, ordered thought signatures, paired function names/IDs |

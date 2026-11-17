@@ -951,9 +951,9 @@ fn chat_reasoning_aliases_emit_once_but_keep_the_original_replay_fields() {
 fn chat_empty_opening_does_not_reserve_text_order_and_empty_usage_trailer_finishes() {
     let p = chat::ChatProvider::new(chat_connection(vec![
         json!({"id":"response","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}),
-        json!({"id":"response","choices":[{"index":0,"delta":{"reasoning_content":"think"},"finish_reason":null}]}),
-        json!({"id":"response","choices":[{"index":0,"delta":{"content":"answer"},"finish_reason":"stop"}]}),
-        json!({"id":"response","choices":[{"index":0,"delta":{"content":null,"reasoning_content":""},"finish_reason":null}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}),
+        json!({"id":"","choices":[{"index":0,"delta":{"reasoning_content":"think"},"finish_reason":null}]}),
+        json!({"id":"","choices":[{"index":0,"delta":{"content":"answer"},"finish_reason":"stop"}]}),
+        json!({"id":"","choices":[{"index":0,"delta":{"content":null,"reasoning_content":""},"finish_reason":null}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}),
         json!({"id":"response","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}),
     ], true));
     let (result, events) = generate(&p, chat::FAMILY);
@@ -963,7 +963,8 @@ fn chat_empty_opening_does_not_reserve_text_order_and_empty_usage_trailer_finish
         ProviderEvent::TextDelta { text, .. } => Some(("text", text.as_str())), _ => None,
     }).collect::<Vec<_>>(), vec![("thinking", "think"), ("text", "answer")]);
     assert!(events.iter().any(|event| matches!(event, ProviderEvent::Usage { receipt } if receipt.output_tokens == Some(5))));
-    assert!(events.iter().any(|event| matches!(event, ProviderEvent::ItemCompleted { .. })));
+    assert!(events.iter().any(|event| matches!(event, ProviderEvent::TextDelta { item_id, .. } if item_id == "response:message")));
+    assert!(events.iter().any(|event| matches!(event, ProviderEvent::ItemCompleted { item } if item.id == "response:message")));
     for tail in [
         json!({"id":"response","choices":[{"index":0,"delta":{"content":"extra"},"finish_reason":null}]}),
         json!({"id":"response","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}),
@@ -972,6 +973,21 @@ fn chat_empty_opening_does_not_reserve_text_order_and_empty_usage_trailer_finish
             json!({"id":"response","choices":[{"index":0,"delta":{"content":"answer"},"finish_reason":"stop"}]}), tail,
         ], true));
         assert_eq!(generate(&p, chat::FAMILY).0.unwrap_err().code, "invalid_event_order");
+    }
+}
+
+#[test]
+fn chat_requires_an_initial_response_id_and_rejects_conflicting_ids() {
+    let chunk = |id: Value| json!({"id":id,"choices":[{"index":0,"delta":{}}]});
+    for (input, code) in [
+        (vec![chunk(json!(""))], "empty_initial_chat_response_id"),
+        (vec![chunk(json!("response")), chunk(Value::Null)], "invalid_chat_response_id"),
+        (vec![chunk(json!("response")), chunk(json!("")), chunk(json!("other"))], "conflicting_response_id"),
+    ] {
+        let provider = chat::ChatProvider::new(chat_connection(input, true));
+        let (result, events) = generate(&provider, chat::FAMILY);
+        assert_eq!(result.unwrap_err().code, code);
+        assert!(!events.iter().any(|event| matches!(event, ProviderEvent::ItemCompleted { .. })));
     }
 }
 

@@ -72,6 +72,16 @@ impl ModelTextRead {
         let generation = serde_json::from_value(self.content.load(&self.reference)?)?;
         if let Some(child) = &mut self.inference {
             inference::hydrate_operation(child, &self.content)?;
+            if let Some(OperationResultMetadata::Control { value }) = &mut child.result {
+                if let Some(response) = value.get_mut("response") {
+                    if let Some(message) = response["failure"]["code"]
+                        .as_str()
+                        .and_then(super::execution_persistence::response_id_diagnostic)
+                    {
+                        response["failureDiagnostic"] = json!(message);
+                    }
+                }
+            }
         }
         Ok(ModelTextView {
             request_id: self.root.id,
@@ -530,6 +540,33 @@ mod tests {
         assert!(view.retry_allowed);
         assert_eq!(view.inference.unwrap().effect, Effect::Unknown);
         admit(&mut db, &retry);
+    }
+    #[test]
+    fn model_text_projects_the_response_id_diagnostic_from_the_original_failure() {
+        let (_, mut db) = open();
+        let p = input("invalid-response");
+        let id = admit(&mut db, &p);
+        let operation = generate(&mut db, &p);
+        db.dispatch_inference_generation(&operation).unwrap();
+        let receipt = InferenceReceipt {
+            request_started: Some(true),
+            provider_completed: false,
+            local_executor_stopped: true,
+            usage: InferenceUsage::default(),
+            http_status: None,
+            problem: Some(InferenceProblem::TransportFailed),
+        };
+        let body = db.prepare_inference_content().write(&json!({
+            "failure": {"code":"empty_initial_chat_response_id", "message":"private upstream text"}
+        })).unwrap();
+        db.settle_inference_generation(&operation, body, receipt, None).unwrap();
+        let view = db.capture_model_text(&id).unwrap().load().unwrap();
+        let original = view.inference.unwrap();
+        assert_eq!(original.effect, Effect::Unknown);
+        assert_eq!(
+            original.result.unwrap().control().unwrap()["response"]["failureDiagnostic"],
+            "The Chat Completions stream started with an empty response ID."
+        );
     }
     #[test]
     fn completed_original_is_inspectable_after_restart_without_new_model_or_thread() {

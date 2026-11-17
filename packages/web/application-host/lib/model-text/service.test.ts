@@ -58,10 +58,10 @@ function fixture() {
   const models={resolveModel,describeModel:vi.fn(async(selection:{providerId:string;modelId:string})=>({providerId:selection.providerId,model:selection.modelId,contextWindowTokens:16000,maxOutputTokens:8192}))};
   const service=createModelTextService({kernel:kernel as unknown as Parameters<typeof createModelTextService>[0]['kernel'],runtime:{onEvent:listener=>listen(()=>listener({} as Parameters<typeof listener>[0])),onReady:listen,onExit:listener=>listen(()=>listener(new Error('Executor exited')))},models:models as unknown as Parameters<typeof createModelTextService>[0]['models'],readSettings:async()=>settings});
   const input:ModelTextInput={key:'original',purpose:'git-commit',prompt:'Describe these changes'};
-  const settle=(key='original',outcome='succeeded',stopped=true)=>{
+  const settle=(key='original',outcome='succeeded',stopped=true,failureDiagnostic?:string)=>{
     const work=records.get(`model-text:${key}`)!;const op=work.inference!;
     op.phase='terminal';op.outcome=outcome as Operation['outcome'];op.effect=outcome==='indeterminate'?'unknown':'confirmed';
-    op.result={kind:'control',value:{dispatched:true,receipt:{localExecutorStopped:stopped,providerCompleted:outcome==='succeeded',usage:{measurement:'actual',inputTokens:7,outputTokens:4}},response:{text:'Original native text',providerOutput:{finishReason:'stop'}}}};
+    op.result={kind:'control',value:{dispatched:true,receipt:{localExecutorStopped:stopped,providerCompleted:outcome==='succeeded',usage:{measurement:'actual',inputTokens:7,outputTokens:4}},response:{text:'Original native text',providerOutput:{finishReason:'stop'},failureDiagnostic}}};
     work.retryAllowed=outcome!=='succeeded'&&stopped;trace.push('settled');notify();
   };
   return {service,kernel,records,trace,input,settle,resolveModel,models,credentialOwner,forkRelease,notify,setSettings:(value:unknown)=>{settings=value;},loseReplies:()=>{loseAdmission=true;loseGeneration=true;},corruptContent:()=>{corruptContent=true;}};
@@ -167,6 +167,20 @@ describe('native standalone text owner',()=>{
     expect(f.kernel.unregisterCredentialOwner).not.toHaveBeenCalled();f.settle('original','indeterminate');await failed;
     expect(await f.service.inspect('model-text:original')).toMatchObject({effect:'unknown',executorStopped:true,retryAllowed:true});
     expect(f.kernel.unregisterCredentialOwner).toHaveBeenCalledOnce();await f.service.close();
+  });
+  it('shows the original parser diagnosis before uncertain provider status', async () => {
+    const f = fixture();
+    const running = f.service.generate(f.input);
+    const diagnostic = 'The Chat Completions stream started with an empty response ID.';
+    const failed = expect(running).rejects.toMatchObject({
+      code: 'model-text-indeterminate',
+      message: `${diagnostic} The original request stopped locally, but provider completion and billing are unconfirmed. An explicit retry creates a new request.`,
+    });
+    await until(() => f.trace.includes('generated'));
+    f.settle('original', 'indeterminate', true, diagnostic);
+    await failed;
+    expect(await f.service.inspect('model-text:original')).toMatchObject({ effect: 'unknown', executorStopped: true });
+    await f.service.close();
   });
   it('retains metadata and releases drained credentials even when original content is unreadable',async()=>{
     const f=fixture();const running=f.service.generate(f.input);const failure=expect(running).rejects.toMatchObject({code:'model-text-output-unavailable',requestId:'model-text:original'});

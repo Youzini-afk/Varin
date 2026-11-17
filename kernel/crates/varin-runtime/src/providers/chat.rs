@@ -1,6 +1,7 @@
 //! OpenAI Chat Completions wire contract. Vendor-specific compatibility is explicit configuration.
 use super::*;
 use serde_json::json;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 pub const FAMILY: &str = "openai-completions";
 pub struct ChatProvider {
@@ -679,14 +680,27 @@ impl StreamState {
         if let Some(error) = event.get("error") {
             return Err(provider_failure(error, "provider_error"));
         }
-        let id = required(&event, "id")?;
-        if self.id.as_deref().is_some_and(|previous| previous != id) {
-            return Err(failure(
-                "conflicting_response_id",
-                "Chat response identity changed mid-stream",
-            ));
-        }
-        self.id = Some(id.into());
+        let chunk_id = event["id"].as_str().ok_or_else(|| {
+            failure("invalid_chat_response_id", "Chat chunk lacks a string response ID")
+        })?;
+        let id = match self.id.as_deref() {
+            Some(id) if chunk_id.is_empty() => Cow::Owned(id.to_owned()),
+            Some(id) if id != chunk_id => {
+                return Err(failure(
+                    "conflicting_response_id",
+                    "Chat response identity changed mid-stream",
+                ));
+            }
+            None if chunk_id.is_empty() => {
+                return Err(failure("empty_initial_chat_response_id", "Chat stream starts with an empty response ID"));
+            }
+            None => {
+                self.id = Some(chunk_id.into());
+                Cow::Borrowed(chunk_id)
+            }
+            Some(_) => Cow::Borrowed(chunk_id),
+        };
+        let id = id.as_ref();
         if let Some(usage) = event.get("usage").filter(|v| v.is_object()) {
             emit_event(
                 emit,

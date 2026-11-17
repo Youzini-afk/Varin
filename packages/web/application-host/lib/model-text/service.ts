@@ -127,10 +127,14 @@ export function createModelTextService(options: {
     const response = record(state(op).response);
     if (op.outcome === 'succeeded' && drained(op) && typeof response.text === 'string' && response.text.trim()) return { ...identity(work), text: response.text.trim() };
     if (record(response.providerOutput).finishReason === 'length') return fail('output-exhausted', 'The original response reached its output limit. Choose more output capacity for an explicit new request.', 409, work.requestId);
-    return fail(op.effect === 'unknown' || !drained(op) ? 'model-text-indeterminate' : 'model-text-failed',
-      !drained(op) ? 'The original request has no confirmed executor stop. Inspect it before retrying.'
-        : op.effect === 'unknown' ? 'The original request stopped locally, but provider completion and billing are unconfirmed. An explicit retry creates a new request.'
-          : 'The original request stopped without a complete result. An explicit retry creates a new request.', 409, work.requestId);
+    const stopped = drained(op);
+    const uncertain = op.effect === 'unknown';
+    const status = !stopped ? 'The original request has no confirmed executor stop. Inspect it before retrying.'
+      : uncertain ? 'The original request stopped locally, but provider completion and billing are unconfirmed. An explicit retry creates a new request.'
+        : 'The original request stopped without a complete result. An explicit retry creates a new request.';
+    const diagnostic = response.failureDiagnostic;
+    return fail(uncertain || !stopped ? 'model-text-indeterminate' : 'model-text-failed',
+      typeof diagnostic === 'string' ? `${diagnostic} ${status}` : status, 409, work.requestId);
   }
   async function loadResult(requestId: string): Promise<ModelTextResult> {
     let work: ModelTextView | null;
