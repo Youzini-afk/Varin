@@ -13,6 +13,17 @@ This module contains tunnel provider orchestration for Varin, including provider
 - `packages/web/application-host/lib/tunnels/types.ts`: tunnel constants, normalization, and shared type helpers.
 - `packages/web/application-host/lib/tunnels/providers/cloudflare.ts`: Cloudflare tunnel provider implementation.
 - `packages/web/application-host/lib/tunnels/providers/ngrok.ts`: Ngrok quick tunnel provider implementation.
+- `packages/web/application-host/lib/tunnels/providers/reverse-proxy.ts`: unregistered existing-proxy adapter. The Host injects an initially disabled guarded listener, and the adapter exposes its actual backend address. It does not install or configure a proxy, persist settings, or probe a public endpoint.
+
+## Guarded-listener integration boundary
+
+`createTunnelService` accepts an optional Host-owned `getStartContext(request)` for provider backends. When supplied, its values override start options; without it, existing Cloudflare/ngrok loopback behavior is unchanged. Explicit unsupported start providers/modes fail rather than falling back to another provider.
+
+The existing-proxy adapter has its own `reverse-proxy` provider/mode and `reverseProxy` configuration (`publicOrigin`, `backend.host`, `backend.port`). The origin must be HTTPS without credentials, a non-root path, query, or fragment. The backend port is fixed, not dynamically reassigned on conflicts. Only the injected `openPublicIngress` may bind it; the adapter does not create another server or auth owner. That opener must finish binding a **guarded, initially disabled** listener before returning. The adapter enables it after validating the bound port, disables it synchronously on stop, and returns an idempotent asynchronous close operation.
+
+`getPublicUrl()` is an address, not a readiness assertion. `getEndpointVerification()` and the service's `endpointVerification` result are `unverified` for the existing-proxy adapter; legacy providers return `null` until they supply evidence. Public HTTPS, current-Host identity, and full proxy reachability have not been checked merely because the local listener is bound.
+
+The adapter is intentionally **not registered in the Host**. Registration requires persistent settings/enable intent through the existing settings writer, public-entry authentication, status consumers that distinguish unverified endpoints, and lifecycle handling that awaits asynchronous listener closure. The current synchronous service stop and URL-based routes are not sufficient for that integration. No FRP, SSH deployment, automatic restoration, or public-endpoint verification is implemented here.
 
 ## Public exports (`routes.ts`)
 - `createTunnelRoutesRuntime(dependencies)`: creates tunnel routes runtime and helpers.

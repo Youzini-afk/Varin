@@ -41,6 +41,73 @@ const createRegistry = (providers: Partial<Record<TunnelProviderId, TunnelProvid
 });
 
 describe('createTunnelService', () => {
+  it('uses the Host-supplied backend context rather than start options', async () => {
+    let controller: TunnelController | null = null;
+    const provider = createProvider({
+      provider: TUNNEL_PROVIDER_CLOUDFLARE,
+      start: async (_request, context) => {
+        expect(context.activePort).toBe(3903);
+        expect(context.originUrl).toBe('http://127.0.0.1:3903');
+        return { mode: TUNNEL_MODE_QUICK, getPublicUrl: () => 'https://example.test', getEndpointVerification: () => 'unverified' };
+      },
+    });
+    const service = createTunnelService({
+      registry: createRegistry({ [TUNNEL_PROVIDER_CLOUDFLARE]: provider }),
+      getController: () => controller,
+      setController: (next) => { controller = next; },
+      getActivePort: () => 3000,
+      getStartContext: async () => ({ activePort: 3903, originUrl: 'http://127.0.0.1:3903' }),
+    });
+    const started = await service.start({}, { activePort: 3000, originUrl: 'http://127.0.0.1:3000' });
+    expect(started.endpointVerification).toBe('unverified');
+    expect(service.getEndpointVerification()).toBe('unverified');
+    service.stop();
+    expect(service.getEndpointVerification()).toBeNull();
+  });
+
+  it('preserves the legacy loopback backend when no public listener owner is injected', async () => {
+    let controller: TunnelController | null = null;
+    const provider = createProvider({
+      provider: TUNNEL_PROVIDER_CLOUDFLARE,
+      start: async (_request, context) => {
+        expect(context).toMatchObject({ activePort: 3000, originUrl: 'http://127.0.0.1:3000' });
+        return { mode: TUNNEL_MODE_QUICK, getPublicUrl: () => 'https://example.test' };
+      },
+    });
+    const service = createTunnelService({
+      registry: createRegistry({ [TUNNEL_PROVIDER_CLOUDFLARE]: provider }),
+      getController: () => controller,
+      setController: (next) => { controller = next; },
+      getActivePort: () => 3000,
+    });
+    expect((await service.start({})).endpointVerification).toBeNull();
+  });
+
+  it('does not resurrect an option origin when the Host context omits it', async () => {
+    const provider = createProvider({
+      provider: TUNNEL_PROVIDER_CLOUDFLARE,
+      start: async (_request, context) => {
+        expect(context.originUrl).toBeUndefined();
+        throw new Error('No guarded backend is available');
+      },
+    });
+    const service = createTunnelService({
+      registry: createRegistry({ [TUNNEL_PROVIDER_CLOUDFLARE]: provider }),
+      getController: () => null, setController: () => undefined,
+      getActivePort: () => 3000, getStartContext: () => ({ activePort: null }),
+    });
+    await expect(service.start({}, { originUrl: 'http://127.0.0.1:3000' })).rejects.toThrow('No guarded backend is available');
+  });
+
+  it('rejects an explicit unknown provider without touching the active controller', async () => {
+    const controller: TunnelController = { provider: TUNNEL_PROVIDER_CLOUDFLARE, getPublicUrl: () => 'https://existing.test' };
+    const service = createTunnelService({
+      registry: createRegistry({}), getController: () => controller,
+      setController: () => { throw new Error('must not replace controller'); }, getActivePort: () => 3000,
+    });
+    await expect(service.start({ provider: 'typo' })).rejects.toThrow('Unsupported tunnel provider');
+  });
+
   it('returns provider startup errors to route callers', async () => {
     let controller: TunnelController | null = null;
     const provider = createProvider({
@@ -83,6 +150,7 @@ describe('createTunnelService', () => {
     });
     const ngrokProvider = createProvider({
       provider: TUNNEL_PROVIDER_NGROK,
+      resolvePublicUrl: (candidate) => candidate?.provider === TUNNEL_PROVIDER_NGROK ? candidate.getPublicUrl?.() ?? null : null,
       start: async () => {
         ngrokStarted = true;
         return {
