@@ -31,13 +31,19 @@ const direct = (id: string, name: string, protocol: string, defaultBaseUrl?: str
   id, name, protocol, ...(defaultBaseUrl === undefined ? {} : { defaultBaseUrl }), authentication: ['credential', 'environment', 'none'], operations: ['chat'], discovery: true,
   parametersSchema: schema(), discoveryRequest: channel => ({ url: modelRequestUrl(channel.baseUrl, '/models') }), parseDiscovery: modelList,
 });
+const openAICompatible: ChannelType = {
+  ...direct('openai-compatible', 'OpenAI compatible', 'openai-completions'),
+  operations: ['chat', 'embedding', 'rerank', 'decision', 'image-generation', 'image-editing'],
+  parametersSchema: schema({ imageApi: { enum: ['openai-images', 'openrouter-images'] }, decisionApi }),
+  defaultParameters: { decisionApi: 'typesafe-system-one' },
+};
 
 const channelTypes: ChannelType[] = [
   { ...direct('openai', 'OpenAI', 'openai-responses', 'https://api.openai.com/v1'), operations: ['chat', 'embedding', 'image-generation', 'image-editing'] },
   { ...direct('openai-codex', 'ChatGPT / Codex', 'openai-codex-responses', 'https://chatgpt.com/backend-api'), authentication: ['credential'], discovery: false,
     oauthProviders: [{ id: 'openai-codex', name: 'ChatGPT / Codex' }] },
-  { ...direct('openai-compatible', 'OpenAI compatible', 'openai-completions'), operations: ['chat', 'embedding', 'rerank', 'decision', 'image-generation', 'image-editing'],
-    parametersSchema: schema({ imageApi: { enum: ['openai-images', 'openrouter-images'] }, decisionApi }), defaultParameters: { decisionApi: 'typesafe-system-one' } },
+  openAICompatible,
+  { ...openAICompatible, id: 'magpie', name: 'Magpie', defaultBaseUrl: 'http://127.0.0.1:3425/v1', authentication: ['none', 'credential', 'environment'] },
   direct('deepseek', 'DeepSeek', 'openai-completions', 'https://api.deepseek.com/v1'),
   ...(['opencode', 'opencode-go'] as const).map(id => ({
     ...direct(id, id === 'opencode' ? 'OpenCode Zen' : 'OpenCode Go', 'openai-completions', `https://opencode.ai/inference${id === 'opencode-go' ? '/go' : ''}`),

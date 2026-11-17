@@ -195,6 +195,8 @@ main branch. Reviewed vendor, agent-service and local entries select existing pr
 ordinary new service templates can therefore arrive without a client release. Specialized channels
 such as OpenCode, Command Code and Cline remain installed behavior. Remote directory data cannot
 replace an installed channel's protocol, introduce OAuth implementations or execute SDK packages.
+Magpie is also an installed channel and uses the OpenAI compatible type's operations and parameters.
+Its editable default address, `http://127.0.0.1:3425/v1`, refers to the machine running the Host.
 Missing later entries retain their known descriptors so saved connections remain usable. Generic
 aggregator/reseller expansion is deferred. The channel directory, models.dev and activated public
 service lists refresh independently, with per-source in-flight reuse and atomic cache replacement.

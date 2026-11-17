@@ -12,7 +12,6 @@
     { "id": "stepfun-step-plan", "name": "阶跃星辰 Step Plan（中国大陆）", "kind": "model-vendor", "protocol": "openai-completions", "baseUrl": "https://api.stepfun.com/step_plan/v1", "environmentVariable": "STEPFUN_API_KEY" },
     { "id": "stepfun-ai-step-plan", "name": "StepFun Step Plan（国际）", "kind": "model-vendor", "protocol": "openai-completions", "baseUrl": "https://api.stepfun.ai/step_plan/v1", "environmentVariable": "STEPFUN_API_KEY" },
     { "id": "ollama", "name": "Ollama", "kind": "local", "protocol": "openai-completions", "baseUrl": "http://localhost:11434/v1" },
-    { "id": "lmstudio", "name": "LM Studio", "kind": "local", "protocol": "openai-completions", "baseUrl": "http://localhost:1234/v1" },
-    { "id": "magpie", "name": "Magpie", "kind": "local", "protocol": "openai-completions", "baseUrl": "http://127.0.0.1:3425/v1", "inheritCapabilities": true }
+    { "id": "lmstudio", "name": "LM Studio", "kind": "local", "protocol": "openai-completions", "baseUrl": "http://localhost:1234/v1" }
   ]
 }

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ModelsService } from './service.js';
@@ -37,6 +37,40 @@ test('offline catalogs populate mixed protocol services while initial settings r
   }
   const command = await models.directorySnapshot('commandcode');
   expect(command.models.find(model => model.id === 'claude-sonnet-5-5')?.protocol).toBe('anthropic-messages');
+});
+
+test('Magpie can discover and save models with a cached directory that predates it', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'varin-directory-')); directories.push(directory);
+  const dependencies = { projectTrusted: () => false, fetch: unexpected };
+  await writeFile(join(directory, 'model-directory.json'), JSON.stringify({
+    version: 1,
+    sources: { [CHANNEL_DIRECTORY_URL]: { checkedAt: Date.now(), body: { version: 1, channels: [
+      { id: 'cached-vendor', name: 'Cached Vendor', kind: 'model-vendor', protocol: 'openai-completions', baseUrl: 'https://example.test/v1' },
+    ] } } },
+  }));
+  const models = new ModelsService(directory, dependencies);
+  const snapshot = await models.read();
+  expect(snapshot.types.some(type => type.id === 'cached-vendor')).toBe(true);
+  const magpie = snapshot.types.find(type => type.id === 'magpie')!;
+  expect(magpie.defaultBaseUrl).toBe('http://127.0.0.1:3425/v1');
+  expect(magpie.authentication[0]).toBe('none');
+  expect(magpie.defaultParameters).toEqual({ decisionApi: 'typesafe-system-one' });
+
+  const channel: ModelChannel = { id: 'gateway', type: magpie.id, name: magpie.name, enabled: true, baseUrl: magpie.defaultBaseUrl!,
+    authentication: { kind: 'none' }, parameters: magpie.defaultParameters!, models: [] };
+  const discovery = await models.discoverDraft({ channel }, async (url, init) => {
+    expect(String(url)).toBe('http://127.0.0.1:3425/v1/models');
+    expect(new Headers(init?.headers).has('authorization')).toBe(false);
+    return Response.json({ data: [{ id: 'gateway/chat-model' }] });
+  });
+  channel.models = [
+    { ...discovery.models[0]!, enabled: true, operations: ['chat'] },
+    { id: 'gateway/decision-model', name: 'Decision model', enabled: true, operations: ['decision'] },
+  ];
+  await models.save(channel, snapshot.revision);
+
+  const restarted = await new ModelsService(directory, dependencies).read();
+  expect(restarted.channels[0]?.models.map(model => model.id)).toEqual(['gateway/chat-model', 'gateway/decision-model']);
 });
 
 test('refresh never blocks model capture, preserves explicit fields and accepted bindings, and reloads cached data with ETag', async () => {
