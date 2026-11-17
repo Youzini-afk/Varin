@@ -359,8 +359,8 @@ run the real inference check before publication.
 
 The native preparation recipe supplies a binary absent from the pinned npm package:
 
-- Windows ARM64 builds TriviumDB 0.9.0 from commit
-  `7edf8ceacd85cd71944a3471ac05df377995a172`. The separate, one-time 0.8 WAL
+- Windows ARM64 builds TriviumDB 0.9.1 from commit
+  `46f767f8c5befeb7da091267f2b19052f3cba8d9`. The separate, one-time 0.8 WAL
   checkpoint helper uses 0.8.10 at `221a628209838483e20296d29bcf35fc3e2dd156`.
   Both addons are missing from their npm archives. Only the helper needs the old
   x64-only Windows loader repair; the 0.9 loader already selects the ARM64 binary.

@@ -5,9 +5,11 @@ described in [Memory ownership](../memory/DOCUMENTATION.md). They bypass semanti
 background memory organization. This module still owns plans, symbol indexes,
 and Bot/user long-term knowledge; these are separate from ordinary Agent notes.
 
-The KnowledgeStore authority, derived vector stores and inference ledger use TriviumDB 0.9.0.
-The native engine upgrades supported nonempty 0.8 checkpoints on writable open/close to
-typed v10 checkpoints; node IDs, payloads, graph links and business receipts retain their identity.
+The KnowledgeStore authority, derived vector stores and inference ledger use TriviumDB 0.9.1.
+Before upgrading, stop all writers and [back up the complete file group](../../../../../docs/ops/cold-backup.md).
+The new writer publishes v13 checkpoints and v6 WAL. To roll back to 0.9.0, restore the **pre-upgrade**
+backup instead of reopening an upgraded store. The native engine recovers supported nonempty
+0.8 checkpoints and 0.9.0 v10 checkpoints with their pending WAL; node IDs, payloads, graph links and business receipts retain their identity.
 Read-only and immutable opens do not upgrade files.
 
 `database.ts` owns the shared native open. An old WAL-only database has no typed base
@@ -30,7 +32,7 @@ native writer and must remain intact during active writes or a failed close.
 Pre-existing damage without such a journal continues to surface as a storage error;
 opening a failed store never deletes or replaces its data.
 
-Windows ARM64 builds the missing 0.9.0 addon and the checkpoint helper addon from
+Windows ARM64 builds the missing 0.9.1 addon and the checkpoint helper addon from
 their exact release commits. Only the old helper needs the historical loader repair;
 0.9's public loader already selects ARM64. Varin's production graph and knowledge
 reads continue to use `indexedLookup` and `substringLookup`; its existing exact/scoped

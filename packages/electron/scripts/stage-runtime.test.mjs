@@ -17,7 +17,7 @@ test('the production tree excludes checkout artifacts, keeps versioned Node reso
   await pkg('packages/electron', '@varin/electron', { '@varin/web': 'workspace:*', '@varin/script-runtime': 'workspace:*', '@varin/extension-host': 'workspace:*', plain: '1.0.0', native: '1.0.0' });
   await write('packages/electron/bootstrap.mjs', ''); await write('packages/electron/dist-bundle/main.mjs', '');
   const modules = 'packages/electron/node_modules';
-  await pkg(`${modules}/@varin/web`, '@varin/web', { plain: '2.0.0', triviumdb: '0.9.0', 'triviumdb-upgrade-0.8': 'npm:triviumdb@0.8.10' });
+  await pkg(`${modules}/@varin/web`, '@varin/web', { plain: '2.0.0', triviumdb: '0.9.1', 'triviumdb-upgrade-0.8': 'npm:triviumdb@0.8.10' });
   await pkg(`${modules}/triviumdb`, 'triviumdb');
   await pkg(`${modules}/triviumdb-upgrade-0.8`, 'triviumdb');
   await write(`${modules}/triviumdb/index.js`, 'module.exports = "current";');
