@@ -59,12 +59,11 @@ function AgentDetail({ agent, device, patch, install, onRemove }: {
   const p = agent.progress ?? 0;
   const stage = p < 55 ? '正在下载' : p < 85 ? '正在安装' : '正在检测程序';
   return <SettingsPageLayout title={<div className="product-title">{logo(agent, true)}<div><h1>{agent.name}</h1><p>{agent.description}</p></div></div>}
-    headerEnd={<DropdownMenu><DropdownMenuTrigger asChild><Button size="icon" variant="ghost" aria-label="Agent 更多操作">{icon('more')}</Button></DropdownMenuTrigger><DropdownMenuContent align="end">
+    headerEnd={<div className="agent-header-actions"><label className="agent-enable" htmlFor={`enable-${agent.id}`}><span>启用</span><Switch id={`enable-${agent.id}`} aria-label={`在 Varin 中启用 ${agent.name}`} checked={agent.enabled} onCheckedChange={enabled => patch({ enabled })} /></label><DropdownMenu><DropdownMenuTrigger asChild><Button size="icon" variant="ghost" aria-label="Agent 更多操作">{icon('more')}</Button></DropdownMenuTrigger><DropdownMenuContent align="end">
       <DropdownMenuItem onClick={() => setSourcePicker(true)}>切换程序来源</DropdownMenuItem>
-      <DropdownMenuItem onClick={() => patch({ enabled: !agent.enabled })}>{agent.enabled ? '在 Varin 中停用' : '在 Varin 中启用'}</DropdownMenuItem>
       <DropdownMenuSeparator />
       <DropdownMenuItem className="text-destructive" onClick={onRemove}>{agent.source === 'managed' ? '卸载程序…' : '移除接入…'}</DropdownMenuItem>
-    </DropdownMenuContent></DropdownMenu>} className="agent-detail-page">
+    </DropdownMenuContent></DropdownMenu></div>} className="agent-detail-page">
     <SettingsSection divider={false} title="程序" headerAction={<span className="quiet-inline">{icon(device === 'local' ? 'computer' : 'server')}{deviceNames[device as keyof typeof deviceNames]}</span>}>
       <div className="program-line"><div className="program-summary"><span className="program-version">{missing ? '未安装' : busy ? stage : agent.version}</span><span className="text-muted-foreground">{sourceText(agent)}</span>{!agent.enabled && <span className="subtle-tag">已停用</span>}</div>
         <div className="program-actions">{busy ? <Button variant="outline" size="sm" onClick={() => patch({ phase: 'missing', progress: undefined })}>取消</Button> : <>
@@ -90,7 +89,6 @@ function AgentDetail({ agent, device, patch, install, onRemove }: {
       <SettingsFieldRow label="执行模式"><Choice label="执行模式" value={mode} values={['沿用 Agent 配置', '默认', '只读']} onChange={setMode} /></SettingsFieldRow>
     </SettingsSection>}
     <details className="settings-disclosure advanced"><summary>{icon('arrow-right-s', 'settings-disclosure-chevron')}<span>高级设置</span><span className="ml-auto text-muted-foreground">启动方式与版本</span></summary><div className="settings-disclosure-body">
-      <SettingsFieldRow label="在 Varin 中使用"><Switch aria-label="在 Varin 中使用" checked={agent.enabled} onCheckedChange={enabled => patch({ enabled })} /></SettingsFieldRow>
       <SettingsFieldRow label="安装版本"><Choice label="安装版本" value={version} values={['最新稳定版', agent.version, '指定版本…']} onChange={setVersion} /></SettingsFieldRow>
       {version === '指定版本…' && <Input aria-label="指定版本号" placeholder="例如 1.5.0" />}
       <label className="advanced-field">程序路径<Input value={command} onChange={e => { setCommand(e.target.value); setSaved(false); }} /></label>
@@ -142,6 +140,7 @@ export function ExternalAgentsPreview() {
   const listRows = (list: Agent[]) => list.map(agent => <div key={agent.id} className={`agent-row ${!agent.enabled ? 'is-disabled' : ''}`}>
     <button className="agent-row-main" onClick={() => setSelected(agent.id)} aria-label={`管理 ${agent.name}`}><span className="product-mark">{logo(agent)}</span><span className="agent-copy"><span className="agent-name">{agent.name}</span><span className="agent-meta"><span className={agent.phase === 'failed' ? 'text-destructive' : ''}>{phaseText(agent)}</span>{agent.phase !== 'missing' && <><span className="meta-dot">·</span>{sourceText(agent)}</>}</span></span></button>
     <div className="agent-row-actions">{agent.phase === 'installing' && icon('loader-4', 'animate-spin text-muted-foreground')}
+      {!agent.enabled && <Button size="sm" variant="outline" aria-label={`启用 ${agent.name}`} onClick={() => patch(agent.id, { enabled: true })}>启用</Button>}
       <Button size="icon" variant="ghost" aria-label={`查看 ${agent.name}`} onClick={() => setSelected(agent.id)}>{icon('arrow-right-s')}</Button>
     </div>
   </div>);

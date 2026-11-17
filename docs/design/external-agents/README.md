@@ -7,4 +7,6 @@
 
 本次管理设计不提供登录或账号管理。认证由用户在目标设备上通过 Agent 自身完成；实际连接报告需要认证时，说明在哪台设备完成即可。安装完成只表示程序已安装，不代表已经登录或模型可用。
 
+启用开关常驻 Agent 详情页标题右侧，停用列表直接提供“启用”按钮；更多菜单保留切换来源、卸载等低频操作。
+
 `bun docs/design/external-agents/preview.mjs --build` 生成可直接打开的单文件设计稿 `.git/design-preview/external-agents/preview.html`。源码独立于产品入口；正式接入时复用这里验证过的组件组合，并连接实际设备及安装 owner。
