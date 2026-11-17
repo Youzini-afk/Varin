@@ -1,6 +1,6 @@
 # 外部 Agent
 
-Varin 可以连接执行 Host 上的 Codex、Claude Code、Pi，以及支持 ACP 的程序。内置 ACP 启动预设包括 OpenCode、Gemini CLI、Kimi Code、Cursor Agent、Qoder 和 Grok。外部程序继续使用自己的模型、账号、工具和项目配置；Varin 提供会话界面、工作区关联与派发协作。
+Varin 可以连接执行 Host 上的 Codex、Claude Code、Pi，以及支持 ACP 的程序。内置 ACP 启动预设包括 OpenCode、Gemini CLI、Kimi Code、Cursor Agent、Qoder、Grok 和 DeepSeek Harness。外部程序继续使用自己的模型、账号、工具和项目配置；Varin 提供会话界面、工作区关联与派发协作。
 
 ## 使用入口
 
@@ -20,6 +20,7 @@ Windows 上，默认的 Codex 和 Claude Code 命令优先按 Host 的 PATH 解�
 | Cursor Agent | `cursor-agent acp` | 使用提供 ACP 子命令的 Cursor CLI；不依赖含糊的 `agent` 别名 |
 | Qoder | `qoder --acp` | 使用 CLI 自身账号；Windows 上游仅提供 x64 |
 | Grok | `grok agent stdio` | `grok login` 或 CLI 已有凭证；版本查询为 `grok version`，不添加自动批准参数 |
+| DeepSeek Harness | `dsh --profile acp` | 在该 Host 完成 dsh 登录，或让其 `acp` profile 指向网关；版本查询为 `dsh --version`，不写入凭证或改写 dsh 的模型/provider 配置 |
 
 每个预设的安装链接、来源版本和兼容性说明显示在设置中；Windows/macOS/Linux 条目表示上游可用性，不代表 Varin 在每个平台上都做过真实账号验证。用户可编辑可执行文件与参数，内置预设可禁用，自定义 ACP 可移除。
 
