@@ -5,6 +5,7 @@ import {
   type SettingsFileStoreOptions,
 } from '@varin/settings-store';
 import { randomUUID } from 'node:crypto';
+import { EXTERNAL_ACCESS_SETTINGS_KEY } from '../tunnels/external-access-config.js';
 import { parseProjectSourceBinding, projectResourceOwnerKey, projectFolders, projectPathKey } from '@varin/application-client';
 
 interface ProjectEntry extends Record<string, unknown> {
@@ -136,6 +137,8 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     const removed = new Set(removals);
     let next = mergePersistedSettings(current, sanitized);
     for (const field of removals) {
+      // The external-access lifecycle alone updates its revision and intent.
+      if (field === EXTERNAL_ACCESS_SETTINGS_KEY) continue;
       if (Object.prototype.hasOwnProperty.call(next, field)) {
         next = { ...next };
         delete next[field];

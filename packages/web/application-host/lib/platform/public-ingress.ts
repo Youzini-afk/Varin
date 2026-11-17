@@ -9,7 +9,7 @@ export interface ExternalIngressConfiguration {
   port: number;
 }
 
-interface ExternalIngress extends Readonly<ExternalIngressConfiguration> { host: string }
+export interface ExternalIngress extends Readonly<ExternalIngressConfiguration> { host: string }
 type UpgradeListener = (request: IncomingMessage, socket: Duplex, head: Buffer) => void;
 
 interface IngressAdmission {

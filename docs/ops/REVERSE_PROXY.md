@@ -14,8 +14,18 @@ proxy must forward the complete origin rather than selecting only ordinary REST 
 ## Dedicated external HTTP backend
 
 For a self-managed TLS proxy on the same machine (or a trusted private link),
-you can opt into a separate guarded HTTP listener. For example, set these
-environment variables on the Application Host before starting it:
+open **Settings → External Access** on the local Host and save an HTTPS origin
+and a fixed IP address and port for the guarded HTTP listener. Saving does not
+restart an existing listener; **Enable** starts it and **Retry** applies changes
+to an enabled entry. A failed replacement attempts to restore the previous
+running listener without overwriting the saved draft. **Disable** is persisted
+before the listener is fenced; shutting down the Host does not clear enabled
+intent or device authorization. An active legacy Cloudflare/ngrok tunnel must
+be stopped before another managed entry can start.
+
+Headless operators can also set the following variables on the Application Host
+before starting it. An explicitly configured environment listener takes precedence
+over the saved entry, which remains untouched and is not restored in this mode:
 
 ```text
 VARIN_EXTERNAL_ORIGIN=https://varin.example.com
@@ -45,9 +55,60 @@ browser can also send a same-origin `DELETE /auth/browser-session` to revoke its
 own grant and clear its cookies. Clearing the browser's site data still
 requires pairing again.
 
-This entry does not provision a VPS, install FRP, manage certificates, or
-replace the existing settings UI. Do not route remote HTTP clients directly to
-the ordinary local listener as a substitute for this guarded backend.
+The local settings screen can generate the same browser pairing link or QR.
+Do not route remote HTTP clients directly to the ordinary local listener as a
+substitute for this guarded backend. This mode does not provision a VPS or
+manage TLS certificates.
+
+## Existing FRP (operator-managed)
+
+The local management API can save an FRP entry pointing to an independently
+configured Linux/macOS Host and frps server. Provide an existing absolute
+`frpc` binary in `VARIN_FRPC_PATH` and an existing token in
+`VARIN_FRP_TOKEN` (or a named `VARIN_FRP_TOKEN_*` environment variable).
+The saved config refers to the variable; the value never appears in the
+management API response. A trusted CA file and verified TLS server name
+are required; the backend is fixed to Host loopback.
+
+On the local Host, with the same authentication and Origin normally used
+for the local settings UI, send a `PUT /api/varin/external-access` with
+`expectedRevision` from GET (`null` only for a new entry) and a
+`configuration` object. For example:
+
+```json
+{
+  "expectedRevision": null,
+  "configuration": {
+    "name": "Home VPS",
+    "provider": "frp",
+    "publicOrigin": "https://varin.example.com",
+    "backend": { "host": "127.0.0.1", "port": 3100 },
+    "frp": {
+      "server": {
+        "address": "forwarding.example.com",
+        "port": 7000,
+        "tls": { "caFile": "/path/to/vps-ca.pem", "serverName": "forwarding.example.com" }
+      },
+      "proxy": { "name": "varin-home", "remotePort": 7300 },
+      "tokenEnv": "VARIN_FRP_TOKEN"
+    }
+  }
+}
+```
+
+Then send `POST /api/varin/external-access/enable` with the returned revision
+in `expectedRevision`. The Host opens business admission only after frpc
+reports the named TCP mapping published. The VPS HTTPS proxy should forward
+to that mapping's private VPS address, not make the TCP mapping public.
+The UI still reports **public endpoint unverified**: this does not verify
+your DNS, certificate, or HTTPS proxy from a browser. Host-side retry is
+bounded and does not retry credentials rejected by the provider. Stop waits
+for the child to exit and cleans up its private configuration files.
+
+This adapter was developed against the FRP v0.65.0 publication log format.
+Actual FRP/VPS/TLS end-to-end qualification is still pending, Windows does
+not have a supported private credential-file path, and FRP configuration
+does not install binaries or mutate the target server.
 
 ## Current realtime routes
 

@@ -13,7 +13,7 @@ This module contains tunnel provider orchestration for Varin, including provider
 - `packages/web/application-host/lib/tunnels/types.ts`: tunnel constants, normalization, and shared type helpers.
 - `packages/web/application-host/lib/tunnels/providers/cloudflare.ts`: Cloudflare tunnel provider implementation.
 - `packages/web/application-host/lib/tunnels/providers/ngrok.ts`: Ngrok quick tunnel provider implementation.
-- `packages/web/application-host/lib/tunnels/providers/reverse-proxy.ts`: unregistered existing-proxy adapter. The Host injects an initially disabled guarded listener, and the adapter exposes its actual backend address. It does not install or configure a proxy, persist settings, or probe a public endpoint.
+- `packages/web/application-host/lib/tunnels/providers/reverse-proxy.ts`: existing-proxy adapter for the self-hosted lifecycle. The Host injects an initially disabled guarded listener, and the adapter exposes its actual backend address. It does not install or configure a proxy, persist settings, or probe a public endpoint.
 
 ## Guarded-listener integration boundary
 
@@ -23,10 +23,14 @@ The existing-proxy adapter has its own `reverse-proxy` provider/mode and `revers
 
 `getPublicUrl()` is an address, not a readiness assertion. `getEndpointVerification()` and the service's `endpointVerification` result are `unverified` for the existing-proxy adapter; legacy providers return `null` until they supply evidence. Public HTTPS, current-Host identity, and full proxy reachability have not been checked merely because the local listener is bound.
 
-The adapter is intentionally **not registered in the Host**. Registration requires persistent settings/enable intent through the existing settings writer, public-entry authentication, status consumers that distinguish unverified endpoints, and lifecycle handling that awaits asynchronous listener closure. The current synchronous service stop and URL-based routes are not sufficient for that integration. No FRP, SSH deployment, automatic restoration, or public-endpoint verification is implemented here.
+The adapter is intentionally **not registered in the legacy Cloudflare/ngrok registry**. The self-hosted lifecycle below calls it directly because legacy stop and URL-based status do not represent asynchronous release or endpoint verification. SSH deployment and a public HTTPS verification probe are not implemented here.
 
 ## Public exports (`routes.ts`)
 - `createTunnelRoutesRuntime(dependencies)`: creates tunnel routes runtime and helpers.
 - Returned API:
   - `registerRoutes(app)`
   - `startTunnelWithNormalizedRequest(request)`
+
+## Self-hosted management
+
+`self-hosted-access` assembles the Host-owned guarded listener and the existing-proxy adapter or operator-provided FRP child. `external-access-runtime` owns serialized activation, fenced teardown, rollback, and bounded retries; configuration and intent use the existing settings file owner with compare-and-swap. The local management API uses separate save/enable/disable/retry actions. Runtime state never treats a listener bind or a published FRP mapping as proof of the public HTTPS endpoint. Legacy starts reserve the external-access slot through the original tunnel service.

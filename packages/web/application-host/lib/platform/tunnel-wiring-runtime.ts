@@ -36,7 +36,7 @@ export const createTunnelWiringRuntime = (
     setRuntimeManagedRemoteTunnelToken,
   } = dependencies;
 
-  const initialize = (app: Express, initialPort: number) => {
+  const initialize = (app: Express, initialPort: number, reserveStart?: () => () => void) => {
     let activePort = initialPort;
 
     const tunnelService = createTunnelService({
@@ -44,6 +44,7 @@ export const createTunnelWiringRuntime = (
       getController: getActiveTunnelController,
       setController: setActiveTunnelController,
       getActivePort: () => activePort,
+      reserveStart,
       onQuickTunnelWarning: () => {
         printTunnelWarning();
       },

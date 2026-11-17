@@ -20,6 +20,7 @@ export interface TunnelServiceDependencies {
   // Supplied only by Host wiring, never copied from an HTTP request body.
   getStartContext?(request: TunnelStartRequest): TunnelStartContext | Promise<TunnelStartContext>;
   onQuickTunnelWarning?: (() => void) | undefined;
+  reserveStart?: (() => () => void) | undefined;
   registry: Pick<TunnelProviderRegistry, 'get'>;
   setController(controller: TunnelController | null): void;
 }
@@ -31,6 +32,7 @@ export function createTunnelService({
   getActivePort,
   getStartContext,
   onQuickTunnelWarning,
+  reserveStart,
 }: TunnelServiceDependencies) {
   if (!registry) {
     throw new Error('Tunnel service requires a provider registry');
@@ -82,6 +84,7 @@ export function createTunnelService({
   let startLock: Promise<void> = Promise.resolve();
 
   const start = async (rawRequest: Record<string, unknown>, options: Record<string, unknown> = {}) => {
+    const releaseReservation = reserveStart?.();
     let releaseLock: () => void = () => undefined;
     const lockPromise = new Promise<void>((resolve) => { releaseLock = resolve; });
     const previousLock = startLock;
@@ -164,6 +167,7 @@ export function createTunnelService({
       };
     } finally {
       releaseLock();
+      releaseReservation?.();
     }
   };
 
