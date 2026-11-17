@@ -66,7 +66,10 @@ wrappers, adjacent attributes/docs and Dart's separate signature/body siblings.
 Malformed units are marked incomplete so they cannot masquerade as full code.
 The manifest may select a reviewed `bundledQueryFile` with its own digest.
 Pinned standalone upstream wasm releases are supported alongside npm archives.
-Both the grammar and query must load successfully before bundling.
+Both the grammar and query must load successfully against the shipped parser before bundling.
+When updating `web-tree-sitter`, refresh only that checked-in runtime with
+`bun run --cwd packages/web structure:copy-runtime --refresh-parser-runtime`; a mismatch
+between its WASM and the installed JavaScript binding stops bundling.
 
 Parsing is on demand. Compiled grammars/queries are reused inside native compute
 workers; their cold compilation is separate from the per-file parse budget.

@@ -33,6 +33,7 @@ const copyIfNeeded = (source, destName, refresh = force) => {
     throw new Error(`Missing structure runtime source: ${source}`);
   }
   fs.copyFileSync(source, dest);
+  fs.chmodSync(dest, 0o644);
   log(`copied ${destName} from ${source} (${fs.statSync(dest).size} bytes)`);
 };
 
