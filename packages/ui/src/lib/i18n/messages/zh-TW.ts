@@ -527,7 +527,7 @@ export const dict: Record<I18nKey, string> = {
   "thread.composer.interrupt": "中斷目前生成",
   "thread.composer.afterRun": "本輪結束後傳送",
   "thread.composer.images": "新增圖片",
-  "thread.composer.chatOnly": "僅聊天",
+  "thread.composer.chatOnly": "未選擇",
   "thread.message.summarize": "總結至此處",
   "chat.fileAttachment.actions.attachPdfs": "加入 PDF",
   "chat.fileAttachment.actions.choosePdfs": "選擇文件",

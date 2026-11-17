@@ -143,6 +143,9 @@ const submit = () => act(async () => container.querySelector('form')!.dispatchEv
 
 it('prepares a chat-only draft once and sends its selected options with the first request', async () => {
   const { api, views, emit } = fixture(); let finish!: () => void;
+  const conversation = views.get('prepared')!.conversation;
+  conversation.cwd = '/varin/workspaces/private-directory';
+  conversation.privateWorkspace = true;
   useThreadDraftStore.getState().patch('draft', { workspacePath: undefined });
   const connect = api.connect.getMockImplementation()!;
   api.connect.mockImplementationOnce(id => new Promise(resolve => { finish = () => {
@@ -168,6 +171,9 @@ it('prepares a chat-only draft once and sends its selected options with the firs
   await submit();
   expect(api.create).toHaveBeenCalledOnce(); expect(api.send).toHaveBeenCalledWith('prepared', expect.any(String), expect.objectContaining({ text: 'Original question', model: 'first', thinking: 'high', mode: 'auto', permissionProfile: ':danger-full-access', config: { verbosity: 'long' } }));
   expect(f.select).toHaveBeenCalledWith('prepared');
+  await renderConversation();
+  expect(f.composer?.workspaceLabel).toBe('thread.composer.chatOnly');
+  expect(f.composer?.workspacePath).toBe(conversation.cwd);
 });
 
 it.each(['draft', 'conversation'] as const)('freezes external %s quote/image relations and preserves a newly inserted occurrence of the same quote on receipt', async surface => {

@@ -24,6 +24,7 @@ import { EMPTY_THREAD_DRAFT, useThreadDraftStore } from '@/stores/useThreadDraft
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useI18n } from '@/lib/i18n';
+import { formatDirectoryName } from '@/lib/utils';
 import { THINKING_LEVELS } from '@varin/protocol';
 import { ThreadComposer } from './ThreadComposer';
 import { HarnessSelector } from './HarnessSelector';
@@ -896,7 +897,7 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
                   onGoal={() => {}}
                   hasInput={Boolean(draft.text.trim() || draft.images.length || draft.files?.length || draft.markerObjects?.length)}
                   onWorkspace={() => setDetails(true)}
-                  workspaceLabel={c.cwd.split(/[\\/]/).at(-1) ?? c.cwd}
+                  workspaceLabel={c.privateWorkspace ? t('thread.composer.chatOnly') : formatDirectoryName(c.cwd)}
                   workspacePath={c.cwd}
                   imageReferences={draftImageReferences(draft)} attachmentNames={draft.files?.map(file => file.filename) ?? []}
                   skills={[]}
