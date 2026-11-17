@@ -18,17 +18,16 @@ export interface ExternalAccessFailure {
 export interface ExternalAccessRuntimeStatus {
   revision: number;
   enabled: boolean;
-  state: 'disabled' | 'connecting' | 'awaiting-verification' | 'connected' | 'reconnecting' | 'stopping' | 'failed';
+  state: 'disabled' | 'connecting' | 'enabled' | 'connected' | 'reconnecting' | 'stopping' | 'failed';
   activeRevision: number | null;
-  endpointVerification: 'unverified' | 'verified' | null;
   error: ExternalAccessFailure | null;
   retryAttempt: number;
   retryAt: number | null;
 }
 
 export interface ExternalAccessResource {
-  /** Verified means HTTPS was checked against this Host, not just a local bind/process. */
-  verification: 'unverified' | 'verified';
+  /** A managed protocol can prove publication; an external service only has a local enabled listener. */
+  state: 'enabled' | 'connected';
   /** Immediately deny new ingress and disconnect existing streams before async teardown. */
   fence(): void;
   /** Resolve only after listeners/processes are actually released. Safe to retry on failure. */
@@ -86,7 +85,7 @@ export function createExternalAccessRuntime<Config>(options: ExternalAccessRunti
   let saved: ExternalAccessRecord<Config> = { revision: 0, enabled: false, config: null };
   let status: ExternalAccessRuntimeStatus = {
     revision: 0, enabled: false, state: 'disabled', activeRevision: null,
-    endpointVerification: null, error: null, retryAttempt: 0, retryAt: null,
+    error: null, retryAttempt: 0, retryAt: null,
   };
   let started = false;
   let shuttingDown = false;
@@ -100,7 +99,11 @@ export function createExternalAccessRuntime<Config>(options: ExternalAccessRunti
 
   const getStatus = (): ExternalAccessRuntimeStatus => structuredClone(status);
   const publish = (patch: Partial<ExternalAccessRuntimeStatus>) => {
-    status = { ...status, ...patch, revision: saved.revision, enabled: saved.enabled };
+    const next = { ...status, ...patch, revision: saved.revision, enabled: saved.enabled };
+    if (next.revision === status.revision && next.enabled === status.enabled && next.state === status.state
+      && next.activeRevision === status.activeRevision && next.error?.code === status.error?.code
+      && next.retryAttempt === status.retryAttempt && next.retryAt === status.retryAt) return;
+    status = next;
     // Observers must not turn a committed intent or resource transition into a failed write.
     try { options.onStatus?.(getStatus()); } catch { /* Observer failure is not lifecycle failure. */ }
   };
@@ -205,7 +208,7 @@ export function createExternalAccessRuntime<Config>(options: ExternalAccessRunti
     const nextEpoch = ++generation;
     cancelRetry();
     fence();
-    publish({ state: 'reconnecting', endpointVerification: null, error: failure, retryAt: null });
+    publish({ state: 'reconnecting', error: failure, retryAt: null });
     work = work.then(async () => {
       try { await stopActive(); } catch {
         if (nextEpoch === generation) publish({ state: 'failed', error: fail('stop_failed') });
@@ -217,7 +220,7 @@ export function createExternalAccessRuntime<Config>(options: ExternalAccessRunti
     });
   };
 
-  const openTarget = async (target: Target<Config>, epoch: number): Promise<boolean> => {
+  const openTarget = async (target: Target<Config>, epoch: number): Promise<ExternalAccessResource['state'] | null> => {
     const controller = new AbortController();
     opening = controller;
     let earlyDisconnect: { error: unknown } | null = null;
@@ -234,9 +237,9 @@ export function createExternalAccessRuntime<Config>(options: ExternalAccessRunti
       if (epoch !== generation || shuttingDown || controller.signal.aborted) {
         await stopActive();
         if (earlyDisconnect) throw (earlyDisconnect as { error: unknown }).error;
-        return false;
+        return null;
       }
-      return true;
+      return resource.state;
     } catch (error) {
       controller.abort();
       if (earlyDisconnect) throw (earlyDisconnect as { error: unknown }).error;
@@ -255,7 +258,7 @@ export function createExternalAccessRuntime<Config>(options: ExternalAccessRunti
     fence();
     publish({
       state: target ? (automatic ? 'reconnecting' : 'connecting') : 'stopping',
-      endpointVerification: null, error: null, retryAt: null,
+      error: null, retryAt: null,
       ...(!automatic ? { retryAttempt: 0 } : {}),
     });
     const completion = work.then(async () => {
@@ -267,13 +270,14 @@ export function createExternalAccessRuntime<Config>(options: ExternalAccessRunti
       if (epoch !== generation) return;
       publish({ activeRevision: null });
       if (!target || shuttingDown) {
-        publish({ state: 'disabled', endpointVerification: null });
+        publish({ state: 'disabled' });
         return;
       }
       try {
-        if (!await openTarget(target, epoch) || epoch !== generation || shuttingDown) return;
-        publish({ state: active?.resource.verification === 'verified' ? 'connected' : 'awaiting-verification',
-          activeRevision: target.revision, endpointVerification: active?.resource.verification ?? null,
+        const nextState = await openTarget(target, epoch);
+        if (!nextState || epoch !== generation || shuttingDown) return;
+        publish({ state: nextState,
+          activeRevision: target.revision,
           error: null, retryAttempt: 0, retryAt: null });
       } catch (error) {
         if (epoch !== generation || shuttingDown) return;
@@ -285,10 +289,11 @@ export function createExternalAccessRuntime<Config>(options: ExternalAccessRunti
         }
         if (allowRollback && previous) {
           try {
-            if (!await openTarget(previous, epoch) || epoch !== generation || shuttingDown) return;
-            // A restored old generation is not evidence for the newly saved endpoint.
-            publish({ state: 'awaiting-verification', activeRevision: previous.revision,
-              endpointVerification: 'unverified', error: failure, retryAt: null });
+            const restoredState = await openTarget(previous, epoch);
+            if (!restoredState || epoch !== generation || shuttingDown) return;
+            // The old listener remains useful, but the error describes the rejected draft.
+            publish({ state: restoredState, activeRevision: previous.revision,
+              error: failure, retryAt: null });
             return;
           } catch {
             if (epoch !== generation || shuttingDown) return;
@@ -308,7 +313,7 @@ export function createExternalAccessRuntime<Config>(options: ExternalAccessRunti
     ++generation;
     cancelRetry();
     fence();
-    publish({ state: 'stopping', endpointVerification: null, retryAt: null });
+    publish({ state: 'stopping', retryAt: null });
   };
 
   return {
@@ -350,6 +355,15 @@ export function createExternalAccessRuntime<Config>(options: ExternalAccessRunti
       const result = await serial(async () => {
         const record = await currentRecord(expectedRevision);
         await persist(record, { config: record.config, enabled: false });
+        return { completion: transition(null, false) };
+      });
+      return result.completion;
+    },
+    remove: async (expectedRevision: number) => {
+      const result = await serial(async () => {
+        const record = await currentRecord(expectedRevision);
+        if (!record.config) throw new ExternalAccessRuntimeError('not_configured');
+        await persist(record, { config: null, enabled: false });
         return { completion: transition(null, false) };
       });
       return result.completion;

@@ -56,7 +56,27 @@ it('parses the external-access action and explicit configuration revision', () =
 it('reads local status without changing it and does not claim public verification', async () => {
   await externalAccessCommand({ ...options(), json: false }, 'status');
   expect(requests).toEqual([{ method: 'GET', url: '/api/varin/external-access', origin: `http://127.0.0.1:${port}`, cookie: undefined, body: null }]);
-  expect(output).toContain('Revision: 4'); expect(output).toContain('Public HTTPS access is not verified.');
+  expect(output).toContain('Revision: 4'); expect(output).toContain('Public HTTPS access has not been checked.');
+});
+
+it('runs an explicit same-origin diagnostic with no revision, request body, or setting write', async () => {
+  await externalAccessCommand(options(), 'check');
+  expect(requests).toEqual([{ method: 'POST', url: '/api/varin/external-access/check',
+    origin: `http://127.0.0.1:${port}`, cookie: undefined, body: null }]);
+});
+
+it('only deletes the local entry using an explicit revision', async () => {
+  await externalAccessCommand({ ...options(), expectedRevision: '4' }, 'remove');
+  expect(requests).toEqual([{ method: 'DELETE', url: '/api/varin/external-access',
+    origin: `http://127.0.0.1:${port}`, cookie: undefined, body: { expectedRevision: 4 } }]);
+});
+
+it('does not forward provider credentials when configuring independently managed forwarding', async () => {
+  const configuration = { ...snapshot().entry.configuration, provider: 'external-forwarding', frp: { token: 'not-for-this-mode' } };
+  await externalAccessCommand({ ...options(), configPath: await config(configuration), expectedRevision: 'new' }, 'config');
+  expect(requests).toHaveLength(1);
+  expect(requests[0]!.body).toMatchObject({ configuration: { provider: 'external-forwarding' } });
+  expect(JSON.stringify(requests[0]!.body)).not.toContain('not-for-this-mode');
 });
 
 it.each(['enable', 'disable', 'retry'])('sends %s once with the requested revision and same-origin header', async action => {

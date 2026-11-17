@@ -16,7 +16,7 @@ import { FrpTunnelError } from './providers/frp.js';
 
 const origin = 'https://varin.example.test';
 const responseStatus = (port: number) => new Promise<number | undefined>((resolve, reject) => {
-  const req = request({ hostname: '127.0.0.1', port, headers: { host: 'varin.example.test' } }, response => {
+  const req = request({ hostname: '127.0.0.1', port, agent: false, headers: { host: 'varin.example.test' } }, response => {
     response.resume();
     resolve(response.statusCode);
   });
@@ -40,7 +40,7 @@ it('uses the real guarded listener and settings store across enable, restart, an
   const construct = () => {
     const store = createSettingsFileStore({ filePath });
     return createSelfHostedAccess({
-      verifyEndpoint: async () => false,
+      resolveFrpc: async () => { throw new Error('external forwarding must not resolve an frpc component'); },
       createIngress: cfg => createPublicIngress({
         ...cfg,
         onRequest(request, response) {
@@ -63,14 +63,14 @@ it('uses the real guarded listener and settings store across enable, restart, an
     });
   };
   const initial = construct();
-  const config = parseExternalAccessConfiguration({ name: 'Example', provider: 'reverse-proxy', publicOrigin: origin, backend: { host: '127.0.0.1', port } }, 'stable-id');
+  const config = parseExternalAccessConfiguration({ name: 'Example', provider: 'external-forwarding', publicOrigin: origin, backend: { host: '127.0.0.1', port } }, 'stable-id');
   try {
     await initial.start();
     await initial.save(config, 0);
     expect(await initial.snapshot()).toMatchObject({ phase: 'disabled', listener: null, entry: { enabled: false, revision: 1 } });
     await expect(initial.enable(0)).rejects.toMatchObject({ code: 'revision_conflict' });
     await initial.enable(1);
-    expect(await initial.snapshot()).toMatchObject({ phase: 'unverified', listener: { origin, host: '127.0.0.1', port }, entry: { enabled: true, revision: 2 } });
+    expect(await initial.snapshot()).toMatchObject({ phase: 'enabled', listener: { origin, host: '127.0.0.1', port }, entry: { enabled: true, revision: 2 } });
     expect(await responseStatus(port)).toBe(204);
     await initial.shutdown();
     expect(holder).toBe(false);
@@ -89,7 +89,30 @@ it('uses the real guarded listener and settings store across enable, restart, an
       await disabled.start();
       expect(await disabled.snapshot()).toMatchObject({ entry: { enabled: false, revision: 3 }, phase: 'disabled', listener: null });
       expect(holder).toBe(false);
+      await disabled.enable(3);
+      expect(await responseStatus(port)).toBe(204);
+      await disabled.remove(4);
+      expect(await disabled.snapshot()).toMatchObject({ settingsRevision: 5, entry: null, phase: 'disabled', listener: null });
+      await expect(responseStatus(port)).rejects.toMatchObject({ code: 'ECONNREFUSED' });
+      await expect(disabled.enable(4)).rejects.toMatchObject({ code: 'revision_conflict' });
     } finally { await disabled.shutdown(); }
+    const afterRemoval = construct();
+    try {
+      await afterRemoval.start();
+      expect(await afterRemoval.snapshot()).toMatchObject({ settingsRevision: 5, entry: null, phase: 'disabled' });
+      const app = express();
+      registerExternalAccessRoutes(app, {
+        json: express.json(), authorize: () => true, snapshot: afterRemoval.snapshot,
+        save: afterRemoval.save, remove: afterRemoval.remove,
+        actions: { enable: afterRemoval.enable, disable: afterRemoval.disable, retry: afterRemoval.retry },
+      });
+      const api = supertest(app);
+      const created = await api.put('/api/varin/external-access').send({ expectedRevision: null, configuration: config }).expect(200);
+      expect(created.body.entry).toMatchObject({ revision: 6, configuration: { provider: 'external-forwarding' } });
+      await api.delete('/api/varin/external-access').send({ expectedRevision: 4 }).expect(409);
+      await api.delete('/api/varin/external-access').send({ expectedRevision: 6 }).expect(200);
+      expect(await afterRemoval.snapshot()).toMatchObject({ settingsRevision: 7, entry: null });
+    } finally { await afterRemoval.shutdown(); }
   } finally {
     await initial.shutdown();
     await rm(directory, { recursive: true, force: true });
@@ -123,15 +146,19 @@ it('guards state changes and treats environment configuration as read only', asy
   const app = express();
   let writes = 0;
   const f = async () => { writes++; };
+  let checks = 0, installs = 0;
+  const component = { state: 'missing', source: null, version: null, managedVersion: '0.65.0', installSupported: true } as const;
   registerExternalAccessRoutes(app, {
     json: express.json(),
     authorize: (req, action) => action === 'read' || req.headers['x-test-owner'] === 'yes',
     includeOperatorDetails: request => request.headers['x-test-owner'] === 'yes',
     snapshot: async (detail) => ({
-      source: 'environment', entry: null, phase: 'unverified', listener: null,
+      source: 'environment', entry: null, phase: 'enabled', listener: null,
       ...(detail ? { error: 'operator diagnostic' } : {}),
     }),
     save: f, actions: { enable: f, disable: f, retry: f },
+    checkAccess: async () => { checks++; },
+    component: { status: async () => component, install: async () => { installs++; return component; } },
   });
   const api = supertest(app);
   await api.post('/api/varin/external-access/enable').send({ expectedRevision: 1 }).expect(403);
@@ -140,6 +167,14 @@ it('guards state changes and treats environment configuration as read only', asy
   expect(ordinary.body.error).toBeUndefined();
   const operator = await api.get('/api/varin/external-access').set('x-test-owner', 'yes').expect(200);
   expect(operator.body.error).toBe('operator diagnostic');
+  await api.post('/api/varin/external-access/check').expect(403);
+  await api.post('/api/varin/external-access/check').set('x-test-owner', 'yes').expect(200);
+  expect(checks).toBe(1);
+  await api.get('/api/varin/external-access/component').expect(403);
+  await api.get('/api/varin/external-access/component').set('x-test-owner', 'yes').expect(200, component);
+  await api.post('/api/varin/external-access/component/install').expect(403);
+  await api.post('/api/varin/external-access/component/install').set('x-test-owner', 'yes').expect(200, component);
+  expect(installs).toBe(1);
   expect(writes).toBe(0);
 });
 
@@ -159,7 +194,6 @@ it('keeps the FRP backend fenced until provider publish and fences on provider d
   let disconnect: ((failure: FrpTunnelError) => void) | undefined;
   let stops = 0;
   const access = createSelfHostedAccess({
-    verifyEndpoint: async () => false,
     env: { VARIN_FRPC_PATH: join(tmpdir(), 'unused-frpc') },
     createIngress: cfg => createPublicIngress({
       ...cfg, onRequest(_req, res) { res.writeHead(204).end(); }, onUpgrade(_req, socket) { socket.destroy(); },
@@ -194,7 +228,7 @@ it('keeps the FRP backend fenced until provider publish and fences on provider d
     publish?.();
     await attempt;
     expect(await responseStatus(port)).toBe(204);
-    expect(await access.snapshot()).toMatchObject({ source: 'settings', phase: 'unverified', listener: { port } });
+    expect(await access.snapshot()).toMatchObject({ source: 'settings', phase: 'connected', listener: { port } });
     disconnect?.(new FrpTunnelError('authentication_failed', 'private upstream details'));
     await expect.poll(async () => (await access.snapshot()).phase).toBe('failed');
     expect(await access.snapshot()).toMatchObject({ listener: null, entry: { enabled: true } });

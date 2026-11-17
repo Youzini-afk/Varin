@@ -46,6 +46,7 @@ type ScheduledTaskRanEvent = {
 export type VarinEvent = StreamReadyEvent | ScheduledTaskRanEvent | HarnessKnowledgeChangedEvent | HarnessExperimentChangedEvent | SettingsChangedEvent
   | { type: 'plan-changed'; threadId: string; branchId: string; ref: string }
   | { type: 'agent-personalization-changed' }
+  | { type: 'external-access-changed' }
   | { type: 'scheduled-task-changed' }
   | { type: 'ssh-instance-status'; status: unknown }
   | { type: 'bot-changed'; botId: string }
@@ -246,6 +247,11 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     if (workspaceId && (fact === 'attempt' || fact === 'machine' || fact === 'source' || fact === 'followup')) {
       for (const listener of listeners) listener({ type: 'harness-experiment-changed', workspaceId, fact });
     }
+    return;
+  }
+
+  if (envelope.type === 'varin:external-access-changed') {
+    for (const listener of listeners) listener({ type: 'external-access-changed' });
     return;
   }
 

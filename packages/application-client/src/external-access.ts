@@ -14,18 +14,39 @@ export interface ExternalAccessFrpConfiguration {
 export interface ExternalAccessConfigurationView {
   id: string;
   name: string;
-  provider: 'reverse-proxy' | 'frp';
+  provider: 'reverse-proxy' | 'external-forwarding' | 'frp';
   publicOrigin: string;
   backend: ExternalAccessBackend;
   /** Available only in a management view; absent on older Hosts or redacted views. */
   frp?: ExternalAccessFrpConfiguration;
 }
 
+export interface ExternalAccessFrpcComponent {
+  state: 'available' | 'missing' | 'invalid' | 'unsupported';
+  source: 'configured' | 'path' | 'managed' | null;
+  version: string | null;
+  managedVersion: string;
+  installSupported: boolean;
+  error?: string;
+  executablePath?: string;
+}
+
+export interface ExternalAccessCheck {
+  state: 'verified' | 'unverified';
+  checkedAt: number;
+  origin: string;
+  reason?: 'dns' | 'not_public' | 'tls' | 'timeout' | 'unreachable' | 'different_endpoint';
+}
+
 export interface ExternalAccessSnapshot {
   source: 'settings' | 'environment';
+  hostName?: string;
+  /** Preserves the settings generation even after the last entry is removed. */
+  settingsRevision?: number;
   entry: { revision: number; enabled: boolean; configuration: ExternalAccessConfigurationView } | null;
   listener: (ExternalAccessBackend & { origin: string }) | null;
-  phase: 'disabled' | 'starting' | 'unverified' | 'reconnecting' | 'stopping' | 'failed' | 'connected';
+  phase: 'disabled' | 'enabled' | 'starting' | 'unverified' | 'reconnecting' | 'stopping' | 'failed' | 'connected';
+  accessCheck?: ExternalAccessCheck;
   error?: string;
 }
 

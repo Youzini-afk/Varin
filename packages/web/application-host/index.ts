@@ -322,6 +322,8 @@ import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.j
 import { createSelfHostedAccess } from './lib/tunnels/self-hosted-access.js';
 import { EXTERNAL_ACCESS_SETTINGS_KEY, readExternalAccessRecord } from './lib/tunnels/external-access-config.js';
 import { registerExternalAccessRoutes } from './lib/tunnels/external-access-routes.js';
+import { createExternalAccessDiagnostics } from './lib/tunnels/external-access-diagnostics.js';
+import { createFrpcComponentService } from './lib/tunnels/frpc-component.js';
 import { hasHostConnectionAccess } from './lib/connections/access.js';
 import type { ExternalAccessSnapshot } from '@varin/application-client';
 import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
@@ -928,8 +930,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     legacyReservations++;
     return () => { legacyReservations--; };
   };
+  const frpcComponents = createFrpcComponentService({ dataDirectory: path.resolve(VARIN_DATA_DIR) });
   const selfHosted = createSelfHostedAccess({
     createIngress,
+    resolveFrpc: () => frpcComponents.resolveExecutable(),
+    onStatus: () => broadcastGlobalUiEvent?.({ type: 'varin:external-access-changed', properties: {} }),
     read: async () => {
       const record = readExternalAccessRecord((await readSettingsFromDisk())[EXTERNAL_ACCESS_SETTINGS_KEY]);
       return record ? { revision: record.revision, enabled: record.enabled, config: record.configuration } : { revision: 0, enabled: false, config: null };
@@ -953,6 +958,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return () => { if (held) { held = false; selfHostedReservations--; } };
     },
   });
+  const externalAccessDiagnostics = createExternalAccessDiagnostics(() => externalIngress ?? selfHosted.getIngress());
   const unsubscribeExternalIngressRevocation = remoteClientAuthRuntime.onClientRevoked(clientId => {
     externalIngress?.revokeClient(clientId);
     selfHosted.getIngress()?.revokeClient(clientId);
@@ -3335,17 +3341,28 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     json: express.json({ limit: '16kb' }),
     authorize: authorizeExternalAccessControl,
     includeOperatorDetails: isDirectLocalAccessControl,
+    checkAccess: externalAccessDiagnostics.check,
+    component: {
+      status: () => frpcComponents.getStatus({ includeOperatorDetails: true }),
+      install: () => frpcComponents.install(),
+    },
     snapshot: async (includeOperatorDetails): Promise<ExternalAccessSnapshot> => {
-      if (!externalIngress) return selfHosted.snapshot(includeOperatorDetails);
-      const { host, port, origin } = externalIngress.configuration;
-      return {
-        source: 'environment', entry: null,
-        phase: externalIngressError ? 'failed' : externalIngress.enabled ? 'unverified' : 'disabled',
-        listener: externalIngress.enabled ? { host, port, origin } : null,
-        ...(externalIngressError ? { error: 'The configured backend failed to bind. Check the Host environment and port.' } : {}),
-      };
+      let snapshot: ExternalAccessSnapshot;
+      if (externalIngress) {
+        const { host, port, origin } = externalIngress.configuration;
+        snapshot = {
+          source: 'environment', entry: null,
+          phase: externalIngressError ? 'failed' : externalIngress.enabled ? 'enabled' : 'disabled',
+          listener: externalIngress.enabled ? { host, port, origin } : null,
+          ...(externalIngressError ? { error: 'The configured backend failed to bind. Check the Host environment and port.' } : {}),
+        };
+      } else snapshot = await selfHosted.snapshot(includeOperatorDetails);
+      const accessCheck = includeOperatorDetails ? externalAccessDiagnostics.getLastCheck() : undefined;
+      return { ...snapshot, hostName: os.hostname()?.trim() || 'Varin',
+        ...(accessCheck && accessCheck.origin === snapshot.listener?.origin ? { accessCheck } : {}) };
     },
     save: selfHosted.save,
+    remove: selfHosted.remove,
     actions: { enable: selfHosted.enable, disable: selfHosted.disable, retry: selfHosted.retry },
   });
   tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port, reserveLegacyStart);

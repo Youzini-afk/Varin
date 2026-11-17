@@ -29,7 +29,7 @@ function fixture(initial: Partial<ExternalAccessRecord<Configuration>> = {}) {
   });
   const makeResource = (context: ExternalAccessOpenContext, configuration: Configuration): ExternalAccessResource => {
     const resource = {
-      context, config: configuration, verification: 'unverified' as const,
+      context, config: configuration, state: 'enabled' as const,
       fence: vi.fn(() => { events.push('fence'); }),
       stop: vi.fn(async () => { events.push('stop'); }),
     };
@@ -72,15 +72,29 @@ describe('persistent external access lifecycle', () => {
     await f.runtime.shutdown();
   });
 
-  it('never turns a bound backend or running provider into verified connectivity', async () => {
+  it('distinguishes a bound external backend from managed provider publication', async () => {
     const f = fixture({ enabled: true, config: config() });
-    expect(await f.runtime.start()).toMatchObject({ state: 'awaiting-verification', endpointVerification: 'unverified' });
+    expect(await f.runtime.start()).toMatchObject({ state: 'enabled' });
     await f.runtime.shutdown();
-    f.open.mockImplementationOnce(async (configuration, context) => ({ ...f.makeResource(context, configuration), verification: 'verified' }));
+    f.open.mockImplementationOnce(async (configuration, context) => ({ ...f.makeResource(context, configuration), state: 'connected' }));
     const restored = createExternalAccessRuntime(f.options);
-    expect(await restored.start()).toMatchObject({ state: 'connected', endpointVerification: 'verified' });
+    expect(await restored.start()).toMatchObject({ state: 'connected' });
     expect(f.stored().enabled).toBe(true);
     await restored.shutdown();
+  });
+
+  it('only publishes actual state changes; reading its snapshot is not an event loop', async () => {
+    const f = fixture();
+    const onStatus = vi.fn();
+    const runtime = createExternalAccessRuntime({ ...f.options, onStatus });
+    await runtime.start();
+    await runtime.read();
+    expect(onStatus).not.toHaveBeenCalled();
+    await runtime.save(config(), 0);
+    expect(onStatus).toHaveBeenCalledOnce();
+    await runtime.read();
+    expect(onStatus).toHaveBeenCalledOnce();
+    await runtime.shutdown();
   });
 
   it('rejects cross-client stale writes without changing configuration or runtime', async () => {
@@ -166,7 +180,7 @@ describe('persistent external access lifecycle', () => {
     f.compareAndSwap.mockRejectedValueOnce(new Error('secret database path'));
     await expect(f.runtime.disable(0)).rejects.toMatchObject({ code: 'persistence_failed' });
     expect(f.resources[0]?.fence).not.toHaveBeenCalled();
-    expect(f.runtime.getStatus()).toMatchObject({ enabled: true, state: 'awaiting-verification' });
+    expect(f.runtime.getStatus()).toMatchObject({ enabled: true, state: 'enabled' });
     await f.runtime.shutdown();
   });
 
@@ -176,7 +190,7 @@ describe('persistent external access lifecycle', () => {
     await f.runtime.save(config('https://candidate.test'), 0);
     f.open.mockRejectedValueOnce(new ExternalAccessRuntimeError('port_in_use'));
     expect(await f.runtime.retry(1)).toMatchObject({
-      revision: 1, activeRevision: 0, state: 'awaiting-verification', endpointVerification: 'unverified',
+      revision: 1, activeRevision: 0, state: 'enabled',
       error: { code: 'port_in_use', retryable: false },
     });
     expect(f.open.mock.calls.map(([configuration]) => configuration.origin)).toEqual([
@@ -205,7 +219,7 @@ describe('persistent external access lifecycle', () => {
     expect(f.open).toHaveBeenCalledTimes(3);
     expect(f.runtime.getStatus()).toMatchObject({ state: 'failed', retryAttempt: 2, retryAt: null });
     f.open.mockImplementation(async (configuration, context) => f.makeResource(context, configuration));
-    expect(await f.runtime.retry(0)).toMatchObject({ state: 'awaiting-verification', retryAttempt: 0 });
+    expect(await f.runtime.retry(0)).toMatchObject({ state: 'enabled', retryAttempt: 0 });
     await f.runtime.shutdown();
   });
 
@@ -220,7 +234,7 @@ describe('persistent external access lifecycle', () => {
     await vi.advanceTimersByTimeAsync(10);
     expect(f.open).toHaveBeenCalledTimes(2);
     f.resources[0]!.context.onDisconnected(new ExternalAccessRuntimeError('authentication_failed'));
-    expect(f.runtime.getStatus()).toMatchObject({ state: 'awaiting-verification', error: null });
+    expect(f.runtime.getStatus()).toMatchObject({ state: 'enabled', error: null });
     await f.runtime.disable(0);
     f.resources[1]!.context.onDisconnected(new ExternalAccessRuntimeError('network_error'));
     await vi.advanceTimersByTimeAsync(100);
@@ -286,7 +300,7 @@ describe('persistent external access lifecycle', () => {
     await f.runtime.retry(1);
     failedContext!.onDisconnected(new ExternalAccessRuntimeError('network_error'));
     expect(f.runtime.getStatus()).toMatchObject({
-      state: 'awaiting-verification', activeRevision: 0, error: { code: 'authentication_failed' }, retryAt: null,
+      state: 'enabled', activeRevision: 0, error: { code: 'authentication_failed' }, retryAt: null,
     });
     await f.runtime.shutdown();
   });

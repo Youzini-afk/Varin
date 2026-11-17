@@ -1,6 +1,5 @@
 import { isAbsolute } from 'node:path';
 import type { ExternalAccessSnapshot } from '@varin/application-client';
-import { verifyPublicEndpoint } from '../platform/external-endpoint-proof.js';
 import type { createPublicIngress, ExternalIngressConfiguration } from '../platform/public-ingress.js';
 import { externalAccessConfigurationView, parseExternalAccessConfiguration, type ExternalAccessConfiguration } from './external-access-config.js';
 import { createExternalAccessRuntime, type ExternalAccessFailureCode, type ExternalAccessRecord, type ExternalAccessRuntimeStatus } from './external-access-runtime.js';
@@ -11,7 +10,7 @@ type PublicIngress = ReturnType<typeof createPublicIngress>;
 const phase: Record<ExternalAccessRuntimeStatus['state'], ExternalAccessSnapshot['phase']> = {
   disabled: 'disabled',
   connecting: 'starting',
-  'awaiting-verification': 'unverified',
+  enabled: 'enabled',
   connected: 'connected',
   reconnecting: 'reconnecting',
   stopping: 'stopping',
@@ -25,21 +24,23 @@ type Options = {
   reserve(): () => void;
   env?: NodeJS.ProcessEnv;
   startFrp?: typeof startFrpTunnel;
-  verifyEndpoint?: typeof verifyPublicEndpoint;
+  resolveFrpc?: () => Promise<string>;
+  onStatus?: (status: ExternalAccessRuntimeStatus) => void;
 };
 
 export function createSelfHostedAccess(options: Options) {
-  const { env = process.env, startFrp = startFrpTunnel, verifyEndpoint = verifyPublicEndpoint } = options;
+  const { env = process.env, startFrp = startFrpTunnel } = options;
   let activeIngress: PublicIngress | null = null;
   const runtime = createExternalAccessRuntime<ExternalAccessConfiguration>({
     read: options.read,
     compareAndSwap: options.compareAndSwap,
+    ...(options.onStatus ? { onStatus: options.onStatus } : {}),
     normalizeConfig: (input) => parseExternalAccessConfiguration(input, (input as ExternalAccessConfiguration)?.id),
     classifyError(error): ExternalAccessFailureCode {
       const code = (error as { code?: unknown } | null)?.code;
       if (code === 'EADDRINUSE') return 'port_in_use';
       if (code === 'EACCES' || code === 'ENOENT' || code === 'invalid_config' || code === 'invalid_configuration'
-        || code === 'missing_dependency' || code === 'missing_credential' || code === 'unsupported_platform' || code === 'tls_failed') return 'invalid_config';
+        || code === 'invalid_component' || code === 'missing_dependency' || code === 'missing_credential' || code === 'unsupported_platform' || code === 'tls_failed') return 'invalid_config';
       if (code === 'connection_lost') return 'network_error';
       if (code === 'process_exit' && (error as { retryable?: boolean }).retryable) return 'process_exited';
       if (code === 'authentication_failed' || code === 'network_error' || code === 'process_exited' || code === 'provider_in_use') return code;
@@ -77,7 +78,7 @@ export function createSelfHostedAccess(options: Options) {
         backend.hostname = configuration.backend.host.includes(':') ? `[${configuration.backend.host}]` : configuration.backend.host;
         backend.port = String(configuration.backend.port);
         context.signal.addEventListener('abort', fenceOnAbort, { once: true });
-        if (configuration.provider === 'reverse-proxy') {
+        if (configuration.provider !== 'frp') {
           const guarded = ingress;
           const provider = createReverseProxyTunnelProvider({
             async openPublicIngress() {
@@ -92,7 +93,7 @@ export function createSelfHostedAccess(options: Options) {
             reverseProxy: { publicOrigin: configuration.publicOrigin, backend: configuration.backend },
           }, { activePort: configuration.backend.port, originUrl: backend.origin });
         } else {
-          const executablePath = env.VARIN_FRPC_PATH;
+          const executablePath = options.resolveFrpc ? await options.resolveFrpc() : env.VARIN_FRPC_PATH;
           if (!executablePath || !isAbsolute(executablePath)) throw Object.assign(new Error('FRP executable path is not configured'), { code: 'invalid_config' });
           await ingress.listen();
           context.signal.throwIfAborted();
@@ -113,13 +114,7 @@ export function createSelfHostedAccess(options: Options) {
         if (disconnected) throw Object.assign(new Error('FRP disconnected during activation'), { code: 'network_error' });
         ingress.setEnabled(true);
         activeIngress = ingress;
-        const challenge = ingress.issueEndpointProof();
-        let verified: boolean;
-        try {
-          verified = await verifyEndpoint({ origin: configuration.publicOrigin, challenge, signal: context.signal });
-        } finally { challenge.clear(); }
-        context.signal.throwIfAborted();
-        return { verification: verified ? 'verified' : 'unverified', fence, stop };
+        return { state: child ? 'connected' : 'enabled', fence, stop };
       } catch (error) {
         fence();
         await stop();
@@ -136,7 +131,7 @@ export function createSelfHostedAccess(options: Options) {
       const status = runtime.getStatus();
       const binding = activeIngress?.enabled ? activeIngress.configuration : null;
       return {
-        source: 'settings',
+        source: 'settings', settingsRevision: entry.revision,
         entry: entry.config ? { revision: entry.revision, enabled: entry.enabled, configuration: externalAccessConfigurationView(entry.config, includeOperatorDetails) } : null,
         listener: binding ? { host: binding.host, port: binding.port, origin: binding.origin } : null,
         phase: phase[status.state],

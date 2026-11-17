@@ -12,9 +12,10 @@ const usage = `Varin Self-hosted External Access
 
 USAGE:
   varin external-access status [--json]
+  varin external-access check [--json]
   varin external-access config [--json]
   varin external-access config --config <file.json> --expected-revision <number|new>
-  varin external-access <enable|disable|retry> --expected-revision <number>
+  varin external-access <enable|disable|retry|remove> --expected-revision <number>
 
 OPTIONS:
   -p, --port <port>            Trusted local Host management port
@@ -47,8 +48,8 @@ function configurationForRequest(value: unknown): Record<string, unknown> {
   const input = recordOf(value), backend = recordOf(input.backend);
   const base = { name: input.name, provider: input.provider, publicOrigin: input.publicOrigin,
     backend: { host: backend.host, port: backend.port } };
-  if (input.provider === 'reverse-proxy') return base;
-  if (input.provider !== 'frp') throw new TunnelCliError('Configuration provider must be reverse-proxy or frp.', EXIT_CODE.USAGE_ERROR);
+  if (input.provider === 'reverse-proxy' || input.provider === 'external-forwarding') return base;
+  if (input.provider !== 'frp') throw new TunnelCliError('Configuration provider must be reverse-proxy, external-forwarding or frp.', EXIT_CODE.USAGE_ERROR);
   const frp = recordOf(input.frp), server = recordOf(frp.server), tls = recordOf(server.tls), proxy = recordOf(frp.proxy);
   if (typeof frp.tokenEnv !== 'string' || !/^VARIN_FRP_TOKEN(?:_[A-Z0-9_]+)?$/.test(frp.tokenEnv)) {
     throw new TunnelCliError('FRP requires a VARIN_FRP_TOKEN or VARIN_FRP_TOKEN_* environment variable name, not a token value.', EXIT_CODE.USAGE_ERROR);
@@ -59,7 +60,7 @@ function configurationForRequest(value: unknown): Record<string, unknown> {
 
 async function externalAccessCommand(options: CliOptions = {}, action = 'status'): Promise<void> {
   if (action === 'help') { process.stdout.write(usage); return; }
-  if (!['status', 'config', 'enable', 'disable', 'retry'].includes(action)) {
+  if (!['status', 'check', 'config', 'enable', 'disable', 'retry', 'remove'].includes(action)) {
     throw new TunnelCliError(`Unknown external-access command '${action}'.`, EXIT_CODE.USAGE_ERROR);
   }
   if (options.dryRun || options.force || options.all) {
@@ -75,7 +76,8 @@ async function externalAccessCommand(options: CliOptions = {}, action = 'status'
   if (options.configPath !== undefined && (action !== 'config' || !options.configPath)) {
     throw new TunnelCliError('Use config --config <file.json> to replace the saved configuration.', EXIT_CODE.USAGE_ERROR);
   }
-  const write = action !== 'status' && (action !== 'config' || typeof options.configPath === 'string');
+  const check = action === 'check';
+  const write = action !== 'status' && !check && (action !== 'config' || typeof options.configPath === 'string');
   let body: unknown;
   if (write) {
     const revision = expectedRevision(options, action === 'config');
@@ -87,19 +89,19 @@ async function externalAccessCommand(options: CliOptions = {}, action = 'status'
     } else body = { expectedRevision: revision };
   }
   const port = await resolveTargetPort(options);
-  const url = action === 'status' || action === 'config' ? endpoint : `${endpoint}/${action}`;
+  const url = action === 'status' || action === 'config' || action === 'remove' ? endpoint : `${endpoint}/${action}`;
   let result;
   try {
     result = await requestJson(port, url, { ...options, timeoutMs: options.timeoutMs ?? 30_000,
       headers: { Origin: new URL(buildLocalUrl(port)).origin },
-      ...(write ? { method: action === 'config' ? 'PUT' : 'POST', body: JSON.stringify(body) } : {}) });
+      ...(check ? { method: 'POST' } : write ? { method: action === 'config' ? 'PUT' : action === 'remove' ? 'DELETE' : 'POST', body: JSON.stringify(body) } : {}) });
   } catch {
     throw new TunnelCliError(write
       ? 'The request outcome is unknown. It was not repeated. Inspect external-access status before issuing another write.'
-      : 'Could not read external-access status from the local Host.', EXIT_CODE.GENERAL_ERROR);
+      : check ? 'Could not complete the HTTPS diagnostic from the local Host.' : 'Could not read external-access status from the local Host.', EXIT_CODE.GENERAL_ERROR);
   }
   if (!result.response.ok) {
-    const message = result.response.status === 409
+    const message = result.response.status === 409 && !check
       ? 'Configuration changed or is environment-managed. Read status/config, review it, then explicitly use the latest revision.'
       : result.response.status === 401 || result.response.status === 403
         ? 'Local owner authorization is required. Use the Host management port and its existing desktop or UI authentication.'
@@ -113,7 +115,9 @@ async function externalAccessCommand(options: CliOptions = {}, action = 'status'
   process.stdout.write(`External access: ${snapshot.phase}\nSource: ${snapshot.source}\n`);
   if (snapshot.entry) process.stdout.write(`Revision: ${snapshot.entry.revision}\nEnabled: ${snapshot.entry.enabled}\nPublic origin: ${snapshot.entry.configuration.publicOrigin}\n`);
   if (snapshot.error) process.stdout.write(`Error: ${snapshot.error}\n`);
-  if (snapshot.phase !== 'connected') process.stdout.write('Public HTTPS access is not verified.\n');
+  if (snapshot.accessCheck) {
+    process.stdout.write(`Public HTTPS: ${snapshot.accessCheck.state}${snapshot.accessCheck.reason ? ` (${snapshot.accessCheck.reason})` : ''} — ${snapshot.accessCheck.origin}\n`);
+  } else process.stdout.write('Public HTTPS access has not been checked. Run external-access check.\n');
 }
 
 export { externalAccessCommand };

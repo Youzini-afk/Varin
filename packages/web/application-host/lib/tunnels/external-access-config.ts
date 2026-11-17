@@ -6,7 +6,7 @@ import { normalizeExternalIngress } from '../platform/public-ingress.js';
 export const EXTERNAL_ACCESS_SETTINGS_KEY = 'selfHostedExternalAccess';
 
 export type ExternalAccessConfiguration = ExternalAccessConfigurationView & (
-  | { provider: 'reverse-proxy' }
+  | { provider: 'reverse-proxy' | 'external-forwarding'; frp?: never }
   | {
     provider: 'frp';
     frp: {
@@ -66,7 +66,7 @@ export function parseExternalAccessConfiguration(value: unknown, id: string): Ex
     publicOrigin: ingress.origin,
     backend: { host: ingress.host, port: ingress.port },
   };
-  if (input.provider === 'reverse-proxy') return { ...base, provider: 'reverse-proxy' };
+  if (input.provider === 'reverse-proxy' || input.provider === 'external-forwarding') return { ...base, provider: input.provider };
   if (input.provider !== 'frp') throw new ExternalAccessConfigurationError('Unsupported external access provider');
   if (bindHost !== '127.0.0.1' && bindHost !== '::1') {
     throw new ExternalAccessConfigurationError('FRP requires a loopback backend address');
@@ -102,6 +102,10 @@ export function readExternalAccessRecord(value: unknown) {
   const saved = record(value);
   if (!Number.isSafeInteger(saved.revision) || Number(saved.revision) <= 0 || typeof saved.enabled !== 'boolean') {
     throw new ExternalAccessConfigurationError('Saved external access configuration has an invalid revision or enable intent');
+  }
+  if (saved.configuration === null) {
+    if (saved.enabled) throw new ExternalAccessConfigurationError('An empty external access record cannot be enabled');
+    return { revision: Number(saved.revision), enabled: false, configuration: null };
   }
   const input = record(saved.configuration);
   return {

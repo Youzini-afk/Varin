@@ -3,6 +3,7 @@ import { lookup } from 'node:dns/promises';
 import { request } from 'node:https';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { BlockList, isIP } from 'node:net';
+import type { ExternalAccessCheck } from '@varin/application-client';
 
 const prefix = '/.well-known/varin-entrance/';
 const validId = /^[a-f0-9]{64}$/u;
@@ -93,44 +94,71 @@ const requestProof: ProofTransport = (url, pinned, signal) => new Promise((resol
   req.end();
 });
 
-export async function verifyPublicEndpoint(input: {
+type ProofResult = 'verified' | NonNullable<ExternalAccessCheck['reason']>;
+type ProofRequest = {
   origin: string;
   challenge: { path: string; expected: string };
   signal: AbortSignal;
   resolve?: (hostname: string) => Promise<Resolved[]>;
   transport?: ProofTransport;
-}): Promise<boolean> {
+};
+
+const isTlsFailure = (error: unknown) => {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' && /^(ERR_(TLS|SSL)_|CERT_|UNABLE_TO_|SELF_SIGNED_CERT_|DEPTH_ZERO_SELF_SIGNED_CERT|INVALID_CA|HOSTNAME_MISMATCH)/u.test(code);
+};
+
+export async function inspectPublicEndpoint(input: ProofRequest): Promise<ProofResult> {
   const done = new AbortController();
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(5_000), done.signal]);
-  const work = async () => {
+  const work = async (): Promise<ProofResult> => {
     const origin = new URL(input.origin);
     if (origin.protocol !== 'https:' || origin.username || origin.password || origin.origin !== input.origin
       || !input.challenge.path.startsWith(prefix) || !validId.test(input.challenge.path.slice(prefix.length))
-      || !validId.test(input.challenge.expected)) return false;
+      || !validId.test(input.challenge.expected)) return 'different_endpoint';
     const hostname = origin.hostname.replace(/^\[|\]$/gu, '');
     const family = isIP(hostname);
-    const addresses: Resolved[] = family ? [{ address: hostname, family }]
-      : await (input.resolve ?? (name => lookup(name, { all: true })))(hostname);
+    let addresses: Resolved[];
+    try {
+      addresses = family ? [{ address: hostname, family }]
+        : await (input.resolve ?? (name => lookup(name, { all: true })))(hostname);
+    } catch { return 'dns'; }
     signal.throwIfAborted();
-    if (!addresses.length || addresses.some(address => isIP(address.address) !== address.family || !publicProofAddress(address.address))) return false;
+    if (!addresses.length) return 'dns';
+    if (addresses.some(address => isIP(address.address) !== address.family || !publicProofAddress(address.address))) return 'not_public';
     const url = new URL(input.challenge.path, origin);
     // Try both families without permitting a fresh DNS lookup or a redirect.
-    return Promise.any(addresses.slice(0, 4).map(async address => {
-      const proof = await (input.transport ?? requestProof)(url, address, signal);
-      if (proof === null || !validId.test(proof)
-        || !timingSafeEqual(Buffer.from(proof), Buffer.from(input.challenge.expected))) throw new Error('Endpoint proof not received');
-      return true;
-    }));
+    try {
+      return await Promise.any(addresses.slice(0, 4).map(async (address): Promise<'verified'> => {
+        let proof: string | null;
+        try { proof = await (input.transport ?? requestProof)(url, address, signal); } catch (error) {
+          throw isTlsFailure(error) ? 'tls' : 'unreachable';
+        }
+        if (proof === null || !validId.test(proof)
+          || !timingSafeEqual(Buffer.from(proof), Buffer.from(input.challenge.expected))) throw 'different_endpoint';
+        return 'verified';
+      }));
+    } catch (error) {
+      signal.throwIfAborted();
+      const failures = error instanceof AggregateError ? error.errors as unknown[] : [];
+      if (failures.includes('different_endpoint')) return 'different_endpoint';
+      if (failures.includes('tls')) return 'tls';
+      return 'unreachable';
+    }
   };
-  if (signal.aborted) return false;
+  if (signal.aborted) return 'timeout';
   let onAbort: (() => void) | undefined;
-  const aborted = new Promise<false>(resolve => {
-    onAbort = () => resolve(false);
+  const aborted = new Promise<'timeout'>(resolve => {
+    onAbort = () => resolve('timeout');
     signal.addEventListener('abort', onAbort, { once: true });
   });
-  try { return await Promise.race([work().catch(() => false), aborted]); }
+  try { return await Promise.race([work().catch(() => signal.aborted ? 'timeout' as const : 'unreachable' as const), aborted]); }
   finally {
     if (onAbort) signal.removeEventListener('abort', onAbort);
     done.abort();
   }
+}
+
+export async function verifyPublicEndpoint(input: ProofRequest): Promise<boolean> {
+  return await inspectPublicEndpoint(input) === 'verified';
 }

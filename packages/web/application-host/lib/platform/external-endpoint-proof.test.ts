@@ -2,7 +2,7 @@ import { once } from 'node:events';
 import { createServer, request } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { expect, it, vi } from 'vitest';
-import { createEndpointProof, publicProofAddress, verifyPublicEndpoint } from './external-endpoint-proof.js';
+import { createEndpointProof, inspectPublicEndpoint, publicProofAddress, verifyPublicEndpoint } from './external-endpoint-proof.js';
 import { createPublicIngress } from './public-ingress.js';
 
 it.each(['127.0.0.1', '10.0.0.1', '100.64.1.2', '169.254.169.254', '192.0.2.2', '224.0.0.1', '::ffff:127.0.0.1', 'fd00::1', 'fe80::1%lo', '2001:db8::1', '2002::1', '3fff::1'])(
@@ -82,4 +82,15 @@ it('serves a GET proof once on the enabled guarded entry, without passing it to 
     expect(await read(challenge.path)).toEqual({ status: 200, body: challenge.expected });
     expect(await read(challenge.path)).toEqual({ status: 404, body: '' });
   } finally { await ingress.close(); }
+});
+
+it('reports safe DNS, TLS, and wrong-entrance reasons without raw provider text', async () => {
+  const challenge = createEndpointProof().issue();
+  const input = { origin: 'https://public.example.test', challenge,
+    signal: new AbortController().signal, resolve: async () => [{ address: '1.1.1.1', family: 4 }] };
+  expect(await inspectPublicEndpoint({ ...input, resolve: async () => { throw new Error('private resolver error'); } })).toBe('dns');
+  expect(await inspectPublicEndpoint({
+    ...input, transport: async () => { throw Object.assign(new Error('private certificate details'), { code: 'ERR_TLS_CERT_ALTNAME_INVALID' }); },
+  })).toBe('tls');
+  expect(await inspectPublicEndpoint({ ...input, transport: async () => null })).toBe('different_endpoint');
 });

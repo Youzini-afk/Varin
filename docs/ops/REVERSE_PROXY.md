@@ -8,6 +8,10 @@ The user or their separately instructed agent configures the VPS, frps, DNS, fir
 independently. Varin connects to existing services; it does not provide VPS deployment, SSH deployment
 inspection/preview, deployment plans/receipts, certificate management or remote uninstall.
 
+Use **Settings → External Access → Get deployment files** for the downloadable
+[Varin FRP + HTTPS kit](../../deploy/external-access/README.md) and existing-service snippets.
+The archive contains only distributable templates; it never includes your Host settings or secrets.
+
 ## Before adding a proxy
 
 1. Start Varin on loopback or a private interface and confirm `GET /health` succeeds.
@@ -43,16 +47,17 @@ preserving the exact public `Host` (including its port, if nonstandard),
 `Origin`, cookies and WebSocket upgrades. Do not cache the pairing page or
 requests. The guard rejects requests for a different origin, and disabling this
 listener does not make it a local entry. The original local listener and managed
-tunnel modes are unchanged. For a saved entry, the Host makes one bounded HTTPS
-check at activation using a one-time proof that only the guarded listener can
-answer. The check uses normal TLS certificate validation, no redirects and
-no private or special-use addresses. A bind alone (including all
-environment-managed binds) does not verify public TLS or reachability. This check confirms only the
-current HTTPS path to this Host; it does not inspect server software, manage certificates or verify
-future renewal.
-An invalid environment configuration or
-backend bind failure leaves the ordinary local listener unaffected. Do not
-fall back to proxying that listener.
+tunnel modes are unchanged. Use **Check access** (or `varin external-access check --json`) when
+you want one bounded HTTPS check. The guarded listener answers a one-time proof; the request
+uses normal TLS certificate validation, no redirects, and no private or special-use addresses.
+A bind does not verify public HTTPS. A failed check leaves enabled forwarding unchanged;
+the Host may not have a network path back through its public address. This diagnostic does not
+inspect the server or manage certificates. Invalid environment configuration or a bind failure leaves
+the ordinary local listener unaffected; do not fall back to proxying it.
+
+For an independently managed frpc or other forwarding process, select **External forwarding**.
+Supply only the public origin and guarded backend. Keep the control port, token,
+mapping and process in your own configuration; Varin neither starts nor stops that process.
 
 An authenticated Host owner can issue a browser-only device link through
 `POST /api/client-auth/pairing/sessions` using `allowedClientKinds: ["browser"]`
@@ -73,8 +78,10 @@ manage TLS certificates.
 ## Existing FRP (operator-managed)
 
 **Settings → External Access** or the local management API can save an FRP
-entry pointing to an independently configured Linux/macOS Host and frps server. Provide an existing absolute
-`frpc` binary in `VARIN_FRPC_PATH` and an existing token in
+entry pointing to a separately configured frps server. On supported Linux/macOS Hosts, Varin can
+select an existing `frpc` binary via absolute `VARIN_FRPC_PATH` or an absolute directory on `PATH`.
+You can also explicitly download Varin's pinned, checksummed component into the Host's own data directory.
+This does not install anything on the VPS or restart a running entry. Provide the existing token in
 `VARIN_FRP_TOKEN` (or a named `VARIN_FRP_TOKEN_*` environment variable).
 The saved config refers to the variable; the value never appears in the
 management API response. A trusted CA file and verified TLS server name
@@ -110,10 +117,10 @@ Then send `POST /api/varin/external-access/enable` with the returned revision
 in `expectedRevision`. The Host opens business admission only after frpc
 reports the named TCP mapping published. The VPS HTTPS proxy should forward
 to that mapping's private VPS address, not make the TCP mapping public.
-The UI reports **public endpoint unverified** until the guarded Host proof
-returns through valid HTTPS. Split DNS, custom trust, insufficient hairpin
-routing or inability to reach the site from the Host may leave it unverified
-even when a different browser can reach it. Host-side retry is
+Publication means that the FRP session is connected, not that public HTTPS
+has been verified. Run **Check access** when needed; split DNS, private trust and missing
+hairpin routing can block the Host's check even when another browser can reach the site.
+Host-side retry is
 bounded and does not retry credentials rejected by the provider. Stop waits
 for the child to exit and cleans up its private configuration files.
 
@@ -125,12 +132,15 @@ For headless use, run `varin external-access status --json`. Save an entry
 with `varin external-access config --config entry.json --expected-revision new`
 (or use the current revision for replacements). Run
 `varin external-access enable --expected-revision N`, `disable` or `retry` with
-the latest revision. The CLI talks only to the local Host.
+the latest revision. `varin external-access remove --expected-revision N` stops and removes only
+the local entry; device grants and external services remain. The CLI talks only to the local Host.
 
 Cloudflare/ngrok keep their existing configuration and credentials. Switching to an FRP or reverse-proxy
 entry does not update an externally managed origin or convert an old in-memory tunnel session into a
-remembered browser device. Create a browser pairing link explicitly when moving to persistent device
-access; existing mobile/desktop device grants remain with their original owner.
+remembered browser device. For a managed-remote Cloudflare migration, stop the legacy connection,
+enable the guarded backend and update the provider's origin to its actual Host/port within your
+trusted network. Verify public HTTPS and create a fresh browser pairing link. Existing mobile/desktop
+device grants remain with their original owner; a legacy in-memory browser session cannot migrate.
 
 ## Current realtime routes
 
