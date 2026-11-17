@@ -27,6 +27,7 @@ import {
 export interface AcpConnectOptions {
   profile?: ExternalAgentProfile | undefined;
   authMethodId?: string | undefined;
+  files?: import('./acp-files.js').AcpFileAccess | undefined;
 }
 
 function authentication(
@@ -109,7 +110,7 @@ export async function connectAcp(
     () => {
       for (const listener of capabilityListeners) listener();
     },
-    options.profile?.id === 'grok' ? 'grok' : undefined,
+    options.profile?.id === 'grok' ? 'grok' : options.profile?.id === 'kiro' ? 'kiro' : undefined,
   );
   const context = new ContextUsage();
   const runningTools = new Set<string>();
@@ -139,6 +140,11 @@ export async function connectAcp(
   const removeExit = peer.onExit(failed);
   const removeMessage = peer.onMessage((message) => {
     const params = record(message.params);
+    if (options.profile?.id === 'kiro' && message.method === '_kiro.dev/metadata' &&
+        (params.sessionId === undefined || params.sessionId === sessionId || opening)) {
+      state.kiroMetadata(params);
+      return;
+    }
     if (
       options.profile?.id === 'grok' &&
       message.method === '_x.ai/models/update'
@@ -261,6 +267,15 @@ export async function connectAcp(
       const interaction = matches ? acpForm(id, params) : undefined;
       return interaction ? answer(id, interaction) : { action: 'decline' };
     }
+    if ((method === 'fs/read_text_file' || method === 'fs/write_text_file') && matches && options.files) {
+      const controller = new AbortController();
+      requests.set(id, controller);
+      try {
+        return await options.files(method === 'fs/read_text_file'
+          ? { action: 'read', path: text(params.path), ...(params.line === undefined ? {} : { line: params.line as number }), ...(params.limit === undefined ? {} : { limit: params.limit as number }) }
+          : { action: 'write', path: text(params.path), content: params.content as string }, controller.signal);
+      } finally { if (requests.get(id) === controller) requests.delete(id); }
+    }
     if (options.profile?.id === 'grok' && matches) {
       const interaction = grokInteraction(id, method.replace(/^_/, ''), params);
       if (interaction) return answer(id, interaction);
@@ -272,6 +287,7 @@ export async function connectAcp(
     const init = await peer.request('initialize', {
       protocolVersion: 1,
       clientCapabilities: {
+        ...(options.files ? { fs: { readTextFile: true, writeTextFile: true } } : {}),
         elicitation: { form: {} },
         session: { configOptions: { boolean: {} } },
       },

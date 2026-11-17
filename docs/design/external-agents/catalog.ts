@@ -1,4 +1,4 @@
-/** Design inventory, not the production registry. See SUPPORT.md for evidence and outstanding work. */
+/** Design inventory, not the production registry. See docs/external-agents.md for the production support contract. */
 export type Product = {
   id: string;
   name: string;

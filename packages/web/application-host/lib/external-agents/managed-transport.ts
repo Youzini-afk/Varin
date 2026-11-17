@@ -106,7 +106,8 @@ export async function openManagedExternalTransport(owner: ManagedExternalOwner, 
       if(page.hash!==metadata.contentHash||page.byteLength!==metadata.byteLength||page.offset!==offset||page.nextOffset!==offset+bytes.length||!bytes.length)throw new Error('Original remote capture changed');offset=page.nextOffset;yield bytes;}})();
     return {...metadata,chunks,readPage,release:async(committed)=>{await client.externalCapture({...request,action:'release',...(committed?{committed}: {})});}};
   };
-  return {child,start:()=>child.start(),close,launch,executionCwd:binding.physicalRoot.canonicalRoot,attachmentOwner,capture};
+  const files: import('./acp-files.js').AcpFileAccess = (input, fileSignal) => client.externalFile({ ...address, input }, fileSignal);
+  return {child,start:()=>child.start(),close,launch,executionCwd:binding.physicalRoot.canonicalRoot,attachmentOwner,capture,files};
 }
 
 /** Also used after coordinator restart/deletion, when no live peer exists. */

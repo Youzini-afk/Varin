@@ -1,4 +1,6 @@
 import { matchesSourcePreparation } from '../kernel/source-preparation-binding.js';
+import { createAcpFileAccess, type AcpFileAccess } from '../external-agents/acp-files.js';
+import { windowsCommandScript } from '../platform/windows-command.js';
 import { encodeProjectCommandResult } from '@varin/application-client';
 import {managedExternalCapture,cleanupManagedExternalCaptures} from '../external-agents/managed-capture.js';
 import { resolveSourceTextPolicy } from '../kernel/source-provenance.js';
@@ -36,7 +38,11 @@ export interface ManagedSourceServiceOptions {
   externalDetect?:(id:string,signal?:AbortSignal)=>Promise<import('@varin/application-client').ExternalAgentDetection>;
   externalInspect?:(id:string,refresh:boolean,signal?:AbortSignal)=>Promise<import('@varin/application-client').ExternalExecutorInspection>;
   externalSettings?:(signal?:AbortSignal)=>Promise<import('@varin/application-client').ExternalAgentSettings>;
-  externalLaunch?: (configurationId: string, harness: import('@varin/application-client').ExternalHarness, sessionId?: string, signal?: AbortSignal) => Promise<{binding:import('./managed-remote-types.js').ManagedExternalLaunchBinding;command:string;args:string[];env:NodeJS.ProcessEnv}>;
+  externalConfigure?: (value: Pick<import('@varin/application-client').ExternalAgentSettings, 'agents' | 'defaultAgent'>, revision: number, key: string) => Promise<import('@varin/application-client').ExternalAgentSettings>;
+  externalInstallations?: (input: import('@varin/application-client').ExternalAgentInstallationRequest, signal?: AbortSignal) => Promise<import('@varin/application-client').ExternalAgentInstallations>;
+  externalInstallationLog?: (id: string, signal?: AbortSignal) => Promise<string>;
+  externalGateway?: (config: import('@varin/application-client').ExternalAgentConfiguration, launch: { command: string; args: string[]; env: NodeJS.ProcessEnv }, signal?: AbortSignal) => Promise<{ env: NodeJS.ProcessEnv; release(): Promise<void> }>;
+  externalLaunch?: (configurationId: string, harness: import('@varin/application-client').ExternalHarness, sessionId?: string, signal?: AbortSignal) => Promise<{binding:import('./managed-remote-types.js').ManagedExternalLaunchBinding;command:string;args:string[];env:NodeJS.ProcessEnv;programDirectory?:string}>;
   workspaceFiles?: import('../workspace/resource-files.js').ResourceFilesOwner;
   deviceFileAccess?: boolean;
   executionEnvironment?: () => Promise<import('../kernel/protocol.generated.js').ExecutionEnvironment>;
@@ -92,6 +98,8 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
   // Live request handles only. Durable effects and recovery remain in their
   // original Storage/domain receipts; this map disappears with this Host.
   const services = new Map<string, ServiceFlight>();
+  const externalFiles = new Map<string, AcpFileAccess>();
+  const externalGateways = new Map<string, Promise<{ env: NodeJS.ProcessEnv; release(): Promise<void> }>>();
   // These fences prove only this Host lifetime. Missing flights after restart
   // remain unknown; they are never inferred stopped from an empty map.
   const captureFences: AttachmentCapture[] = [];
@@ -110,6 +118,11 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
   const requireReadPrincipal = (principal: ManagedSourcePrincipal, coordinator: string): void => {
     requirePrincipal(principal, coordinator);
     if (!principal.capabilities.includes('filesystem:read')) throw new SourceAdmissionError('source_authority_denied');
+  };
+  const requireExternalManagement = (principal: ManagedSourcePrincipal, coordinator: string) => {
+    requireReadPrincipal(principal, coordinator);
+    if (principal.allowedDirectories?.length || !['instance:write', 'config:write', 'terminal:use', 'process:control'].every(capability => principal.capabilities.includes(capability)))
+      throw new SourceAdmissionError('source_authority_denied');
   };
   const address = (principal: ManagedSourcePrincipal, input: ManagedSourceAddress): SourceAuthorityAddress => {
     requirePrincipal(principal, input.coordinatorHostId);
@@ -312,6 +325,36 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       if(!options.externalSettings)throw new SourceAdmissionError('source_unavailable');
       return options.externalSettings(signal);
     },
+    async externalFile(principal, input, signal) {
+      requireReadPrincipal(principal, input.coordinatorHostId);
+      if (input.input.action === 'write' && !principal.capabilities.includes('filesystem:write')) throw new SourceAdmissionError('source_authority_denied');
+      const authority = await inspect(principal, input, signal);
+      if (authority.scope.kind !== 'external' || authority.purpose !== 'external_harness' || authority.operationId !== input.processId || !authority.physicalRoot)
+        throw new SourceAdmissionError('source_authority_denied');
+      const key = `${input.authorityId}:${input.resourceEpoch}:${input.processId}`;
+      let files = externalFiles.get(key);
+      if (!files) {
+        files = createAcpFileAccess(async () => ({ client: kernel.scoped(kernel.sourceAuthorityGrant(authority)), workspaceId: authority.source.workspace_id,
+          rootId: authority.physicalRoot!.rootId, canonicalRoot: authority.physicalRoot!.canonicalRoot }));
+        externalFiles.set(key, files);
+      }
+      return files(input.input, signal);
+    },
+    async externalConfigure(principal, input) {
+      requireExternalManagement(principal, input.coordinatorHostId);
+      if (!options.externalConfigure) throw new SourceAdmissionError('source_unavailable');
+      return options.externalConfigure(input.value, input.expectedRevision, input.key);
+    },
+    async externalInstallations(principal, input, signal) {
+      requireExternalManagement(principal, input.coordinatorHostId);
+      if (!options.externalInstallations) throw new SourceAdmissionError('source_unavailable');
+      return options.externalInstallations(input.input, signal);
+    },
+    async externalInstallationLog(principal, input, signal) {
+      requireExternalManagement(principal, input.coordinatorHostId);
+      if (!options.externalInstallationLog) throw new SourceAdmissionError('source_unavailable');
+      return options.externalInstallationLog(input.id, signal);
+    },
     async externalPrepare(principal,input,signal) {
       requireReadPrincipal(principal,input.coordinatorHostId);
       if (!options.prepareExternalLiveSource || input.resourceOwner.kind !== 'managed_host' || input.resourceOwner.hostId !== options.hostId
@@ -342,17 +385,31 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       const launch = await options.externalLaunch(input.launch.configuration.id,input.launch.configuration.harness,input.sessionId,signal);
       if (!isDeepStrictEqual(launch.binding,input.launch)) throw new Error('Original target external Harness configuration changed');
       signal?.throwIfAborted();
+      let gateway = externalGateways.get(input.processId);
+      if (!gateway && options.externalGateway) {
+        gateway = options.externalGateway(launch.binding.configuration, launch, signal);
+        externalGateways.set(input.processId, gateway);
+        void gateway.catch(() => externalGateways.delete(input.processId));
+      }
+      const environment = gateway ? (await gateway).env : launch.env;
+      const script = process.platform === 'win32' && /\.(cmd|bat)$/i.test(launch.command);
       // Once dispatched, retain its exact receipt even if the HTTP waiter disconnects.
       return kernel.scoped(kernel.sourceAuthorityGrant(authority)).processSpawn({processId:input.processId,workspaceId:authority.source.workspace_id,
-        rootId:authority.physicalRoot.rootId,cwd:'',command:launch.command,args:launch.args,mode:'pipe',
-        env:Object.entries(launch.env).flatMap(([name,value]) => value === undefined || name === 'NODE_CHANNEL_FD' ? [] : [{name,value}])});
+        rootId:authority.physicalRoot.rootId,cwd:'',command:script ? environment.ComSpec ?? 'cmd.exe' : launch.command,args:script ? [] : launch.args,
+        ...(script ? {windowsRawArguments:windowsCommandScript(launch.command, launch.args)} : {}),mode:'pipe',...(launch.programDirectory ? {programDirectory:launch.programDirectory} : {}),
+        env:Object.entries(environment).flatMap(([name,value]) => value === undefined || name === 'NODE_CHANNEL_FD' ? [] : [{name,value}])});
     },
     async externalControl(principal,input,signal) {
       requirePrincipal(principal,input.coordinatorHostId); await kernel.start();
       const {releaseCaptures,release,...control}=input;
       let receipt = await kernel.sourceRequest<import('./managed-remote-types.js').ManagedExternalControlReceipt>('source.external.control',{...control,principalId:principal.principalId},signal);
+      if (receipt.executorStopped) {
+        await (await externalGateways.get(input.processId))?.release();
+        externalGateways.delete(input.processId);
+      }
       if(receipt.executorStopped&&releaseCaptures)await cleanupManagedExternalCaptures(kernel,{principal,coordinatorHostId:input.coordinatorHostId,scope:{kind:'external',conversationId:input.conversationId,transportId:input.transportId}});
       if (receipt.executorStopped) for (const address of receipt.authorities) {
+        externalFiles.delete(`${address.authorityId}:${address.resourceEpoch}:${input.processId}`);
         const authority = await inspect(principal,{coordinatorHostId:input.coordinatorHostId,...address},signal);
         await attachments.drain(cleanupScope(principal,input.coordinatorHostId,authority));
         await attachments.cleanup(cleanupScope(principal,input.coordinatorHostId,authority));

@@ -31,7 +31,10 @@ import { createPlatformEnvironmentRuntime } from '../platform/environment-runtim
 import { HarnessTransport, record, text } from './transport.js';
 import type { HarnessConnection } from './adapter.js';
 import { HarnessSteeringRejected } from './adapter.js';
-import { ACP_DEFAULTS, ACP_PROFILES, getAcpProfile } from './profiles.js';
+import { ACP_DEFAULTS, EXTERNAL_AGENT_PROFILES, getExternalAgentProfile } from './profiles.js';
+import { ExternalAgentInstaller } from './installations.js';
+import { createAcpFileAccess } from './acp-files.js';
+import { connectHermesGateway } from './hermes-gateway.js';
 import { assertProfilePlatform, profileVersionArguments } from './profile-launch.js';
 import { findInstalledExternalExecutable } from './installed-executable.js';
 import { cacheableCapabilities, capabilityConfiguration } from './capability-cache.js';
@@ -80,6 +83,16 @@ const launchKey = (launch: (Pick<ExternalAgentConfiguration, 'command' | 'args'>
   JSON.stringify([launch.command, launch.args]);
 
 export class ExternalAgentsService {
+  private readonly installer: ExternalAgentInstaller;
+  private readonly gatewayConnections = new Set<() => Promise<void>>();
+  async connectProgramGateway(configuration: ExternalAgentConfiguration, launch: { command: string; args: string[]; env: NodeJS.ProcessEnv }, signal?: AbortSignal) {
+    if ((configuration.profileId ?? configuration.id) !== 'hermes' || launch.env.HERMES_TUI_GATEWAY_URL) return { env: launch.env, release: async () => {} };
+    const bridge = await connectHermesGateway({ ...launch, spawn: this.deps.spawn, cwd: path.join(this.deps.directory, 'probe'), ...(signal ? { signal } : {}) });
+    let closing: Promise<void> | undefined;
+    const release = () => closing ??= bridge.close().finally(() => this.gatewayConnections.delete(release));
+    this.gatewayConnections.add(release);
+    return { env: bridge.env, release };
+  }
   private readonly connections = new Map<string, Live>();
   private readonly connecting = new Map<string, Promise<Live>>();
   private readonly authenticating = new Set<string>();
@@ -149,12 +162,24 @@ export class ExternalAgentsService {
       spawn: Spawn;
       spawnAdmitted?: ReturnType<typeof createKernelProcessService>['spawnAdmitted'];
       directory: string;
+      fetch?: import('./installations.js').ExternalAgentDownload;
+      removeProgram?: (directory: string) => Promise<void>;
+      fileContext?: ReturnType<typeof createKernelProcessService>['fileContext'];
       resolveWorkspace(cwd: string): Promise<{ workspaceId: string; root: string }>;
       onError?(operationId: string, error: unknown): void;
       /** Host policy defaults, injectable without changing the durable input contract. */
       idle?: { preparedMs?: number; conversationMs?: number; sweepMs?: number };
     },
   ) {
+    this.installer = new ExternalAgentInstaller({
+      directory: deps.directory, spawn: deps.spawn, fetch: deps.fetch ?? fetch,
+      settings: () => this.settings(), configure: (value, revision, key) => this.configure(value, revision, key),
+      executable: config => this.executable(config),
+      removeProgram: async directory => {
+        if (!deps.removeProgram) throw new ExternalAgentError('process_owner_unavailable', 'Program process ownership is unavailable');
+        await deps.removeProgram(directory);
+      },
+    });
     this.idleTimer = setInterval(() => {
       void this.sweepIdle().catch(error => this.deps.onError?.('external-idle', error));
     }, deps.idle?.sweepMs ?? 60_000);
@@ -329,7 +354,7 @@ export class ExternalAgentsService {
             throw new Error('Original target external Harness configuration changed');
           preparedConfiguration = launch.configuration;
           source = {...source, executionBinding: {resourceOwner:targetOwner,configurationId:child.binding.configuration_id,
-            harness:child.binding.harness,configurationIdentity:launch.configurationIdentity,
+            harness:child.binding.harness,configurationIdentity:launch.configurationIdentity,profileId:launch.configuration.profileId ?? launch.configuration.id,
             launch:{command:launch.configuration.command,args:[...launch.configuration.args]}}};
         }
         child = await this.command<ExternalChild>({
@@ -338,12 +363,15 @@ export class ExternalAgentsService {
           source,
         });
       }
+      const targetOwner = record(record(source).executionSource).resource_owner ?? child.binding.resource_owner;
+      const configuration = preparedConfiguration ?? await this.configuration(child.binding.configuration_id, targetOwner as import('@varin/protocol').SourceResourceOwner | undefined);
       signal.throwIfAborted();
       await this.command({
         action: 'create',
         key: id,
         id,
         configurationId: child.binding.configuration_id,
+        profileId: configuration.profileId ?? configuration.id,
         harness: child.binding.harness,
         title: child.name,
         cwd: source.cwd,
@@ -364,8 +392,6 @@ export class ExternalAgentsService {
       });
       // Only a new dispatch takes current target defaults; subsequent send requests
       // preserve the existing session and their own explicitly admitted overrides.
-      const targetOwner = record(record(source).executionSource).resource_owner ?? child.binding.resource_owner;
-      const configuration = preparedConfiguration ?? await this.configuration(child.binding.configuration_id, targetOwner as import('@varin/protocol').SourceResourceOwner | undefined);
       input = { ...configuration.defaults, ...input };
       signal.throwIfAborted();
       const turn = await this.command<ExternalTurn>({ action: 'admit', id, key: child.operation_id, input });
@@ -530,13 +556,24 @@ export class ExternalAgentsService {
       const owner=this.deps.managed();return (await owner.source(resourceOwner,signal)).externalSettings({coordinatorHostId:owner.coordinatorHostId},signal);
     }
     const value = await this.command<ExternalAgentSettings>({ action: 'settings' }, signal);
+    const agents = [...value.agents, ...defaults.filter((d) => !value.agents.some((a) => a.id === d.id)).map(d => ({ ...d, availability: 'auto' as const, enabled: true }))];
+    const detections = agents.flatMap(agent => {
+      const cached = this.detections.get(agent.id);
+      return cached?.configuration === JSON.stringify(capabilityConfiguration(agent)) ? [cached.result] : [];
+    });
     return {
       ...value,
-      profiles: [...ACP_PROFILES],
-      agents: [...value.agents, ...defaults.filter((d) => !value.agents.some((a) => a.id === d.id)).map(d => ({ ...d, availability: 'auto' as const, enabled: true }))],
+      profiles: [...EXTERNAL_AGENT_PROFILES],
+      host: { platform: process.platform, architecture: process.arch },
+      agents, ...(detections.length ? { detections } : {}),
     };
   }
-  async configure(value: Pick<ExternalAgentSettings, 'agents' | 'defaultAgent'>, expectedRevision: number, key: string) {
+  async configure(value: Pick<ExternalAgentSettings, 'agents' | 'defaultAgent'>, expectedRevision: number, key: string, resourceOwner?: import('@varin/protocol').SourceResourceOwner) {
+    if (resourceOwner?.kind === 'managed_host') {
+      if (!this.deps.managed) throw new Error('Managed external Source transport is unavailable');
+      const owner = this.deps.managed();
+      return (await owner.source(resourceOwner)).externalConfigure({ coordinatorHostId: owner.coordinatorHostId, value, expectedRevision, key });
+    }
     if (
       !value ||
       !Array.isArray(value.agents) ||
@@ -547,12 +584,13 @@ export class ExternalAgentsService {
       if (
         !a ||
         Object.keys(a).some(
-          (key) => !['id', 'name', 'harness', 'enabled', 'availability', 'command', 'args', 'defaults'].includes(key),
+          (key) => !['id', 'profileId', 'name', 'harness', 'enabled', 'availability', 'command', 'args', 'defaults'].includes(key),
         ) ||
         !text(a.id).trim() ||
         !text(a.name).trim() ||
         !text(a.command).trim() ||
         !['codex', 'claude', 'pi', 'acp'].includes(a.harness) ||
+        (a.profileId !== undefined && (!getExternalAgentProfile(a.profileId) || getExternalAgentProfile(a.profileId)!.harness !== a.harness)) ||
         typeof a.enabled !== 'boolean' ||
         (a.availability !== undefined && !['auto', 'enabled', 'disabled'].includes(a.availability)) ||
         !Array.isArray(a.args) ||
@@ -573,6 +611,22 @@ export class ExternalAgentsService {
     this.notify('*');
     return result;
   }
+  async installations(input: import('@varin/application-client').ExternalAgentInstallationRequest, signal?: AbortSignal, resourceOwner?: import('@varin/protocol').SourceResourceOwner) {
+    if (resourceOwner?.kind === 'managed_host') {
+      if (!this.deps.managed) throw new Error('Managed external Source transport is unavailable');
+      const owner = this.deps.managed();
+      return (await owner.source(resourceOwner, signal)).externalInstallations({ coordinatorHostId: owner.coordinatorHostId, input }, signal);
+    }
+    return this.installer.request(input, signal);
+  }
+  async installationLog(id: string, signal?: AbortSignal, resourceOwner?: import('@varin/protocol').SourceResourceOwner) {
+    if (resourceOwner?.kind === 'managed_host') {
+      if (!this.deps.managed) throw new Error('Managed external Source transport is unavailable');
+      const owner = this.deps.managed();
+      return (await owner.source(resourceOwner, signal)).externalInstallationLog({ coordinatorHostId: owner.coordinatorHostId, id }, signal);
+    }
+    return this.installer.log(id);
+  }
   private async configuration(id: string,resourceOwner?:import('@varin/protocol').SourceResourceOwner) {
     const config = (await this.settings(undefined,resourceOwner)).agents.find((a) => a.id === id);
     if (!config) throw new ExternalAgentError('agent_missing', 'External Agent configuration is unavailable');
@@ -581,7 +635,7 @@ export class ExternalAgentsService {
   private async executable(
     config: ExternalAgentConfiguration,
   ): Promise<{ executable: string; command: string; args: string[]; env: NodeJS.ProcessEnv }> {
-    const profile = getAcpProfile(config.id);
+    const profile = getExternalAgentProfile(config.profileId ?? config.id);
     assertProfilePlatform(profile, process.platform, process.arch);
     const env = { ...process.env, ...this.environment.getLoginShellEnvSnapshot() };
     const executable = path.isAbsolute(config.command)
@@ -592,13 +646,11 @@ export class ExternalAgentsService {
     if (process.platform === 'win32' && /\.cmd$/i.test(executable)) {
       // npm shims invoke a JS entry point; run that entry directly without a shell quoting layer.
       const shim = await readFile(executable, 'utf8');
-      const entry = /"%dp0%[\\/]([^"\r\n]+\.(?:c?js|mjs))"/i.exec(shim)?.[1];
-      if (!entry)
-        throw new ExternalAgentError(
-          'launcher_required',
-          'Select the executable and arguments used by this command script',
-        );
-      const node = this.environment.searchPathFor('node', env.PATH ?? env.Path) ?? process.execPath;
+      const entry = /"(?:%dp0%[\\/]|%~dp0)([^"\r\n]+\.(?:c?js|mjs))"/i.exec(shim)?.[1];
+      if (!entry) return { executable, command: executable, args: config.args, env };
+      const bundledNode = path.join(path.dirname(executable), 'node.exe');
+      const node = (await stat(bundledNode).catch(() => null))?.isFile() ? bundledNode
+        : this.environment.searchPathFor('node', env.PATH ?? env.Path) ?? process.execPath;
       return {
         executable,
         command: node,
@@ -609,6 +661,7 @@ export class ExternalAgentsService {
     return { executable, command: executable, args: config.args, env };
   }
   private async probeVersion(launch: Awaited<ReturnType<ExternalAgentsService['executable']>>, signal?: AbortSignal, profile?: ExternalAgentProfile) {
+    if (profile?.versionProbe === 'handshake') return undefined;
     const cwd = path.join(this.deps.directory, 'probe');
     await mkdir(cwd, { recursive: true });
     // This deadline bounds only a version query, never a model turn or native effect.
@@ -666,17 +719,19 @@ export class ExternalAgentsService {
     }, signal);
     try {
       const launch = await this.executable(config);
-      const version = await this.probeVersion(launch, signal, getAcpProfile(config.id));
+      const version = await this.probeVersion(launch, signal, getExternalAgentProfile(config.profileId ?? config.id));
       if (observed?.agentVersion && observed.agentVersion !== version)
         await this.invalidateCapabilities(config, observed.generation);
-      const result = { id, status: 'available' as const, executable: launch.executable, version, checkedAt: Date.now() };
+      const managed = await this.installer.inspect(config);
+      const result = { id, status: 'available' as const, executable: launch.executable, ...(version ? { version } : {}), ...(managed ? { managed } : {}), checkedAt: Date.now() };
       saveDetection(result);
       return result;
     } catch (error) {
       if (signal?.aborted) throw error;
       if (observed) await this.invalidateCapabilities(config, observed.generation);
+      const managed = await this.installer.inspect(config);
       const result = {
-        id, checkedAt: Date.now(),
+        id, checkedAt: Date.now(), code: error instanceof ExternalAgentError ? error.code : 'detection_failed', ...(managed ? { managed } : {}),
         status:
           error instanceof ExternalAgentError && error.code === 'program_missing'
             ? ('missing' as const)
@@ -725,7 +780,7 @@ export class ExternalAgentsService {
       const selected=settings.agents.find(c=>c.id===input.configurationId);
       if (!selected) throw new ExternalAgentError('agent_missing','Choose an external Harness configuration');
       const target=await client.externalBinding({coordinatorHostId:owner.coordinatorHostId,source,configurationId:input.configurationId,harness:selected.harness});
-      const result=await this.command<ExternalConversation>({action:'create',key:input.key,id,configurationId:input.configurationId,harness:target.configuration.harness,
+      const result=await this.command<ExternalConversation>({action:'create',key:input.key,id,configurationId:input.configurationId,harness:target.configuration.harness,profileId:target.configuration.profileId ?? target.configuration.id,
         cwd:input.source.path,workspaceId:source.workspace_id,executionSource:source,title:input.title||target.configuration.name,
         ...(input.organization?{organization:input.organization}:{}),...(principalId===undefined?{}:{principalId})});
       this.notify(id,true);return result;
@@ -747,6 +802,7 @@ export class ExternalAgentsService {
       ...(principalId === undefined ? {} : { principalId }),
       id,
       configurationId: config.id,
+      profileId: config.profileId ?? config.id,
       harness: config.harness,
       cwd,
       workspaceId: source.workspaceId,
@@ -904,7 +960,7 @@ export class ExternalAgentsService {
     const config = await this.configuration(configurationId);
     if (!config.enabled || config.harness !== harness) throw new ExternalAgentError('agent_disabled', 'The target Host configuration is disabled or changed');
     const launch = await this.executable(config);
-    const version = await this.probeVersion(launch, signal, getAcpProfile(config.id)).catch(error => {
+    const version = await this.probeVersion(launch, signal, getExternalAgentProfile(config.profileId ?? config.id)).catch(error => {
       if (signal?.aborted || config.harness === 'pi' || error instanceof AggregateError) throw error;
       return undefined;
     });
@@ -914,7 +970,8 @@ export class ExternalAgentsService {
     const env = {...launch.env,...(harness === 'claude' ? {ELECTRON_RUN_AS_NODE:'1'} : {})};
     const configurationIdentity = createHash('sha256').update(JSON.stringify([config,command,args,env,version])).digest('hex');
     const binding = {configurationIdentity,configuration:config,command:launch.command,args:launch.args,...(version ? {version} : {})};
-    return {binding, command, args, env};
+    const managed = await this.installer.inspect(config);
+    return {binding, command, args, env, ...(managed ? { programDirectory: managed.directory } : {})};
   }
   private async executionSource(c: ExternalConversation, signal: AbortSignal) {
     if (c.executionSource?.resource_owner.kind === 'managed_host') throw new ExternalAgentError('remote_source_required','This attachment requires the target Host source owner');
@@ -956,7 +1013,7 @@ export class ExternalAgentsService {
         if (!this.deps.managed) throw new Error('Managed external Source transport is unavailable');
         const remote = await openManagedExternalTransport(this.deps.managed(),c,input=>this.command(input),error=>this.deps.onError?.(id,error),signal);
         return {config:remote.launch.configuration, capabilityGeneration:null, launch:remote.launch,
-          version:remote.launch.version,child:remote.child,executionCwd:remote.executionCwd,start:remote.start,close:remote.close,capture:remote.capture,attachments:this.attachments ? remote.attachmentOwner(this.attachments) : undefined};
+          version:remote.launch.version,child:remote.child,executionCwd:remote.executionCwd,start:remote.start,close:remote.close,capture:remote.capture,files:remote.files,attachments:this.attachments ? remote.attachmentOwner(this.attachments) : undefined};
       }
       const config = await this.configuration(c.configurationId);
     if (!config.enabled)
@@ -966,7 +1023,7 @@ export class ExternalAgentsService {
     const { admittedSource, executionCwd } = await this.executionSource(c, signal);
     const capabilityGeneration = await this.claimCapabilities(config);
     const launch = await this.executable(config);
-    const version = await this.probeVersion(launch, signal, getAcpProfile(config.id)).catch(error => {
+    const version = await this.probeVersion(launch, signal, getExternalAgentProfile(config.profileId ?? config.id)).catch(error => {
       if (signal.aborted || config.harness === 'pi' || error instanceof AggregateError) throw error;
       return undefined;
     });
@@ -983,17 +1040,29 @@ export class ExternalAgentsService {
                 : []),
           ];
     signal.throwIfAborted();
+    const managedProgram = await this.installer.inspect(config);
+    const gateway = await this.connectProgramGateway(config, launch, signal);
     const spawnOptions = {
       cwd: executionCwd,
-      env: { ...launch.env, ...(config.harness === 'claude' ? { ELECTRON_RUN_AS_NODE: '1' } : {}) },
+      ...(managedProgram ? { programDirectory: managedProgram.directory } : {}),
+      env: { ...gateway.env, ...(config.harness === 'claude' ? { ELECTRON_RUN_AS_NODE: '1' } : {}) },
       stdio: ['pipe', 'pipe', 'pipe'] as ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       signal,
     };
-    const child = admittedSource
+    let child: Awaited<ReturnType<Spawn>>;
+    try { child = admittedSource
       ? await this.deps.spawnAdmitted!(async () => admittedSource!, command, args, spawnOptions)
-      : await this.deps.spawn(command, args, spawnOptions);
-      return {config, capabilityGeneration, launch, version, child, executionCwd, start:async()=>{},close:undefined,capture:undefined,attachments:this.attachments};
+      : await this.deps.spawn(command, args, spawnOptions); }
+    catch (error) { await gateway.release(); throw error; }
+    let closing: Promise<void> | undefined;
+    const close = () => closing ??= (async () => {
+      if (!child.exitConfirmed) await child.requestTermination(true);
+      await child.completion;
+      await child.release();
+      await gateway.release();
+    })().catch(error => { closing = undefined; throw error; });
+      return {config, capabilityGeneration, launch, version, child, executionCwd, start:async()=>{},close,capture:undefined,files:this.deps.fileContext ? createAcpFileAccess(() => this.deps.fileContext!(executionCwd, admittedSource ? async () => admittedSource! : undefined)) : undefined,attachments:this.attachments};
     })();
     const {config, capabilityGeneration, launch, version, child, executionCwd} = prepared;
     const peer = new HarnessTransport(child, config.harness === 'pi' ? 'pi' : 'rpc',prepared.close);
@@ -1006,7 +1075,7 @@ export class ExternalAgentsService {
             ? await connectPi(peer, c.sessionId, version === undefined ? {} : { version })
             : config.harness === 'claude'
               ? await connectClaude(peer, { command: launch.command, args: launch.args }, executionCwd, c.sessionId)
-              : await connectAcp(peer, executionCwd, c.sessionId, { profile: getAcpProfile(c.configurationId), authMethodId });
+              : await connectAcp(peer, executionCwd, c.sessionId, { profile: getExternalAgentProfile(config.profileId ?? config.id), authMethodId, files: prepared.files });
       const agentVersion = version ?? connection.capabilities.protocol?.agentVersion;
       signal.throwIfAborted();
       await this.command({ action: 'bind', id, sessionId: connection.sessionId });
@@ -1709,6 +1778,8 @@ export class ExternalAgentsService {
     return work;
   }
   async close() {
+    await this.installer.close();
+    await Promise.all([...this.gatewayConnections].map(close => close()));
     this.stopping = true;
     clearInterval(this.idleTimer);
     await Promise.all([...this.inputAdmissions.keys()].map(id => this.drainInputAdmissions(id)));

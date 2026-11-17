@@ -75,8 +75,22 @@ export class AcpOptions {
   constructor(
     readonly capabilities: ExternalAgentCapabilities,
     private readonly changed: () => void,
-    private readonly dialect?: 'grok',
+    private readonly dialect?: 'grok' | 'kiro',
   ) {}
+
+  kiroMetadata(value: RecordValue): void {
+    if (this.dialect !== 'kiro' || !Object.hasOwn(value, 'reasoning')) return;
+    const reasoning = record(value.reasoning);
+    const options = (this.capabilities.configOptions ?? []).filter(option => !option.id.startsWith('kiro:'));
+    if (reasoning.support === 'toggleable' && typeof reasoning.thinkingEnabled === 'boolean')
+      options.push({ id: 'kiro:thinking', name: 'Thinking', type: 'boolean', currentValue: reasoning.thinkingEnabled, options: [] });
+    const levels = Array.isArray(reasoning.effortLevels) ? reasoning.effortLevels.filter((value): value is string => typeof value === 'string' && Boolean(value)) : [];
+    if (levels.length && typeof reasoning.effort === 'string' && levels.includes(reasoning.effort))
+      options.push({ id: 'kiro:effort', name: 'Reasoning effort', category: 'thought_level', type: 'select', currentValue: reasoning.effort,
+        options: levels.map(value => ({ value, name: value })) });
+    this.capabilities.configOptions = options;
+    this.publish();
+  }
 
   // Connection-level catalog defaults are not the current session's model/effort.
   catalog(value: unknown): void {
@@ -296,6 +310,13 @@ export class AcpOptions {
     const setOption = async (id: string, value: string) => {
       const option = validate(id, value);
       const wire = option.type === 'boolean' ? value === 'true' : value;
+      if (this.dialect === 'kiro' && (id === 'kiro:thinking' || id === 'kiro:effort')) {
+        const response = await request('_kiro.dev/commands/execute', { sessionId, command: id === 'kiro:thinking'
+          ? { command: 'reasoning', args: { thinkingEnabled: wire } } : { command: 'effort', args: { level: wire } } });
+        if (response.success === false) throw new Error(text(response.message) || 'Kiro rejected the option');
+        // Kiro reports the applied value in its metadata notification, not this command reply.
+        return;
+      }
       const response = await request('session/set_config_option', {
         sessionId,
         configId: id,

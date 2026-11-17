@@ -32,7 +32,7 @@ export function ExternalDelegateList({ parentThreadId }: { parentThreadId: strin
           className="thread-overview-action typography-meta"
           onClick={() => void openConversationFromNavigation({ threadId: child.conversationId })}
         >
-          <HarnessIcon harness={child.harness} configurationId={child.configurationId ?? conversations.find(c => c.id === child.conversationId)?.configurationId} className="size-[22px]" />
+          <HarnessIcon harness={child.harness} profileId={conversations.find(c => c.id === child.conversationId)?.profileId} configurationId={child.configurationId ?? conversations.find(c => c.id === child.conversationId)?.configurationId} className="size-[22px]" />
           <span className="min-w-0 flex-1 truncate">{child.name}</span>
           <ChildState state={child.state} />
         </button>

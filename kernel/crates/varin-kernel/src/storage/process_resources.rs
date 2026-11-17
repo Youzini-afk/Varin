@@ -587,7 +587,15 @@ impl Storage {
             }],
             lease_id,
         )?;
-        let record = json!({"processId":id,"kernelEpoch":grant.kernel_epoch,"workspaceId":workspace,
+        // A managed program is also a live process resource, even when its cwd is
+        // a different workspace. Native deletion and spawn share this exclusion.
+        let program_directory = params_value.get("programDirectory").and_then(Value::as_str)
+            .map(fs::canonicalize).transpose()?;
+        if let Some(directory) = &program_directory {
+            self.check_canonical_file_lease(grant, root_id,
+                &[crate::model::CanonicalFileLeaseResource { absolute: directory.clone(), subtree: true }], None, false)?;
+        }
+        let record = json!({"processId":id,"kernelEpoch":grant.kernel_epoch,"workspaceId":workspace,"programDirectory":program_directory,
             "cwd":cwd,"sourceRoot":root.canonical_root,"sourceRelativeCwd":canonical_relative,"mode":mode,"stdinMode":if mode=="pty" {"pty"} else {stdin_mode},
             "input":{"writable":stdin_mode!="null","eofSupported":mode=="pipe"&&stdin_mode!="null","lineEnding":if mode=="pty"&&cfg!(windows){"\r"}else{"\n"}},
             "inputEncoding":input_encoding,"outputEncoding":output_encoding,
@@ -945,7 +953,11 @@ impl Storage {
         for raw in records {
             let record: Value = serde_json::from_str(&raw)?;
             if record["writerActive"].as_bool() != Some(false)
-                && contains(target, Path::new(string(&record, "cwd")?))
+                && (contains(target, Path::new(string(&record, "cwd")?))
+                    || record["programDirectory"].as_str().is_some_and(|directory| {
+                        let directory = Path::new(directory);
+                        contains(target, directory) || contains(directory, target)
+                    }))
             {
                 return Ok(Some(string(&record, "processId")?.into()));
             }

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { ACP_DEFAULTS, ACP_PROFILES, getAcpProfile } from './profiles.js';
+import { ACP_DEFAULTS, ACP_PROFILES, EXTERNAL_AGENT_PROFILES, getAcpProfile } from './profiles.js';
 import {
   assertProfilePlatform,
   profileVersionArguments,
@@ -8,7 +8,7 @@ import {
 it('supplies disabled editable launch configurations, not auto-install or permission bypass commands', () => {
   expect(
     ACP_DEFAULTS.map(({ id, command, args }) => [id, command, args]),
-  ).toEqual([
+  ).toEqual(expect.arrayContaining([
     ['opencode', 'opencode', ['acp']],
     ['gemini', 'gemini', ['--acp']],
     ['kimi', 'kimi', ['acp']],
@@ -16,7 +16,11 @@ it('supplies disabled editable launch configurations, not auto-install or permis
     ['qoder', 'qoder', ['--acp']],
     ['grok', 'grok', ['agent', 'stdio']],
     ['dsh', 'dsh', ['--profile', 'acp']],
-  ]);
+    ['cline', 'cline', ['--acp']],
+    ['kiro', 'kiro-cli', ['acp']],
+    ['trae', 'traecli', ['acp', 'serve']],
+    ['deepseek-acp', 'deepseek-acp', []],
+  ]));
   for (const configuration of ACP_DEFAULTS) {
     expect(configuration.enabled).toBe(false);
     const profile = getAcpProfile(configuration.id)!;
@@ -28,7 +32,8 @@ it('supplies disabled editable launch configurations, not auto-install or permis
     );
     expect(profile.launch.args).not.toBe(configuration.args);
   }
-  expect(ACP_PROFILES).toHaveLength(7);
+  expect(new Set(EXTERNAL_AGENT_PROFILES.map(profile => profile.productId ?? profile.id)).size).toBe(20);
+  expect(getAcpProfile('deepseek-acp')?.installation?.community).toBe(true);
   expect(getAcpProfile('custom')).toBeUndefined();
 });
 

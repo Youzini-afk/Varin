@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import path from "node:path";
 import os from "node:os";
+import { windowsCommandScript } from '../platform/windows-command.js';
 import type { SpawnOptions } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
@@ -12,6 +13,7 @@ import type { KernelClient, KernelGrantHandle, KernelScopedClient, KernelProcess
 import type { KernelMethodParams, KernelProcessSnapshot, KernelProcessStreamEvent } from "./protocol.generated.js";
 
 export type NativeProcessIdentity = ManagedProcessIdentity;
+export type ManagedProgramSpawnOptions = SpawnOptions & { programDirectory?: string };
 interface Options {
   client: KernelClient;
   resolveIdentity(cwd: string): Promise<NativeProcessIdentity>;
@@ -446,7 +448,7 @@ export function createKernelProcessService(options: Options) {
     }
     return existing;
   };
-  const launch = async (command: string, args: readonly string[], input: SpawnOptions, mode: "pipe" | "pty", cols = 80, rows = 24, admission?: ManagedProcessAdmission): Promise<KernelManagedProcess> => {
+  const launch = async (command: string, args: readonly string[], input: ManagedProgramSpawnOptions, mode: "pipe" | "pty", cols = 80, rows = 24, admission?: ManagedProcessAdmission): Promise<KernelManagedProcess> => {
     const originalGeneration = generation;
     input.signal?.throwIfAborted();
     if (stopping || !options.client.isReady) throw new Error("Native process authority is unavailable or stopping");
@@ -465,9 +467,15 @@ export function createKernelProcessService(options: Options) {
     const params: KernelMethodParams["process.spawn"] = {
       processId: "process:" + randomUUID(), workspaceId: resolved.identity.workspaceId, rootId: resolved.rootId,
       cwd, command, args: [...args], mode, cols, rows, stdinMode: stdinIgnored ? 'null' : 'pipe',
+      ...(input.programDirectory ? { programDirectory: input.programDirectory } : {}),
       ...(mode === 'pty' ? { inputEncoding: 'utf-8', outputEncoding: 'utf-8' } : {}),
       env: Object.entries(input.env ?? process.env).flatMap(([name, value]) => value === undefined || name === "NODE_CHANNEL_FD" ? [] : [{ name, value }]),
     };
+    if (process.platform === 'win32' && mode === 'pipe' && /\.(cmd|bat)$/i.test(command)) {
+      params.command = input.env?.ComSpec ?? process.env.ComSpec ?? 'cmd.exe';
+      params.args = [];
+      params.windowsRawArguments = windowsCommandScript(command, args);
+    }
     // The trusted source callback belongs to the original source owner, not the JSON
     // caller. Preparation/grant creation may have waited; re-admit at actual spawn.
     if (admission) {
@@ -514,7 +522,17 @@ export function createKernelProcessService(options: Options) {
     return pending;
   };
   return {
-    spawn: (command: string, args: readonly string[], input: SpawnOptions) => trackedLaunch(command, args, input, "pipe"),
+    spawn: (command: string, args: readonly string[], input: ManagedProgramSpawnOptions) => trackedLaunch(command, args, input, "pipe"),
+    async fileContext(cwd: string, admission?: ManagedProcessAdmission) {
+      const resolved = await context(cwd, admission);
+      return { client: resolved.client, workspaceId: resolved.identity.workspaceId, rootId: resolved.rootId, canonicalRoot: resolved.identity.canonicalRoot };
+    },
+    async removeProgram(directory: string): Promise<void> {
+      const resolved = await context(path.dirname(directory));
+      const result = await resolved.client.fileRemove({ workspaceId: resolved.identity.workspaceId, rootId: resolved.rootId,
+        operationId: `program-remove:${randomUUID()}`, path: path.relative(resolved.identity.canonicalRoot, directory).replaceAll('\\', '/'), recursive: true, force: true });
+      if (result.status !== 'removed') throw new Error(`Program removal did not complete: ${String(result.status)}`);
+    },
     /** Release one drained private source context. It cannot revoke other roots
      * or a context still owned by an admitted process or in-flight launch. */
     async releaseContext(identity: NativeProcessIdentity): Promise<void> {
@@ -540,7 +558,7 @@ export function createKernelProcessService(options: Options) {
       if (grants.get(key) === pending) grants.delete(key);
     },
     /** Host-private source admission. Never exposed in process tool JSON or extension contracts. */
-    spawnAdmitted: (admission: ManagedProcessAdmission, command: string, args: readonly string[], input: SpawnOptions) =>
+    spawnAdmitted: (admission: ManagedProcessAdmission, command: string, args: readonly string[], input: ManagedProgramSpawnOptions) =>
       trackedLaunch(command, args, input, "pipe", 80, 24, admission),
     ptyProvider: {
       backend: "rust-kernel",

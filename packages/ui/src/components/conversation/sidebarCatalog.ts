@@ -11,6 +11,7 @@ import { isLeadThread } from '@/lib/agent-runtime/threadRole';
 export interface SidebarConversation {
   harness?: ExternalHarness;
   configurationId?: string;
+  profileId?: string;
   avatar?: string;
   id: string;
   name: string;
@@ -63,7 +64,7 @@ export function useSidebarCatalog(includeBotConversations = false) {
         ...(thread.bot_id ? { botId: thread.bot_id } : {}), lead: isLeadThread(thread, byId),
         busy, unread: thread.unread, pinned: thread.pinned, projectIds, branchId: thread.main_branch_id, branches: thread.branches };
     });
-    for (const c of external) summaries.push({ origin: origins.get(JSON.stringify(['external', c.id])), ...(origins.get(JSON.stringify(['external', c.id]))?.botId ? { botId: origins.get(JSON.stringify(['external', c.id]))!.botId! } : {}), id: c.id, harness: c.harness, configurationId: c.configurationId, name: c.title, firstMessage: c.title, cwd: c.cwd,
+    for (const c of external) summaries.push({ origin: origins.get(JSON.stringify(['external', c.id])), ...(origins.get(JSON.stringify(['external', c.id]))?.botId ? { botId: origins.get(JSON.stringify(['external', c.id]))!.botId! } : {}), id: c.id, harness: c.harness, configurationId: c.configurationId, ...(c.profileId ? { profileId: c.profileId } : {}), name: c.title, firstMessage: c.title, cwd: c.cwd,
       createdAt: new Date(c.createdAt).toISOString(), updatedAt: new Date(c.updatedAt).toISOString(),
       ...(c.archived ? { archivedAt: new Date(c.updatedAt).toISOString() } : {}), ...(c.parent ? { parentId: c.parent.threadId } : {}),
       pinned: c.pinned, busy: Boolean(c.activeTurn), unread: false, lead: !c.parent, projectIds: projects.filter(p => projectContainsPath(p, c.cwd)).map(p => p.id), branchId: '', branches: [] });

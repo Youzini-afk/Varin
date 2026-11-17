@@ -45,7 +45,7 @@ export function ChatAgentMessageBubble({ id, senderThreadId, senderBranchId, tar
   return <article className="chat-agent-message" data-outgoing={outgoing} data-kind={kind} data-arrive={arrives || undefined}>
     <button type="button" className="chat-agent-message-avatar" disabled={!senderThreadId}
       aria-label={t('collaboration.viewMember', { name: name(senderThreadId) })} onClick={() => openMember(senderThreadId, senderBranchId)}>
-      {externalSource ? <HarnessIcon harness={externalSource.harness} configurationId={externalSource.configurationId} className="size-[26px]" />
+      {externalSource ? <HarnessIcon harness={externalSource.harness} configurationId={externalSource.configurationId} profileId={externalSource.profileId} className="size-[26px]" />
         : <AgentAvatar identity={source?.thread_id ?? senderThreadId ?? id} avatar={source?.avatar} size={26} />}
     </button>
     <div className="chat-agent-message-column">
@@ -53,7 +53,7 @@ export function ChatAgentMessageBubble({ id, senderThreadId, senderBranchId, tar
         <button type="button" disabled={!senderThreadId} title={name(senderThreadId)} onClick={() => openMember(senderThreadId, senderBranchId)}><span>{name(senderThreadId)}</span></button>
         {targetThreadId && <><Icon name="arrow-right" className="size-3 shrink-0" />
           <button type="button" title={name(targetThreadId)} onClick={() => openMember(targetThreadId, targetBranchId)}>
-            {externalTarget ? <HarnessIcon harness={externalTarget.harness} configurationId={externalTarget.configurationId} className="size-3.5" /> : target && <AgentAvatar identity={target.thread_id} avatar={target.avatar} size={14} />}<span>{name(targetThreadId)}</span>
+            {externalTarget ? <HarnessIcon harness={externalTarget.harness} configurationId={externalTarget.configurationId} profileId={externalTarget.profileId} className="size-3.5" /> : target && <AgentAvatar identity={target.thread_id} avatar={target.avatar} size={14} />}<span>{name(targetThreadId)}</span>
           </button></>}
       </div>
       <div className="chat-agent-message-bubble" data-expanded={expanded}>

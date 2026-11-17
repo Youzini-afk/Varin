@@ -243,3 +243,5 @@ Claude Code reuses the LobeHub Claude SVG covered above.
 These marks identify compatible external products and do not imply their endorsement. Exact source
 paths, adaptations, theme treatment and intentional neutral fallbacks are recorded in
 [`harness-logos/README.md`](packages/ui/src/assets/harness-logos/README.md).
+
+External Agent catalogue marks additionally come from Codeg (Apache-2.0) and its attributed LobeHub assets (MIT); see `packages/ui/src/assets/harness-logos/README.md`. The Codeg license is shipped as `packages/web/public/licenses/codeg-LICENSE.txt`.

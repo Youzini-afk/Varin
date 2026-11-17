@@ -13,6 +13,36 @@ afterEach(async () => {
   for (const peer of peers.splice(0)) await peer.close();
 });
 
+it('maps Kiro metadata and sends native reasoning commands without inventing options', async () => {
+  const f = fixture({ opened: { sessionId: 'native-session', models: { currentModelId: 'model', availableModels: [{ modelId: 'model', name: 'Model' }] } },
+    handle(message, reply) { if (message.method === '_kiro.dev/commands/execute') { reply(message, { success: true }); return true; } return false; } });
+  const connection = await connectAcp(f.peer, '/workspace', undefined, { profile: getAcpProfile('kiro') });
+  f.emit({ jsonrpc: '2.0', method: '_kiro.dev/metadata', params: { sessionId: 'native-session', reasoning: { support: 'toggleable', thinkingEnabled: true, effortLevels: ['low', 'high'], effort: 'low' } } });
+  expect(connection.capabilities.models[0]?.thinkingLevels).toEqual(['low', 'high']);
+  expect(connection.capabilities.configOptions?.find(option => option.id === 'kiro:thinking')?.currentValue).toBe(true);
+  const result = connection.prompt({ text: 'hello', thinking: 'high' }, sink());
+  await vi.waitFor(() => expect(f.latest('session/prompt')).toBeDefined());
+  expect(f.latest('_kiro.dev/commands/execute').params).toEqual({ sessionId: 'native-session', command: { command: 'effort', args: { level: 'high' } } });
+  // Only metadata confirms what Kiro actually applied.
+  expect(connection.capabilities.current?.thinking).toBe('low');
+  f.emit({ jsonrpc: '2.0', method: '_kiro.dev/metadata', params: { sessionId: 'native-session', reasoning: { support: 'unavailable', effortLevels: ['low', 'high'], effort: 'high' } } });
+  expect(connection.capabilities.current?.thinking).toBe('high');
+  expect(connection.capabilities.configOptions?.find(option => option.id === 'kiro:thinking')).toBeUndefined();
+  f.reply(f.latest('session/prompt'), { stopReason: 'end_turn' });
+  await result;
+});
+
+it('advertises only connected file callbacks and keeps callback session identity', async () => {
+  const f = fixture(), files = vi.fn(async () => ({ content: 'file content' }));
+  await connectAcp(f.peer, '/workspace', undefined, { files });
+  expect(record(f.latest('initialize').params).clientCapabilities).toMatchObject({ fs: { readTextFile: true, writeTextFile: true } });
+  f.emit({ jsonrpc: '2.0', id: 'file-read', method: 'fs/read_text_file', params: { sessionId: 'native-session', path: '/workspace/file.txt', line: 2, limit: 3 } });
+  await vi.waitFor(() => expect(files).toHaveBeenCalledWith({ action: 'read', path: '/workspace/file.txt', line: 2, limit: 3 }, expect.any(AbortSignal)));
+  f.emit({ jsonrpc: '2.0', id: 'foreign-read', method: 'fs/read_text_file', params: { sessionId: 'other', path: '/workspace/file.txt' } });
+  await vi.waitFor(() => expect(f.sent.find(message => message.id === 'foreign-read')?.error).toBeDefined());
+  expect(files).toHaveBeenCalledTimes(1);
+});
+
 // The adapter and transport are real; only the remote process and its wire replies are controlled.
 // ACP v1 frames follow schema-v1.21.0. Dialect shapes are captured in Codeg 6e7e3c3
 // connection.rs: Qoder elicitation tests, Grok sessionConfig/model broadcasts and ask-user callbacks.

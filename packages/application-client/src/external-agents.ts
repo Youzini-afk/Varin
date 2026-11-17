@@ -7,6 +7,12 @@ import {
 } from './transport/runtime-switch.js';
 
 export type ExternalHarness = 'codex' | 'claude' | 'pi' | 'acp';
+const waitForExternalReconnect = (signal: AbortSignal) => new Promise<void>(resolve => {
+  const finish = () => { clearTimeout(timer); signal.removeEventListener('abort', finish); resolve(); };
+  const timer = setTimeout(finish, 1500);
+  signal.addEventListener('abort', finish, { once: true });
+  if (signal.aborted) finish();
+});
 /** Explicit Host defaults for new drafts, never a remembered last-used choice. */
 export interface ExternalAgentDefaults {
   model?: string;
@@ -15,6 +21,8 @@ export interface ExternalAgentDefaults {
 }
 export interface ExternalAgentConfiguration {
   id: string;
+  /** A built-in launch recipe used by an additional named configuration. */
+  profileId?: string;
   name: string;
   harness: ExternalHarness;
   enabled: boolean;
@@ -26,6 +34,7 @@ export interface ExternalAgentConfiguration {
 }
 export interface ExternalAgentProfile {
   id: string;
+  productId?: string;
   name: string;
   harness: ExternalHarness;
   description: string;
@@ -36,6 +45,9 @@ export interface ExternalAgentProfile {
   versionArgs?: string[];
   authentication?: string;
   compatibility?: string;
+  installation?: { kind: 'npm' | 'archive' | 'external'; packageName?: string; community?: boolean };
+  /** Some upstream servers only expose their version in the protocol handshake. */
+  versionProbe?: 'handshake';
 }
 export interface ExternalAuthentication {
   methods: Array<{ id: string; name: string; description?: string; type: 'agent' | 'terminal'; command?: string; args?: string[] }>;
@@ -56,6 +68,8 @@ export interface ExternalAgentSettings {
   agents: ExternalAgentConfiguration[];
   /** Last negotiated catalogue for the same launch configuration and program version. */
   capabilityCache?: Record<string, ExternalAgentCapabilityCache>;
+  host?: { platform: string; architecture: string };
+  detections?: ExternalAgentDetection[];
 }
 export interface ExternalAgentCapabilityCache {
   capabilities: ExternalAgentCapabilities;
@@ -69,7 +83,30 @@ export interface ExternalAgentDetection {
   executable?: string;
   version?: string;
   message?: string;
+  code?: string;
+  managed?: { version: string; directory: string };
 }
+
+export interface ExternalAgentInstallation {
+  configurationId: string;
+  operation: 'install' | 'check' | 'uninstall';
+  status: 'running' | 'cancelling' | 'succeeded' | 'failed' | 'cancelled';
+  stage: 'resolving' | 'downloading' | 'installing' | 'checking' | 'activating' | 'removing';
+  version?: string;
+  downloadedBytes?: number;
+  totalBytes?: number;
+  error?: string;
+  code?: string;
+}
+export interface ExternalAgentInstallations {
+  revision: string;
+  operations: ExternalAgentInstallation[];
+}
+export type ExternalAgentInstallationRequest =
+  | { action: 'state' }
+  | { action: 'watch'; after: string }
+  | { action: 'install'; id: string; version?: string }
+  | { action: 'check' | 'cancel' | 'uninstall'; id: string };
 /** Installation, configuration intent and negotiated session facts are independent. */
 export interface ExternalExecutorInspection {
   configurationId: string;
@@ -111,6 +148,7 @@ export interface ExternalConversation {
   principalId?: string | null;
   id: string;
   configurationId: string;
+  profileId?: string;
   harness: ExternalHarness;
   title: string;
   cwd: string;
@@ -292,6 +330,7 @@ export type ExternalObservation = { epoch: string; revision: number } & External
 export interface ExternalDelegation {
   /** Original execution configuration, independent of the task name or role avatar. */
   configurationId?: string;
+  profileId?: string;
   messageKind?: 'inform' | 'request';
   operationId: string;
   conversationId: string;
@@ -312,7 +351,12 @@ export interface ExternalAgentsAPI {
     value: Pick<ExternalAgentSettings, 'agents' | 'defaultAgent'>,
     expectedRevision: number,
     key: string,
+    resourceOwner?: import('@varin/protocol').SourceResourceOwner,
   ): Promise<ExternalAgentSettings>;
+  installations(input: ExternalAgentInstallationRequest, signal?: AbortSignal, resourceOwner?: import('@varin/protocol').SourceResourceOwner): Promise<ExternalAgentInstallations>;
+  installationLog(id: string, signal?: AbortSignal, resourceOwner?: import('@varin/protocol').SourceResourceOwner): Promise<string>;
+  observeInstallations(listener: (state: ExternalAgentInstallations) => void | Promise<void>, signal: AbortSignal,
+    resourceOwner?: import('@varin/protocol').SourceResourceOwner, unavailable?: (error: unknown) => void): Promise<void>;
   detect(id: string, signal?: AbortSignal, resourceOwner?: import('@varin/protocol').SourceResourceOwner): Promise<ExternalAgentDetection>;
   list(signal?: AbortSignal): Promise<ExternalConversation[]>;
   children(signal?: AbortSignal): Promise<ExternalDelegation[]>;
@@ -385,7 +429,29 @@ export function createExternalAgentsHttpAPI(generation = getRuntimeEndpointGener
   };
   return {
     settings: (signal, resourceOwner) => request('settings', resourceOwner ? {resourceOwner} : {}, signal),
-    configure: (value, expectedRevision, key) => request('configure', { value, expectedRevision, key }),
+    configure: (value, expectedRevision, key, resourceOwner) => request('configure', { value, expectedRevision, key, ...(resourceOwner ? {resourceOwner} : {}) }),
+    installations: (input, signal, resourceOwner) => request('installations', { input, ...(resourceOwner ? {resourceOwner} : {}) }, signal),
+    installationLog: (id, signal, resourceOwner) => request('installation-log', { id, ...(resourceOwner ? {resourceOwner} : {}) }, signal),
+    async observeInstallations(listener, signal, resourceOwner, unavailable) {
+      let revision: string | undefined;
+      while (!signal.aborted) {
+        try {
+          const snapshot = await request<ExternalAgentInstallations>('installations', {
+            input: revision === undefined ? { action: 'state' } : { action: 'watch', after: revision },
+            ...(resourceOwner ? { resourceOwner } : {}),
+          }, signal);
+          if (signal.aborted) return;
+          await listener(snapshot);
+          revision = snapshot.revision;
+        } catch (error) {
+          if (signal.aborted) return;
+          if (error instanceof ExternalAgentError && error.status < 500) throw error;
+          unavailable?.(error);
+          revision = undefined;
+          await waitForExternalReconnect(signal);
+        }
+      }
+    },
     detect: (id, signal, resourceOwner) => request('detect', { id, ...(resourceOwner ? { resourceOwner } : {}) }, signal),
     list: (signal) => request('list', {}, signal),
     children: (signal) => request('children', {}, signal),
@@ -488,16 +554,7 @@ export function createExternalAgentsHttpAPI(generation = getRuntimeEndpointGener
           } finally {
             await response?.body?.cancel().catch(() => {});
           }
-          if (!controller.signal.aborted)
-            await new Promise<void>((resolve) => {
-              const finish = () => {
-                clearTimeout(timer);
-                controller.signal.removeEventListener('abort', finish);
-                resolve();
-              };
-              const timer = setTimeout(finish, 1500);
-              controller.signal.addEventListener('abort', finish, { once: true });
-            });
+          if (!controller.signal.aborted) await waitForExternalReconnect(controller.signal);
         }
       } finally {
         controller.abort();

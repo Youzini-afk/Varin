@@ -470,7 +470,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
         }
         throw error;
       });
-      if (method !== 'projectManagement' && method !== 'service' && method !== 'handoff' && method !== 'integrationReceipt' && method !== 'fileReceipt' && method !== 'authorize' && method !== 'release' && method !== 'inspectScope'
+      if (method !== 'externalInstallationLog' && method !== 'projectManagement' && method !== 'service' && method !== 'handoff' && method !== 'integrationReceipt' && method !== 'fileReceipt' && method !== 'authorize' && method !== 'release' && method !== 'inspectScope'
         && (!result || typeof result !== 'object' || Array.isArray(result))) throw new Error('Managed source response is unconfirmed');
       if (method === 'projectManagement') result = decodeManagedProjectManagementResponse((input as Parameters<ManagedSourceService['projectManagement']>[1]).command.action, result, (input as Parameters<ManagedSourceService['projectManagement']>[1]).command.input) as typeof result;
       if (method === 'cancelService') decodeManagedSourceCancellation(input as Parameters<ManagedSourceService['cancelService']>[1], result);
@@ -524,6 +524,10 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       projectManagement: (input, signal) => request('projectManagement', input, signal),
       externalProjectSource: (input, signal) => request('externalProjectSource', input, signal),
       externalSettings: (input, signal) => request('externalSettings', input, signal),
+      externalFile: (input, signal) => request('externalFile', input, signal),
+      externalConfigure: (input, signal) => request('externalConfigure', input, signal),
+      externalInstallations: (input, signal) => request('externalInstallations', input, signal),
+      externalInstallationLog: (input, signal) => request('externalInstallationLog', input, signal),
       externalDetect: (input, signal) => request('externalDetect', input, signal),
       externalInspect: (input, signal) => request('externalInspect', input, signal),
       externalPrepare: (input, signal) => request('externalPrepare', input, signal),

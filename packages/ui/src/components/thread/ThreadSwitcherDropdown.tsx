@@ -57,7 +57,7 @@ const SwitcherNode: React.FC<{
         className={cn('min-w-0 gap-2', currentSessionId === session.id && 'bg-interactive-active')}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
       >
-        {session.harness ? <HarnessIcon harness={session.harness} configurationId={session.configurationId} className="size-5" /> : <AgentAvatar identity={session.id} avatar={session.avatar} size={20} {...(session.lead ? { role: 'lead' as const } : {})} />}{icon}
+        {session.harness ? <HarnessIcon harness={session.harness} configurationId={session.configurationId} profileId={session.profileId} className="size-5" /> : <AgentAvatar identity={session.id} avatar={session.avatar} size={20} {...(session.lead ? { role: 'lead' as const } : {})} />}{icon}
         <span className="min-w-0 flex-1">
           <span className="block truncate typography-ui-label text-foreground">
             {conversationSessionTitle(session, untitled)}

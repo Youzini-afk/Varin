@@ -1303,6 +1303,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return externalAgentIdentity(cwd);
   } });
   const externalAgents = new ExternalAgentsService({ managed: () => ({coordinatorHostId:agentRuntime.coordinatorHostId,source:(owner,signal)=>agentRuntime.managedSource(owner,signal)}), kernel: kernelClient, spawn: externalAgentProcesses.spawn, spawnAdmitted: externalAgentProcesses.spawnAdmitted, directory: externalAgentDirectory,
+    fetch: (input, init) => egressRuntime.fetch(input, init), removeProgram: externalAgentProcesses.removeProgram, fileContext: externalAgentProcesses.fileContext,
     onError: operationId => console.error('[ExternalAgents] Execution or resource cleanup needs reconciliation:', operationId),
     resolveWorkspace: async cwd => {
       const canonicalRoot = await canonicalizePathIdentity(externalAgentDirectory);
@@ -2675,6 +2676,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       capture:{documents:documentsAuthority,prepareResources:threadResources.prepareSourceCapture,inspectInventory:(directory,signal)=>inspectSourceInventory(directory,signal)}})}),
     externalProjectSource:createManagedExternalProjectSourceOwner({kernel:kernelClient,storage:kernelStorageAdapter,hostId}),
     externalSettings: signal=>externalAgents.settings(signal),
+    externalConfigure: (value, revision, key) => externalAgents.configure(value, revision, key),
+    externalInstallations: (input, signal) => externalAgents.installations(input, signal),
+    externalInstallationLog: (id, signal) => externalAgents.installationLog(id, signal),
+    externalGateway: (config, launch, signal) => externalAgents.connectProgramGateway(config, launch, signal),
     externalDetect: (id,signal)=>externalAgents.detect(id,signal),
     externalInspect: (id,refresh,signal)=>externalAgents.inspectExecutor(id,refresh,signal),
     prepareExternalLiveSource: liveSources.prepare,

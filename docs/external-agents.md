@@ -1,16 +1,20 @@
 # 外部 Agent
 
-Varin 可以连接执行 Host 上的 Codex、Claude Code、Pi，以及支持 ACP 的程序。内置 ACP 启动预设包括 OpenCode、Gemini CLI、Kimi Code、Cursor Agent、Qoder、Grok 和 DeepSeek Harness。外部程序继续使用自己的模型、账号、工具和项目配置；Varin 提供会话界面、工作区关联与派发协作。
+Varin 可以连接执行 Host 上的 Codex、Claude Code、Pi，以及支持 ACP 的程序。产品目录提供 20 个产品，Codex、Claude Code、Pi 保留原生适配，其余复用 ACP。DeepSeek 的官方接口与社区桥接是同一产品下的独立配置。外部程序继续使用自己的模型、账号、工具和项目配置；Varin 提供会话界面、工作区关联与派发协作。
 
 ## 使用入口
 
-设置的“外部 Agent”区分“自动发现／启用／停用”。未保存过的内置程序默认自动发现，已安装时无需先创建角色预设；旧存储的 `enabled: true/false` 在 Catalog 升级时分别保留为启用／停用，不把已保存的停用默认值猜成自动发现。自定义配置继续由用户维护，可指定程序与参数；自动发现不安装程序、不更改外部账号或项目配置。
+设置先展示实际发现或明确配置的程序，停用项可折叠，未安装的自动发现项留在“添加 Agent”目录。详情标题旁直接启用或停用；目录可搜索、筛选“可添加 / 全部”，并提供自定义 ACP。启动参数逐项编辑，模型与思考默认值来自真实连接的能力目录。登录和账号配置继续由原程序负责。
 
-检测只在所选执行 Host 解析安装路径并运行版本查询，不发送模型请求。可以选择已注册项目使用的托管 Host 检测；远端配置仍由该 Host 的设置 owner 编辑。安装、启用意图、连接和认证分别表达，切换客户端不会借用另一台机器的安装。
+设备列表来自工作连接，可选择本机或已连接设备，无需先建项目。检测、配置、安装和日志都由所选 Host 的同一外部 Agent owner 处理；远端管理沿用现有 Host 配置/执行权限及目录范围。检测解析程序并查询版本，不调用模型；Antigravity 版本由真正连接时的握手报告，设置只确认其文件存在。
+
+支持 npm 分发的产品安装到目标 Host 的私有数据目录，使用该设备已有的 Node.js/npm 及原有 registry 配置，并遵守包声明的 Node 版本要求。Cursor、Antigravity 从 ACP 官方分发目录取得完整发行包，包含配套运行时；其他产品可连接已有程序或打开官方安装说明。安装不会迁移凭据或改写用户的全局程序。
+
+新程序先在独立目录准备，成功后才更新 Catalog 的启动配置；失败和取消保留上一版本，取消状态等待原生进程退出。更新后的新连接使用新程序，旧连接继续使用原目录。卸载通过 Rust 文件 owner 执行，运行中进程及未确认结束的进程仍占用其程序目录，跨工作区也不能删除。卸载仅删除 Varin 管理的程序，保留外部配置和历史。进度采用变化通知，安装继续运行不依赖设置页是否打开；日志按需读取。
 
 Windows 上，默认的 Codex 和 Claude Code 命令优先按 Host 的 PATH 解析。找不到时，Varin 会检查 Codex 桌面版解包的 CLI 和 Claude Code 原生安装的用户启动器。使用 `claude-agent-acp` 时，在自定义 ACP 条目中填写该命令，参数留空即可。
 
-启动预设不是安装、登录或完整兼容性认证。设置中的“检测”只验证该 Host 的可执行文件和版本查询；会话的连接准备才执行协议握手和会话创建/恢复，不发送模型输入。登录、模型目录与具体能力仍以实际连接结果为准。
+Windows 的 npm 启动器可直接使用 JS 入口及配套 Node；其他 `.cmd`/`.bat` 由原生进程 owner 按命令脚本规则运行，保留参数边界。会话准备负责实际协议握手与恢复，具体能力由该版本协商。
 
 | 预设 | 协议启动参数 | 账号与平台要求 |
 | --- | --- | --- |
@@ -21,8 +25,22 @@ Windows 上，默认的 Codex 和 Claude Code 命令优先按 Host 的 PATH 解�
 | Qoder | `qoder --acp` | 使用 CLI 自身账号；Windows 上游仅提供 x64 |
 | Grok | `grok agent stdio` | `grok login` 或 CLI 已有凭证；版本查询为 `grok version`，不添加自动批准参数 |
 | DeepSeek Harness | `dsh --profile acp` | 在该 Host 完成 dsh 登录，或让其 `acp` profile 指向网关；版本查询为 `dsh --version`，不写入凭证或改写 dsh 的模型/provider 配置 |
+| Cline | `cline --acp` | 官方 npm 包，沿用 CLI 的配置与后端 |
+| CodeBuddy | `codebuddy --acp` | 官方 npm 包 |
+| OpenClaw | `openclaw acp` | CLI 可托管安装，Gateway 使用已有部署 |
+| Hermes Agent | `hermes acp` | 官方安装；先在目标设备用 `hermes gateway ensure` 准备共享 Gateway |
+| Google Antigravity | 官方 ACP server | 与 `localharness_external` 一起安装；Linux 使用上游要求的 `--uid=` |
+| Kiro CLI | `kiro-cli acp` | 官方安装器；从 `_kiro.dev/metadata` 映射思考开关与实际 effort 档位 |
+| ZCode | `zcode-acp-server server` | 社区桥接可托管安装，另需官方 ZCode 运行时 |
+| TRAE CLI | `traecli acp serve` | 官方安装器与已有程序 |
+| Command Code | `command-code acp` | 官方 npm 包，避免 Windows 的系统 `cmd` 别名 |
+| MiniMax Code | `mcode acp` | 官方安装器与已有程序 |
 
-每个预设的安装链接、来源版本和兼容性说明显示在设置中；Windows/macOS/Linux 条目表示上游可用性，不代表 Varin 在每个平台上都做过真实账号验证。用户可编辑可执行文件与参数，内置预设可禁用，自定义 ACP 可移除。
+DeepSeek 社区路线安装 `deepseek-acp`，独立保留配置和版本；不把官方会话自动迁移给桥接。完整发行平台、安装包与启动参数见 [`profiles.ts`](../packages/web/application-host/lib/external-agents/profiles.ts)。产品 Logo 跟随实际后端与配置身份，包含历史会话保存的产品身份；自定义显示名称不会改变标识。
+
+ACP 文件回调使用原执行 Source 的文件 owner，本地与远端均保留原有路径范围和版本冲突：读后被用户修改的文件必须重新读取再写。只有接上读写 owner 时才向后端声明该能力。
+
+Hermes 的 `gateway attach --json` 提供现有 Gateway 的一次性连接票据。Varin 立即连接该 endpoint，以本机字节通道供 ACP viewer 使用；票据不写入设置、会话或日志。每个 viewer 只关闭自己的连接，共享 Gateway 不进入会话的进程树，也不会随该会话强制停止。OpenClaw 同样使用原有 Gateway 配置。
 
 新会话输入框中原来的 Varin 位置可选择执行后端；默认后端位于“对话默认”。正文、图片和各后端的下一条请求选项保留在当前草稿中，不作为下次新会话的偏好。模型、思考和模式默认沿用 Agent 自己的配置；如需固定默认值，可在“外部 Agent”设置的对应条目中选择，候选来自该 Host 上次实际连接的能力目录。更改默认值不改写已有会话或已受理输入。
 

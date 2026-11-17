@@ -24,10 +24,22 @@ The original MIT/Apache license texts are shipped in `packages/web/public/licens
 `kimi-LICENSE.txt`, and `lobe-icons-LICENSE.txt`; Kimi's upstream `NOTICE` is preserved as
 `kimi-NOTICE.txt`. The root `THIRD_PARTY_NOTICES.md` links this inventory.
 
-## Neutral fallbacks
 
-Qoder's official favicon was located, but a redistribution license or brand-use grant was not verified.
-Grok's [official brand guidelines](https://x.ai/legal/brand-guidelines) require unchanged provided assets;
-the linked official ZIP returned HTTP 403 during verification. Neither asset is bundled. These known
-profiles, and unknown/custom ACP configurations, use the existing neutral terminal mark until a vetted
-asset is available. This is deliberate, not a display-name heuristic or a claimed official logo.
+## Additional product marks
+
+### Codeg product marks
+
+These SVGs are unchanged copies of `docs/images/agents/` in
+[Codeg](https://github.com/spacering-net/codeg/tree/4991406e6/docs/images/agents),
+reference commit `4991406e6`, under its repository Apache-2.0 license.
+The source license is shipped in `packages/web/public/licenses/codeg-LICENSE.txt`.
+These marks are used by the product catalogue and conversation HarnessIcon.
+Product names and marks belong to their respective owners and do not imply endorsement.
+
+Codeg's `src/components/agent-icon.tsx` records additional mark provenance:
+Antigravity and Qoder from the ACP registry; Kiro from kiro.dev/icon.svg;
+ZCode from zai-org/ZCode; Command Code from its published extension icon;
+TRAE from LobeHub's MIT icon set, whose license is shipped in `packages/web/public/licenses/lobe-icons-LICENSE.txt`.
+Existing Varin marks keep their original notices in `packages/ui/src/assets/harness-logos/README.md`.
+
+Theme variants are preserved unchanged.

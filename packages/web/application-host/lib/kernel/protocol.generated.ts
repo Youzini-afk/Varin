@@ -4721,6 +4721,7 @@ export interface KernelProcessSpawnParams {
   rootId: string;
   cwd: string;
   command: string;
+  programDirectory?: string;
   args: string[];
   windowsRawArguments?: string;
   env: KernelProcessEnvironmentEntry[];

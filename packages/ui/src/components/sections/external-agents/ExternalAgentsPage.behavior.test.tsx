@@ -2,28 +2,30 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { ExternalAgentsAPI, ExternalAgentSettings, ProjectEntry } from '@varin/application-client';
+import type { ExternalAgentsAPI, ExternalAgentSettings, ThreadSourceTargets } from '@varin/application-client';
 import { ExternalAgentsPage } from './ExternalAgentsPage';
 import { externalAgentEn } from '@/lib/i18n/messages/external-agents';
-import { openExternalUrl } from '@/lib/url';
 import type { SourceResourceOwner } from '@varin/protocol';
 
 const f = vi.hoisted(() => ({ host: 1, listeners: new Set<() => void>(), settings: undefined as ExternalAgentSettings | undefined,
-  projects: [] as ProjectEntry[], read: vi.fn<ExternalAgentsAPI['settings']>(), detect: vi.fn<ExternalAgentsAPI['detect']>(), configure: vi.fn<ExternalAgentsAPI['configure']>(), refresh: vi.fn(async () => {}) }));
+  sources: { targets: [], unavailable: [] } as ThreadSourceTargets, installations: vi.fn<ExternalAgentsAPI['installations']>(), read: vi.fn<ExternalAgentsAPI['settings']>(), detect: vi.fn<ExternalAgentsAPI['detect']>(), configure: vi.fn<ExternalAgentsAPI['configure']>(), refresh: vi.fn(async () => {}) }));
 vi.mock('@varin/application-client', () => ({
   getRuntimeEndpointGeneration: () => f.host,
   subscribeRuntimeEndpointChanged: (listener: () => void) => { f.listeners.add(listener); return () => f.listeners.delete(listener); },
-  createExternalAgentsHttpAPI: () => ({ settings: f.read, detect: f.detect, configure: f.configure }),
+  createExternalAgentsHttpAPI: () => ({ settings: f.read, detect: f.detect, configure: f.configure, installations: f.installations, observeInstallations: async (listener: (value: unknown) => Promise<void>, signal: AbortSignal, owner?: SourceResourceOwner) => {
+    let state = await f.installations({action:'state'}, signal, owner);
+    while (!signal.aborted) { await listener(state); state = await f.installations({action:'watch',after:state.revision},signal,owner); }
+  } }),
 }));
 vi.mock('@/lib/i18n', () => { const t = (key: string) => (externalAgentEn as Record<string, string>)[key] ?? key; return { useI18n: () => ({ t }) }; });
-vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (select: (state: { projects: ProjectEntry[] }) => unknown) => select({ projects: f.projects }) }));
+vi.mock('@/hooks/useRuntimeAPIs', () => { const threads = { sources: { list: async () => f.sources } }; return { useRuntimeAPIs: () => ({ threads }) }; });
 vi.mock('@/stores/useExternalAgentStore', () => ({ useExternalAgents: () => f.settings,
   useExternalAgentStore: Object.assign(() => null, { getState: () => ({ refresh: f.refresh }) }) }));
 vi.mock('@/lib/url', () => ({ openExternalUrl: vi.fn(async () => true) }));
 vi.mock('@/components/thread/HarnessIcon', () => ({ HarnessIcon: () => null }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
-vi.mock('@/components/sections/shared/SettingsPageLayout', () => ({ SettingsPageLayout: ({ children }: React.PropsWithChildren) => <main>{children}</main> }));
-vi.mock('@/components/sections/shared/SettingsSection', () => ({ SettingsFieldRow: ({ children }: React.PropsWithChildren) => <div>{children}</div> }));
+vi.mock('@/components/sections/shared/SettingsPageLayout', () => ({ SettingsPageLayout: ({ children, headerEnd, scope }: React.PropsWithChildren<{ headerEnd?: React.ReactNode; scope?: React.ReactNode }>) => <main>{scope}{headerEnd}{children}</main> }));
+vi.mock('@/components/sections/shared/SettingsSection', () => ({ SettingsFieldRow: ({ children }: React.PropsWithChildren) => <div>{children}</div>, SettingsSection: ({ children }: React.PropsWithChildren) => <section>{children}</section> }));
 vi.mock('@/components/ui/select', async () => {
   const { createContext, useContext } = await import('react');
   const Selection = createContext<{ disabled?: boolean; onValueChange?(value: string): void }>({});
@@ -41,9 +43,13 @@ vi.mock('@/components/ui/select', async () => {
 });
 vi.mock('@/components/ui/button', () => ({ Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => <button {...props} /> }));
 vi.mock('@/components/ui/input', () => ({ Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} /> }));
+vi.mock('motion/react', () => ({ AnimatePresence: ({ children }: React.PropsWithChildren) => children, motion: { div: ({ children, className }: React.PropsWithChildren<{ className?: string }>) => <div className={className}>{children}</div> } }));
+vi.mock('@/components/ui/switch', () => ({ Switch: ({ checked, onCheckedChange, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { checked: boolean; onCheckedChange(value: boolean): void }) => <button {...props} role="switch" aria-checked={checked} onClick={() => onCheckedChange(!checked)} /> }));
+vi.mock('@/components/ui/dialog', () => { const Fragment = ({ children }: React.PropsWithChildren) => <>{children}</>; return { Dialog: ({ open, children }: React.PropsWithChildren<{ open: boolean }>) => open ? children : null, DialogContent: Fragment, DialogHeader: Fragment, DialogTitle: Fragment, DialogDescription: Fragment }; });
+vi.mock('@/components/ui/dropdown-menu', () => { const Fragment = ({ children }: React.PropsWithChildren) => <>{children}</>; return { DropdownMenu: Fragment, DropdownMenuTrigger: Fragment, DropdownMenuContent: Fragment, DropdownMenuItem: ({ children, onSelect, disabled }: React.PropsWithChildren<{ onSelect(): void; disabled?: boolean }>) => <button disabled={disabled} onClick={onSelect}>{children}</button> }; });
 let root: Root, container: HTMLDivElement;
 beforeEach(() => {
-  vi.clearAllMocks(); f.host++; f.projects = [];
+  vi.clearAllMocks(); f.host++; f.sources = { targets: [], unavailable: [] };
   // Metadata is supplied by the Host, rather than a renderer-owned installation registry.
   f.settings = { revision: 7, defaultAgent: null, profiles: [
     { id: 'named', name: 'Named ACP', harness: 'acp', description: 'Host-provided description', platforms: ['linux', 'darwin'],
@@ -54,118 +60,64 @@ beforeEach(() => {
     { id: 'custom', name: 'Custom ACP', harness: 'acp', enabled: false, command: 'custom', args: [] },
   ] };
   f.detect.mockImplementation(async id => ({ id, status: 'available', version: '1.2.3' }));
-  f.configure.mockImplementation(async value => ({ ...f.settings!, ...value, revision: 8 }));
+  f.read.mockImplementation(async () => f.settings!);
+  f.configure.mockImplementation(async value => { f.settings = { ...f.settings!, ...value, revision: f.settings!.revision + 1 }; return f.settings; });
+  f.installations.mockImplementation(async (input, signal) => input.action === 'watch' ? new Promise((_resolve, reject) => signal?.addEventListener('abort', () => reject(signal.reason), { once: true })) : { revision: '1', operations: [] });
   const { document, window } = parseHTML('<html><body></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
-const render = () => act(async () => root.render(<ExternalAgentsPage />));
+const render = () => act(async () => root.render(<React.StrictMode><ExternalAgentsPage /></React.StrictMode>));
 const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === label)!;
-it('shows Host profile guidance and installation-only detection without auto login/install or removing a built-in profile', async () => {
+const openNamed = () => act(async () => container.querySelector<HTMLButtonElement>('.ea-row-main')!.click());
+it('keeps missing automatic presets out of the main list and exposes enabled state in details', async () => {
+  f.settings!.agents.push({ id: 'missing', name: 'Missing preset', harness: 'acp', command: 'missing', args: [], enabled: true, availability: 'auto' });
+  f.detect.mockImplementation(async id => ({ id, status: id === 'missing' ? 'missing' : 'available', version: '1.2.3' }));
   await render();
-  expect(container.textContent).toContain('Installed (version detected) · 1.2.3');
-  expect(container.textContent).toContain('does not verify login, protocol compatibility, or model access');
-  const named = [...container.querySelectorAll('section')].find(node => node.textContent?.includes('Host-provided description'))!;
-  expect(named.textContent).toContain('linux · darwin'); expect(named.textContent).toContain('/host/bin/agent ["--acp"]');
-  expect(named.textContent).toContain('Run the original CLI login yourself.'); expect(named.textContent).toContain('negotiates its actual capabilities');
-  expect(named.textContent).not.toContain('Remove connection configuration');
-  expect(container.textContent?.match(/Remove connection configuration/g)).toHaveLength(1);
-  expect(f.configure).not.toHaveBeenCalled(); expect(openExternalUrl).not.toHaveBeenCalled();
-  await act(async () => button('Installation and setup guide').click());
-  expect(openExternalUrl).toHaveBeenCalledExactlyOnceWith('https://example.test/agent/setup');
+  expect(container.textContent).toContain('1.2.3');
+  expect(container.textContent).not.toContain('Missing preset');
+  expect(f.configure).not.toHaveBeenCalled();
+  await openNamed();
+  expect(container.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
+  expect(container.textContent).not.toContain('Run the original CLI login yourself');
+  await act(async () => container.querySelector<HTMLButtonElement>('[role="switch"]')!.click());
+  expect(f.configure.mock.lastCall?.[0].agents[0]).toMatchObject({ enabled: false, availability: 'disabled', args: ['--acp'] });
 });
-it('enables a built-in configuration without changing launch arguments or inventing authentication status', async () => {
+it('uses connected devices without requiring projects and saves to the selected owner', async () => {
+  const resourceOwner: SourceResourceOwner = { kind: 'managed_host', hostId: 'server', connectionId: 'pairing', endpointIdentity: 'endpoint' };
+  f.sources.targets = [{ resourceOwner, label: 'Development server', capabilities: ['filesystem:read', 'filesystem:write', 'terminal:use', 'process:control'] }];
   await render();
-  await act(async () => namedRow().querySelector<HTMLButtonElement>('[data-option="enabled"]')!.click());
-  expect(f.configure).toHaveBeenCalledWith({ agents: [{ ...f.settings!.agents[0], enabled: true, availability: 'enabled' }, f.settings!.agents[1]], defaultAgent: null }, 7, expect.any(String));
-  expect(container.textContent).not.toContain('Authenticated');
+  await act(async () => button('Development server').click());
+  expect(f.read).toHaveBeenLastCalledWith(expect.any(AbortSignal), resourceOwner);
+  expect(f.detect).toHaveBeenLastCalledWith('named', expect.any(AbortSignal), resourceOwner);
+  await openNamed();
+  await act(async () => container.querySelector<HTMLButtonElement>('[role="switch"]')!.click());
+  expect(f.configure.mock.lastCall?.[3]).toEqual(resourceOwner);
 });
-it('discards old Host detection results and aborts the original observation when the Host changes', async () => {
-  let finish!: () => void;
-  f.detect.mockImplementationOnce(id => new Promise(resolve => { finish = () => resolve({ id, status: 'failed', message: 'Old Host failure' }); }));
-  await render(); const originalSignal = f.detect.mock.calls[0]![1];
+it('discards an old Host detection when the runtime switches', async () => {
+  let reject!: (error: Error) => void; let signal: AbortSignal | undefined;
+  f.detect.mockImplementationOnce((_id, requestSignal) => { signal = requestSignal; return new Promise((_resolve, fail) => { reject = fail; }); });
+  await render();
   await act(async () => { f.host++; f.listeners.forEach(listener => listener()); });
-  await act(async () => finish());
-  expect(originalSignal?.aborted).toBe(true); expect(container.textContent).not.toContain('Old Host failure');
-  expect(container.textContent).toContain('Installed (version detected)');
+  await act(async () => reject(new Error('Old Host failure')));
+  expect(signal?.aborted).toBe(true);
+  expect(container.textContent).not.toContain('Old Host failure');
+  expect(container.textContent).toContain('1.2.3');
 });
-
-function addCatalogue() {
-  f.settings!.capabilityCache = { named: { cachedAt: 1000, agentVersion: '1.2.3', capabilities: {
-    resume: true, images: false, files: 'paths', steering: false,
-    models: [{ id: 'reasoner', name: 'Reasoner', thinkingLevels: ['low', 'high'] }, { id: 'fast', name: 'Fast' }],
-    current: { model: 'reasoner', thinking: 'low', mode: 'default' },
-    modes: [{ id: 'default', name: 'Default' }, { id: 'plan', name: 'Plan' }],
-  } } };
-}
-const namedRow = () => [...container.querySelectorAll('section')].find(node => node.textContent?.includes('Host-provided description'))!;
-const selectOption = async (value: string) => act(async () => namedRow().querySelector<HTMLButtonElement>(`[data-option="value:${value}"]`)!.click());
-const saveNamed = async () => act(async () => namedRow().querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
-
-it('offers only cached Host defaults and persists explicit choices on Save, without a connection or model request', async () => {
-  addCatalogue();
-  await render();
-  expect(namedRow().textContent).toContain('Options from the last negotiated catalogue · 1.2.3');
-  await selectOption('reasoner'); await selectOption('high'); await selectOption('plan');
-  expect(f.configure).not.toHaveBeenCalled();
-  await saveNamed();
-  expect(f.configure).toHaveBeenCalledWith({ agents: [
-    { ...f.settings!.agents[0], defaults: { model: 'reasoner', thinking: 'high', mode: 'plan' } }, f.settings!.agents[1],
-  ], defaultAgent: null }, 7, expect.any(String));
-  expect(f.detect).toHaveBeenCalledTimes(1);
-});
-
-it('clears model-specific thinking and preserves unsaved defaults through a metadata refresh', async () => {
-  addCatalogue();
+it('uses cached model options and clears thinking belonging to the previous model', async () => {
   f.settings!.agents[0]!.defaults = { model: 'reasoner', thinking: 'high', mode: 'plan' };
-  await render(); await selectOption('fast');
-  f.settings = { ...f.settings!, agents: f.settings!.agents.map(agent => ({ ...agent })),
-    capabilityCache: { named: { ...f.settings!.capabilityCache!.named!, cachedAt: 2000 } } };
-  await render(); await saveNamed();
-  expect(f.configure.mock.calls[0]![0].agents[0]!.defaults).toEqual({ model: 'fast', mode: 'plan' });
+  f.settings!.capabilityCache = { named: { cachedAt: 1000, capabilities: { resume: true, images: false, steering: false,
+    models: [{ id: 'reasoner', name: 'Reasoner', thinkingLevels: ['low', 'high'] }, { id: 'fast', name: 'Fast' }], modes: [{ id: 'plan', name: 'Plan' }] } } };
+  await render(); await openNamed();
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-option="value:fast"]')!.click());
+  expect(f.configure.mock.lastCall?.[0].agents[0]?.defaults).toEqual({ model: 'fast', mode: 'plan' });
 });
-
-it('keeps an unavailable saved default visible and clearable without inventing candidates', async () => {
+it('keeps a retired default visible and clearable without inventing model choices', async () => {
   f.settings!.agents[0]!.defaults = { model: 'retired' };
-  await render();
-  expect(namedRow().textContent).toContain('Settings do not start a connection');
-  expect(namedRow().textContent).toContain('retired · Not reported by Agent');
-  expect(namedRow().querySelector<HTMLButtonElement>('[data-option="value:retired"]')!.disabled).toBe(true);
-  await act(async () => namedRow().querySelector<HTMLButtonElement>('[data-option="inherit"]')!.click());
-  await saveNamed();
-  expect(f.configure.mock.calls[0]![0].agents[0]).not.toHaveProperty('defaults');
-});
-
-it('offers auto-discovery only for known profiles and keeps disablement explicit', async () => {
-  await render();
-  const custom = [...container.querySelectorAll('section')].find(node => node.textContent?.includes('Custom ACP'))!;
-  expect(custom.querySelector('[data-option="auto"]')).toBeNull();
-  await act(async () => namedRow().querySelector<HTMLButtonElement>('[data-option="auto"]')!.click());
-  expect(f.configure.mock.lastCall?.[0].agents[0]).toMatchObject({ availability: 'auto', enabled: true });
-  await act(async () => namedRow().querySelector<HTMLButtonElement>('[data-option="disabled"]')!.click());
-  expect(f.configure.mock.lastCall?.[0].agents[0]).toMatchObject({ availability: 'disabled', enabled: false });
-});
-
-it('reads and detects on the selected project device without editing its configuration on the current Host', async () => {
-  const resourceOwner: SourceResourceOwner = {
-    kind: 'managed_host', hostId: 'other-device', connectionId: 'pairing', endpointIdentity: 'endpoint',
-  };
-  f.projects = [{ id: 'project', path: '/other', source: { resourceOwner, workspaceId: 'registered' } }];
-  f.read.mockResolvedValue({ revision: 3, defaultAgent: null, agents: [
-    { id: 'remote-agent', name: 'Remote Agent', harness: 'codex', enabled: true, command: 'codex', args: [] },
-  ] });
-  await render();
-  expect(f.detect.mock.calls.map(([id]) => id)).toEqual(['named']);
-  await act(async () => button('other-device').click());
-  expect(f.read).toHaveBeenCalledWith(expect.any(AbortSignal), resourceOwner);
-  expect(container.textContent).toContain('Remote Agent');
-  expect(container.textContent).not.toContain('Custom ACP');
-  expect(f.detect.mock.calls.map(([id]) => id)).toEqual(['named']);
-  const row = [...container.querySelectorAll('section')].find(node => node.textContent?.includes('Remote Agent'))!;
-  const detect = [...row.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === button('Detect').textContent)!;
-  await act(async () => detect.click());
-  expect(f.detect).toHaveBeenLastCalledWith('remote-agent', expect.any(AbortSignal), resourceOwner);
-  expect(row.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
-  expect(f.configure).not.toHaveBeenCalled();
+  await render(); await openNamed();
+  expect(container.textContent).toContain('retired');
+  expect(container.querySelector<HTMLButtonElement>('[data-option="value:retired"]')?.disabled).toBe(true);
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-option="inherit"]')!.click());
+  expect(f.configure.mock.lastCall?.[0].agents[0]?.defaults).toBeUndefined();
 });

@@ -2,7 +2,7 @@ import type { ExternalAgentCapabilities, ExternalAgentConfiguration } from '@var
 
 /** Only launch identity affects reuse. Presentation and draft defaults do not. */
 export const capabilityConfiguration = (configuration: ExternalAgentConfiguration) => ({
-  harness: configuration.harness, command: configuration.command, args: configuration.args,
+  ...(configuration.profileId ? { profileId: configuration.profileId } : {}), harness: configuration.harness, command: configuration.command, args: configuration.args,
 });
 
 /** Protocol metadata only: never authentication methods, credentials or transient errors. */

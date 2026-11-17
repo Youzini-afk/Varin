@@ -10,6 +10,7 @@ it('probes the CLI rather than its protocol server and preserves launcher prefix
   expect(profileVersionArguments(['/npm/grok.js', '--custom', 'agent', 'stdio'], profile)).toEqual(['/npm/grok.js', '--custom', 'version']);
   expect(profileVersionArguments(['/custom/bridge.js'], profile)).toEqual(['/custom/bridge.js', '--version']);
   expect(profileVersionArguments(['custom'], undefined)).toEqual(['custom', '--version']);
+  expect(profileVersionArguments(['/npm/codex.js'], { ...profile, launch: { command: 'codex', args: [] }, versionArgs: ['--version'] })).toEqual(['/npm/codex.js', '--version']);
 });
 it('checks only evidenced platform restrictions and leaves custom protocols to their actual connection', () => {
   expect(() => assertProfilePlatform(profile, 'win32', 'x64')).not.toThrow();

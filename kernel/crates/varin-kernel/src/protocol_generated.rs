@@ -2251,6 +2251,7 @@ pub(crate) struct KernelProcessSpawnParams {
     pub(crate) root_id: String,
     pub(crate) cwd: String,
     pub(crate) command: String,
+    pub(crate) program_directory: Option<String>,
     pub(crate) args: Vec<String>,
     pub(crate) windows_raw_arguments: Option<String>,
     pub(crate) env: Vec<KernelProcessEnvironmentEntry>,

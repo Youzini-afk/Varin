@@ -42,6 +42,8 @@ pub enum ExternalCommand {
         key: String,
         id: String,
         configuration_id: String,
+        #[serde(default, skip_serializing_if="Option::is_none")]
+        profile_id: Option<String>,
         harness: String,
         title: String,
         cwd: String,
@@ -725,7 +727,9 @@ impl ExternalRead {
     }
 }
 fn capability_configuration(agent: &Value) -> Value {
-    json!({"harness":agent["harness"],"command":agent["command"],"args":agent["args"]})
+    let mut value = json!({"harness":agent["harness"],"command":agent["command"],"args":agent["args"]});
+    if let Some(profile) = agent["profileId"].as_str() { value["profileId"] = json!(profile); }
+    value
 }
 fn capability_cache(db: &Connection) -> Result<Value> {
     let body: Option<String> = db.query_row("SELECT body FROM external_settings WHERE id='capabilities'", [], |row| row.get(0)).optional()?;
@@ -929,7 +933,7 @@ impl Catalog {
                     let mut matched=false;
                     for historical_principal in [None,Some(None),Some(principal.clone())] {
                         for historical_private in [Some(private),None] {
-                            let original=ExternalCommand::Create {key:key.clone(),id:id.clone(),configuration_id:configuration_id.clone(),
+                            let original=ExternalCommand::Create {key:key.clone(),id:id.clone(),configuration_id:configuration_id.clone(),profile_id:receipt["profileId"].as_str().map(str::to_owned),
                                 harness:receipt["harness"].as_str().unwrap_or("").into(),title:title.clone().unwrap_or_else(||receipt["title"].as_str().unwrap_or("").into()),
                                 cwd:receipt["cwd"].as_str().unwrap_or("").into(),workspace_id:receipt["workspaceId"].as_str().map(str::to_owned),
                                 native_workspace:receipt.get("nativeWorkspace").cloned().map(serde_json::from_value).transpose()?,
@@ -1061,6 +1065,7 @@ impl Catalog {
                 organization,
                 id,
                 configuration_id,
+                profile_id,
                 harness,
                 title,
                 cwd,
@@ -1079,6 +1084,7 @@ impl Catalog {
                     return Err(RuntimeError::Invalid("unsupported external harness".into()));
                 }
                 let mut v = json!({"id":id,"configurationId":configuration_id,"harness":harness,"title":title,"cwd":cwd,"revision":1,"createdAt":now(),"updatedAt":now(),"archived":false,"pinned":false,"deleted":false});
+                if let Some(profile) = profile_id { v["profileId"] = json!(profile); }
                 if let Some(workspace) = workspace_id {
                     v["workspaceId"] = json!(workspace);
                 }

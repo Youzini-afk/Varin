@@ -38,7 +38,7 @@ function HarnessSelectorContent({
   const content = (
     <>
       {value ? (
-        <HarnessIcon harness={agent?.harness ?? harness} configurationId={agent?.id ?? value ?? undefined} className="size-3.5" />
+        <HarnessIcon harness={agent?.harness ?? harness} configurationId={agent?.id ?? value ?? undefined} profileId={agent?.profileId} className="size-3.5" />
       ) : (
         <VarinLogo decorative width={14} height={14} />
       )}
@@ -79,7 +79,7 @@ function HarnessSelectorContent({
           .filter((v) => v.enabled || v.id === value)
           .map((v) => (
             <DropdownMenuItem key={v.id} disabled={!v.enabled} onSelect={() => onChange(v.id)}>
-              <HarnessIcon harness={v.harness} configurationId={v.id} />
+              <HarnessIcon harness={v.harness} configurationId={v.id} profileId={v.profileId} />
               <span className="flex-1">{v.name}</span>
               {v.id === value && <Icon name="check" className="size-3.5" />}
             </DropdownMenuItem>

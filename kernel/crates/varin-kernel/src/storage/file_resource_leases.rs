@@ -320,7 +320,7 @@ impl Storage {
         }
         self.check_canonical_file_lease(grant, root_id, requested, Some(lease_id), true)
     }
-    fn check_canonical_file_lease(
+    pub(super) fn check_canonical_file_lease(
         &self, grant: &Grant, root_id: &str, requested: &[CanonicalFileLeaseResource],
         lease_id: Option<&str>, retained: bool,
     ) -> Result<(), KernelError> {

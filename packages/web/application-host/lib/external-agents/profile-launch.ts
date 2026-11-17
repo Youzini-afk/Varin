@@ -11,7 +11,7 @@ export function profileVersionArguments(args: string[], profile?: ExternalAgentP
   const matched = suffix.length > 0 && suffix.every((arg, index) => args[args.length - suffix.length + index] === arg);
   // Only remove the profile's known protocol mode. Preserve executable/shim prefixes
   // and user flags; an arbitrary custom launch is never rewritten by command guessing.
-  return profile?.versionArgs && matched
-    ? [...args.slice(0, -suffix.length), ...profile.versionArgs]
+  return profile?.versionArgs && (matched || suffix.length === 0)
+    ? [...(suffix.length ? args.slice(0, -suffix.length) : args), ...profile.versionArgs]
     : [...args, '--version'];
 }

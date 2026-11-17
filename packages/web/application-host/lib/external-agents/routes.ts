@@ -1,4 +1,7 @@
 import { parseSourceResourceOwner } from '../kernel/thread-sources.js';
+import { hasHostConnectionAccess } from '../connections/access.js';
+import { sourceFailureCode } from '../kernel/source-admission-error.js';
+import { ManagedResponseError } from '../harness/managed-remote-client.js';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Express, Request, Response, RequestHandler } from 'express';
@@ -90,7 +93,9 @@ export function registerExternalAgentRoutes(
   });
   const fields: Record<string, string[]> = {
     settings: ['resourceOwner'],
-    configure: ['value', 'expectedRevision', 'key'],
+    configure: ['value', 'expectedRevision', 'key', 'resourceOwner'],
+    installations: ['input', 'resourceOwner'],
+    'installation-log': ['id', 'resourceOwner'],
     detect: ['id', 'resourceOwner'],
     list: [],
     children: [],
@@ -117,7 +122,12 @@ export function registerExternalAgentRoutes(
         const body = object(req.body);
         if (Object.keys(body).some((key) => !allowed.includes(key)))
           throw new ExternalAgentError('invalid_request', 'Unexpected external Agent request field');
-        const owner = await principal(req, res);
+        const auth = await resolveAuthContext?.(req, res);
+        const principalId = (auth as { principalId?: unknown } | null | undefined)?.principalId;
+        const owner = typeof principalId === 'string' && principalId ? principalId : null;
+        if (['configure', 'installations', 'installation-log'].includes(action) && resolveAuthContext &&
+            !hasHostConnectionAccess(auth, action === 'configure' ? 'configuration' : 'execution'))
+          throw new ExternalAgentError('forbidden', 'External program management requires Host configuration access', 403);
         if (['read', 'connect', 'authenticate', 'continue', 'disconnect', 'send', 'stop', 'respond', 'update'].includes(action)) await authorize(string(body.id), owner, controller.signal);
         let result: unknown;
         switch (action) {
@@ -129,7 +139,16 @@ export function registerExternalAgentRoutes(
               object(body.value) as unknown as Pick<ExternalAgentSettings, 'agents' | 'defaultAgent'>,
               number(body.expectedRevision),
               string(body.key),
+              body.resourceOwner === undefined ? undefined : parseSourceResourceOwner(body.resourceOwner),
             );
+            break;
+          case 'installations':
+            result = await service.installations(object(body.input) as unknown as import('@varin/application-client').ExternalAgentInstallationRequest, controller.signal,
+              body.resourceOwner === undefined ? undefined : parseSourceResourceOwner(body.resourceOwner));
+            break;
+          case 'installation-log':
+            result = await service.installationLog(string(body.id), controller.signal,
+              body.resourceOwner === undefined ? undefined : parseSourceResourceOwner(body.resourceOwner));
             break;
           case 'detect':
             result = await service.detect(string(body.id), controller.signal, body.resourceOwner === undefined ? undefined : parseSourceResourceOwner(body.resourceOwner));
@@ -148,6 +167,7 @@ export function registerExternalAgentRoutes(
               avatar: c.avatar ?? undefined,
               harness: c.binding.harness,
               configurationId: c.binding.configuration_id,
+              profileId: (c.source as { executionBinding?: { profileId?: string } } | null)?.executionBinding?.profileId,
               state: c.report && !c.resources_released ? 'settling' : c.state,
               turnId: c.turn_id ?? undefined,
               reportReady: Boolean(c.report) && c.receipt_published,
@@ -223,10 +243,13 @@ export function registerExternalAgentRoutes(
       } catch (error) {
         if (res.destroyed || controller.signal.aborted) return;
         const message = error instanceof Error ? error.message : String(error);
+        const sourceCode = sourceFailureCode(error);
         res
           .status(
             error instanceof ExternalAgentError
               ? error.status
+              : sourceCode === 'source_authority_denied' ? 403
+              : error instanceof ManagedResponseError ? error.status ?? 503
               : message.includes('conflict:')
                 ? 409
                 : message.includes('not found:')
@@ -234,7 +257,7 @@ export function registerExternalAgentRoutes(
                   : 503,
           )
           .json({
-            code: error instanceof ExternalAgentError ? error.code : 'external_agent_failed',
+            code: error instanceof ExternalAgentError ? error.code : sourceCode ?? 'external_agent_failed',
             error: message,
             ...(error instanceof ExternalAgentError && error.details ? { details: error.details } : {}),
           });

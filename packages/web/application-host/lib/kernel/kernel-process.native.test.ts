@@ -5,6 +5,7 @@ import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-a
 import { execFile, spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { TransportFixture } from "./tests/transport-fixture.js";
 import { createKernelProcessService } from "./process-service.js";
+import { createAcpFileAccess } from '../external-agents/acp-files.js';
 import fs from "node:fs/promises";
 import os from "node:os";
 import { promisify, stripVTControlCharacters } from "node:util";
@@ -290,6 +291,38 @@ it("a native process writer prevents directory removal and release until its pro
   const result = await drain(f.client, params.processId);
   assert.equal(result.process.writerActive, false);
   await f.client.fileRemove({ ...f.address, operationId: "after-exit-remove", path: "child", recursive: true, force: true });
+}, 30_000);
+
+it('retains a managed program outside the process cwd until its native tree exits', async () => {
+  const f = await fixture();
+  const directory = path.join(f.workspace, 'program');
+  await fs.mkdir(directory);
+  await fs.writeFile(path.join(directory, 'dependency.txt'), 'program dependency');
+  const params = { ...f.spawn('managed-program', 'setInterval(()=>{},1000)'), programDirectory: directory };
+  await f.client.processSpawn(params);
+  await waitFor(f.client, params.processId, snapshot => snapshot.pid !== null);
+  await assert.rejects(f.client.fileRemove({ ...f.address, operationId: 'program-remove-active', path: 'program', recursive: true, force: true }), /writer|exit/);
+  await f.client.processKill({ workspaceId: 'ws', processId: params.processId, force: true });
+  await drain(f.client, params.processId);
+  await f.client.fileRemove({ ...f.address, operationId: 'program-remove-stopped', path: 'program', recursive: true, force: true });
+  await assert.rejects(fs.stat(directory), { code: 'ENOENT' });
+}, 30_000);
+
+it('ACP text callbacks preserve native file conflicts and support creating a file', async () => {
+  const f = await fixture();
+  const files = createAcpFileAccess(async () => ({ client: f.client, ...f.address, canonicalRoot: f.workspace }));
+  const file = path.join(f.workspace, 'notes.txt');
+  await fs.writeFile(file, 'first\nsecond\nthird\n');
+  assert.deepEqual(await files({ action: 'read', path: file, line: 2, limit: 1 }), { content: 'second\n' });
+  await fs.writeFile(file, 'user edit');
+  await assert.rejects(files({ action: 'write', path: file, content: 'agent edit' }), /changed/);
+  assert.equal(await fs.readFile(file, 'utf8'), 'user edit');
+  await files({ action: 'read', path: file });
+  await files({ action: 'write', path: file, content: 'updated' });
+  await files({ action: 'write', path: path.join(f.workspace, 'new.txt'), content: 'new file' });
+  assert.equal(await fs.readFile(file, 'utf8'), 'updated');
+  assert.equal(await fs.readFile(path.join(f.workspace, 'new.txt'), 'utf8'), 'new file');
+  await assert.rejects(files({ action: 'read', path: path.join(f.workspace, '..', 'outside') }), /outside/);
 }, 30_000);
 
 it("native process handles reject another actor and a cwd escaping its admitted root", async () => {
