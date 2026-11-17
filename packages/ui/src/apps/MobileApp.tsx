@@ -59,6 +59,7 @@ import { usePwaManifestSync } from '@/hooks/usePwaManifestSync';
 import { bindMobileWorkspaceShell } from './mobileWorkspaceShell';
 import { WorkbenchProfileBridge, WorkbenchReplacement, WORKBENCH_REPLACEMENT_TARGETS } from '@/lib/extensions/workbench-registry';
 import { WorkbenchShellHost } from '@/lib/extensions/workbench-shell-host';
+import { resetVarinExtensionCatalogForHostSwitch, startVarinExtensionCatalog } from '@/lib/extensions/catalog-store';
 import { MOBILE_WORKSPACE_DISCONNECTED_EVENT } from '@/workbenches/agent/AgentWorkspaceShell';
 import { MobileChangesSurface } from './MobileChangesSurface';
 import { MobileFilesSurface } from './MobileFilesSurface';
@@ -2581,11 +2582,12 @@ export function MobileApp({ apis }: MobileAppProps) {
         setConnectionEpoch((epoch) => epoch + 1);
         return;
       }
+      if (isNativeMobileApp) resetVarinExtensionCatalogForHostSwitch();
       resetAppForRuntimeEndpointChange(detail);
       setRuntimeEndpointEpoch((epoch) => epoch + 1);
       setConnectionEpoch((epoch) => epoch + 1);
     });
-  }, []);
+  }, [isNativeMobileApp]);
 
   // On cold launch, silently reconnect to the most-recent saved instance so a
   // returning user — and notification deep-links — land in the app instead of the
@@ -2638,6 +2640,17 @@ export function MobileApp({ apis }: MobileAppProps) {
   React.useEffect(() => {
     if (catalogLoaded) setHasLoadedCatalog(true);
   }, [catalogLoaded]);
+
+  React.useEffect(() => {
+    if (!isNativeMobileApp || !catalogLoaded || !getRuntimeApiBaseUrl()) return;
+    // Restart the catalog after a Host switch even when the Surface loader is already running.
+    void Promise.all([
+      startVarinExtensionCatalog(),
+      import('@/lib/extensions/managed-runtime').then(({ startSurfaceExtensions }) => startSurfaceExtensions()),
+    ]).catch((error) => {
+      console.error('[Varin Extensions] Mobile workbench startup failed:', error);
+    });
+  }, [catalogLoaded, isNativeMobileApp, runtimeEndpointEpoch]);
 
   // Gated on the Thread catalog handshake (and re-run on instance switch): probing the
   // GitHub auth status before the runtime is reachable cached a "not connected"

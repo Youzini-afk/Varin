@@ -187,7 +187,7 @@ test('recovers when the initial authoritative Host-state read fails', async () =
   stopVarinExtensionCatalog();
 });
 
-test('stop cancels the wait and rejects a late completion from the old owner', async () => {
+test('a Host switch clears the old catalog and rejects a late completion', async () => {
   const oldSnapshot = snapshot();
   const newHostId = '8d9b2b76-faf2-45d5-908a-88c0d66bfb6e';
   const newSnapshot = {
@@ -198,6 +198,7 @@ test('stop cancels the wait and rejects a late completion from the old owner', a
     workbench: { ...oldSnapshot.workbench, hostId: newHostId },
   };
   const waitResolvers: Array<(next: VarinExtensionHostStateSnapshot) => void> = [];
+  const signals: AbortSignal[] = [];
   let oldWaitCalls = 0;
   let newHostStateReads = 0;
   Object.defineProperty(globalThis, 'window', {
@@ -209,8 +210,9 @@ test('stop cancels the wait and rejects a late completion from the old owner', a
             newHostStateReads += 1;
             return newHostStateReads === 1 ? oldSnapshot : newSnapshot;
           },
-          waitForHostState: async () => {
+          waitForHostState: async (_request: unknown, signal: AbortSignal) => {
             oldWaitCalls += 1;
+            signals.push(signal);
             return new Promise<VarinExtensionHostStateSnapshot>((resolve) => {
               waitResolvers.push(resolve);
             });
@@ -221,13 +223,16 @@ test('stop cancels the wait and rejects a late completion from the old owner', a
   });
   const {
     getVarinExtensionCatalogState,
+    resetVarinExtensionCatalogForHostSwitch,
     startVarinExtensionCatalog,
     stopVarinExtensionCatalog,
   } = await import('./catalog-store');
 
   await startVarinExtensionCatalog();
   await waitUntil(() => oldWaitCalls === 1);
-  stopVarinExtensionCatalog();
+  resetVarinExtensionCatalogForHostSwitch();
+  expect(signals[0]?.aborted).toBe(true);
+  expect(getVarinExtensionCatalogState().snapshot).toBeNull();
   await startVarinExtensionCatalog();
   expect(getVarinExtensionCatalogState().snapshot?.catalog.hostId).toBe(newHostId);
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setLocalRuntimeAuthCredentialProvider } from '@varin/application-client';
+import { setLocalRuntimeAuthCredentialProvider, switchRuntimeEndpoint } from '@varin/application-client';
 
 const { fetchWithoutRuntimeRouting } = vi.hoisted(() => ({ fetchWithoutRuntimeRouting: vi.fn() }));
 
@@ -16,10 +16,120 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   setLocalRuntimeAuthCredentialProvider(null, null);
   fetchWithoutRuntimeRouting.mockReset();
   if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
   else Reflect.deleteProperty(globalThis, 'window');
+});
+
+describe('native mobile workbench', () => {
+  const firstHost = 'https://first.example';
+  const secondHost = 'https://second.example';
+  const hostId = '2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a';
+  const date = '2026-08-14T00:00:00.000Z';
+  const storage = { authoritative: true, diagnostics: [], hostId, storageState: 'missing' };
+  const snapshot = {
+    catalog: { ...storage, schemaVersion: 1, revision: 1, loadedAt: date, extensions: [] },
+    revision: 1,
+    routing: { ...storage, document: { revision: 0, rules: [], schemaVersion: 1, updatedAt: date } },
+    services: { hostId, providers: [], revision: 0 },
+    workbench: { ...storage, document: {
+      activeProfileId: 'default', layouts: [], profileSelections: { users: {} },
+      profiles: [{ id: 'default', label: 'Default' }], revision: 0, schemaVersion: 1, updatedAt: date,
+    } },
+  };
+  const artifactIntegrity = `sha256-${'a'.repeat(64)}`;
+  const entrypoint = {
+    artifactIntegrity,
+    entrypointId: 'shell',
+    module: {
+      artifactIntegrity, bytesBase64: 'ZXhwb3J0IHt9Ow==',
+      contentType: 'text/javascript', integrity: artifactIntegrity, path: 'shell.js',
+    },
+    styles: [],
+  };
+  const fetch = vi.fn<typeof globalThis.fetch>();
+
+  beforeEach(() => {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: Object.assign(new EventTarget(), {
+      Capacitor: { isNativePlatform: () => true },
+      location: new URL('https://localhost/'),
+    }) });
+    fetch.mockReset();
+    fetch.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/url-token')) return Response.json({});
+      if (url.endsWith('/profile/select')) return Response.json(snapshot.workbench);
+      if (url.endsWith('/enabled')) return Response.json({ snapshot: snapshot.catalog });
+      if (url.endsWith('/entrypoints/read')) return Response.json(entrypoint);
+      if (url.endsWith('/updates')) return Response.json([]);
+      return Response.json(snapshot);
+    });
+    vi.stubGlobal('fetch', fetch);
+  });
+
+  afterEach(() => {
+    switchRuntimeEndpoint({ apiBaseUrl: '' });
+  });
+
+  it('waits for a connection before requesting the catalog', async () => {
+    const { createWebExtensionsAPI } = await import('./extensions');
+    await expect(createWebExtensionsAPI().hostState()).rejects.toThrow('Connect to a Varin Host');
+    expect(fetch).not.toHaveBeenCalled();
+    expect(fetchWithoutRuntimeRouting).not.toHaveBeenCalled();
+  });
+
+  it('uses the connected Host and its auth for workbench recovery, managed code and plugins', async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: firstHost, clientToken: 'first-host-token' });
+    const { createWebExtensionsAPI } = await import('./extensions');
+    const api = createWebExtensionsAPI();
+    const selection = { profileId: 'default', scope: 'user' as const, scopeId: 'default', expectedRevision: 0, surface: 'mobile' as const };
+    await expect(api.hostState()).resolves.toMatchObject({ catalog: { hostId } });
+    await expect(api.selectWorkbenchProfile(selection)).resolves.toMatchObject({ hostId });
+    await expect(api.setEnabled('test.workbench', true, 1)).resolves.toMatchObject({ hostId });
+    const entrypointRequest = { entrypointId: 'shell', extensionId: 'test.workbench', integrity: artifactIntegrity, slot: 'selected' as const };
+    await expect(api.readManagedEntrypoint(entrypointRequest)).resolves.toEqual(entrypoint);
+    await expect(api.pluginCenter!.checkUpdates()).resolves.toEqual([]);
+
+    const requests = fetch.mock.calls.filter(([url]) => String(url).includes('/extensions/'));
+    expect(requests.map(([url, init]) => [String(url), init?.method, new Headers(init?.headers).get('Authorization')])).toEqual([
+      [`${firstHost}/api/varin/extensions/v1/host-state`, undefined, 'Bearer first-host-token'],
+      [`${firstHost}/api/varin/extensions/v1/workbench/profile/select`, 'PATCH', 'Bearer first-host-token'],
+      [`${firstHost}/api/varin/extensions/v1/extensions/test.workbench/enabled`, 'PATCH', 'Bearer first-host-token'],
+      [`${firstHost}/api/varin/extensions/v1/entrypoints/read`, 'POST', 'Bearer first-host-token'],
+      [`${firstHost}/api/varin/extensions/v1/updates`, 'POST', 'Bearer first-host-token'],
+    ]);
+    expect(JSON.parse(String(requests[1]?.[1]?.body))).toEqual(selection);
+    expect(JSON.parse(String(requests[2]?.[1]?.body))).toEqual({ enabled: true, expectedRevision: 1 });
+    expect(JSON.parse(String(requests[3]?.[1]?.body))).toEqual(entrypointRequest);
+    expect(fetchWithoutRuntimeRouting).not.toHaveBeenCalled();
+  });
+
+  it('rejects a workbench response whose body completes after switching Hosts', async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: firstHost, clientToken: 'first-host-token' });
+    const { createWebExtensionsAPI } = await import('./extensions');
+    let completeOldBody!: (body: unknown) => void;
+    const oldResponse = new Response(null);
+    vi.spyOn(oldResponse, 'json').mockImplementation(() => new Promise(resolve => { completeOldBody = resolve; }));
+    fetch.mockImplementation(async input => {
+      if (String(input) === `${firstHost}/api/varin/extensions/v1/host-state`) {
+        return oldResponse;
+      }
+      return Response.json(String(input).endsWith('/url-token') ? {} : snapshot);
+    });
+    const api = createWebExtensionsAPI();
+    const oldRequest = api.hostState();
+    const rejected = expect(oldRequest).rejects.toThrow('Application Host changed');
+    await vi.waitFor(() => expect(completeOldBody).toBeTypeOf('function'));
+    switchRuntimeEndpoint({ apiBaseUrl: secondHost, clientToken: 'second-host-token' });
+    completeOldBody(snapshot);
+    await rejected;
+    await expect(api.hostState()).resolves.toMatchObject({ catalog: { hostId } });
+    const [url, init] = fetch.mock.calls.at(-1)!;
+    expect(String(url)).toBe(`${secondHost}/api/varin/extensions/v1/host-state`);
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer second-host-token');
+  });
 });
 
 describe('createWebExtensionsAPI', () => {

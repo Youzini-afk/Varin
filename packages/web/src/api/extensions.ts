@@ -25,7 +25,8 @@ import {
 import type { ExtensionsAPI } from '@varin/application-client';
 import { createPluginCenterHttpAPI } from '@varin/application-client';
 import { buildLocalRuntimeAuthHeaders } from '@varin/application-client';
-import { fetchWithoutRuntimeRouting } from '@varin/application-client';
+import { fetchWithoutRuntimeRouting, getRuntimeApiBaseUrl, getRuntimeEndpointGeneration, runtimeFetch } from '@varin/application-client';
+import { isCapacitorApp } from '@varin/ui/lib/platform';
 
 const normalizeOrigin = (value: string): string => value.trim().replace(/\/+$/, '');
 
@@ -43,33 +44,40 @@ const errorResult = (message: string, retryable: boolean): VarinExtensionCatalog
   error: { code: 'application_host_unavailable', message, retryable },
 });
 
-const applicationHostRequest = async (
+const fetchApplicationHost = async (path: string, init: RequestInit): Promise<Response> => {
+  // Capacitor serves UI assets locally; its extension owner is the connected Host.
+  if (isCapacitorApp()) {
+    if (!getRuntimeApiBaseUrl()) throw new Error('Connect to a Varin Host to use extensions');
+    const endpoint = getRuntimeEndpointGeneration();
+    const response = await runtimeFetch(path, { ...init, credentials: 'include' });
+    if (endpoint !== getRuntimeEndpointGeneration()) {
+      void response.body?.cancel().catch(() => undefined);
+      throw new Error('Application Host changed during the extension request');
+    }
+    return response;
+  }
+  const origin = applicationHostOrigin();
+  const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
+  const headers = await buildLocalRuntimeAuthHeaders(origin, init.headers);
+  return fetchWithoutRuntimeRouting(target, { ...init, credentials: 'include', headers });
+};
+
+const applicationHostRequest = (
   path: string,
   body: unknown,
   signal?: AbortSignal,
   method = 'POST',
   accept = 'application/json',
-): Promise<Response> => {
-  const origin = applicationHostOrigin();
-  const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
-  const headers = await buildLocalRuntimeAuthHeaders(origin, { Accept: accept, 'Content-Type': 'application/json' });
-  return fetchWithoutRuntimeRouting(target, {
-    body: JSON.stringify(body),
-    credentials: 'include',
-    headers,
-    method,
-    signal,
-  });
-};
+): Promise<Response> => fetchApplicationHost(path, {
+  body: JSON.stringify(body),
+  headers: { Accept: accept, 'Content-Type': 'application/json' },
+  method,
+  signal,
+});
 
-const applicationHostRead = async (path: string): Promise<Response> => {
-  const origin = applicationHostOrigin();
-  const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
-  return fetchWithoutRuntimeRouting(target, {
-    credentials: 'include',
-    headers: await buildLocalRuntimeAuthHeaders(origin, { Accept: 'application/json' }),
-  });
-};
+const applicationHostRead = (path: string): Promise<Response> => (
+  fetchApplicationHost(path, { headers: { Accept: 'application/json' } })
+);
 
 const readJsonOrThrow = async (response: Response): Promise<unknown> => {
   const payload = await response.json().catch(() => null) as unknown;
@@ -81,13 +89,18 @@ const readJsonOrThrow = async (response: Response): Promise<unknown> => {
   throw new Error(message);
 };
 
+const readHostState = async (request: Promise<Response>) => {
+  const endpoint = isCapacitorApp() ? getRuntimeEndpointGeneration() : undefined;
+  const payload = await readJsonOrThrow(await request);
+  // A response may have arrived before the switch while its body was still being read.
+  if (endpoint !== undefined && endpoint !== getRuntimeEndpointGeneration()) {
+    throw new Error('Application Host changed during the extension request');
+  }
+  return parseVarinExtensionHostStateSnapshot(payload);
+};
+
 export const createWebExtensionsAPI = (): ExtensionsAPI => ({
-  pluginCenter: createPluginCenterHttpAPI(async (path, options) => {
-    const origin = applicationHostOrigin();
-    const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
-    const headers = await buildLocalRuntimeAuthHeaders(origin, options.headers);
-    return fetchWithoutRuntimeRouting(target, { ...options, headers, credentials: 'include' });
-  }),
+  pluginCenter: createPluginCenterHttpAPI(fetchApplicationHost),
   queryContracts: async (request, context, signal) => parseVarinRuntimeContractResult(
     await readJsonOrThrow(await applicationHostRequest(
       '/api/varin/extensions/v1/contracts/query', { request, ...(context ? { context } : {}) }, signal,
@@ -129,9 +142,7 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
     if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Varin extension discard response is malformed');
     return parseVarinExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },
-  hostState: async () => parseVarinExtensionHostStateSnapshot(
-    await readJsonOrThrow(await applicationHostRead('/api/varin/extensions/v1/host-state')),
-  ),
+  hostState: () => readHostState(applicationHostRead('/api/varin/extensions/v1/host-state')),
   install: async (request: VarinExtensionPackageInstallRequest) => {
     const payload = await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/install', request));
     if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Varin extension install response is malformed');
@@ -277,9 +288,7 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
   removeWorkbenchProfile: async (request) => parseVarinWorkbenchProfileSnapshot(
     await readJsonOrThrow(await applicationHostRequest('/api/varin/extensions/v1/workbench/profiles/remove', request)),
   ),
-  waitForHostState: async (request: VarinExtensionHostStateWaitRequest, signal?: AbortSignal) => (
-    parseVarinExtensionHostStateSnapshot(await readJsonOrThrow(
-      await applicationHostRequest('/api/varin/extensions/v1/host-state/wait', request, signal),
-    ))
+  waitForHostState: (request: VarinExtensionHostStateWaitRequest, signal?: AbortSignal) => (
+    readHostState(applicationHostRequest('/api/varin/extensions/v1/host-state/wait', request, signal))
   ),
 });
