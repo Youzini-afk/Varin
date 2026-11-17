@@ -13,6 +13,7 @@ import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { insertDraftMarker, referenceMarkerObject, freezeDraftContentReferences } from '@/lib/agent-editor/contentReferences';
 import { externalAgentEn } from '@/lib/i18n/messages/external-agents';
+import opencodeLogo from '@/assets/harness-logos/opencode.svg';
 
 const f = vi.hoisted(() => ({ host: 1, listeners: new Set<() => void>(), api: undefined as ExternalAgentsAPI | undefined,
   composer: undefined as React.ComponentProps<typeof import('./ThreadComposer').ThreadComposer> | undefined,
@@ -847,16 +848,24 @@ it('shows a supplement as a normal message without delivery copy or a separate c
 
 it('opens a supplementary input together with the actual shared execution result in scoped task details', async () => {
   const { view } = activeConversation();
+  view.conversation.profileId = 'opencode';
+  f.settings!.profiles = [{ id: 'opencode', name: 'OpenCode', harness: 'acp', description: '', platforms: [], launch: { command: 'opencode', args: [] } }];
   view.turns[0]!.status = 'completed'; view.conversation.activeTurn = undefined;
   view.turns.push({ id: 'supplement', conversationId: 'prepared', key: 'supplement-key', status: 'completed', createdAt: 1, updatedAt: 1,
     consumedByTurnId: 'active', steering: { state: 'appended', targetTurnId: 'active' } });
   view.items.push({ id: 'original-user', turnId: 'active', kind: 'user', text: 'Original work', complete: true },
+    { id: 'shared-plan', turnId: 'active', kind: 'plan', text: 'Plan for the work', complete: true },
     { id: 'user-supplement', turnId: 'supplement', kind: 'user', text: 'Additional detail', complete: true },
     { id: 'shared-answer', turnId: 'active', kind: 'assistant', text: 'Actual shared answer', complete: true },
     { id: 'unrelated-answer', turnId: 'other-turn', kind: 'assistant', text: 'Unrelated historical answer', complete: true });
   await act(async () => root.render(<ExternalConversationView id="prepared" turnId="supplement" />));
   expect(container.textContent).toContain('Additional detail');
   expect(container.textContent).toContain('Actual shared answer');
+  const replyHeaders = container.querySelectorAll('header');
+  expect(replyHeaders).toHaveLength(1);
+  expect(replyHeaders[0]?.textContent).toBe('OpenCode');
+  expect(replyHeaders[0]?.querySelector('img')?.getAttribute('src')).toBe(opencodeLogo);
+  expect(container.textContent!.indexOf('OpenCode')).toBeLessThan(container.textContent!.indexOf('Plan for the work'));
   expect(container.textContent).not.toContain('Unrelated historical answer');
   expect(container.textContent).not.toContain('Shares the result of the turn that consumed this input.');
   expect(container.querySelector('form')).toBeNull();

@@ -7,6 +7,8 @@ import codex from '@/assets/harness-logos/codex.svg';
 import opencode from '@/assets/harness-logos/opencode.svg';
 import pi from '@/assets/harness-logos/pi.svg';
 import kimi from '@/assets/harness-logos/kimi.png';
+import qoder from '@/assets/harness-logos/qoder.svg';
+import grok from '@/assets/harness-logos/grok.svg';
 import cursorLight from '@/assets/harness-logos/cursor.svg';
 import cursorDark from '@/assets/harness-logos/cursor-dark.svg';
 
@@ -24,7 +26,9 @@ it('uses dedicated product marks regardless of a profile name and leaves them de
 it('retains known ACP product identity independently of the task or configuration display name', () => {
   expect(render({ harness: 'acp', configurationId: 'opencode' }).querySelector('img')?.getAttribute('src')).toBe(opencode);
   expect(render({ harness: 'acp', configurationId: 'renamed-config', profileId: 'kimi' }).querySelector('img')?.getAttribute('src')).toBe(kimi);
-  for (const configurationId of ['custom', 'Claude Code', 'Codex', 'qoder', 'grok']) {
+  expect(render({ harness: 'acp', configurationId: 'qoder' }).querySelector('img')?.getAttribute('src')).toBe(qoder);
+  expect(render({ harness: 'acp', configurationId: 'grok' }).querySelector('img')?.getAttribute('src')).toBe(grok);
+  for (const configurationId of ['custom', 'Claude Code', 'Codex']) {
     const document = render({ harness: 'acp', configurationId });
     expect(document.querySelector('img')).toBeNull();
     expect(document.querySelector('use')?.getAttribute('href')).toBe('#varin-terminal');

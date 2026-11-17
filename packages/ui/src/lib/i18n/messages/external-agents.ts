@@ -169,6 +169,7 @@ export const externalAgentEn = {
   'external.cacheRate': 'Cache rate',
   'external.delegated': 'External Agents',
   'external.title': 'External Agents',
+  'external.agent': 'External Agent',
   'external.description':
     'Use your installed Agents in this workspace, with their own configuration and accounts.',
   'external.enabled': 'Enable in Varin',
@@ -399,6 +400,7 @@ export const externalAgentZh: Record<keyof typeof externalAgentEn, string> = {
   'external.cacheRate': '缓存率',
   'external.delegated': '外部 Agent',
   'external.title': '外部 Agent',
+  'external.agent': '外部 Agent',
   'external.description': '在工作区中使用已安装的 Agent，保留它们自己的配置和账号。',
   'external.enabled': '在 Varin 中启用',
   'external.availability': '在 Varin 中使用',
