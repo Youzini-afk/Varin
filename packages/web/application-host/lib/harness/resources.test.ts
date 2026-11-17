@@ -83,7 +83,10 @@ describe('original resource admission reconciliation', () => {
         status(code: number) { status = code; return this; },
         json(body: unknown) { value = body; this.writableEnded = true; return this; },
       };
-      const request = { body: input } as Request;
+      const request = {
+        body: input,
+        headers: Object.fromEntries(new Headers(init?.headers).entries()),
+      } as Request;
       const handlers = [...common, ...(routes.get(`/api/harness/managed-execution/v1${route}`) ?? [])];
       await new Promise<void>((resolve, reject) => {
         let index = 0;
