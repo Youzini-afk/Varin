@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import type { ExternalInteractionResponse, ExternalItem } from '@varin/application-client';
+import { CODEX_PERMISSION_PROFILE_OPTION, type ExternalInteractionResponse, type ExternalItem } from '@varin/application-client';
 import type { KernelManagedProcess } from '../kernel/process-service.js';
 import type { HarnessSink } from './adapter.js';
 import { connectCodex } from './codex.js';
@@ -352,13 +352,20 @@ describe('Codex native turn ownership', () => {
     peer.event('turn/completed', codexEvent('turn', { turn: { id: 'turn', status: 'completed' } }));
     await result;
   });
-  it('starts a Codex Plan turn with the selected model and effort in the collaboration settings', async () => {
+  it('starts a Codex Plan turn with the selected model, effort and permission profile', async () => {
     const peer = new Peer(), fallback = peer.handler;
     peer.handler = (method, params) => {
       if (method === 'collaborationMode/list') return { data: [{ mode: 'plan', name: 'Plan', reasoning_effort: 'medium' }] };
+      if (method === 'permissionProfile/list') {
+        expect(params.cwd).toBe('/workspace');
+        return params.cursor ? { data: [{ id: 'project-edit', allowed: true }] }
+          : { data: [{ id: ':read-only', allowed: true }, { id: ':danger-full-access', allowed: false }], nextCursor: 'page-two' };
+      }
+      if (method === 'thread/start') return { thread: { id: 'thread' }, sandbox: { type: 'readOnly' } };
       if (method === 'turn/start') {
         peer.event('thread/settings/updated', { threadId: 'thread', threadSettings: {
           model: 'second-model', effort: 'high', collaborationMode: { mode: 'plan' },
+          activePermissionProfile: { id: 'project-edit' },
         } });
         return { turn: { id: 'turn' } };
       }
@@ -366,13 +373,18 @@ describe('Codex native turn ownership', () => {
     };
     const connection = await connectCodex(peer.transport, '/workspace'), s = sink();
     expect(connection.capabilities.modes).toEqual([{ id: 'plan', name: 'Plan' }]);
-    const result = connection.prompt({ text: 'Work', model: 'second-model', thinking: 'high', mode: 'plan' }, s);
+    const permissions = connection.capabilities.configOptions?.find(option => option.id === CODEX_PERMISSION_PROFILE_OPTION);
+    expect(permissions?.options.map(option => option.value)).toEqual([':read-only', 'project-edit']);
+    expect(permissions?.currentValue).toBe(':read-only');
+    await expect(connection.prompt({ text: 'Work', permissionProfile: ':danger-full-access' }, s)).rejects.toThrow('does not offer');
+    const result = connection.prompt({ text: 'Work', model: 'second-model', thinking: 'high', mode: 'plan', permissionProfile: 'project-edit' }, s);
     const start = await peer.call('turn/start');
-    expect(start.params).toMatchObject({ collaborationMode: { mode: 'plan', settings: {
+    expect(start.params).toMatchObject({ permissions: 'project-edit', collaborationMode: { mode: 'plan', settings: {
       model: 'second-model', reasoning_effort: 'high', developer_instructions: null,
     } } });
     await vi.waitFor(() => expect(s.started).toHaveBeenCalledWith('turn'));
     expect(connection.capabilities.current).toEqual({ model: 'second-model', thinking: 'high', mode: 'plan' });
+    expect(permissions?.currentValue).toBe('project-edit');
     peer.event('item/plan/delta', codexEvent('turn', { itemId: 'proposal', delta: 'Draft plan' }));
     expect(s.items.get('proposal')).toMatchObject({ kind: 'plan', text: 'Draft plan' });
     peer.event('item/completed', codexEvent('turn', { item: { type: 'plan', id: 'proposal', text: 'Final plan' } }));

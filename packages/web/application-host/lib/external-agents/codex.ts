@@ -1,7 +1,9 @@
-import type {
-  ExternalAgentCapabilities,
-  ExternalItem,
-  ExternalInteractionResponse,
+import {
+  CODEX_PERMISSION_PROFILE_OPTION,
+  type ExternalAgentCapabilities,
+  type ExternalAgentConfigOption,
+  type ExternalItem,
+  type ExternalInteractionResponse,
 } from '@varin/application-client';
 import type { HarnessConnection, HarnessSink, HarnessInput } from './adapter.js';
 import { assertSteeringContent, HarnessSteeringRejected } from './adapter.js';
@@ -10,6 +12,29 @@ import { formInteraction } from './interaction-form.js';
 import { fileInputText } from './attachments.js';
 import { dedicatedOptions } from './dedicated-options.js';
 import { HarnessProtocolError, HarnessTransport, record, text, clientInfo, type RecordValue } from './transport.js';
+
+async function readCodexCatalog(peer: HarnessTransport, method: 'model/list' | 'permissionProfile/list', params: RecordValue, data: unknown[]) {
+  const catalog = method === 'model/list' ? 'model' : 'permission profile';
+  let cursor: string | undefined;
+  const cursors = new Set<string>();
+  do {
+    const page = await peer.request(method, { ...params, ...(cursor ? { cursor } : {}) });
+    if (!Array.isArray(page.data)) throw new Error(`Codex returned an invalid ${catalog} catalog`);
+    data.push(...page.data);
+    cursor = text(page.nextCursor) || undefined;
+    if (cursor && cursors.has(cursor)) throw new Error(`Codex repeated its ${catalog} catalog cursor`);
+    if (cursor) cursors.add(cursor);
+  } while (cursor);
+}
+
+const codexSandboxProfiles: Record<string, string> = {
+  readOnly: ':read-only', workspaceWrite: ':workspace', dangerFullAccess: ':danger-full-access',
+};
+
+function activeCodexPermission(snapshot: RecordValue) {
+  const sandbox = text(record(snapshot.sandboxPolicy ?? snapshot.sandbox).type);
+  return text(record(snapshot.activePermissionProfile).id) || codexSandboxProfiles[sandbox] || undefined;
+}
 
 export async function connectCodex(
   peer: HarnessTransport,
@@ -37,26 +62,29 @@ export async function connectCodex(
     const data: unknown[] = [];
     modelsError = undefined;
     try {
-      let cursor: string | undefined;
-      const cursors = new Set<string>();
-      do {
-        const page = await peer.request('model/list', cursor ? { cursor } : {});
-        if (!Array.isArray(page.data)) throw new Error('Codex returned an invalid model catalog');
-        data.push(...page.data);
-        cursor = text(page.nextCursor) || undefined;
-        if (cursor && cursors.has(cursor))
-          throw new Error('Codex repeated its model catalog cursor');
-        if (cursor) cursors.add(cursor);
-      } while (cursor);
+      await readCodexCatalog(peer, 'model/list', {}, data);
     } catch (error) {
       modelsError = String(error);
     }
     if (!modelsError || !modelData.length) modelData = data;
   };
+  const profileData: unknown[] = [];
   const [, modeCatalog] = await Promise.all([
     loadModels(),
     peer.request('collaborationMode/list', {}).catch((): RecordValue => ({})),
+    readCodexCatalog(peer, 'permissionProfile/list', { cwd: text(opened.cwd) || cwd }, profileData).catch(() => {}),
   ]);
+  const profiles = profileData.map(record).flatMap(profile => {
+    const id = text(profile.id), description = text(profile.description);
+    return profile.allowed === true && id
+      ? [{ value: id, name: id, ...(description ? { description } : {}) }]
+      : [];
+  });
+  const permissionOption: ExternalAgentConfigOption | undefined = profiles.length ? {
+    id: CODEX_PERMISSION_PROFILE_OPTION, name: 'Codex permissions', type: 'select',
+    currentValue: activeCodexPermission(opened),
+    options: profiles,
+  } : undefined;
   const modes = (Array.isArray(modeCatalog.data) ? modeCatalog.data : []).map(record)
     .filter(preset => text(preset.mode) && text(preset.name));
   let lastAcceptedModel = text(opened.model);
@@ -97,6 +125,7 @@ export async function connectCodex(
     },
     models: models(),
     modes: modes.map(preset => ({ id: text(preset.mode), name: text(preset.name) })),
+    ...(permissionOption ? { configOptions: [permissionOption] } : {}),
   };
   let sink: HarnessSink | undefined;
   let turnId: string | undefined;
@@ -222,6 +251,7 @@ export async function connectCodex(
         mode: text(record(settings.collaborationMode).mode) || undefined,
       };
       lastAcceptedModel = model;
+      if (permissionOption) permissionOption.currentValue = activeCodexPermission(settings);
       settingsRevision++;
       for (const listener of changed) listener();
       return;
@@ -527,6 +557,9 @@ export async function connectCodex(
       if (failure) throw failure;
       if (sink) throw new Error('Codex turn already active');
       const selected = dedicatedOptions(input, 'Codex', capabilities.modes);
+      const permission = input.permissionProfile;
+      if (permission !== undefined && !profiles.some(profile => profile.value === permission))
+        throw new Error('This Codex execution Host does not offer the selected permission profile');
       const preset = selected.mode ? modes.find(mode => mode.mode === selected.mode) : undefined;
       const modeModel = selected.model ?? (text(preset?.model) || capabilities.current?.model || lastAcceptedModel);
       if (preset && !modeModel) throw new Error('Codex did not report a model for this collaboration mode');
@@ -570,6 +603,7 @@ export async function connectCodex(
         dispatched = true;
         const result = await peer.request('turn/start', {
           threadId: sessionId,
+          ...(permission === undefined ? {} : { permissions: permission }),
           input: [
             { type: 'text', text: fileInputText(input) },
             ...(input.images ?? []).map((image) => ({
@@ -603,6 +637,8 @@ export async function connectCodex(
           if (text(result.model)) current.model = text(result.model);
           if (text(result.reasoningEffort)) current.thinking = text(result.reasoningEffort);
           if (text(record(result.collaborationMode).mode)) current.mode = text(record(result.collaborationMode).mode);
+          if (permissionOption && permission !== undefined)
+            permissionOption.currentValue = activeCodexPermission(result) ?? (permissionOption.currentValue === permission ? permission : undefined);
           lastAcceptedModel = current.model || requestedModel || lastAcceptedModel;
           capabilities.current = current;
           for (const listener of changed) listener();

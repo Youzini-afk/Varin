@@ -7,6 +7,7 @@ import {
 } from './transport/runtime-switch.js';
 
 export type ExternalHarness = 'codex' | 'claude' | 'pi' | 'acp';
+export const CODEX_PERMISSION_PROFILE_OPTION = 'codex:permissions';
 const waitForExternalReconnect = (signal: AbortSignal) => new Promise<void>(resolve => {
   const finish = () => { clearTimeout(timer); signal.removeEventListener('abort', finish); resolve(); };
   const timer = setTimeout(finish, 1500);
@@ -59,7 +60,7 @@ export interface ExternalAgentConfigOption {
   category?: string;
   type?: 'select' | 'boolean';
   /** An adapter can expose choices before the Agent reports its effective default. */
-  currentValue?: string | boolean;
+  currentValue?: string | boolean | undefined;
   options: Array<{ value: string; name: string; description?: string }>;
 }
 export interface ExternalAgentSettings {
@@ -191,6 +192,8 @@ export interface ExternalInput extends ContentReferenceInput {
   model?: string;
   thinking?: string;
   mode?: string;
+  /** Explicit profile selection from the conversation composer. */
+  permissionProfile?: string;
 }
 /** Delivery intent is separate from the next turn's model and session options. */
 export interface ExternalSendOptions {

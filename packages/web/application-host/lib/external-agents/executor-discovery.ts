@@ -1,7 +1,7 @@
 /** Existing Host configuration identities, not another executable registry. */
 import { createHash } from 'node:crypto';
 import type { SourceResourceOwner } from '@varin/protocol';
-import type { ExternalAgentSettings } from '@varin/application-client';
+import { CODEX_PERMISSION_PROFILE_OPTION, type ExternalAgentSettings } from '@varin/application-client';
 import type { ChildExecutor } from '../kernel/protocol.generated.js';
 import type { ExternalAgentsService } from './service.js';
 import { parseSourceResourceOwner } from '../kernel/thread-sources.js';
@@ -31,7 +31,10 @@ export async function inspectExecutors(service: Pick<ExternalAgentsService, 'set
   for (const choice of choices) {
     try {
       const observed = await service.inspectExecutor(choice.binding.configuration_id, input.action === 'detect', signal, owner);
-      executors.push({...observed,ref:choice.reference,host:input.host});
+      const capabilities = observed.capabilities;
+      executors.push({...observed, ...(capabilities?.configOptions ? { capabilities: {
+        ...capabilities, configOptions: capabilities.configOptions.filter(option => option.id !== CODEX_PERMISSION_PROFILE_OPTION),
+      } } : {}), ref:choice.reference,host:input.host});
     } catch {
       signal.throwIfAborted();
       executors.push({ref:choice.reference,name:choice.name,host:input.host,configurationId:choice.binding.configuration_id,installation:{status:'unknown'},connection:'unknown',authentication:'unknown',error:'The selected executor configuration could not be inspected on its execution Host'});

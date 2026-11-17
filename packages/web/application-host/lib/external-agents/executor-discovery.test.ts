@@ -1,5 +1,5 @@
 import {expect,it,vi} from 'vitest';
-import type {ExternalAgentSettings,ExternalExecutorInspection} from '@varin/application-client';
+import {CODEX_PERMISSION_PROFILE_OPTION,type ExternalAgentSettings,type ExternalExecutorInspection} from '@varin/application-client';
 import type {SourceResourceOwner} from '@varin/protocol';
 import type {AgentRuntimeClient} from '../kernel/agent-runtime-client.js';
 import type {Run} from '../kernel/protocol.generated.js';
@@ -11,12 +11,16 @@ it('reads current configured identities, keeps Host references stable and withho
   const owner={kind:'local' as const};
   const settings:ExternalAgentSettings={revision:1,defaultAgent:null,agents:[{id:'codex',name:'Code work',harness:'codex',enabled:true,availability:'auto',command:'/private/program',args:['--private-setting'],defaults:{thinking:'high'}}]};
   const inspect:ExternalExecutorInspection={configurationId:'codex',name:'Code work',harness:'codex',availability:'auto',installation:{status:'installed',checkedAt:1},defaults:{thinking:'high'},authentication:'unknown',connection:'not_connected',capabilitySource:'unknown'};
+  inspect.capabilities={resume:true,images:true,steering:true,models:[],configOptions:[
+    {id:CODEX_PERMISSION_PROFILE_OPTION,name:'Permissions',type:'select',options:[{value:':danger-full-access',name:'Full access'}]},
+  ]};
   const service={settings:vi.fn(async()=>settings),inspectExecutor:vi.fn(async()=>inspect)};
   const query={action:'list',host:'host:local',hosts:[{ref:'host:local'}],includeVarin:true,resourceOwner:owner};
   const listed=await inspectExecutors(service,query,new AbortController().signal);
   expect(listed.executors).toHaveLength(2);
   expect(JSON.stringify(listed)).not.toContain('/private/program');
   expect(JSON.stringify(listed)).not.toContain('--private-setting');
+  expect(JSON.stringify(listed)).not.toContain(CODEX_PERMISSION_PROFILE_OPTION);
   const reference=executorChoices(settings,owner)[0]!.reference;
   settings.agents[0]!.command='/updated/program';settings.agents[0]!.name='Renamed';
   expect(executorChoices(settings,owner)[0]!.reference).toBe(reference);

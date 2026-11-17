@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ExternalAgentCapabilities } from '@varin/application-client';
+import { CODEX_PERMISSION_PROFILE_OPTION, type ExternalAgentCapabilities } from '@varin/application-client';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
@@ -21,12 +21,27 @@ export interface ExternalComposerOptions {
 }
 export type ExternalSelectorKind = 'model' | 'thinking' | 'mode' | { config: string };
 
-function selector(options: ExternalComposerOptions, kind: ExternalSelectorKind) {
+type SelectorValue = { id: string; name: string; description?: string };
+type Translate = ReturnType<typeof useI18n>['t'];
+function permissionLabel(value: string, t: Translate) {
+  switch (value) {
+    case ':read-only': return t('external.codex.permissions.readOnly');
+    case ':workspace': return t('external.codex.permissions.workspace');
+    case ':danger-full-access': return t('external.codex.permissions.full');
+    default: return value;
+  }
+}
+const isPermission = (kind: ExternalSelectorKind) => typeof kind === 'object' && kind.config === CODEX_PERMISSION_PROFILE_OPTION;
+
+function selector(options: ExternalComposerOptions, kind: ExternalSelectorKind, t: Translate): { current?: string; selected?: string; values: SelectorValue[] } {
   const { capabilities: caps, choice } = options;
   if (typeof kind === 'object') {
     const config = caps?.configOptions?.find(option => option.id === kind.config);
     return { current: config?.currentValue === undefined ? undefined : String(config.currentValue), selected: choice.config?.[kind.config], values: config?.type === 'boolean'
-      ? [{ id: 'true', name: 'true' }, { id: 'false', name: 'false' }] : config?.options.map(value => ({ id: value.value, name: value.name })) ?? [] };
+      ? [{ id: 'true', name: 'true' }, { id: 'false', name: 'false' }] : config?.options.map(value => ({
+        id: value.value, name: isPermission(kind) ? permissionLabel(value.value, t) : value.name,
+        ...(value.description ? { description: value.description } : {}),
+      })) ?? [] };
   }
   const { levels, sessionOption, modelChanged } = externalThinkingOptions(choice, caps);
   return { current: kind === 'thinking' && modelChanged ? undefined : caps?.current?.[kind], selected: choice[kind], values: kind === 'model' ? caps?.models ?? [] : kind === 'mode' ? caps?.modes ?? []
@@ -45,8 +60,9 @@ function choose(options: ExternalComposerOptions, kind: ExternalSelectorKind, va
 export function ExternalOptionMenu({ options, kind, onComplete }: { options: ExternalComposerOptions; kind: ExternalSelectorKind; onComplete?(): void }) {
   const { t } = useI18n();
   const [query, setQuery] = React.useState('');
-  const { current, selected, values } = selector(options, kind);
-  const currentName = values.find(value => value.id === current)?.name ?? current ?? t('external.notReported');
+  const { current, selected, values } = selector(options, kind, t);
+  const currentName = values.find(value => value.id === current)?.name ??
+    (current ? isPermission(kind) ? permissionLabel(current, t) : current : t('external.notReported'));
   const apply = (value?: string) => { choose(options, kind, value); onComplete?.(); };
   return <div className="min-w-56 max-w-sm space-y-1 p-1 typography-meta">
     <p className="px-2 py-1 text-muted-foreground">{t('external.nextTurnOptions')}{options.source === 'cached' ? ` · ${t('external.previousCapabilities')}` : ''}</p>
@@ -54,13 +70,15 @@ export function ExternalOptionMenu({ options, kind, onComplete }: { options: Ext
     <button type="button" disabled={options.disabled} className="flex w-full items-center justify-between gap-2 rounded px-2 py-2 text-left hover:bg-interactive-hover" onClick={() => apply()}>
       <span>{t('external.inheritCurrent', { current: currentName })}</span>{selected === undefined || selected === '' ? <Icon name="check" className="size-3.5 shrink-0" /> : null}
     </button>
+    {isPermission(kind) && options.source === 'live' && selected && !values.some(value => value.id === selected) &&
+      <p role="status" className="px-2 py-1 text-muted-foreground">{t('external.codex.permissions.unavailable')}</p>}
     {kind === 'model' && options.capabilities?.modelsError && <div role="alert" className="space-y-1 px-2 py-1 text-destructive">
       <p>{t('external.modelsError')}: {options.capabilities.modelsError}</p>
       {options.onRetryModels && <button type="button" disabled={options.disabled || options.retryDisabled || Boolean(options.retryDisabledReason)} className="underline" onClick={options.onRetryModels}>{t(options.capabilities.modelsRefresh ? 'external.retryModels' : 'external.reconnect')}</button>}
       {options.retryDisabledReason && <p className="text-muted-foreground">{options.retryDisabledReason}</p>}
     </div>}
     <div className="max-h-64 overflow-y-auto">
-      {values.filter(value => `${value.name} ${value.id}`.toLowerCase().includes(query.toLowerCase())).map(value => <button type="button" key={value.id} disabled={options.disabled}
+      {values.filter(value => `${value.name} ${value.id}`.toLowerCase().includes(query.toLowerCase())).map(value => <button type="button" key={value.id} disabled={options.disabled} title={value.description}
         className="flex w-full items-center justify-between gap-3 rounded px-2 py-2 text-left hover:bg-interactive-hover" onClick={() => apply(value.id)}>
         <span>{typeof kind === 'object' && options.capabilities?.configOptions?.find(option => option.id === kind.config)?.type === 'boolean' ? t(value.id === 'true' ? 'external.yes' : 'external.no') : value.name}</span>{selected === value.id && <Icon name="check" className="size-3.5 shrink-0" />}
       </button>)}
@@ -71,9 +89,9 @@ export function ExternalOptionMenu({ options, kind, onComplete }: { options: Ext
 function OptionChip({ options, kind, label, icon }: { options: ExternalComposerOptions; kind: ExternalSelectorKind; label: string; icon?: React.ComponentProps<typeof Icon>['name'] }) {
   const { t } = useI18n();
   const [open, setOpen] = React.useState(false);
-  const { selected, current, values } = selector(options, kind);
+  const { selected, current, values } = selector(options, kind, t);
   const value = selected || current;
-  const name = values.find(item => item.id === value)?.name ?? value ?? label;
+  const name = values.find(item => item.id === value)?.name ?? (value ? isPermission(kind) ? permissionLabel(value, t) : value : label);
   return <DropdownMenu open={open} onOpenChange={next => { setOpen(next); if (next) options.onInteract('menu'); }}>
     <DropdownMenuTrigger asChild><button type="button" disabled={options.disabled} aria-label={label} title={`${label}: ${name}`}
       className={cn('flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 typography-meta hover:bg-interactive-hover', selected ? 'text-foreground' : 'text-muted-foreground')}>
@@ -93,7 +111,7 @@ export function ExternalModelControls({ options }: { options: ExternalComposerOp
 function BooleanOption({ options, id, label }: { options: ExternalComposerOptions; id: string; label: string }) {
   const { t } = useI18n();
   const [open, setOpen] = React.useState(false);
-  const { current, selected } = selector(options, { config: id });
+  const { current, selected } = selector(options, { config: id }, t);
   const value = selected ?? current;
   const checked = value === undefined ? undefined : value === 'true';
   return <div className="flex shrink-0 items-center">
@@ -108,14 +126,16 @@ function BooleanOption({ options, id, label }: { options: ExternalComposerOption
 }
 function ConfigControl({ options, option }: { options: ExternalComposerOptions; option: NonNullable<ExternalAgentCapabilities['configOptions']>[number] }) {
   return option.type === 'boolean' ? <BooleanOption options={options} id={option.id} label={option.name} />
-    : <OptionChip options={options} kind={{ config: option.id }} label={option.name} />;
+    : <OptionChip options={options} kind={{ config: option.id }} label={option.name}
+      icon={option.id === CODEX_PERMISSION_PROFILE_OPTION ? 'shield-check' : undefined} />;
 }
 export function ExternalModeControls({ options }: { options: ExternalComposerOptions }) {
   const { t } = useI18n();
   const root = React.useRef<HTMLDivElement>(null), row = React.useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = React.useState(false), [open, setOpen] = React.useState(false);
   const caps = options.capabilities;
-  const generic = externalGenericOptions(options.choice, caps).filter(option => option.category !== 'model_config');
+  const generic = externalGenericOptions(options.choice, caps).filter(option => option.category !== 'model_config')
+    .map(option => option.id === CODEX_PERMISSION_PROFILE_OPTION ? { ...option, name: t('external.codex.permissions') } : option);
   // Measure the actual row and its toolbar neighbours, including long backend-provided labels.
   // The hidden measurement row keeps its intrinsic width while the compact menu is displayed.
   React.useLayoutEffect(() => {
@@ -140,7 +160,8 @@ export function ExternalModeControls({ options }: { options: ExternalComposerOpt
   return <div ref={root} className="relative min-w-0">
     <div ref={row} aria-hidden={collapsed || undefined} inert={collapsed || undefined} className="flex w-max items-center gap-0.5 whitespace-nowrap"
       style={collapsed ? { position: 'absolute', visibility: 'hidden', pointerEvents: 'none' } : undefined}>
-      {Boolean(caps?.modes?.length) && <OptionChip options={options} kind="mode" label={t('external.mode')} icon="shield-user" />}
+      {Boolean(caps?.modes?.length) && <OptionChip options={options} kind="mode" label={t('external.mode')}
+        icon={caps?.protocol?.name === 'codex-app-server' ? 'list-check-2' : 'shield-user'} />}
       {generic.map(option => <ConfigControl key={option.id} options={options} option={option} />)}
     </div>
     {collapsed && <DropdownMenu open={open} onOpenChange={next => { setOpen(next); if (next) options.onInteract('menu'); }}>

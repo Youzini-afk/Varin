@@ -1,4 +1,4 @@
-import type { ExternalAgentCapabilities, ExternalInput } from '@varin/application-client';
+import { CODEX_PERMISSION_PROFILE_OPTION, type ExternalAgentCapabilities, type ExternalInput } from '@varin/application-client';
 
 export type ExternalSessionChoice = Pick<ExternalInput, 'model' | 'thinking' | 'mode' | 'config'>;
 
@@ -29,7 +29,11 @@ function projectedConfigIds(choice: ExternalSessionChoice, capabilities?: Extern
 
 export function externalGenericOptions(choice: ExternalSessionChoice, capabilities?: ExternalAgentCapabilities) {
   const projected = projectedConfigIds(choice, capabilities);
-  return capabilities?.configOptions?.filter(option => !projected.has(option.id)) ?? [];
+  const options = capabilities?.configOptions?.filter(option => !projected.has(option.id)) ?? [];
+  // Keep an unavailable permission choice visible so it can be cleared explicitly.
+  if (choice.config?.[CODEX_PERMISSION_PROFILE_OPTION] && !options.some(option => option.id === CODEX_PERMISSION_PROFILE_OPTION))
+    options.push({ id: CODEX_PERMISSION_PROFILE_OPTION, name: 'Codex permissions', type: 'select', options: [] });
+  return options;
 }
 
 /** A model change must not carry an invisible effort override to a different model. */
@@ -46,13 +50,15 @@ export function externalModelChoice(choice: ExternalSessionChoice, model: string
 }
 
 /** Never send an effort override hidden by the current session/model's controls. */
-export function externalSessionInput(choice: ExternalSessionChoice, capabilities?: ExternalAgentCapabilities): ExternalSessionChoice {
+export function externalSessionInput(choice: ExternalSessionChoice, capabilities?: ExternalAgentCapabilities): ExternalSessionChoice & Pick<ExternalInput, 'permissionProfile'> {
   const { levels } = externalThinkingOptions(choice, capabilities);
   const hiddenConfig = projectedConfigIds(choice, capabilities);
-  const config = Object.fromEntries(Object.entries(choice.config ?? {}).filter(([id]) => !hiddenConfig.has(id)));
+  const { [CODEX_PERMISSION_PROFILE_OPTION]: permissionProfile, ...remaining } = choice.config ?? {};
+  const config = Object.fromEntries(Object.entries(remaining).filter(([id]) => !hiddenConfig.has(id)));
   return { ...(choice.model ? { model: choice.model } : {}),
     ...(choice.thinking && (levels?.includes(choice.thinking) || capabilities?.modelsError) ? { thinking: choice.thinking } : {}),
     ...(choice.mode ? { mode: choice.mode } : {}),
+    ...(permissionProfile ? { permissionProfile } : {}),
     ...(Object.keys(config).length ? { config } : {}) };
 }
 
@@ -71,6 +77,8 @@ export function normalizeExternalSessionChoice(choice: ExternalSessionChoice, ca
   if (next.thinking && !capabilities.modelsError && !levels?.includes(next.thinking)) next.thinking = undefined;
   if (next.config) {
     next.config = Object.fromEntries(Object.entries(next.config).filter(([id, value]) => {
+      // An obsolete permission selection must not fall through to a broader current profile.
+      if (id === CODEX_PERMISSION_PROFILE_OPTION) return true;
       const option = capabilities.configOptions?.find(item => item.id === id);
       return option && !(option.category === 'thought_level' && hideSessionConfig)
         && !(option.category === 'model_config' && modelChanged)

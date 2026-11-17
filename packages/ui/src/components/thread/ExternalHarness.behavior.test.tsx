@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { ExternalAgentError, type ExternalAgentsAPI, type ExternalAgentSettings, type ExternalConversationSnapshot, type ExternalObservation, type ThreadsAPI } from '@varin/application-client';
+import { CODEX_PERMISSION_PROFILE_OPTION, ExternalAgentError, type ExternalAgentsAPI, type ExternalAgentSettings, type ExternalConversationSnapshot, type ExternalObservation, type ThreadsAPI } from '@varin/application-client';
 import { ThreadDraftConversation } from './ThreadDraftConversation';
 import { ExternalConversationView } from './ExternalConversation';
 import { ExternalInteractionForm } from './ExternalInteractionForm';
@@ -141,10 +141,16 @@ const choose = (label: string, value: string) => act(async () => {
 const submit = () => act(async () => container.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
 
 it('prepares a chat-only draft once and sends its selected options with the first request', async () => {
-  const { api } = fixture(); let finish!: () => void;
+  const { api, views, emit } = fixture(); let finish!: () => void;
   useThreadDraftStore.getState().patch('draft', { workspacePath: undefined });
   const connect = api.connect.getMockImplementation()!;
-  api.connect.mockImplementationOnce(id => new Promise(resolve => { finish = () => { void connect(id).then(resolve); }; }));
+  api.connect.mockImplementationOnce(id => new Promise(resolve => { finish = () => {
+    void connect(id).then(caps => {
+      views.get(id)!.capabilities!.configOptions!.push({ id: CODEX_PERMISSION_PROFILE_OPTION, name: 'Permissions', type: 'select', currentValue: ':workspace',
+        options: [{ value: ':workspace', name: ':workspace' }, { value: ':danger-full-access', name: ':danger-full-access' }] });
+      resolve(caps);
+    });
+  }; }));
   await renderDraft(); expect(button('Send').disabled).toBe(false); expect(api.connect).not.toHaveBeenCalled();
   await act(async () => { f.composer?.external?.onInteract('focus'); f.composer?.external?.onInteract('input'); });
   expect(api.create).toHaveBeenCalledOnce(); expect(api.connect).toHaveBeenCalledOnce(); expect(api.send).not.toHaveBeenCalled();
@@ -152,8 +158,14 @@ it('prepares a chat-only draft once and sends its selected options with the firs
   await act(async () => finish());
   expect(container.textContent).toContain('Use session configuration (current: First model)'); expect(button('Send').disabled).toBe(false);
   await choose('Model', 'first'); await choose('chat.context.thinking', 'high'); await choose('Mode', 'Auto'); await choose('Verbosity', 'value:long');
+  await choose('Codex permissions', 'Full access');
+  expect(api.send).not.toHaveBeenCalled();
+  const catalog = views.get('prepared')!.capabilities!.configOptions!;
+  catalog.splice(catalog.findIndex(option => option.id === CODEX_PERMISSION_PROFILE_OPTION), 1);
+  await emit();
+  expect(container.textContent).toContain('The selected permission profile is unavailable');
   await submit();
-  expect(api.create).toHaveBeenCalledOnce(); expect(api.send).toHaveBeenCalledWith('prepared', expect.any(String), expect.objectContaining({ text: 'Original question', model: 'first', thinking: 'high', mode: 'auto', config: { verbosity: 'long' } }));
+  expect(api.create).toHaveBeenCalledOnce(); expect(api.send).toHaveBeenCalledWith('prepared', expect.any(String), expect.objectContaining({ text: 'Original question', model: 'first', thinking: 'high', mode: 'auto', permissionProfile: ':danger-full-access', config: { verbosity: 'long' } }));
   expect(f.select).toHaveBeenCalledWith('prepared');
 });
 

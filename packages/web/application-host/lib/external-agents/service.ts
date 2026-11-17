@@ -1172,9 +1172,9 @@ export class ExternalAgentsService {
     if (!input || typeof input !== 'object' || Array.isArray(input))
       throw new ExternalAgentError('invalid_input', 'Invalid external Agent input');
     if (
-      typeof input.text !== 'string' || Object.keys(input).some((key) => !['text', 'images', 'attachments', 'attachmentImageReferences', 'model', 'thinking', 'mode', 'config', 'contentReferences', 'contentReferenceOccurrences'].includes(key)) ||
+      typeof input.text !== 'string' || Object.keys(input).some((key) => !['text', 'images', 'attachments', 'attachmentImageReferences', 'model', 'thinking', 'mode', 'config', 'permissionProfile', 'contentReferences', 'contentReferenceOccurrences'].includes(key)) ||
       (input.config !== undefined && (!input.config || typeof input.config !== 'object' || Array.isArray(input.config) || Object.values(input.config).some((v) => typeof v !== 'string'))) ||
-      ['model', 'thinking', 'mode'].some(
+      ['model', 'thinking', 'mode', 'permissionProfile'].some(
         (key) =>
           input[key as keyof ExternalInput] !== undefined &&
           typeof input[key as keyof ExternalInput] !== 'string',
@@ -1197,6 +1197,8 @@ export class ExternalAgentsService {
     if (!input || typeof input.text !== 'string' || (!input.text.trim() && !input.images?.length && !selections?.length && !input.contentReferences?.length))
       throw new ExternalAgentError('empty_input', 'Enter a message');
     const snapshot = await this.read(id);
+    if (input.permissionProfile !== undefined && snapshot.conversation.harness !== 'codex')
+      throw new ExternalAgentError('invalid_input', 'Permission profiles apply to Codex conversations');
     const previous = snapshot.turns.find((turn) => turn.key === key);
     if (previous) {
       const { _launch: _frozen, _delivery, _attachmentSelections, attachments: frozenAttachments, ...saved } = await this.command<AcceptedExternalInput & { _launch?: unknown; _delivery?: unknown }>({
@@ -1221,7 +1223,7 @@ export class ExternalAgentsService {
         throw new ExternalAgentError('steering_unsupported', 'This connection cannot supplement the current turn; choose next turn instead');
       if (snapshot.conversation.activeTurn !== delivery.expectedTurnId)
         throw new ExternalAgentError('steering_target_ended', 'The selected execution ended; the input was not queued or resent', 409);
-      if (input.model !== undefined || input.thinking !== undefined || input.mode !== undefined || Object.keys(input.config ?? {}).length)
+      if (input.model !== undefined || input.thinking !== undefined || input.mode !== undefined || input.permissionProfile !== undefined || Object.keys(input.config ?? {}).length)
         throw new ExternalAgentError('steering_options', 'Current-turn supplements keep the active model and settings; choose next turn to change them');
     }
     const config = await this.configuration(snapshot.conversation.configurationId,snapshot.conversation.executionSource?.resource_owner);
