@@ -25,6 +25,8 @@ async function vacantPort(): Promise<number> {
 function call(port: number, opts: { method?: string; host?: string; origin?: string; extra?: Record<string, string> } = {}) {
   return new Promise<{ status?: number; body: string }>((resolve, reject) => {
     const call = request({
+      // Probe admission with a new connection. Disable deliberately destroys the old sockets.
+      agent: false,
       hostname: '127.0.0.1', port, path: '/', method: opts.method ?? 'GET',
       headers: { Host: opts.host ?? host, ...(opts.origin ? { Origin: opts.origin } : {}), ...opts.extra },
     }, response => {

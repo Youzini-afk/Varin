@@ -322,8 +322,6 @@ import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.j
 import { createSelfHostedAccess } from './lib/tunnels/self-hosted-access.js';
 import { EXTERNAL_ACCESS_SETTINGS_KEY, readExternalAccessRecord } from './lib/tunnels/external-access-config.js';
 import { registerExternalAccessRoutes } from './lib/tunnels/external-access-routes.js';
-import { registerDeploymentPreviewRoute } from './lib/tunnels/deployment-preview-routes.js';
-import { DeploymentSshTransport } from './lib/connections/deployment-ssh.js';
 import { hasHostConnectionAccess } from './lib/connections/access.js';
 import type { ExternalAccessSnapshot } from '@varin/application-client';
 import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
@@ -1706,7 +1704,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       options.onConnectionStatus?.(detail);
     },
   });
-  const deploymentSsh = new DeploymentSshTransport(connections);
   const vmGuestRegistration = createVmGuestRegistration({
     readSettings: async () => await readSettingsFromDisk() as Record<string, unknown>,
     updateSettings: (mutator) => updateSettingsOnDisk((current) => mutator(current as Record<string, unknown>) as typeof current),
@@ -3334,11 +3331,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (operation === 'write') return direct && await isRequestOriginAllowed(request);
     return direct || Boolean(auth?.principalId);
   };
-  registerDeploymentPreviewRoute(app, {
-    json: express.json({ limit: '16kb' }),
-    authorize: request => authorizeExternalAccessControl(request, 'write'),
-    transport: deploymentSsh,
-  });
   registerExternalAccessRoutes(app, {
     json: express.json({ limit: '16kb' }),
     authorize: authorizeExternalAccessControl,
@@ -3584,7 +3576,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           const managedStop = await selfHosted.shutdown();
           if (managedStop.state === 'failed') throw new Error('Self-hosted external access did not stop cleanly');
         });
-        await shutdown.run('deploymentSsh.dispose', () => deploymentSsh.dispose());
         await shutdown.run('remoteClientAuthRuntime.dispose', () => remoteClientAuthRuntime.dispose());
         await shutdown.run('unsubscribeTokenizerKernel', () => unsubscribeTokenizerKernel());
         await shutdown.run('stopTokenizerCollection?.', () => stopTokenizerCollection?.());
