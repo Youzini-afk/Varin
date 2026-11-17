@@ -50,7 +50,7 @@ export interface ExternalAccessRuntimeOptions<Config> {
   /** Return only a known code, never raw provider stderr, configuration, or exception text. */
   classifyError?(error: unknown): ExternalAccessFailureCode;
   onStatus?(status: ExternalAccessRuntimeStatus): void;
-  /** Bounded retries. Defaults to 1s, 2s, 5s, 10s, 30s; [] disables automatic recovery. */
+  /** Backoff steps; keep retrying at the final delay while enabled. [] disables recovery. */
   retryDelaysMs?: readonly number[];
 }
 
@@ -188,7 +188,7 @@ export function createExternalAccessRuntime<Config>(options: ExternalAccessRunti
 
   const scheduleRetry = (target: Target<Config>, failure: ExternalAccessFailure, epoch: number) => {
     if (epoch !== generation || shuttingDown) return;
-    const delay = retryDelays[status.retryAttempt];
+    const delay = retryDelays[Math.min(status.retryAttempt, retryDelays.length - 1)];
     if (!failure.retryable || delay === undefined || target.revision !== saved.revision) {
       publish({ state: 'failed', error: failure, retryAt: null });
       return;

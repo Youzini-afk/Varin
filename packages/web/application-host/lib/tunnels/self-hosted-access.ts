@@ -41,7 +41,7 @@ export function createSelfHostedAccess(options: Options) {
       if (code === 'EADDRINUSE') return 'port_in_use';
       if (code === 'EACCES' || code === 'ENOENT' || code === 'invalid_config' || code === 'invalid_configuration'
         || code === 'invalid_component' || code === 'missing_dependency' || code === 'missing_credential' || code === 'unsupported_platform' || code === 'tls_failed') return 'invalid_config';
-      if (code === 'connection_lost') return 'network_error';
+      if (code === 'connection_lost' || code === 'startup_timeout') return 'network_error';
       if (code === 'process_exit' && (error as { retryable?: boolean }).retryable) return 'process_exited';
       if (code === 'authentication_failed' || code === 'network_error' || code === 'process_exited' || code === 'provider_in_use') return code;
       return 'start_failed';
@@ -131,7 +131,7 @@ export function createSelfHostedAccess(options: Options) {
       const status = runtime.getStatus();
       const binding = activeIngress?.enabled ? activeIngress.configuration : null;
       return {
-        source: 'settings', settingsRevision: entry.revision,
+        source: 'settings', settingsRevision: entry.revision, activeRevision: status.activeRevision,
         entry: entry.config ? { revision: entry.revision, enabled: entry.enabled, configuration: externalAccessConfigurationView(entry.config, includeOperatorDetails) } : null,
         listener: binding ? { host: binding.host, port: binding.port, origin: binding.origin } : null,
         phase: phase[status.state],

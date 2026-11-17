@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { test } from 'node:test';
+import { test, onTestFinished } from 'vitest';
 import { gunzipSync } from 'node:zlib';
 import { buildExternalAccessDownloads, kitArchivePath, kitFiles } from './external-access-kit.mjs';
 
@@ -27,9 +27,9 @@ function members(archive) {
   return files;
 }
 
-test('downloads package exactly the deterministic public kit, no adjacent operator files', async t => {
+test('downloads package exactly the deterministic public kit, no adjacent operator files', async () => {
   const root = await mkdtemp(join(tmpdir(), 'varin-deploy-kit-'));
-  t.after(() => rm(root, { force: true, recursive: true }));
+  onTestFinished(() => rm(root, { force: true, recursive: true }));
   for (const file of kitFiles) {
     const destination = join(root, file);
     await mkdir(dirname(destination), { recursive: true });

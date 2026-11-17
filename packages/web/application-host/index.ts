@@ -3334,13 +3334,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (isShuttingDown || (auth?.principalId && !await hostPrincipals().isOwner(auth.principalId))) return false;
     if (auth?.type === 'client' && !hasHostConnectionAccess(auth, 'configuration')) return false;
     const direct = isDirectLocalAccessControl(request);
-    if (operation === 'write') return direct && await isRequestOriginAllowed(request);
+    if (operation === 'write') return (direct || hasHostConnectionAccess(auth, 'configuration')) && await isRequestOriginAllowed(request);
     return direct || Boolean(auth?.principalId);
   };
   registerExternalAccessRoutes(app, {
     json: express.json({ limit: '16kb' }),
     authorize: authorizeExternalAccessControl,
-    includeOperatorDetails: isDirectLocalAccessControl,
+    includeOperatorDetails: request => isDirectLocalAccessControl(request) || hasHostConnectionAccess(request.varinAuth, 'configuration'),
     checkAccess: externalAccessDiagnostics.check,
     component: {
       status: () => frpcComponents.getStatus({ includeOperatorDetails: true }),

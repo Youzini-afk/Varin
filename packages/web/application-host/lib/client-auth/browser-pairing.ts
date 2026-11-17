@@ -32,7 +32,19 @@ export function buildBrowserPairingUrl(origin: string, pairing: { id: string; se
 
 // No URL secret is rendered into HTML, logged by the server, or fetched by a
 // preview GET. Clear the fragment immediately, then require an explicit click.
-const script = `(() => {
+const messages = {
+  en: { title: 'Connect this browser', ready: 'Connect this browser to {host}?', missing: 'Open a new device pairing link from your Varin Host.', connecting: 'Connecting…', failed: 'Could not confirm pairing. Reopen your link or create a new one.', button: 'Connect', preparing: 'Preparing device pairing…', javascript: 'JavaScript is required to pair this browser.' },
+  'zh-CN': { title: '连接此浏览器', ready: '将此浏览器连接到 {host}', missing: '请从 Varin 打开新的设备配对链接。', connecting: '正在连接…', failed: '未能确认配对，请重新打开链接或创建新链接。', button: '连接', preparing: '正在准备设备配对…', javascript: '请启用 JavaScript 后连接此浏览器。' },
+  'zh-TW': { title: '連接此瀏覽器', ready: '將此瀏覽器連接到 {host}', missing: '請從 Varin 開啟新的裝置配對連結。', connecting: '正在連接…', failed: '未能確認配對，請重新開啟連結或建立新連結。', button: '連接', preparing: '正在準備裝置配對…', javascript: '請啟用 JavaScript 後連接此瀏覽器。' },
+};
+const style = `:root{color-scheme:light dark;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f5f5f4;color:#252526}*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px}main{width:min(100%,420px)}.brand{font-size:14px;color:#737373;margin:0 0 36px}h1{font-size:24px;line-height:1.3;font-weight:600;letter-spacing:-.02em;margin:0 0 16px}p{font-size:15px;line-height:1.7;overflow-wrap:anywhere;margin:0 0 24px}button{font:inherit;border:1px solid #d4d4d4;border-radius:12px;padding:10px 24px;background:#fff;color:inherit;cursor:pointer}button:disabled{opacity:.6;cursor:wait}button:focus-visible{outline:2px solid #6b83ac;outline-offset:3px}@media(prefers-color-scheme:dark){:root{background:#202021;color:#e5e5e5}.brand{color:#a3a3a3}button{border-color:#505052;background:#303032}}`;
+
+export function createBrowserPairingPage(acceptLanguage = 'en') {
+  const preferred = acceptLanguage.split(',')[0]?.trim().toLowerCase() ?? 'en';
+  const locale = /^zh-(tw|hk|hant)/.test(preferred) ? 'zh-TW' : preferred.startsWith('zh') ? 'zh-CN' : 'en';
+  const text = messages[locale];
+  const script = `(() => {
+  const text = ${JSON.stringify(text)};
   const fragment = new URLSearchParams(location.hash.slice(1));
   history.replaceState(null, '', location.pathname);
   const status = document.getElementById('status');
@@ -40,16 +52,16 @@ const script = `(() => {
   let payload;
   try {
     const encoded = fragment.get('pairing');
-    if (!encoded || encoded.length > 16384) throw new Error();
+    if (!encoded) throw new Error();
     const binary = atob(encoded.replace(/-/g, '+').replace(/_/g, '/'));
     payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(binary, c => c.charCodeAt(0))));
     if (payload.v !== 2 || typeof payload.pairingId !== 'string' || typeof payload.secret !== 'string') throw new Error();
-    status.textContent = 'Connect this browser to ' + location.host + '? Only continue if you requested this device link.';
+    status.textContent = text.ready.replace('{host}', location.host);
     button.hidden = false;
-  } catch { status.textContent = 'Open a new device pairing link from your Varin Host.'; return; }
+  } catch { status.textContent = text.missing; return; }
   button.addEventListener('click', async () => {
     button.disabled = true;
-    status.textContent = 'Connecting…';
+    status.textContent = text.connecting;
     try {
       const response = await fetch('${BROWSER_PAIRING_REDEEM_PATH}', {
         method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
@@ -61,12 +73,15 @@ const script = `(() => {
       location.replace('/');
     } catch {
       payload = null;
-      status.textContent = 'Could not confirm pairing. Reopen your link or create a new one. This request will not be retried automatically.';
+      status.textContent = text.failed;
     }
   });
 })();`;
 
-export const browserPairingPage = {
-  contentSecurityPolicy: `default-src 'none'; script-src 'sha256-${crypto.createHash('sha256').update(script).digest('base64')}'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
-  html: `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Connect this browser · Varin</title><body><main><h1>Connect this browser</h1><p id="status">Preparing device pairing…</p><button id="connect" hidden>Connect browser</button><noscript>JavaScript is required to pair this browser.</noscript></main><script>${script}</script></body></html>`,
-};
+  return {
+    contentSecurityPolicy: `default-src 'none'; script-src 'sha256-${crypto.createHash('sha256').update(script).digest('base64')}'; style-src 'sha256-${crypto.createHash('sha256').update(style).digest('base64')}'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+    html: `<!doctype html><html lang="${locale}"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>${text.title} · Varin</title><style>${style}</style><body><main><p class="brand">Varin</p><h1>${text.title}</h1><p id="status">${text.preparing}</p><button id="connect" hidden>${text.button}</button><noscript>${text.javascript}</noscript></main><script>${script}</script></body></html>`,
+  };
+}
+
+export const browserPairingPage = createBrowserPairingPage();

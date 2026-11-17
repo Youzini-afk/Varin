@@ -309,6 +309,11 @@ function ExternalAccessPanel({ host }: { host: number }) {
             {!environmentManaged && snapshot.phase === 'failed' && <Button size="sm" variant="outline" disabled={mutationBlocked || dirty} onClick={() => void mutate('retry')}>
               {t('settings.varin.externalAccess.retry')}
             </Button>}
+            {!environmentManaged && snapshot.entry?.enabled && snapshot.phase !== 'failed' && !transition
+              && snapshot.activeRevision !== undefined && snapshot.activeRevision !== snapshot.entry.revision
+              && <Button size="sm" variant="outline" disabled={mutationBlocked || dirty} onClick={() => void mutate('retry')}>
+                {t('settings.varin.externalAccess.applySaved')}
+              </Button>}
             <Button size="sm" variant="outline" disabled={busy || !snapshot.listener || transition || conflict || needsRefresh}
               onClick={() => void checkAccess()}>{t(checking ? 'settings.varin.externalAccess.checking' : 'settings.varin.externalAccess.checkAccess')}</Button>
             <Button size="sm" variant="outline" disabled={busy || !snapshot.listener || conflict || needsRefresh}

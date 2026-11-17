@@ -2,31 +2,11 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { request } from 'node:https';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { BlockList, isIP } from 'node:net';
+import { isIP } from 'node:net';
 import type { ExternalAccessCheck } from '@varin/application-client';
 
 const prefix = '/.well-known/varin-entrance/';
 const validId = /^[a-f0-9]{64}$/u;
-const ipv4Denied = new BlockList();
-for (const [address, bits] of [
-  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16],
-  ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.88.99.0', 24], ['192.168.0.0', 16],
-  ['198.18.0.0', 15], ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 3],
-] as const) ipv4Denied.addSubnet(address, bits);
-const ipv6Global = new BlockList();
-ipv6Global.addSubnet('2000::', 3, 'ipv6');
-const ipv6Denied = new BlockList();
-for (const [address, bits] of [['2001::', 23], ['2001:db8::', 32], ['2002::', 16], ['3fff::', 20]] as const) {
-  ipv6Denied.addSubnet(address, bits, 'ipv6');
-}
-
-export function publicProofAddress(address: string): boolean {
-  const family = isIP(address);
-  if (family === 4) return !ipv4Denied.check(address);
-  return family === 6 && !address.includes('%')
-    && ipv6Global.check(address, 'ipv6') && !ipv6Denied.check(address, 'ipv6');
-}
-
 interface ProofChallenge { ticket: string; expected: string; expiresAt: number }
 
 export function createEndpointProof() {
@@ -125,11 +105,11 @@ export async function inspectPublicEndpoint(input: ProofRequest): Promise<ProofR
     } catch { return 'dns'; }
     signal.throwIfAborted();
     if (!addresses.length) return 'dns';
-    if (addresses.some(address => isIP(address.address) !== address.family || !publicProofAddress(address.address))) return 'not_public';
+    if (addresses.some(address => !isIP(address.address) || isIP(address.address) !== address.family)) return 'dns';
     const url = new URL(input.challenge.path, origin);
     // Try both families without permitting a fresh DNS lookup or a redirect.
     try {
-      return await Promise.any(addresses.slice(0, 4).map(async (address): Promise<'verified'> => {
+      return await Promise.any(addresses.map(async (address): Promise<'verified'> => {
         let proof: string | null;
         try { proof = await (input.transport ?? requestProof)(url, address, signal); } catch (error) {
           throw isTlsFailure(error) ? 'tls' : 'unreachable';

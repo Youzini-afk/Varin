@@ -32,7 +32,7 @@ async function freePort(): Promise<number> {
 function send(port: number, target: string, options: { method?: string; cookie?: string; bearer?: string; body?: unknown; origin?: string | null } = {}) {
   return new Promise<{ status: number; headers: IncomingHttpHeaders; text: string; json: () => Record<string, unknown> }>((resolve, reject) => {
     const body = options.body === undefined ? undefined : JSON.stringify(options.body);
-    const req = http.request({ hostname: '127.0.0.1', port, path: target, method: options.method ?? 'GET', headers: {
+    const req = http.request({ agent: false, hostname: '127.0.0.1', port, path: target, method: options.method ?? 'GET', headers: {
       Host: new URL(origin).host,
       ...(options.origin === null ? {} : { Origin: options.origin ?? origin }),
       ...(options.cookie ? { Cookie: options.cookie } : {}),

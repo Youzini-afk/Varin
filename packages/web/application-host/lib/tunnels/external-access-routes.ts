@@ -25,7 +25,7 @@ export function registerExternalAccessRoutes(app: Express, dependencies: {
       response.setHeader('Cache-Control', 'no-store');
       try {
         if (!await authorize(request, operation === 'check' ? 'write' : operation)) {
-          response.status(403).json({ error: 'Manage external access from the local Host settings.' });
+          response.status(403).json({ error: 'Host-wide connection management permission is required.' });
           return;
         }
         if (operation === 'write') {
@@ -68,7 +68,7 @@ export function registerExternalAccessRoutes(app: Express, dependencies: {
       response.setHeader('Cache-Control', 'no-store');
       try {
         if (!dependencies.includeOperatorDetails?.(request) || !await authorize(request, write ? 'write' : 'read')) {
-          response.status(403).json({ error: 'Manage FRP components from the local Host settings.' });
+          response.status(403).json({ error: 'Host-wide connection management permission is required.' });
           return;
         }
         response.json(await (write ? component.install() : component.status()));

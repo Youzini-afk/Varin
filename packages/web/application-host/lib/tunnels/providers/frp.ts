@@ -110,10 +110,6 @@ export async function startFrpTunnel(
   dependencies: FrpTunnelDependencies = {},
 ): Promise<FrpTunnelController> {
   const config = normalizeConfiguration(input);
-  const platform = dependencies.platform ?? process.platform;
-  // POSIX modes are not an ACL guarantee on Windows. Do not write a credential
-  // there until the Host has an ACL-aware private-file owner.
-  if (platform === 'win32') throw new FrpTunnelError('unsupported_platform', 'FRP private credential files require a POSIX Host in this implementation');
   const fs = dependencies.fs ?? fsPromises;
   const env = dependencies.env ?? process.env;
   const signal = dependencies.signal;
@@ -142,24 +138,26 @@ export async function startFrpTunnel(
   try {
     directory = await fs.mkdtemp(path.join(dependencies.tempDirectory ?? os.tmpdir(), 'varin-frpc-'));
     await fs.chmod(directory, 0o700);
-    const tokenPath = path.join(directory, 'token');
     const configPath = path.join(directory, 'frpc.json');
-    await fs.writeFile(tokenPath, token, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
     const document = {
       serverAddr: config.server.address, serverPort: config.server.port, loginFailExit: true,
-      auth: { method: 'token', tokenSource: { type: 'file', file: { path: tokenPath } } },
+      auth: { method: 'token', token: null },
       log: { to: 'console', level: 'debug', disablePrintColor: true },
       transport: { protocol: 'tcp', tls: { enable: true, trustedCaFile: config.server.tls.caFile, serverName: config.server.tls.serverName } },
       proxies: [{ name: config.proxy.name, type: 'tcp', localIP: config.localIP, localPort: config.localPort, remotePort: config.proxy.remotePort }],
     };
-    // frpc renders Go templates before JSON decoding. Escape template openers
-    // even in innocent filesystem names; the token is never a template input.
-    await fs.writeFile(configPath, JSON.stringify(document, null, 2).replaceAll('{{', '\\u007b\\u007b'), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    // FRP renders its native environment template before JSON decoding. Pass a
+    // JSON-encoded value so quotes, newlines and template characters in a token
+    // stay data. Neither the configuration file nor argv contains the secret.
+    const serialized = JSON.stringify(document, null, 2).replaceAll('{{', '\\u007b\\u007b')
+      .replace('"token": null', '"token": {{ .Envs.VARIN_FRPC_AUTH_JSON }}');
+    await fs.writeFile(configPath, serialized, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
     if (signal?.aborted) throw aborted();
-    // Do not pass Host credentials, proxy overrides, or the selected token into
-    // the child environment. The explicitly selected binary needs no PATH probe.
-    const childEnv: NodeJS.ProcessEnv = {};
-    for (const key of ['LANG', 'LC_ALL', 'TZ', 'TMPDIR']) if (env[key]) childEnv[key] = env[key];
+    const childEnv: NodeJS.ProcessEnv = { VARIN_FRPC_AUTH_JSON: JSON.stringify(token) };
+    for (const key of ['SystemRoot', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR',
+      'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy']) {
+      if (env[key]) childEnv[key] = env[key];
+    }
     child = (dependencies.spawnProcess ?? spawn)(config.executablePath, ['-c', configPath], {
       shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: childEnv, cwd: directory,
     });

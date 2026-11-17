@@ -39,6 +39,8 @@ export interface ExternalAccessCheck {
 }
 
 export interface ExternalAccessSnapshot {
+  /** The saved revision currently serving requests; null while disconnected. */
+  activeRevision?: number | null;
   source: 'settings' | 'environment';
   hostName?: string;
   /** Preserves the settings generation even after the last entry is removed. */

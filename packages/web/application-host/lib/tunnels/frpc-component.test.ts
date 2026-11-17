@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { Header } from 'tar';
+import AdmZip from 'adm-zip';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createFrpcComponentService } from './frpc-component.js';
 
@@ -35,7 +36,7 @@ const normalArchive = () => archiveOf([
 const response = (body: Buffer) => new Response(new Uint8Array(body), { status: 200, headers: { 'content-length': String(body.length) } });
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map(directory => fs.rm(directory, { force: true, recursive: true }))); });
-async function setup(archive = normalArchive()) {
+async function setup(archive: Buffer = normalArchive()) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-frpc-component-test-'));
   directories.push(root);
   const dataDirectory = path.join(root, 'host-data');
@@ -121,7 +122,7 @@ describe('frpc component selection', () => {
     expect(await service.resolveExecutable()).toBe(installed);
     expect(c.fetcher).not.toHaveBeenCalled();
   });
-  it.each([['win32', 'x64'], ['linux', 'ia32'], ['darwin', 'riscv64'], ['freebsd', 'x64']] as const)(
+  it.each([['linux', 'ia32'], ['darwin', 'riscv64'], ['freebsd', 'x64']] as const)(
     'fails closed for unsupported %s/%s', async (platform, arch) => {
       const c = await setup(); const service = createFrpcComponentService(c.options, { ...c.dependencies, platform, arch });
       expect(await service.getStatus()).toMatchObject({ state: 'unsupported', installSupported: false });
@@ -132,6 +133,21 @@ describe('frpc component selection', () => {
 });
 
 describe('explicit managed installation', () => {
+  it('installs the Windows ZIP member and restores its managed executable', async () => {
+    const zip = new AdmZip();
+    const name = 'frp_0.65.0_windows_amd64';
+    zip.addFile(`${name}/frpc.exe`, binary);
+    zip.addFile(`${name}/frps.exe`, Buffer.from('server is not installed'));
+    const archive = zip.toBuffer();
+    const c = await setup(archive);
+    const service = createFrpcComponentService(c.options, { ...c.dependencies, platform: 'win32' });
+    expect(await service.install()).toMatchObject({ state: 'available', installSupported: true });
+    const executablePath = await service.resolveExecutable();
+    expect(executablePath).toBe(path.join(c.dataDirectory, 'components', 'frpc', name, 'frpc.exe'));
+    expect(await fs.readFile(executablePath)).toEqual(binary);
+    expect(await fs.readdir(path.dirname(executablePath))).toEqual(['component.json', 'frpc.exe']);
+    expect(c.fetcher.mock.calls[0]?.[0]).toBe(`https://github.com/fatedier/frp/releases/download/v0.65.0/${name}.zip`);
+  });
   it('verifies, extracts only frpc, atomically publishes, and reopens without executing the fixture', async () => {
     const c = await setup();
     expect(await c.service.install()).toMatchObject({ state: 'available', source: 'managed', version: '0.65.0' });
@@ -140,9 +156,11 @@ describe('explicit managed installation', () => {
     expect(await fs.readdir(c.installDirectory)).toEqual(['component.json', 'frpc']);
     const installedPath = path.join(c.installDirectory, 'frpc');
     expect(await fs.readFile(installedPath)).toEqual(binary);
-    expect((await fs.stat(installedPath)).mode & 0o777).toBe(0o500);
-    expect((await fs.stat(c.installDirectory)).mode & 0o777).toBe(0o700);
-    expect((await fs.stat(path.join(c.installDirectory, 'component.json'))).mode & 0o777).toBe(0o400);
+    if (process.platform !== 'win32') {
+      expect((await fs.stat(installedPath)).mode & 0o777).toBe(0o500);
+      expect((await fs.stat(c.installDirectory)).mode & 0o777).toBe(0o700);
+      expect((await fs.stat(path.join(c.installDirectory, 'component.json'))).mode & 0o777).toBe(0o400);
+    }
     const reopened = createFrpcComponentService(c.options, c.dependencies);
     expect(await reopened.resolveExecutable()).toBe(installedPath);
     expect((await reopened.getStatus()).executablePath).toBeUndefined();
@@ -194,11 +212,11 @@ describe('explicit managed installation', () => {
   });
   it('refuses symlinked managed storage before downloading', async () => {
     const c = await setup(); const outside = path.join(c.root, 'outside');
-    await fs.mkdir(outside); await fs.mkdir(c.dataDirectory); await fs.symlink(outside, path.join(c.dataDirectory, 'components'));
+    await fs.mkdir(outside); await fs.mkdir(c.dataDirectory); await fs.symlink(outside, path.join(c.dataDirectory, 'components'), process.platform === 'win32' ? 'junction' : 'dir');
     await expect(c.service.install()).rejects.toMatchObject({ code: 'integrity_failed' });
     expect(c.fetcher).not.toHaveBeenCalled(); expect(await fs.readdir(outside)).toEqual([]);
   });
-  it('refuses symlinks in a published generation', async () => {
+  it.skipIf(process.platform === 'win32')('refuses symlinks in a published generation', async () => {
     const c = await setup(); await c.service.install(); const binaryPath = path.join(c.installDirectory, 'frpc');
     const outside = path.join(c.root, 'outside-frpc'); await executable(outside);
     await fs.unlink(binaryPath); await fs.symlink(outside, binaryPath);

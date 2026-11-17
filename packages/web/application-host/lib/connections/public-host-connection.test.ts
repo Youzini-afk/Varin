@@ -68,7 +68,7 @@ async function fixture(password?: string) {
     const headers = new Headers(init.headers); headers.set('Host', url.host);
     requests.push({ url: url.href, headers: new Headers(headers), redirect: init.redirect });
     return new Promise<Response>((resolve, reject) => {
-      const request = httpRequest({ hostname: '127.0.0.1', port, path: url.pathname + url.search,
+      const request = httpRequest({ agent: false, hostname: '127.0.0.1', port, path: url.pathname + url.search,
         method: init.method ?? 'GET', headers: Object.fromEntries(headers), signal: init.signal ?? undefined,
       }, response => {
         const chunks: Buffer[] = [];

@@ -101,6 +101,16 @@ const edit = async (name: string, value: string) => { await act(async () => {
 }); };
 const body = (call: number) => JSON.parse(fixture.fetch.mock.calls[call][1].body);
 
+it('offers an explicit apply action for saved changes while the old entry is running', async () => {
+  fixture.fetch.mockResolvedValueOnce(response({ ...listening(3), phase: 'enabled', activeRevision: 2 }))
+    .mockResolvedValueOnce(response({ ...listening(3), phase: 'enabled', activeRevision: 3 }));
+  await mount();
+  await click('applySaved');
+  expect(fixture.fetch.mock.calls[1][0]).toBe('/api/varin/external-access/retry');
+  expect(body(1)).toEqual({ expectedRevision: 3 });
+  expect(container.textContent).not.toContain(prefix + 'applySaved');
+});
+
 it('saves a draft without enabling it and only reports the real listener as unverified after enable', async () => {
   fixture.fetch.mockResolvedValueOnce(response({ entry: null, phase: 'disabled', source: 'settings', listener: null }))
     .mockResolvedValueOnce(response(saved())).mockResolvedValueOnce(response(listening()));

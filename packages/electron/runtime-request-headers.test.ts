@@ -47,13 +47,12 @@ describe('native Host authentication requests', () => {
 
   test('does not forward pairing bodies or access credentials to a redirected Host', async () => {
     const { createServer } = await import('node:http');
-    const { once } = await import('node:events');
     let redirected = 0;
     const destination = createServer((_request, response) => { redirected++; response.end('must not receive credentials'); });
-    destination.listen(0, '127.0.0.1'); await once(destination, 'listening');
+    await new Promise<void>(resolve => destination.listen(0, '127.0.0.1', resolve));
     const destinationUrl = `http://127.0.0.1:${(destination.address() as import('node:net').AddressInfo).port}`;
     const source = createServer((_request, response) => { response.writeHead(307, { Location: destinationUrl }); response.end(); });
-    source.listen(0, '127.0.0.1'); await once(source, 'listening');
+    await new Promise<void>(resolve => source.listen(0, '127.0.0.1', resolve));
     const url = `http://127.0.0.1:${(source.address() as import('node:net').AddressInfo).port}`;
     try {
       await expect(fetch(url, nativeHostRequestInit(url, { method: 'POST', body: 'one-time-secret',

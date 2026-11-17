@@ -22,9 +22,9 @@ The archive contains only distributable templates; it never includes your Host s
 ## Dedicated external HTTP backend
 
 For a self-managed TLS proxy on the same machine (or a trusted private link),
-open **Settings → External Access** on the local Host and save an HTTPS origin
+open **Settings → External Access** for the selected Host and save an HTTPS origin
 and a fixed IP address and port for the guarded HTTP listener. Saving does not
-restart an existing listener; **Enable** starts it and **Retry** applies changes
+restart an existing listener; **Enable** starts it and **Apply saved configuration** applies changes
 to an enabled entry. A failed replacement attempts to restore the previous
 running listener without overwriting the saved draft. **Disable** is persisted
 before the listener is fenced; shutting down the Host does not clear enabled
@@ -49,7 +49,8 @@ requests. The guard rejects requests for a different origin, and disabling this
 listener does not make it a local entry. The original local listener and managed
 tunnel modes are unchanged. Use **Check access** (or `varin external-access check --json`) when
 you want one bounded HTTPS check. The guarded listener answers a one-time proof; the request
-uses normal TLS certificate validation, no redirects, and no private or special-use addresses.
+uses normal TLS certificate validation and no redirects. Private and split-horizon DNS
+addresses are supported for the owner-configured endpoint.
 A bind does not verify public HTTPS. A failed check leaves enabled forwarding unchanged;
 the Host may not have a network path back through its public address. This diagnostic does not
 inspect the server or manage certificates. Invalid environment configuration or a bind failure leaves
@@ -120,12 +121,13 @@ to that mapping's private VPS address, not make the TCP mapping public.
 Publication means that the FRP session is connected, not that public HTTPS
 has been verified. Run **Check access** when needed; split DNS, private trust and missing
 hairpin routing can block the Host's check even when another browser can reach the site.
-Host-side retry is
-bounded and does not retry credentials rejected by the provider. Stop waits
+Host-side recovery continues at the final backoff interval while enabled, and does not
+retry credentials rejected by the provider. Stop waits
 for the child to exit and cleans up its private configuration files.
 
-Windows does not yet have a supported private
-credential-file path for this FRP mode. Saving an FRP configuration does not install binaries
+Windows, Linux and macOS can use Host-managed frpc. The credential is passed through
+FRP's environment template; the generated runtime configuration and process arguments
+contain no token. Saving an FRP configuration does not install binaries
 or mutate the target server.
 
 For headless use, run `varin external-access status --json`. Save an entry

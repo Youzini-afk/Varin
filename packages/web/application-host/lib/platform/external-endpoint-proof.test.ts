@@ -2,21 +2,17 @@ import { once } from 'node:events';
 import { createServer, request } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { expect, it, vi } from 'vitest';
-import { createEndpointProof, inspectPublicEndpoint, publicProofAddress, verifyPublicEndpoint } from './external-endpoint-proof.js';
+import { createEndpointProof, inspectPublicEndpoint, verifyPublicEndpoint } from './external-endpoint-proof.js';
 import { createPublicIngress } from './public-ingress.js';
 
-it.each(['127.0.0.1', '10.0.0.1', '100.64.1.2', '169.254.169.254', '192.0.2.2', '224.0.0.1', '::ffff:127.0.0.1', 'fd00::1', 'fe80::1%lo', '2001:db8::1', '2002::1', '3fff::1'])(
-  'rejects not-public address %s', address => expect(publicProofAddress(address)).toBe(false),
-);
-
-it('does not contact any address when DNS mixes public and non-public results', async () => {
+it('checks the configured entrance through private or split-horizon DNS', async () => {
   const challenge = createEndpointProof().issue();
   const transport = vi.fn(async () => challenge.expected);
   expect(await verifyPublicEndpoint({
     origin: 'https://public.example.test', challenge, signal: new AbortController().signal,
     resolve: async () => [{ address: '1.1.1.1', family: 4 }, { address: '::1', family: 6 }], transport,
-  })).toBe(false);
-  expect(transport).not.toHaveBeenCalled();
+  })).toBe(true);
+  expect(transport).toHaveBeenCalledTimes(2);
 });
 
 it('pins resolved addresses, keeps configured authority, and requires independent proof rather than ticket reflection', async () => {

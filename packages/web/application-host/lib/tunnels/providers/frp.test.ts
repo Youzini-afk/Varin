@@ -77,27 +77,26 @@ describe('existing FRP process adapter', () => {
     expect(launch.command).toBe(configuration.executablePath);
     expect(launch.options.shell).toBe(false);
     expect(launch.options.stdio).toEqual(['ignore', 'pipe', 'pipe']);
-    expect(launch.options.env).toEqual({ LANG: 'C.UTF-8' });
+    expect(launch.options.env).toMatchObject({ LANG: 'C.UTF-8', VARIN_FRPC_AUTH_JSON: JSON.stringify(token) });
     expect(launch.args).toEqual(['-c', path.join(launch.options.cwd, 'frpc.json')]);
     const text = await fs.readFile(launch.args[1]!, 'utf8');
-    const document = JSON.parse(text);
+    const document = JSON.parse(text.replace('{{ .Envs.VARIN_FRPC_AUTH_JSON }}', launch.options.env.VARIN_FRPC_AUTH_JSON!));
     expect(text).not.toContain(token);
-    expect(text).not.toContain('{{');
+    expect(text.match(/\{\{/g)).toHaveLength(1);
     expect(document).toMatchObject({
       serverAddr: 'frps.example', serverPort: 7000, loginFailExit: true,
-      auth: { method: 'token', tokenSource: { type: 'file' } },
+      auth: { method: 'token', token },
       log: { to: 'console', disablePrintColor: true },
       transport: { protocol: 'tcp', tls: { enable: true, trustedCaFile: configuration.server.tls.caFile, serverName: 'frps.example' } },
       proxies: [{ name: 'varin-test', type: 'tcp', localIP: '127.0.0.1', localPort: 3903, remotePort: 18080 }],
     });
-    expect(document.auth.token).toBeUndefined();
+    expect(document.auth.tokenSource).toBeUndefined();
     expect(document.webServer).toBeUndefined();
-    expect(await fs.readFile(document.auth.tokenSource.file.path, 'utf8')).toBe(token);
+    expect(await fs.readdir(launch.options.cwd)).toEqual(['frpc.json']);
     expect(chmod).toHaveBeenCalledWith(launch.options.cwd, 0o700);
-    for (const file of [launch.args[1]!, document.auth.tokenSource.file.path]) {
+    for (const file of [launch.args[1]!]) {
       expect(writeFile).toHaveBeenCalledWith(file, expect.any(String), expect.objectContaining({ mode: 0o600 }));
-      // Windows exposes no POSIX mode bits even when the fake provider platform
-      // is Linux. Real Windows still fails closed before credential creation.
+      // The runtime file contains no secret on either Windows or POSIX.
       if (process.platform !== 'win32') expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
     }
     if (process.platform !== 'win32') expect((await fs.stat(launch.options.cwd)).mode & 0o777).toBe(0o700);
@@ -252,15 +251,14 @@ describe('existing FRP process adapter', () => {
   it('accepts an explicit IPv6 loopback backend', async () => {
     const run = begin({}, { ...configuration, backend: { originUrl: 'http://[::1]:3903' } });
     const launch = await run.spawned;
-    expect(JSON.parse(await fs.readFile(launch.args[1]!, 'utf8')).proxies[0].localIP).toBe('::1');
+    expect(JSON.parse((await fs.readFile(launch.args[1]!, 'utf8')).replace('{{ .Envs.VARIN_FRPC_AUTH_JSON }}', launch.options.env.VARIN_FRPC_AUTH_JSON!)).proxies[0].localIP).toBe('::1');
     run.child.publish(); await (await run.starting).stop();
   });
 
-  it('rejects unnamespaced credential references, missing credentials, relative binaries, and unsupported privacy semantics', async () => {
+  it('rejects unnamespaced credential references, missing credentials, and relative binaries', async () => {
     await expect(begin({}, { ...configuration, tokenEnv: 'AWS_SECRET_ACCESS_KEY' }).starting).rejects.toMatchObject({ code: 'invalid_configuration' });
     await expect(begin({ env: {} }).starting).rejects.toMatchObject({ code: 'missing_credential' });
     await expect(begin({}, { ...configuration, executablePath: 'frpc' }).starting).rejects.toMatchObject({ code: 'invalid_configuration' });
-    await expect(begin({ platform: 'win32' }).starting).rejects.toMatchObject({ code: 'unsupported_platform' });
   });
 
   it('requires an existing CA, explicit verified server name, and fixed nonzero remote port', async () => {

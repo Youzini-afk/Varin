@@ -33,7 +33,14 @@ The adapter is intentionally **not registered in the legacy Cloudflare/ngrok reg
 
 ## Self-hosted management
 
-`self-hosted-access` assembles the Host-owned guarded listener and the existing-proxy adapter or operator-provided FRP child. `external-access-runtime` owns serialized activation, fenced teardown, rollback, and bounded retries; configuration and intent use the existing settings file owner with compare-and-swap. The local management API uses separate save/enable/disable/retry actions. Runtime state distinguishes an enabled external listener from a connected managed FRP session. The local diagnostic action issues one bounded single-use HTTPS proof when requested; only the same guarded Host may answer. Results are scoped to the current ingress, do not alter lifecycle state, and use sanitized reasons for failures. Runtime changes invalidate the settings view through the existing Host event stream. Legacy starts reserve the external-access slot through the original tunnel service.
+`self-hosted-access` assembles the Host-owned guarded listener and the existing-proxy adapter or operator-provided FRP child. `external-access-runtime` owns serialized activation, fenced teardown, rollback, and persistent recovery with capped backoff; configuration and intent use the existing settings file owner with compare-and-swap. The management API accepts local or remote operators with the existing Host-wide connection permissions and uses separate save/enable/disable/retry actions. The snapshot's active revision lets the UI offer an explicit apply action when saved changes are pending. Runtime state distinguishes an enabled external listener from a connected managed FRP session. The optional diagnostic uses a single-use HTTPS proof with normal certificate verification; split-horizon/private DNS is supported and a failed check never changes forwarding state. Runtime changes invalidate the settings view through the existing Host event stream. Legacy starts reserve the external-access slot through the original tunnel service.
+
+Managed frpc supports Windows, Linux and macOS. Runtime configuration uses FRP's native
+environment template with a JSON-encoded token, so quotes and template characters remain
+data and no token file or credential argument is needed. Explicit component installation
+verifies the pinned official archive and extracts only the selected executable, including
+the Windows ZIP member. Temporary network failures keep reconnecting while enabled;
+credential/configuration failures await an operator change.
 
 Self-hosted entries consume services already configured by the user or their separately instructed
 agent. They do not inspect or provision a VPS over SSH, generate deployment plans or receipts, manage

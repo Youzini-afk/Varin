@@ -1,7 +1,7 @@
 import React from 'react';
 import QRCode from 'qrcode';
 import { toast } from '@/components/ui';
-import { runtimeFetch } from '@varin/application-client';
+import { runtimeFetch, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
@@ -348,10 +348,34 @@ const createPresetId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 };
 
-export const TunnelSettings: React.FC = () => <>
-  <ExternalAccessSettings />
-  <LegacyTunnelSettings />
-</>;
+export const TunnelSettings: React.FC = () => {
+  const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  return <TunnelSettingsPanel key={host} />;
+};
+
+const TunnelSettingsPanel: React.FC = () => {
+  const { t } = useI18n();
+  const [section, setSection] = React.useState('self-hosted');
+  const selected = React.useRef(false);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    void runtimeFetch('/api/varin/tunnel/status', { signal: controller.signal })
+      .then(async response => response.ok ? response.json() : null)
+      .then(status => { if (!controller.signal.aborted && !selected.current && status?.url) setSection('provider'); })
+      .catch(() => { /* The selected settings panel reports its own connection errors. */ });
+    return () => controller.abort();
+  }, []);
+  return <div className="space-y-6">
+    <Select value={section} onValueChange={value => { selected.current = true; setSection(value); }}>
+      <SelectTrigger size={SETTINGS_SELECT_SIZE} className="max-w-xs" aria-label={t('settings.varin.externalAccess.provider')}><SelectValue /></SelectTrigger>
+      <SelectContent>
+        <SelectItem value="self-hosted">{t('settings.varin.externalAccess.title')}</SelectItem>
+        <SelectItem value="provider">{t('settings.varin.externalAccess.legacyTitle')}</SelectItem>
+      </SelectContent>
+    </Select>
+    {section === 'provider' ? <LegacyTunnelSettings /> : <ExternalAccessSettings />}
+  </div>;
+};
 
 const LegacyTunnelSettings: React.FC = () => {
   const { t } = useI18n();

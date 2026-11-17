@@ -210,20 +210,23 @@ describe('persistent external access lifecycle', () => {
     await f.runtime.shutdown();
   });
 
-  it('bounds network retry attempts and permits an explicit retry after exhaustion', async () => {
+  it('keeps reconnecting at the final backoff until the network recovers', async () => {
     vi.useFakeTimers();
     const f = fixture({ config: config(), enabled: true });
     f.open.mockRejectedValue(new ExternalAccessRuntimeError('network_error'));
     expect(await f.runtime.start()).toMatchObject({ state: 'reconnecting', retryAttempt: 1 });
     await vi.advanceTimersByTimeAsync(30);
     expect(f.open).toHaveBeenCalledTimes(3);
-    expect(f.runtime.getStatus()).toMatchObject({ state: 'failed', retryAttempt: 2, retryAt: null });
+    expect(f.runtime.getStatus()).toMatchObject({ state: 'reconnecting', retryAttempt: 3 });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.open).toHaveBeenCalledTimes(8);
     f.open.mockImplementation(async (configuration, context) => f.makeResource(context, configuration));
-    expect(await f.runtime.retry(0)).toMatchObject({ state: 'enabled', retryAttempt: 0 });
+    await vi.advanceTimersByTimeAsync(20);
+    expect(f.runtime.getStatus()).toMatchObject({ state: 'enabled', retryAttempt: 0 });
     await f.runtime.shutdown();
   });
 
-  it('fences a real disconnect before bounded recovery, and ignores stale provider callbacks', async () => {
+  it('fences a real disconnect before recovery, and ignores stale provider callbacks', async () => {
     vi.useFakeTimers();
     const f = fixture({ config: config(), enabled: true });
     await f.runtime.start();

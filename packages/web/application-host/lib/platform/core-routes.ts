@@ -1,7 +1,7 @@
 import type { Express, NextFunction, Request, Response } from 'express';
 import type expressModule from 'express';
 import type { VarinAuthenticatedClient, VarinRequestAuthContext } from '../client-auth/request-context.js';
-import { BROWSER_PAIRING_PATH, BROWSER_PAIRING_REDEEM_PATH, browserPairingPage, buildBrowserPairingUrl } from '../client-auth/browser-pairing.js';
+import { BROWSER_PAIRING_PATH, BROWSER_PAIRING_REDEEM_PATH, createBrowserPairingPage, buildBrowserPairingUrl } from '../client-auth/browser-pairing.js';
 import { getExternalIngress } from './public-ingress.js';
 import { isRelayUnavailableError } from '../relay/endpoint.js';
 
@@ -1062,6 +1062,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
 
   app.get(BROWSER_PAIRING_PATH, (req, res) => {
     if (!getExternalIngress(req)) return res.status(404).end();
+    const browserPairingPage = createBrowserPairingPage(req.headers['accept-language']);
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Content-Security-Policy', browserPairingPage.contentSecurityPolicy);

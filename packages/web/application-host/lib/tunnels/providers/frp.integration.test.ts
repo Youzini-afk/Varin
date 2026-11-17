@@ -31,7 +31,10 @@ import { startFrpTunnel, type FrpTunnelConfiguration, type FrpTunnelController }
 
 const binaryDirectory = process.env.VARIN_FRP_TEST_BIN_DIR;
 const loopback = '127.0.0.1';
-const hashes = {
+const hashes = process.platform === 'win32' ? {
+  frpc: '5b0846d4a5e9bcde0960b354fd819eb0011529ff23f41ad55a8717ba5c7004ac',
+  frps: '18b333df77b87826c29a29d9907c50b8d9a1a3c20ec402704a710c46b5be6914',
+} : {
   frpc: 'a89129b922f91f1327853a46da65136c52ad421c85315299d333ec06da3f3bbb',
   frps: '02b50823f330d0486f334d6aa9e448c4d0a26f553a691d167aae8358baab89ee',
 };
@@ -108,17 +111,17 @@ describe.skipIf(!binaryDirectory)('official FRP v0.65.0 loopback conformance', (
   }
 
   beforeAll(async () => {
-    expect(process.platform).toBe('linux');
+    expect(['linux', 'win32']).toContain(process.platform);
     expect(process.arch).toBe('x64');
     expect(path.isAbsolute(binaryDirectory!)).toBe(true);
     for (const name of ['frpc', 'frps'] as const) {
-      const binary = path.join(binaryDirectory!, name);
+      const binary = path.join(binaryDirectory!, process.platform === 'win32' ? `${name}.exe` : name);
       expect(createHash('sha256').update(await fs.readFile(binary)).digest('hex')).toBe(hashes[name]);
       expect(execFileSync(binary, ['--version'], { encoding: 'utf8', timeout: 5_000 }).trim()).toBe('0.65.0');
     }
     directory = await fs.mkdtemp(path.join(tmpdir(), 'varin-frp-integration-'));
     await fs.chmod(directory, 0o700);
-    const openssl = (args: string[]) => execFileSync('openssl', args, { cwd: directory, stdio: 'pipe', timeout: 10_000 });
+    const openssl = (args: string[]) => execFileSync('openssl', args, { cwd: directory, windowsHide: true, stdio: 'pipe', timeout: 10_000 });
     openssl(['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', 'ca.key', '-out', 'ca.pem',
       '-days', '1', '-subj', '/CN=Varin ephemeral fixture CA', '-addext', 'basicConstraints=critical,CA:TRUE']);
     openssl(['req', '-newkey', 'rsa:2048', '-nodes', '-keyout', 'server.key', '-out', 'server.csr', '-subj', '/CN=frps.fixture.test']);
@@ -146,7 +149,7 @@ describe.skipIf(!binaryDirectory)('official FRP v0.65.0 loopback conformance', (
       transport: { tls: { force: true, certFile: path.join(directory, 'server.pem'), keyFile: path.join(directory, 'server.key') } },
       log: { to: 'console', level: 'info', disablePrintColor: true },
     }), { mode: 0o600 });
-    const server = spawn(path.join(binaryDirectory!, 'frps'), ['-c', serverConfig], { cwd: directory, env: {}, stdio: ['ignore', 'pipe', 'pipe'] });
+    const server = spawn(path.join(binaryDirectory!, process.platform === 'win32' ? 'frps.exe' : 'frps'), ['-c', serverConfig], { windowsHide: true, cwd: directory, env: {}, stdio: ['ignore', 'pipe', 'pipe'] });
     frps = ownChild(server);
     children.push(frps);
     await bounded(new Promise<void>((resolve, reject) => {
@@ -159,7 +162,7 @@ describe.skipIf(!binaryDirectory)('official FRP v0.65.0 loopback conformance', (
       server.once('close', () => reject(new Error('frps exited before readiness')));
     }), 'frps readiness');
     configuration = {
-      executablePath: path.join(binaryDirectory!, 'frpc'),
+      executablePath: path.join(binaryDirectory!, process.platform === 'win32' ? 'frpc.exe' : 'frpc'),
       server: { address: loopback, port: controlPort, tls: { caFile: path.join(directory, 'ca.pem'), serverName: 'frps.fixture.test' } },
       proxy: { name: 'varin-conformance', remotePort }, tokenEnv: 'VARIN_FRP_TOKEN_TEST', publicOrigin: origin,
       backend: { originUrl: `http://${loopback}:${backendPort}` },

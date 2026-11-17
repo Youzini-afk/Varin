@@ -6,6 +6,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { gunzip } from 'node:zlib';
 import { Parser } from 'tar';
+import AdmZip from 'adm-zip';
 
 export const FRPC_MANAGED_VERSION = '0.65.0';
 const MAX_ARCHIVE_BYTES = 32 * 1024 * 1024;
@@ -37,6 +38,7 @@ interface Artifact {
   name: string;
   sha256: string;
   size: number;
+  zip?: boolean;
 }
 
 // Pinned against BOTH the official release API asset.digest and checksum asset:
@@ -44,6 +46,8 @@ interface Artifact {
 // https://github.com/fatedier/frp/releases/download/v0.65.0/frp_sha256_checksums.txt
 // Checked 2026-11-17. Updates require reviewing the adapter's protocol contract.
 const ARTIFACTS: Readonly<Record<string, Artifact>> = {
+  'win32-x64': { name: 'frp_0.65.0_windows_amd64', size: 13_820_524, sha256: '5885bff09604e719e429698f800f89379f3910f07490ca1f7d8a7f7a40970eda', zip: true },
+  'win32-arm64': { name: 'frp_0.65.0_windows_arm64', size: 12_254_248, sha256: 'cef05f46ec253c3542c3e943740d161f004387d52ff5d9d30d8dde0d58bba6e8', zip: true },
   'linux-x64': { name: 'frp_0.65.0_linux_amd64', size: 13_808_813, sha256: '52ced8c5fdf772f48a9909da4c10c7568c061861946ac9af7a86eeaf14b7e6d5' },
   'linux-arm64': { name: 'frp_0.65.0_linux_arm64', size: 12_404_966, sha256: 'd3e2be696d70b8e8dc475a81b8b5e4089f3a2acde5e42e47d6fc020fe3ddb180' },
   'darwin-x64': { name: 'frp_0.65.0_darwin_amd64', size: 13_952_135, sha256: '83dcf7617c61bef0087cb771e99fd16d749203c16dd6bbf47efb15ce617dc471' },
@@ -92,6 +96,14 @@ async function isExecutable(file: string): Promise<boolean> {
 
 /** Never follows archive paths on disk: only one validated regular entry becomes bytes. */
 async function extractBinary(archive: Buffer, artifact: Artifact): Promise<Buffer> {
+  if (artifact.zip) {
+    try {
+      // Read the selected member into memory; archive paths never reach disk.
+      const entry = new AdmZip(archive).getEntry(`${artifact.name}/frpc.exe`);
+      if (!entry || entry.isDirectory || entry.header.size > MAX_BINARY_BYTES) throw integrityError();
+      return entry.getData();
+    } catch { throw integrityError(); }
+  }
   let unpacked: Buffer;
   try { unpacked = await unzip(archive, { maxOutputLength: MAX_UNPACKED_BYTES }); }
   catch { throw integrityError(); }
@@ -138,7 +150,7 @@ async function downloadArtifact(artifact: Artifact, fetcher: typeof globalThis.f
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response: Response | undefined;
   try {
-    let url = `https://github.com/fatedier/frp/releases/download/v${FRPC_MANAGED_VERSION}/${artifact.name}.tar.gz`;
+    let url = `https://github.com/fatedier/frp/releases/download/v${FRPC_MANAGED_VERSION}/${artifact.name}.${artifact.zip ? 'zip' : 'tar.gz'}`;
     for (let redirects = 0; ; redirects++) {
       response = await fetcher(url, {
         signal: controller.signal, redirect: 'manual', credentials: 'omit',
@@ -182,7 +194,7 @@ async function downloadArtifact(artifact: Artifact, fetcher: typeof globalThis.f
 async function privateDirectory(directory: string, create: boolean): Promise<void> {
   if (create) await fs.mkdir(directory, { mode: 0o700 });
   const stat = await fs.lstat(directory);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o022) !== 0
+  if (!stat.isDirectory() || stat.isSymbolicLink() || (process.platform !== 'win32' && (stat.mode & 0o022) !== 0)
     || (process.getuid && stat.uid !== process.getuid())) throw integrityError();
 }
 
@@ -199,10 +211,11 @@ export function createFrpcComponentService(options: Options, dependencies: Depen
   const release = ARTIFACTS[`${platform}-${arch}`];
   const artifact = release ? { ...release, sha256: dependencies.artifact?.sha256 ?? release.sha256,
     size: dependencies.artifact?.size ?? release.size } : undefined;
-  const supported = (platform === 'linux' || platform === 'darwin') && Boolean(artifact);
+  const supported = Boolean(artifact);
   const parentDirectory = path.join(options.dataDirectory, 'components', 'frpc');
   const installDirectory = artifact ? path.join(parentDirectory, artifact.name) : '';
-  const managedPath = path.join(installDirectory, 'frpc');
+  const binaryName = platform === 'win32' ? 'frpc.exe' : 'frpc';
+  const managedPath = path.join(installDirectory, binaryName);
   let installation: Promise<FrpcComponentStatus> | undefined;
 
   const base = (): FrpcComponentStatus => ({ state: 'missing', source: null, version: null, managedVersion: FRPC_MANAGED_VERSION, installSupported: supported });
@@ -235,10 +248,6 @@ export function createFrpcComponentService(options: Options, dependencies: Depen
   };
 
   const inspect = async (): Promise<Selection> => {
-    // Distribution coverage must not disable operator binaries on other
-    // POSIX targets. Windows still lacks an ACL-backed runtime credential file.
-    if (platform === 'win32') return { ...base(), state: 'unsupported',
-      error: 'Varin-managed FRP requires a POSIX Host; use externally managed forwarding on Windows' };
     const configured = env.VARIN_FRPC_PATH;
     let selectedPath: string | undefined;
     let source: 'configured' | 'path' | undefined;
@@ -249,9 +258,9 @@ export function createFrpcComponentService(options: Options, dependencies: Depen
     } else {
       // Never resolve an empty/relative PATH entry against the Host working
       // directory, which can be an untrusted project directory.
-      for (const directory of (env.PATH ?? '').split(path.delimiter)) {
+      for (const directory of (env.PATH ?? env.Path ?? '').split(path.delimiter)) {
         if (!absoluteFile(directory)) continue;
-        const candidate = path.join(directory, 'frpc');
+        const candidate = path.join(directory, binaryName);
         if (await isExecutable(candidate)) { selectedPath = candidate; source = 'path'; break; }
       }
     }
@@ -293,7 +302,7 @@ export function createFrpcComponentService(options: Options, dependencies: Depen
       const binary = await extractBinary(archive, artifact);
       // Both files are complete before a single directory rename publishes the
       // generation. Failed downloads/extraction cannot replace a valid install.
-      const binaryFile = await fs.open(path.join(staging, 'frpc'), 'wx', 0o500);
+      const binaryFile = await fs.open(path.join(staging, binaryName), 'wx', 0o500);
       try { await binaryFile.writeFile(binary); await binaryFile.sync(); } finally { await binaryFile.close(); }
       const metadataFile = await fs.open(path.join(staging, 'component.json'), 'wx', 0o400);
       try {
@@ -304,7 +313,9 @@ export function createFrpcComponentService(options: Options, dependencies: Depen
       try { await fs.rename(staging, installDirectory); staging = undefined; }
       catch (error) {
         // A concurrent Host may have committed the same pinned generation.
-        if (!['EEXIST', 'ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+        if (!['EEXIST', 'ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code ?? '')
+          && !(process.platform === 'win32' && (error as NodeJS.ErrnoException).code === 'EPERM'
+            && (await managedSelection()).state === 'available')) throw error;
       }
       const installed = await managedSelection();
       if (installed.state !== 'available') throw integrityError();
