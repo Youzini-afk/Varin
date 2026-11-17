@@ -1457,12 +1457,15 @@ export interface RemoteClientPurgeRevokedResult {
 }
 
 export interface PairingSessionCreateResult {
+  /** HTTPS browser URL; the one-time secret is only in its fragment. */
+  browserUrl?: string;
   pairing: {
     id: string;
     label?: string;
     fingerprint?: string | null;
     expiresAt?: string;
     secret: string;
+    clientExpiresAt?: string | null;
   };
   server: {
     label: string;
@@ -1490,7 +1493,11 @@ export interface ClientAuthAPI {
   // server folds in a relay candidate when its relay host is enabled.
   createPairingSession(input?: {
     label?: string;
-    allowedClientKinds?: Array<'mobile' | 'desktop'>;
+    allowedClientKinds?: Array<'mobile' | 'desktop' | 'browser'>;
+    /** Browser links require an explicit device lifetime; null retains until revoked. */
+    clientExpiresAt?: string | null;
+    /** One-time link expiration, independent of device lifetime. */
+    expiresAt?: string;
     serverUrl?: string;
     // Per-link transport choice. `includeRelay: true` adds the relay candidate
     // and enables the relay host on demand; `false` omits it; omitted keeps the

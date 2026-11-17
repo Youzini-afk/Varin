@@ -2,6 +2,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { request as httpRequest, type IncomingMessage, type Server } from 'node:http';
 import { Readable, type Duplex } from 'node:stream';
 import { createBrotliDecompress, createUnzip } from 'node:zlib';
+import { getExternalIngress } from './platform/public-ingress.js';
 import {
   OBSERVATION_WEBSOCKET_PATH,
   isAllowedObservationRequest,
@@ -89,7 +90,10 @@ const requestObservation = (server: Server, request: IncomingMessage,
   message: Extract<ObservationClientMessage, { type: 'open' }>, signal: AbortSignal,
 ): Promise<{ reader: ReadableStreamDefaultReader<Uint8Array> | null; headers: Record<string, string>; status: number; statusText: string }> => (
   new Promise((resolve, reject) => {
-    const address = server.address();
+    const ingress = getExternalIngress(request);
+    // A public request must stay public when opening its individual channels.
+    // Reenter through the actual guarded socket, not the trusted local listener.
+    const address = ingress ? { address: ingress.host, port: ingress.port } : server.address();
     if (!address || typeof address === 'string') { reject(new Error('Host listener is unavailable')); return; }
     const headers = buildRequestHeaders(request, message.headers, message.path);
     headers.set('accept-encoding', 'identity');

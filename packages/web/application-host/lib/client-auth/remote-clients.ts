@@ -284,6 +284,7 @@ const createRuntime = ({
     return { version: STORE_VERSION, clients };
   };
 
+  const revocationListeners = new Set<(clientId: string) => void>();
   let closed = false;
   let snapshot: RemoteClientStore;
   let byToken = new Map<string, RemoteClientRecord>();
@@ -467,13 +468,23 @@ const createRuntime = ({
     if (typeof id !== 'string' || id.trim().length === 0) {
       return { revoked: false };
     }
-    return mutateStore<{ client?: PublicRemoteClient; revoked: boolean }>(async (store) => {
+    let changed = false;
+    const result = await mutateStore<{ client?: PublicRemoteClient; revoked: boolean }>(async (store) => {
       const client = store.clients.find((entry) => entry.id === id);
       if (!client) return { result: { revoked: false }, write: false };
       if (client.revokedAt) return { result: { revoked: true, client: publicClient(client) }, write: false };
       client.revokedAt = nowIso();
+      changed = true;
       return { result: { revoked: true, client: publicClient(client) } };
     });
+
+    if (changed && result.client) {
+      // Notify only after the durable commit and credential index publication.
+      for (const listener of revocationListeners) {
+        try { listener(result.client.id); } catch { /* One observer must not suppress other disconnects. */ }
+      }
+    }
+    return result;
   };
 
   const purgeRevokedClients = async (principalId?: string) => {
@@ -567,7 +578,11 @@ const createRuntime = ({
   return {
     authenticateBearerToken,
     flushUsage,
-    dispose: async () => { closed = true; await flushUsage(); },
+    dispose: async () => { closed = true; revocationListeners.clear(); await flushUsage(); },
+    onClientRevoked: (listener: (clientId: string) => void) => {
+      revocationListeners.add(listener);
+      return () => { revocationListeners.delete(listener); };
+    },
     createClient,
     getCapabilitiesForProfile,
     listAuditEvents,

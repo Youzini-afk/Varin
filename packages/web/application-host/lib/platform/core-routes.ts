@@ -1,6 +1,8 @@
 import type { Express, NextFunction, Request, Response } from 'express';
 import type expressModule from 'express';
 import type { VarinAuthenticatedClient, VarinRequestAuthContext } from '../client-auth/request-context.js';
+import { BROWSER_PAIRING_PATH, BROWSER_PAIRING_REDEEM_PATH, browserPairingPage, buildBrowserPairingUrl } from '../client-auth/browser-pairing.js';
+import { getExternalIngress } from './public-ingress.js';
 import { isRelayUnavailableError } from '../relay/endpoint.js';
 
 type TunnelAuthController = ReturnType<typeof import('./tunnel-auth.js').createTunnelAuth>;
@@ -26,6 +28,7 @@ export interface ServerStatusDependencies {
 export interface AuthAccessDependencies {
   clientPairingRuntime: ClientPairingRuntime;
   express: typeof expressModule;
+  getExternalAccessOrigin?(): string | null;
   getDirectCandidateUrls?(request: Request): string[];
   getPairingTransports?(request: Request): unknown;
   getRelayPairingCandidate?(options: { ensureEnabled: boolean }): Promise<Record<string, unknown> | null>;
@@ -345,6 +348,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
     clientPairingRuntime,
     readSettingsFromDisk,
     normalizeTunnelSessionTtlMs,
+    getExternalAccessOrigin = () => null,
     // Returns the relay pairing candidate ({ type:'relay', relayUrl, serverId,
     // hostEncPubJwk, priority }) when the host relay is enabled, else null.
     // Injected lazily because the relay service is constructed after these routes.
@@ -651,12 +655,12 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
     // preview proxy validates against the registered target id/TTL. Let those
     // requests reach that stricter check instead of failing the global UI auth
     // gate when the short-lived browser URL auth token expires.
-    if (hasPreviewProxyCredential(req)) {
+    if (!getExternalIngress(req) && hasPreviewProxyCredential(req)) {
       return next();
     }
 
     const requestScope = tunnelAuthController.classifyRequestScope(req);
-    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+    if (!getExternalIngress(req) && (requestScope === 'tunnel' || requestScope === 'unknown-public')) {
       return tunnelAuthController.requireTunnelSession(req, res, next);
     }
     if (typeof uiAuthController.resolveAuthContext === 'function') {
@@ -675,7 +679,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
 
   app.get('/auth/session', async (req, res) => {
     const requestScope = tunnelAuthController.classifyRequestScope(req);
-    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+    if (!getExternalIngress(req) && (requestScope === 'tunnel' || requestScope === 'unknown-public')) {
       const tunnelSession = tunnelAuthController.getTunnelSessionFromRequest(req);
       if (tunnelSession) {
         return res.json({ authenticated: true, scope: 'tunnel' });
@@ -693,7 +697,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
 
   app.post('/auth/session', (req, res) => {
     const requestScope = tunnelAuthController.classifyRequestScope(req);
-    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+    if (!getExternalIngress(req) && (requestScope === 'tunnel' || requestScope === 'unknown-public')) {
       return res.status(403).json({ error: 'Password login is disabled for tunnel scope', tunnelLocked: true });
     }
     return uiAuthController.handleSessionCreate(req, res);
@@ -709,7 +713,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
 
   app.get('/auth/passkey/status', (req, res) => {
     const requestScope = tunnelAuthController.classifyRequestScope(req);
-    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+    if (!getExternalIngress(req) && (requestScope === 'tunnel' || requestScope === 'unknown-public')) {
       return res.json({ enabled: false, hasPasskeys: false, passkeyCount: 0, rpID: null, tunnelLocked: true });
     }
     return uiAuthController.handlePasskeyStatus(req, res);
@@ -717,7 +721,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
 
   app.post('/auth/passkey/authenticate/options', (req, res) => {
     const requestScope = tunnelAuthController.classifyRequestScope(req);
-    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+    if (!getExternalIngress(req) && (requestScope === 'tunnel' || requestScope === 'unknown-public')) {
       return res.status(403).json({ error: 'Passkey login is disabled for tunnel scope', tunnelLocked: true });
     }
     return uiAuthController.handlePasskeyAuthenticationOptions(req, res);
@@ -725,7 +729,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
 
   app.post('/auth/passkey/authenticate/verify', (req, res) => {
     const requestScope = tunnelAuthController.classifyRequestScope(req);
-    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+    if (!getExternalIngress(req) && (requestScope === 'tunnel' || requestScope === 'unknown-public')) {
       return res.status(403).json({ error: 'Passkey login is disabled for tunnel scope', tunnelLocked: true });
     }
     return uiAuthController.handlePasskeyAuthenticationVerify(req, res);
@@ -733,7 +737,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
 
   app.post('/auth/passkey/register/options', async (req, res, next) => {
     const requestScope = tunnelAuthController.classifyRequestScope(req);
-    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+    if (!getExternalIngress(req) && (requestScope === 'tunnel' || requestScope === 'unknown-public')) {
       return res.status(403).json({ error: 'Passkey setup is disabled for tunnel scope', tunnelLocked: true });
     }
     try {
@@ -747,7 +751,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
 
   app.post('/auth/passkey/register/verify', async (req, res, next) => {
     const requestScope = tunnelAuthController.classifyRequestScope(req);
-    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+    if (!getExternalIngress(req) && (requestScope === 'tunnel' || requestScope === 'unknown-public')) {
       return res.status(403).json({ error: 'Passkey setup is disabled for tunnel scope', tunnelLocked: true });
     }
     try {
@@ -761,7 +765,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
 
   app.get('/api/passkeys', async (req, res, next) => {
     const requestScope = tunnelAuthController.classifyRequestScope(req);
-    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+    if (!getExternalIngress(req) && (requestScope === 'tunnel' || requestScope === 'unknown-public')) {
       return res.status(403).json({ error: 'Passkey management is disabled for tunnel scope', tunnelLocked: true });
     }
     try {
@@ -775,7 +779,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
 
   app.delete('/api/passkeys/:id', async (req, res, next) => {
     const requestScope = tunnelAuthController.classifyRequestScope(req);
-    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+    if (!getExternalIngress(req) && (requestScope === 'tunnel' || requestScope === 'unknown-public')) {
       return res.status(403).json({ error: 'Passkey management is disabled for tunnel scope', tunnelLocked: true });
     }
     try {
@@ -789,7 +793,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
 
   app.post('/api/auth/reset', async (req, res, next) => {
     const requestScope = tunnelAuthController.classifyRequestScope(req);
-    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+    if (!getExternalIngress(req) && (requestScope === 'tunnel' || requestScope === 'unknown-public')) {
       return res.status(403).json({ error: 'Global sign-out is disabled for tunnel scope', tunnelLocked: true });
     }
     try {
@@ -876,6 +880,25 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
 
   app.post('/api/client-auth/pairing/sessions', express.json({ limit: '64kb' }), async (req, res, next) => {
     await runWithClientCreateAuth(req, res, next, async (authContext) => {
+      if (Array.isArray(req.body?.allowedClientKinds) && req.body.allowedClientKinds.includes('browser')) {
+        if (req.body.allowedClientKinds.length !== 1) return res.status(400).json({ error: 'Browser pairing must use a browser-only link' });
+        const origin = getExternalAccessOrigin();
+        if (!origin) return res.status(409).json({ error: 'Configure an external HTTPS listener before pairing a browser' });
+        // Validate origin before creating a redeemable secret.
+        buildBrowserPairingUrl(origin, { id: '', secret: '', expiresAt: '', fingerprint: '' });
+        const result = await clientPairingRuntime.createPairingSession({
+          ...(authContext.principalId ? { principalId: authContext.principalId } : {}),
+          label: req.body?.label,
+          allowedClientKinds: ['browser'],
+          createdByClientId: clientIdFromAuthContext(authContext),
+          usesRelay: false,
+          clientExpiresAt: req.body?.clientExpiresAt,
+          expiresAt: req.body?.expiresAt ?? new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        });
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(201).json({ ...result, browserUrl: buildBrowserPairingUrl(origin, result.pairing),
+          server: { label: getServerLabel(), candidates: [{ type: 'tunnel', url: origin, priority: 10 }] } });
+      }
       let candidates: Awaited<ReturnType<typeof pairingServerCandidates>>;
       try {
         candidates = await pairingServerCandidates(req, {
@@ -991,6 +1014,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
         res.setHeader('Retry-After', String(rateLimit.retryAfter ?? 1));
         return res.status(429).json({ error: 'Invalid or expired pairing session' });
       }
+      if (req.body?.clientKind === 'browser') return res.status(400).json({ error: 'Use the same-origin browser pairing page' });
       const result = await clientPairingRuntime.redeemPairingSession({
         pairingId: req.body?.pairingId,
         secret: req.body?.secret,
@@ -1024,6 +1048,48 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
       }
       next(error);
     }
+  });
+
+  app.get(BROWSER_PAIRING_PATH, (req, res) => {
+    if (!getExternalIngress(req)) return res.status(404).end();
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Content-Security-Policy', browserPairingPage.contentSecurityPolicy);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    return res.type('html').send(browserPairingPage.html);
+  });
+
+  app.post(BROWSER_PAIRING_REDEEM_PATH, express.json({ limit: '16kb' }), async (req, res, next) => {
+    try {
+      const ingress = getExternalIngress(req);
+      if (!ingress || req.headers.origin !== ingress.origin) return res.status(403).json({ error: 'Same-origin browser request required' });
+      const rateLimit = checkPairingRedeemRateLimit(req);
+      if (!rateLimit.allowed) {
+        res.setHeader('Retry-After', String(rateLimit.retryAfter ?? 1));
+        return res.status(429).json({ error: 'Invalid or expired pairing session' });
+      }
+      // Fail before consuming the link if stable cookie identity is unavailable.
+      if (!await getServerId()) return res.status(503).json({ error: 'Host identity is unavailable' });
+      const result = await clientPairingRuntime.redeemPairingSession({
+        pairingId: req.body?.pairingId,
+        secret: req.body?.secret,
+        clientKind: 'browser',
+        deviceName: req.body?.deviceName,
+        devicePlatform: req.body?.devicePlatform,
+      });
+      await uiAuthController.issueBrowserClientCookie(req, res, { token: result.token, expiresAt: result.pairing.clientExpiresAt });
+      clearPairingRedeemRateLimit(req);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({ ok: true, client: result.client });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Invalid or expired pairing session') return sendPairingRedeemError(res, error);
+      next(error);
+    }
+  });
+
+  app.delete('/auth/browser-session', async (req, res, next) => {
+    try { await uiAuthController.handleBrowserSessionDelete(req, res); }
+    catch (error) { next(error); }
   });
 
   app.get('/connect', async (req, res) => {

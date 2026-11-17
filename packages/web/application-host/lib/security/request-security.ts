@@ -1,4 +1,5 @@
 import type { IncomingHttpHeaders } from 'node:http';
+import { getExternalIngress } from '../platform/public-ingress.js';
 
 export interface SecurityRequest {
   headers: IncomingHttpHeaders;
@@ -131,6 +132,8 @@ export const createRequestSecurityRuntime = (deps: RequestSecurityDependencies) 
   };
 
   const isRequestOriginAllowed = async (req: SecurityRequest): Promise<boolean> => {
+    const external = getExternalIngress(req);
+    if (external) return req.headers.origin === external.origin;
     const originHeader = typeof req.headers.origin === 'string' ? req.headers.origin.trim() : '';
     if (!originHeader) {
       return false;

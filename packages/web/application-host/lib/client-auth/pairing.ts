@@ -4,16 +4,16 @@ import type cryptoModule from 'node:crypto';
 import pathModule from 'node:path';
 import { createPrincipalStore, type PrincipalStore } from '../ui-auth/principals.js';
 
-const STORE_VERSION = 2;
+const STORE_VERSION = 3;
 const PAIRING_ID_PREFIX = 'pair_';
 const SECRET_BYTES = 32;
 const FINGERPRINT_BYTES = 4;
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const MAX_LABEL_LENGTH = 80;
-const VALID_CLIENT_KINDS = new Set(['mobile', 'desktop']);
+const VALID_CLIENT_KINDS = new Set(['mobile', 'desktop', 'browser']);
 const GENERIC_REDEEM_ERROR = 'Invalid or expired pairing session';
 
-type ClientKind = 'desktop' | 'mobile';
+type ClientKind = 'desktop' | 'mobile' | 'browser';
 
 interface PairingSession {
   principalId: string;
@@ -23,6 +23,7 @@ interface PairingSession {
   createdAt: string;
   createdByClientId: string | null;
   expiresAt: string;
+  clientExpiresAt: string | null;
   fingerprint: string;
   id: string;
   label: string | null;
@@ -43,6 +44,7 @@ interface RemoteClientCreateInput extends Record<string, unknown> {
   dedupeKey: string;
   label: string;
   profile?: string;
+  expiresAt: string | null;
   pairingId: string;
   usesRelay: boolean;
 }
@@ -71,6 +73,9 @@ interface CreatePairingInput {
   createdByClientId?: unknown;
   label?: unknown;
   usesRelay?: unknown;
+  /** Explicit null means retained until revoked; browser issuers must choose. */
+  clientExpiresAt?: unknown;
+  expiresAt?: unknown;
 }
 
 interface RedeemPairingInput {
@@ -144,6 +149,7 @@ const publicSession = (session: PairingSession) => ({
   principalId: session.principalId,
   createdAt: session.createdAt,
   expiresAt: session.expiresAt,
+  clientExpiresAt: session.clientExpiresAt,
   usedAt: session.usedAt,
   cancelledAt: session.cancelledAt,
   clientId: session.clientId,
@@ -193,7 +199,7 @@ export const createClientPairingRuntime = ({
 
   const normalizeStore = (value: unknown, legacyOwnerId: string): PairingStore => {
     const payload = asRecord(value);
-    if (!payload || payload.version !== 1 && payload.version !== STORE_VERSION) {
+    if (!payload || payload.version !== 1 && payload.version !== 2 && payload.version !== STORE_VERSION) {
       throw new Error(`Unsupported pairing store version: ${String(payload?.version)}`);
     }
     if (!Array.isArray(payload.sessions)) {
@@ -209,12 +215,17 @@ export const createClientPairingRuntime = ({
           if (!id || !secretHash) {
             throw new Error('Pairing store contains an incomplete session');
           }
-          if (payload.version === STORE_VERSION && !normalizeOptionalString(session.principalId)) throw new Error('Pairing store has an unbound principal');
+          if (payload.version !== 1 && !normalizeOptionalString(session.principalId)) throw new Error('Pairing store has an unbound principal');
+          const clientExpiresAt = session.clientExpiresAt == null ? null : normalizeTimestamp(session.clientExpiresAt);
+          if (session.clientExpiresAt != null && !clientExpiresAt) throw new Error('Pairing store has an invalid client expiration');
+          if (payload.version === STORE_VERSION && normalizeAllowedClientKinds(session.allowedClientKinds).includes('browser')
+            && !Object.hasOwn(session, 'clientExpiresAt')) throw new Error('Browser pairing has no client expiration policy');
           return {
           id,
           principalId: normalizeOptionalString(session.principalId) ?? legacyOwnerId,
           secretHash,
           createdAt: typeof session.createdAt === 'string' ? session.createdAt : nowIso(),
+          clientExpiresAt,
           expiresAt: normalizeTimestamp(session.expiresAt) || new Date(Date.now() + ttlMs).toISOString(),
           usedAt: normalizeTimestamp(session.usedAt),
           cancelledAt: normalizeTimestamp(session.cancelledAt),
@@ -256,7 +267,14 @@ export const createClientPairingRuntime = ({
     });
   };
 
-  const createPairingSession = async ({ label, allowedClientKinds, createdByClientId, usesRelay, principalId }: CreatePairingInput = {}) => {
+  const createPairingSession = async ({ label, allowedClientKinds, createdByClientId, usesRelay, principalId, clientExpiresAt, expiresAt }: CreatePairingInput = {}) => {
+    const kinds = normalizeAllowedClientKinds(allowedClientKinds);
+    const invalidExpiry = () => Object.assign(new Error('Pairing expiration must be a future timestamp; use null explicitly for a persistent device'), { statusCode: 400 });
+    if (kinds.includes('browser') && clientExpiresAt === undefined) throw invalidExpiry();
+    const clientExpiration = clientExpiresAt == null ? null : normalizeTimestamp(clientExpiresAt);
+    if (clientExpiresAt != null && (!clientExpiration || Date.parse(clientExpiration) <= Date.now())) throw invalidExpiry();
+    const linkExpiration = expiresAt === undefined ? null : normalizeTimestamp(expiresAt);
+    if (expiresAt !== undefined && (!linkExpiration || Date.parse(linkExpiration) <= Date.now())) throw invalidExpiry();
     return mutateStore(async (store) => {
       sweepExpiredSessionsFromStore(store);
       const subject = principalId ?? await principals.ownerId();
@@ -267,13 +285,14 @@ export const createClientPairingRuntime = ({
         principalId: subject,
         secretHash: hashSecret(secret),
         createdAt: nowIso(),
-        expiresAt: new Date(Date.now() + ttlMs).toISOString(),
+        expiresAt: linkExpiration ?? new Date(Date.now() + ttlMs).toISOString(),
+        clientExpiresAt: clientExpiration,
         usedAt: null,
         cancelledAt: null,
         clientId: null,
         label: normalizeStoredLabel(label),
         fingerprint: generateFingerprint(),
-        allowedClientKinds: normalizeAllowedClientKinds(allowedClientKinds),
+        allowedClientKinds: kinds,
         createdByClientId: normalizeOptionalString(createdByClientId),
         usesRelay: usesRelay === true,
       };
@@ -336,7 +355,7 @@ export const createClientPairingRuntime = ({
       const session = store.sessions.find((entry) => entry.id === normalizedId);
       if (!session) throw redeemError();
       if (session.cancelledAt || session.usedAt) throw redeemError();
-      if (Date.parse(session.expiresAt) <= Date.now()) throw redeemError();
+      if (Date.parse(session.expiresAt) <= Date.now() || session.clientExpiresAt && Date.parse(session.clientExpiresAt) <= Date.now()) throw redeemError();
       if (!session.allowedClientKinds.includes(normalizedKind)) throw redeemError();
       if (!constantTimeEqual(session.secretHash, hashSecret(normalizedSecret), crypto)) throw redeemError();
 
@@ -351,15 +370,16 @@ export const createClientPairingRuntime = ({
         label,
         principalId: session.principalId,
         clientKind: normalizedKind,
-        dedupeKey: normalizeOptionalString(dedupeKey) || `pairing:${session.id}`,
+        dedupeKey: normalizedKind === 'browser' ? `pairing:${session.id}` : normalizeOptionalString(dedupeKey) || `pairing:${session.id}`,
         authMethod: 'pairing',
+        expiresAt: session.clientExpiresAt,
         pairingId: session.id,
         deviceName,
         devicePlatform,
         deviceModel,
         appVersion,
         usesRelay: session.usesRelay === true,
-        ...(normalizedKind === 'desktop' ? { profile: 'full-control' } : {}),
+        ...(['desktop', 'browser'].includes(normalizedKind) ? { profile: 'full-control' } : {}),
       });
       session.usedAt = nowIso();
       session.clientId = result.client?.id || null;

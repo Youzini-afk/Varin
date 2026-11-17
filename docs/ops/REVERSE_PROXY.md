@@ -11,6 +11,44 @@ proxy must forward the complete origin rather than selecting only ordinary REST 
 3. Keep `VARIN_DATA_DIR` and workspaces outside immutable release directories.
 4. Terminate TLS at the proxy. Do not publish an unauthenticated plain-HTTP Varin server.
 
+## Dedicated external HTTP backend
+
+For a self-managed TLS proxy on the same machine (or a trusted private link),
+you can opt into a separate guarded HTTP listener. For example, set these
+environment variables on the Application Host before starting it:
+
+```text
+VARIN_EXTERNAL_ORIGIN=https://varin.example.com
+VARIN_EXTERNAL_LISTEN_PORT=3100
+# Optional. Defaults to loopback. Do not publish this plain-HTTP socket.
+VARIN_EXTERNAL_LISTEN_HOST=127.0.0.1
+```
+
+Point the proxy at that backend instead of the local Application Host port,
+preserving the exact public `Host` (including its port, if nonstandard),
+`Origin`, cookies and WebSocket upgrades. Do not cache the pairing page or
+requests. The guard rejects requests for a different origin, and disabling this
+listener does not make it a local entry. The original local listener and managed
+tunnel modes are unchanged. A successful bind does not verify your public TLS
+endpoint, certificate or reachability. An invalid environment configuration or
+backend bind failure leaves the ordinary local listener unaffected. Do not
+fall back to proxying that listener.
+
+An authenticated Host owner can issue a browser-only device link through
+`POST /api/client-auth/pairing/sessions` using `allowedClientKinds: ["browser"]`
+and `clientExpiresAt` (an absolute time or `null` for remembered access). Use the
+returned `browserUrl` from the HTTPS origin. The browser opens a confirmation
+page before exchanging its one-use secret. It receives a host-only Secure
+HttpOnly cookie backed by the existing device store. Remove the browser's
+record through the normal device management operation to revoke it. The paired
+browser can also send a same-origin `DELETE /auth/browser-session` to revoke its
+own grant and clear its cookies. Clearing the browser's site data still
+requires pairing again.
+
+This entry does not provision a VPS, install FRP, manage certificates, or
+replace the existing settings UI. Do not route remote HTTP clients directly to
+the ordinary local listener as a substitute for this guarded backend.
+
 ## Current realtime routes
 
 Varin no longer exposes the former OpenCode `/api/event`, `/api/global/event`, or matching

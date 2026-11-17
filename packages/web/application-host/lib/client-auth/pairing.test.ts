@@ -187,4 +187,49 @@ describe('client auth pairing runtime', () => {
     await expect(runtime.createPairingSession()).rejects.toBeInstanceOf(SyntaxError);
     expect(await fs.readFile(storePath, 'utf8')).toBe(malformed);
   });
+  it('requires an explicit valid browser-device expiration policy before creating a link', async () => {
+    const { runtime } = await makeRuntime();
+    for (const input of [undefined, 'not-a-date', '2000-01-01T00:00:00.000Z']) {
+      await expect(runtime.createPairingSession({ allowedClientKinds: ['browser'], clientExpiresAt: input })).rejects.toThrow('Pairing expiration');
+    }
+    expect(await runtime.listPendingSessions()).toEqual([]);
+    const created = await runtime.createPairingSession({ allowedClientKinds: ['browser'], clientExpiresAt: null });
+    expect(created.pairing.clientExpiresAt).toBeNull();
+  });
+
+  it('retains browser issuer expiration after reload and ignores redeemer expiration and dedupe choices', async () => {
+    const { runtime, createRuntime, remoteClientAuthRuntime } = await makeRuntime();
+    const clientExpiresAt = new Date(Date.now() + 60_000).toISOString();
+    const created = await runtime.createPairingSession({ allowedClientKinds: ['browser'], clientExpiresAt });
+    const redemption = { pairingId: created.pairing.id, secret: created.pairing.secret,
+      clientKind: 'browser', clientExpiresAt: null, expiresAt: null, dedupeKey: 'another-device' };
+    await createRuntime().redeemPairingSession(redemption);
+    expect(remoteClientAuthRuntime.createClient).toHaveBeenCalledWith(expect.objectContaining({
+      expiresAt: clientExpiresAt, profile: 'full-control', clientKind: 'browser', dedupeKey: `pairing:${created.pairing.id}`,
+    }));
+  });
+
+  it('does not redeem a still-live link after its issuer device deadline', async () => {
+    const { runtime } = await makeRuntime();
+    const now = Date.now();
+    const created = await runtime.createPairingSession({ allowedClientKinds: ['browser'], clientExpiresAt: new Date(now + 10_000).toISOString() });
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 20_000);
+    try {
+      await expect(runtime.redeemPairingSession({ pairingId: created.pairing.id, secret: created.pairing.secret, clientKind: 'browser' }))
+        .rejects.toThrow('Invalid or expired pairing session');
+    } finally { clock.mockRestore(); }
+  });
+
+  it('upgrades legacy native pairing records without changing their allowed clients', async () => {
+    const { runtime, createRuntime, storePath, remoteClientAuthRuntime } = await makeRuntime();
+    const created = await runtime.createPairingSession();
+    const legacy = JSON.parse(await fs.readFile(storePath, 'utf8'));
+    legacy.version = 2;
+    delete legacy.sessions[0].clientExpiresAt;
+    await fs.writeFile(storePath, JSON.stringify(legacy));
+    await createRuntime().redeemPairingSession({ pairingId: created.pairing.id, secret: created.pairing.secret, clientKind: 'desktop' });
+    expect(remoteClientAuthRuntime.createClient).toHaveBeenCalledWith(expect.objectContaining({ clientKind: 'desktop', profile: 'full-control', expiresAt: null }));
+    expect(JSON.parse(await fs.readFile(storePath, 'utf8')).version).toBe(3);
+  });
+
 });

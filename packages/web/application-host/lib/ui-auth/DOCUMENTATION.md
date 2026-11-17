@@ -7,6 +7,45 @@ Trusted-device access has one durable credential model: a remote client bearer t
 
 Pairing v2 is implemented by `packages/web/application-host/lib/client-auth/pairing.ts`. It stores short-lived one-time pairing sessions with hashed secrets, exposes create/cancel/redeem routes under `/api/client-auth/pairing/*`, and redeems a valid pairing secret into the same remote client token used by password/passkey trusted-device flows.
 
+### Persistent browser devices on the dedicated external listener
+
+The dedicated HTTPS-proxy listener uses the same device owner and index. Its
+configured origin is routing metadata, not identity. Only requests admitted by
+that listener can use a browser device cookie; a forged Host or forwarding header
+on the ordinary listener cannot select this authentication path. An external
+request without a password or device credential never receives trusted-local
+anonymous access.
+
+An authenticated issuer can create a browser-only Pairing v2 session with
+`allowedClientKinds: ["browser"]` and an explicit `clientExpiresAt`: an absolute
+future deadline or `null` to retain the device until revoked. `expiresAt` controls
+the independent one-time link deadline (30 minutes when omitted). The response's
+`browserUrl` is built from the configured listener origin, never request headers.
+The `/pair` GET only serves a small pairing page. Its fragment carries the existing
+v2 payload; the page removes it immediately and sends the secret only in a
+same-origin POST after the user clicks Connect. Native redemption remains bearer
+based and cannot redeem browser-only sessions into a JavaScript-visible token.
+
+The browser POST creates a full-control browser device with the issuer's deadline
+and returns its credential only as a Secure, HttpOnly, SameSite=Strict,
+`__Host-` cookie. Its name is derived from the stable Host identity and has no
+Domain attribute. Pairing clears an older UI session cookie; a presented device
+cookie takes precedence over a previous session, including after revocation.
+An explicit successful password/passkey login can switch back to a temporary UI
+session and clears the device cookie. Password/passkey and native client behavior
+on existing entrypoints is otherwise unchanged.
+
+Browser credentials survive a Host restart through `remote-clients`, without a
+second auth store or a new long-lived JWT. Browser cookie retention is capped at
+400 days and may be shorter under browser policy; it never extends a server-side
+device deadline. Clearing site data still requires pairing again. Device revocation
+publishes the committed credential index before notifying connection observers.
+Dedicated-ingress SSE and WebSocket associations use that same device identity,
+including when carried by a short-lived URL grant. `DELETE /auth/browser-session`
+revokes the current device and clears its cookie; stopping the listener does not
+revoke devices. This slice does not replace the old `/connect` tunnel-cookie flow
+or provide the complete external-access settings/deployment UI.
+
 Browser-owned URLs are a separate presentation of the same authenticated authority. Elements such as
 iframes, downloads, SSE, and WebSocket upgrades cannot attach the normal `Authorization` header, so
 `ui-auth.ts` can mint short-lived `varin_url_token` credentials scoped to explicit readable or

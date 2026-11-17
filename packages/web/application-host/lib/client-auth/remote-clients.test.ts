@@ -254,4 +254,19 @@ describe('cached credential authority', () => {
       expect(await runtime.authenticateBearerToken(created.token)).toBeNull();
     } finally { await runtime.dispose(); await fs.rm(dir, { recursive: true, force: true }); }
   });
+  it('notifies device revocation only after the credential can no longer authenticate', async () => {
+    const { dir, runtime } = await createRuntime();
+    try {
+      const issued = await runtime.createClient({ clientKind: 'browser' });
+      const observed: Array<Promise<unknown>> = [];
+      const listener = vi.fn(() => { observed.push(runtime.authenticateBearerToken(issued.token)); });
+      runtime.onClientRevoked(listener);
+      await runtime.revokeClient(issued.client.id);
+      await runtime.revokeClient(issued.client.id);
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenCalledWith(issued.client.id);
+      expect(await Promise.all(observed)).toEqual([null]);
+    } finally { await runtime.dispose(); await fs.rm(dir, { recursive: true, force: true }); }
+  });
+
 });
