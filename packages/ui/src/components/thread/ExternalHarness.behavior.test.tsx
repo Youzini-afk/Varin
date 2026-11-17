@@ -688,7 +688,7 @@ it('uses source Host configuration and model defaults, never the coordinating Ho
   api.settings.mockResolvedValue({ revision: 3, defaultAgent: 'agent', agents: [{ ...f.settings!.agents[0]!, name: 'Source Agent', defaults: { model: 'source-model' } }] });
   useThreadDraftStore.getState().patch('draft', { sourceSelection: { resourceOwner: owner, path: '/project', mode: 'live_root', contentMode: 'saved-files', captureScopes: [] }, externalModels: { agent: 'coordinator-model' } });
   await renderDraft();
-  expect(api.settings).toHaveBeenCalledWith(expect.any(AbortSignal), owner);
+  expect(api.settings).toHaveBeenCalledWith(expect.any(AbortSignal), owner, false);
   expect(f.composer?.external?.choice.model).toBe('source-model');
   expect(api.create).not.toHaveBeenCalled();
   await focusComposer();

@@ -839,6 +839,22 @@ it('keeps installation, authentication and explicit disabled intent separate wit
   expect(f.config.enabled).toBe(false);
 });
 
+it('discovers installed automatic choices without running the programs or changing configuration intent', async () => {
+  const f = await fixture({ connect: false });
+  f.config.availability = 'auto';
+  f.settings.agents.push(
+    { ...f.config, id: 'missing', command: `${process.execPath}.varin-missing` },
+    { ...f.config, id: 'disabled', availability: 'disabled', enabled: false },
+    { ...f.config, id: 'explicit', availability: 'enabled' },
+  );
+  const settings = await f.service.settings(undefined, undefined, true);
+  expect(settings.discoveredAgentIds?.filter(id => f.settings.agents.some(agent => agent.id === id))).toEqual([f.config.id]);
+  expect(settings.agents).toEqual(expect.arrayContaining(f.settings.agents));
+  expect(f.commands.map(command => command.action)).toEqual(['settings']);
+  expect(f.spawn).not.toHaveBeenCalled();
+  expect(connectCodex).not.toHaveBeenCalled();
+});
+
 it.each([true, false])('existing Agent request uses native steering only when its original preference permits it (%s)', async prefer => {
   const f = await fixture();
   const connection = await vi.mocked(connectCodex).mock.results.at(-1)!.value as HarnessConnection;

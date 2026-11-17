@@ -15,7 +15,7 @@ const workFocusIcons: Record<WorkFocusId, IconName> = {
 
 /** Agent identifies the execution backend. Varin is the currently available backend. */
 export function ThreadAgentControls({ workFocus, disabled, pending, onWorkFocusChange, onHarnessChange, harnessSelector }: {
-  harnessSelector?: Pick<React.ComponentProps<typeof HarnessSelector>, 'settings' | 'loading' | 'error' | 'onRetry' | 'onOpenChange' | 'sourceRemote'>;
+  harnessSelector?: Pick<React.ComponentProps<typeof HarnessSelector>, 'settings' | 'discoveredAgentIds' | 'loading' | 'error' | 'onRetry' | 'onOpenChange' | 'sourceRemote'>;
   workFocus: WorkFocusId; disabled: boolean; pending?: boolean;
   onWorkFocusChange(workFocus: WorkFocusId): void;
   onHarnessChange?(id: string | null): void;

@@ -92,7 +92,7 @@ export function registerExternalAgentRoutes(
     } finally { res.off('close', close); }
   });
   const fields: Record<string, string[]> = {
-    settings: ['resourceOwner'],
+    settings: ['resourceOwner', 'discover'],
     configure: ['value', 'expectedRevision', 'key', 'resourceOwner'],
     installations: ['input', 'resourceOwner'],
     'installation-log': ['id', 'resourceOwner'],
@@ -132,7 +132,8 @@ export function registerExternalAgentRoutes(
         let result: unknown;
         switch (action) {
           case 'settings':
-            result = await service.settings(controller.signal,body.resourceOwner===undefined?undefined:parseSourceResourceOwner(body.resourceOwner));
+            result = await service.settings(controller.signal,
+              body.resourceOwner === undefined ? undefined : parseSourceResourceOwner(body.resourceOwner), body.discover === true);
             break;
           case 'configure':
             result = await service.configure(

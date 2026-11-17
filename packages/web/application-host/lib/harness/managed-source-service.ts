@@ -37,7 +37,7 @@ export interface ManagedSourceServiceOptions {
   terminal?:ReturnType<typeof import('../terminal/managed-owner.js').createManagedTerminalOwner>;
   externalDetect?:(id:string,signal?:AbortSignal)=>Promise<import('@varin/application-client').ExternalAgentDetection>;
   externalInspect?:(id:string,refresh:boolean,signal?:AbortSignal)=>Promise<import('@varin/application-client').ExternalExecutorInspection>;
-  externalSettings?:(signal?:AbortSignal)=>Promise<import('@varin/application-client').ExternalAgentSettings>;
+  externalSettings?:(signal?:AbortSignal,discover?:boolean)=>Promise<import('@varin/application-client').ExternalAgentSettings>;
   externalConfigure?: (value: Pick<import('@varin/application-client').ExternalAgentSettings, 'agents' | 'defaultAgent'>, revision: number, key: string) => Promise<import('@varin/application-client').ExternalAgentSettings>;
   externalInstallations?: (input: import('@varin/application-client').ExternalAgentInstallationRequest, signal?: AbortSignal) => Promise<import('@varin/application-client').ExternalAgentInstallations>;
   externalInstallationLog?: (id: string, signal?: AbortSignal) => Promise<string>;
@@ -323,7 +323,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     async externalSettings(principal,input,signal) {
       requireReadPrincipal(principal,input.coordinatorHostId);
       if(!options.externalSettings)throw new SourceAdmissionError('source_unavailable');
-      return options.externalSettings(signal);
+      return options.externalSettings(signal, input.discover === true);
     },
     async externalFile(principal, input, signal) {
       requireReadPrincipal(principal, input.coordinatorHostId);

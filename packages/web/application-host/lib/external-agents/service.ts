@@ -550,10 +550,13 @@ export class ExternalAgentsService {
     this.sweeping = work;
     return work;
   }
-  async settings(signal?: AbortSignal, resourceOwner?:import('@varin/protocol').SourceResourceOwner): Promise<ExternalAgentSettings> {
+  async settings(signal?: AbortSignal, resourceOwner?: import('@varin/protocol').SourceResourceOwner, discover = false): Promise<ExternalAgentSettings> {
     if(resourceOwner?.kind==='managed_host'){
       if(!this.deps.managed)throw new Error('Managed external Source transport is unavailable');
-      const owner=this.deps.managed();return (await owner.source(resourceOwner,signal)).externalSettings({coordinatorHostId:owner.coordinatorHostId},signal);
+      const owner = this.deps.managed();
+      return (await owner.source(resourceOwner, signal)).externalSettings({
+        coordinatorHostId: owner.coordinatorHostId, ...(discover ? { discover } : {}),
+      }, signal);
     }
     const value = await this.command<ExternalAgentSettings>({ action: 'settings' }, signal);
     const agents = [...value.agents, ...defaults.filter((d) => !value.agents.some((a) => a.id === d.id)).map(d => ({ ...d, availability: 'auto' as const, enabled: true }))];
@@ -566,6 +569,7 @@ export class ExternalAgentsService {
       profiles: [...EXTERNAL_AGENT_PROFILES],
       host: { platform: process.platform, architecture: process.arch },
       agents, ...(detections.length ? { detections } : {}),
+      ...(discover ? { discoveredAgentIds: await this.discoverPrograms(agents, signal) } : {}),
     };
   }
   async configure(value: Pick<ExternalAgentSettings, 'agents' | 'defaultAgent'>, expectedRevision: number, key: string, resourceOwner?: import('@varin/protocol').SourceResourceOwner) {
@@ -632,17 +636,41 @@ export class ExternalAgentsService {
     if (!config) throw new ExternalAgentError('agent_missing', 'External Agent configuration is unavailable');
     return config;
   }
-  private async executable(
-    config: ExternalAgentConfiguration,
-  ): Promise<{ executable: string; command: string; args: string[]; env: NodeJS.ProcessEnv }> {
+  private launchEnvironment(): NodeJS.ProcessEnv {
+    return { ...process.env, ...this.environment.getLoginShellEnvSnapshot() };
+  }
+  private async resolveExecutable(config: ExternalAgentConfiguration, env: NodeJS.ProcessEnv) {
     const profile = getExternalAgentProfile(config.profileId ?? config.id);
     assertProfilePlatform(profile, process.platform, process.arch);
-    const env = { ...process.env, ...this.environment.getLoginShellEnvSnapshot() };
     const executable = path.isAbsolute(config.command)
       ? config.command
       : this.environment.searchPathFor(config.command, env.PATH ?? env.Path) ?? await findInstalledExternalExecutable(config);
     if (!executable || !(await stat(executable).catch(() => null))?.isFile())
       throw new ExternalAgentError('program_missing', `Cannot find ${config.command} on this Host`);
+    return executable;
+  }
+  private async discoverPrograms(agents: ExternalAgentConfiguration[], signal?: AbortSignal) {
+    const candidates = agents.filter(agent => agent.enabled && agent.availability === 'auto');
+    if (candidates.length === 0) return [];
+    signal?.throwIfAborted();
+    const env = this.launchEnvironment();
+    const found = await Promise.all(candidates.map(async agent => {
+      try {
+        await this.resolveExecutable(agent, env);
+        return agent.id;
+      } catch (error) {
+        if (error instanceof ExternalAgentError && ['program_missing', 'platform_unsupported'].includes(error.code)) return null;
+        throw error;
+      }
+    }));
+    signal?.throwIfAborted();
+    return found.filter(id => id !== null);
+  }
+  private async executable(
+    config: ExternalAgentConfiguration,
+  ): Promise<{ executable: string; command: string; args: string[]; env: NodeJS.ProcessEnv }> {
+    const env = this.launchEnvironment();
+    const executable = await this.resolveExecutable(config, env);
     if (process.platform === 'win32' && /\.cmd$/i.test(executable)) {
       // npm shims invoke a JS entry point; run that entry directly without a shell quoting layer.
       const shim = await readFile(executable, 'utf8');

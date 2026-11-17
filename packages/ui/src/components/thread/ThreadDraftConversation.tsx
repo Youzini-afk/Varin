@@ -67,10 +67,11 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   const sourceOwnerKey = JSON.stringify(sourceOwner ?? { kind: 'local' });
   const sourceRemote = Boolean(sourceOwner && sourceOwner.kind !== 'local');
   const [agentSelectorOpened, setAgentSelectorOpened] = React.useState(false);
-  const sourceAgents = useSourceExternalAgents(sourceOwner, sourceRemote && (Boolean(draft.harnessId) || agentSelectorOpened));
+  const sourceAgents = useSourceExternalAgents(sourceOwner, agentSelectorOpened || (sourceRemote && Boolean(draft.harnessId)), agentSelectorOpened);
   const externalSettings = sourceRemote ? sourceAgents.settings : localExternalSettings;
-  const harnessSelector = { settings: externalSettings, sourceRemote, loading: sourceRemote && sourceAgents.loading,
-    error: sourceRemote ? sourceAgents.error : undefined, onRetry: sourceAgents.retry,
+  const harnessSelector = { settings: externalSettings, sourceRemote, loading: sourceAgents.loading,
+    discoveredAgentIds: sourceAgents.settings?.discoveredAgentIds,
+    error: sourceAgents.error, onRetry: sourceAgents.retry,
     onOpenChange: (open: boolean) => { if (open) { if (agentSelectorOpened) sourceAgents.retry(); else setAgentSelectorOpened(true); } } };
   const externalChoiceKey = draft.harnessId ? sourceRemote ? JSON.stringify([sourceOwnerKey, draft.harnessId]) : draft.harnessId : '';
   const workFocus = useThreadWorkFocus(draftKey, draft.workspacePath);

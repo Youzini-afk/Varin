@@ -2,8 +2,8 @@ import React from 'react';
 import { createExternalAgentsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type ExternalAgentSettings } from '@varin/application-client';
 import type { SourceResourceOwner } from '@varin/protocol';
 
-/** Read configured agents from the execution source, never discover or start programs. */
-export function useSourceExternalAgents(owner: SourceResourceOwner | undefined, enabled: boolean) {
+/** Read the execution Host's configuration and optionally locate installed programs. */
+export function useSourceExternalAgents(owner: SourceResourceOwner | undefined, enabled: boolean, discover: boolean) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const ownerKey = JSON.stringify(owner ?? { kind: 'local' });
   const scope = `${host}:${ownerKey}`;
@@ -12,13 +12,14 @@ export function useSourceExternalAgents(owner: SourceResourceOwner | undefined, 
   React.useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
-    setState({ scope, loading: true });
-    void createExternalAgentsHttpAPI(host).settings(controller.signal, JSON.parse(ownerKey)).then(settings => {
+    setState(previous => ({ scope, settings: previous.scope === scope ? previous.settings : undefined, loading: true }));
+    void createExternalAgentsHttpAPI(host).settings(controller.signal, JSON.parse(ownerKey), discover).then(settings => {
       if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setState({ scope, settings, loading: false });
     }).catch(error => {
-      if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setState({ scope, error: error instanceof Error ? error.message : String(error), loading: false });
+      if (!controller.signal.aborted && host === getRuntimeEndpointGeneration())
+        setState(previous => ({ ...previous, error: error instanceof Error ? error.message : String(error), loading: false }));
     });
     return () => controller.abort();
-  }, [scope, ownerKey, host, enabled, revision]);
+  }, [scope, ownerKey, host, enabled, discover, revision]);
   return { settings: state.scope === scope ? state.settings ?? null : null, error: state.scope === scope ? state.error : undefined, loading: enabled && (state.scope !== scope || state.loading), retry };
 }

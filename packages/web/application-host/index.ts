@@ -2675,7 +2675,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     externalChildSource:createManagedExternalChildSourceOwner({kernel:kernelClient,hostId,sources:createExternalSourceOwner({kernel:kernelClient,storage:kernelStorageAdapter,
       capture:{documents:documentsAuthority,prepareResources:threadResources.prepareSourceCapture,inspectInventory:(directory,signal)=>inspectSourceInventory(directory,signal)}})}),
     externalProjectSource:createManagedExternalProjectSourceOwner({kernel:kernelClient,storage:kernelStorageAdapter,hostId}),
-    externalSettings: signal=>externalAgents.settings(signal),
+    externalSettings: (signal, discover) => externalAgents.settings(signal, undefined, discover),
     externalConfigure: (value, revision, key) => externalAgents.configure(value, revision, key),
     externalInstallations: (input, signal) => externalAgents.installations(input, signal),
     externalInstallationLog: (id, signal) => externalAgents.installationLog(id, signal),

@@ -70,6 +70,8 @@ export interface ExternalAgentSettings {
   capabilityCache?: Record<string, ExternalAgentCapabilityCache>;
   host?: { platform: string; architecture: string };
   detections?: ExternalAgentDetection[];
+  /** Auto-discovery configurations whose launch program was found on the execution Host. */
+  discoveredAgentIds?: string[];
 }
 export interface ExternalAgentCapabilityCache {
   capabilities: ExternalAgentCapabilities;
@@ -346,7 +348,7 @@ export interface ExternalDelegation {
   finishedAtMs?: number;
 }
 export interface ExternalAgentsAPI {
-  settings(signal?: AbortSignal, resourceOwner?: import('@varin/protocol').SourceResourceOwner): Promise<ExternalAgentSettings>;
+  settings(signal?: AbortSignal, resourceOwner?: import('@varin/protocol').SourceResourceOwner, discover?: boolean): Promise<ExternalAgentSettings>;
   configure(
     value: Pick<ExternalAgentSettings, 'agents' | 'defaultAgent'>,
     expectedRevision: number,
@@ -428,7 +430,9 @@ export function createExternalAgentsHttpAPI(generation = getRuntimeEndpointGener
     return result as T;
   };
   return {
-    settings: (signal, resourceOwner) => request('settings', resourceOwner ? {resourceOwner} : {}, signal),
+    settings: (signal, resourceOwner, discover) => request('settings', {
+      ...(resourceOwner ? { resourceOwner } : {}), ...(discover ? { discover } : {}),
+    }, signal),
     configure: (value, expectedRevision, key, resourceOwner) => request('configure', { value, expectedRevision, key, ...(resourceOwner ? {resourceOwner} : {}) }),
     installations: (input, signal, resourceOwner) => request('installations', { input, ...(resourceOwner ? {resourceOwner} : {}) }, signal),
     installationLog: (id, signal, resourceOwner) => request('installation-log', { id, ...(resourceOwner ? {resourceOwner} : {}) }, signal),
