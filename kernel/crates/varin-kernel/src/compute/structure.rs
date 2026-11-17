@@ -363,6 +363,23 @@ mod tests {
     }
 
     #[test]
+    fn bundled_typescript_queries_keep_utf8_ranges_and_editor_line_lengths_distinct() {
+        let recipe = recipe();
+        let text = "const note = '🌱';\nexport function café() { return fetch('文'); }";
+        let result = SyntaxRuntime::default()
+            .analyze(&recipe, text, &[2], 30_000, "hash", &Shared::new(false)).unwrap();
+        let symbol = &result["symbols"][0];
+        let start = symbol["range"]["startByte"].as_u64().unwrap() as usize;
+        let end = symbol["range"]["endByte"].as_u64().unwrap() as usize;
+        assert_eq!(&text[start..end], "export function café() { return fetch('文'); }");
+        assert_eq!(symbol["name"], "café");
+        assert_eq!(symbol["syntaxComplete"], true);
+        assert_eq!(result["calls"][0]["literal"], "文");
+        assert_eq!(result["hits"][0]["class"], "name");
+        assert_eq!(result["lineLengths"][0], "const note = '🌱';".encode_utf16().count());
+    }
+
+    #[test]
     fn repeated_documents_share_compilation_without_sharing_analysis() {
         let mut syntax = SyntaxRuntime::default();
         let recipe = recipe();
