@@ -467,6 +467,9 @@ export const installCloudRuntimeDependencies = (
       const pdfjsEntry = webRequire.resolve('pdfjs-dist/legacy/build/pdf.mjs');
       const pdfRequire = createRequire(pdfjsEntry);
       const canvas = pdfRequire('@napi-rs/canvas');
+      if (pdfRequire('@napi-rs/canvas/package.json').version !== webRequire('@napi-rs/canvas/package.json').version) {
+        throw new Error('PDF.js and Host previews resolved different native Canvas versions');
+      }
       const surface = canvas.createCanvas(2, 2);
       const context = surface.getContext('2d');
       context.fillStyle = '#ff0000';
