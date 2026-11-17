@@ -40,6 +40,7 @@ it('uses the real guarded listener and settings store across enable, restart, an
   const construct = () => {
     const store = createSettingsFileStore({ filePath });
     return createSelfHostedAccess({
+      verifyEndpoint: async () => false,
       createIngress: cfg => createPublicIngress({
         ...cfg,
         onRequest(request, response) {
@@ -114,6 +115,8 @@ it('rejects invalid FRP transport and does not expose credential references in t
   expect(json).toContain('"provider":"frp"');
   expect(json).not.toContain('VARIN_FRP_TOKEN');
   expect(json).not.toContain('ca.pem');
+  const local = await access.snapshot(true);
+  expect(local.entry?.configuration).toMatchObject({ frp: { tokenEnv: 'VARIN_FRP_TOKEN_HOME', server: { tls: { caFile: expect.stringContaining('ca.pem') } } } });
 });
 
 it('guards state changes and treats environment configuration as read only', async () => {
@@ -123,13 +126,20 @@ it('guards state changes and treats environment configuration as read only', asy
   registerExternalAccessRoutes(app, {
     json: express.json(),
     authorize: (req, action) => action === 'read' || req.headers['x-test-owner'] === 'yes',
-    snapshot: async () => ({ source: 'environment', entry: null, phase: 'unverified', listener: null }),
+    includeOperatorDetails: request => request.headers['x-test-owner'] === 'yes',
+    snapshot: async (detail) => ({
+      source: 'environment', entry: null, phase: 'unverified', listener: null,
+      ...(detail ? { error: 'operator diagnostic' } : {}),
+    }),
     save: f, actions: { enable: f, disable: f, retry: f },
   });
   const api = supertest(app);
   await api.post('/api/varin/external-access/enable').send({ expectedRevision: 1 }).expect(403);
   await api.post('/api/varin/external-access/enable').set('x-test-owner', 'yes').send({ expectedRevision: 1 }).expect(409);
-  await api.get('/api/varin/external-access').expect('Cache-Control', 'no-store').expect(200);
+  const ordinary = await api.get('/api/varin/external-access').expect('Cache-Control', 'no-store').expect(200);
+  expect(ordinary.body.error).toBeUndefined();
+  const operator = await api.get('/api/varin/external-access').set('x-test-owner', 'yes').expect(200);
+  expect(operator.body.error).toBe('operator diagnostic');
   expect(writes).toBe(0);
 });
 
@@ -149,6 +159,7 @@ it('keeps the FRP backend fenced until provider publish and fences on provider d
   let disconnect: ((failure: FrpTunnelError) => void) | undefined;
   let stops = 0;
   const access = createSelfHostedAccess({
+    verifyEndpoint: async () => false,
     env: { VARIN_FRPC_PATH: join(tmpdir(), 'unused-frpc') },
     createIngress: cfg => createPublicIngress({
       ...cfg, onRequest(_req, res) { res.writeHead(204).end(); }, onUpgrade(_req, socket) { socket.destroy(); },

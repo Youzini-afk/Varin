@@ -16,6 +16,7 @@ export interface CliOptions extends Record<string, unknown> {
   disabled?: boolean | undefined;
   dryRun?: boolean | undefined;
   envSnapshot?: boolean | undefined;
+  expectedRevision?: string | undefined;
   explicitPort?: boolean | undefined;
   explicitQr?: boolean | undefined;
   explicitUiPassword?: boolean | undefined;

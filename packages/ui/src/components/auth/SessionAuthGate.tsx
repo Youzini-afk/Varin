@@ -41,6 +41,7 @@ const STATUS_CHECK_ENDPOINT = '/auth/session';
 // answers (200/401/429) are never retried.
 const TRANSIENT_RETRY_MAX_ATTEMPTS = 4;
 const TRANSIENT_RETRY_BASE_DELAY_MS = 1_500;
+const FOREGROUND_RECHECK_DELAY_MS = 100;
 const TRUST_DEVICE_STORAGE_KEY = 'varin.uiAuth.trustDevice';
 const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
 const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
@@ -100,8 +101,9 @@ const desktopClientAuthMetadata = (): { clientKind?: string; dedupeKey?: string 
   };
 };
 
-const fetchSessionStatus = async (): Promise<Response> => {
+const fetchSessionStatus = async (signal: AbortSignal): Promise<Response> => {
   const response = await runtimeFetch(STATUS_CHECK_ENDPOINT, {
+    signal,
     method: 'GET',
     credentials: 'include',
     headers: {
@@ -411,6 +413,15 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   const transientRetryAttemptRef = React.useRef(0);
   const transientRetryTimerRef = React.useRef<number | null>(null);
   const checkStatusRef = React.useRef<(() => Promise<void>) | null>(null);
+  const statusRequestRef = React.useRef<AbortController | null>(null);
+  const browserDeviceRuntimeRef = React.useRef<RuntimeIdentity | null>(null);
+  const foregroundCheckTimerRef = React.useRef<number | null>(null);
+  const clearForegroundCheck = React.useCallback(() => {
+    if (foregroundCheckTimerRef.current !== null) {
+      window.clearTimeout(foregroundCheckTimerRef.current);
+      foregroundCheckTimerRef.current = null;
+    }
+  }, []);
 
   const clearTransientRetry = React.useCallback(() => {
     if (transientRetryTimerRef.current !== null) {
@@ -441,19 +452,27 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
 
   const checkStatus = React.useCallback(async () => {
     const runtime = captureRuntimeIdentity();
+    statusRequestRef.current?.abort();
+    const controller = new AbortController();
+    statusRequestRef.current = controller;
+    const isCurrent = () => statusRequestRef.current === controller && !controller.signal.aborted && isRuntimeIdentityActive(runtime);
     setState((prev) => (prev === 'authenticated' ? prev : 'pending'));
     try {
       const [response, latestPasskeyStatus] = await Promise.all([
-        fetchSessionStatus(),
+        fetchSessionStatus(controller.signal),
         refreshPasskeyStatus(runtime),
       ]);
       const responseText = await response.text();
 
-        if (!isRuntimeIdentityActive(runtime)) {
+        if (!isCurrent()) {
           return;
         }
 
         if (response.ok) {
+          let data: { authenticated?: boolean; browserDevice?: { id?: string } } | null = null;
+          try { data = JSON.parse(responseText); } catch { /* Older Hosts may omit session metadata. */ }
+          browserDeviceRuntimeRef.current = data?.authenticated === true && typeof data.browserDevice?.id === 'string' && data.browserDevice.id.length > 0
+            ? runtime : null;
           resetTransientRetry();
           setState('authenticated');
           setIsTunnelLocked(false);
@@ -462,7 +481,8 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
           return;
         }
         if (response.status === 401) {
-          let data: { tunnelLocked?: boolean; debug?: { hasRefreshToken: boolean; message: string } } = {};
+          browserDeviceRuntimeRef.current = null;
+          let data: { tunnelLocked?: boolean; clientAuthRequired?: boolean } = {};
           try {
             data = JSON.parse(responseText);
           } catch {
@@ -471,7 +491,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
           resetTransientRetry();
           setIsTunnelLocked(data.tunnelLocked === true);
           setPasskeyStatus(latestPasskeyStatus);
-          setState('locked');
+          setState(data.clientAuthRequired === true && data.tunnelLocked !== true ? 'pairing-required' : 'locked');
           setRetryAfter(undefined);
           return;
         }
@@ -494,7 +514,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       setState('error');
       setIsTunnelLocked(false);
     } catch (error) {
-      if (!isRuntimeIdentityActive(runtime)) {
+      if (!isCurrent()) {
         return;
       }
       console.warn('Failed to check session status:', error);
@@ -509,6 +529,8 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       if (scheduleTransientRetry()) return;
       setState('error');
       setIsTunnelLocked(false);
+    } finally {
+      if (statusRequestRef.current === controller) statusRequestRef.current = null;
     }
   }, [refreshPasskeyStatus, resetTransientRetry, scheduleTransientRetry]);
 
@@ -518,10 +540,36 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
 
   React.useEffect(() => {
     void checkStatus();
+    return () => { statusRequestRef.current?.abort(); statusRequestRef.current = null; };
   }, [checkStatus]);
 
   React.useEffect(() => {
+    const recheckBrowserDevice = () => {
+      const runtime = browserDeviceRuntimeRef.current;
+      if (!runtime || !isRuntimeIdentityActive(runtime) || document.visibilityState === 'hidden'
+        || statusRequestRef.current || transientRetryTimerRef.current !== null || foregroundCheckTimerRef.current !== null) return;
+      // A foreground transition commonly fires both focus and visibilitychange.
+      // Coalesce those events; there is no periodic session polling.
+      foregroundCheckTimerRef.current = window.setTimeout(() => {
+        foregroundCheckTimerRef.current = null;
+        if (!isRuntimeIdentityActive(runtime) || document.visibilityState === 'hidden' || statusRequestRef.current) return;
+        resetTransientRetry();
+        void checkStatus();
+      }, FOREGROUND_RECHECK_DELAY_MS);
+    };
+    window.addEventListener('focus', recheckBrowserDevice);
+    document.addEventListener('visibilitychange', recheckBrowserDevice);
+    return () => {
+      window.removeEventListener('focus', recheckBrowserDevice);
+      document.removeEventListener('visibilitychange', recheckBrowserDevice);
+      clearForegroundCheck();
+    };
+  }, [checkStatus, clearForegroundCheck, resetTransientRetry]);
+
+  React.useEffect(() => {
     return subscribeRuntimeEndpointChanged(() => {
+      browserDeviceRuntimeRef.current = null;
+      clearForegroundCheck();
       cancelPasskeyCeremony();
       setPassword('');
       setErrorMessage('');
@@ -537,10 +585,10 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       setState('pending');
       void checkStatus();
     });
-  }, [checkStatus, resetTransientRetry]);
+  }, [checkStatus, clearForegroundCheck, resetTransientRetry]);
 
   React.useEffect(() => {
-    if (state === 'locked') {
+    if (state === 'locked' || state === 'pairing-required') {
       hasResyncedRef.current = false;
       preferencesSyncRef.current = null;
       setPreferencesReady(false);
@@ -580,7 +628,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   }, [apis, state]);
 
   React.useEffect(() => {
-    if (state !== 'locked' && state !== 'error' && state !== 'rate-limited') return;
+    if (state !== 'locked' && state !== 'pairing-required' && state !== 'error' && state !== 'rate-limited') return;
     dismissInitialSplash();
   }, [state]);
 
@@ -863,22 +911,30 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     return <ErrorScreen onRetry={() => void checkStatus()} errorType="rate-limit" retryAfter={retryAfter} />;
   }
 
-  if (state === 'locked') {
+  if (state === 'locked' || state === 'pairing-required') {
+    const pairingRequired = state === 'pairing-required';
     return (
       <AuthShell>
         <div className="flex flex-col items-center gap-6 w-full max-w-xs">
           <div className="flex flex-col items-center gap-1 text-center">
             <h1 className="text-xl font-semibold text-foreground">
-              {isTunnelLocked ? t('sessionAuth.locked.tunnelTitle') : t('sessionAuth.locked.unlockTitle')}
+              {pairingRequired ? t('sessionAuth.pairing.title')
+                : isTunnelLocked ? t('sessionAuth.locked.tunnelTitle') : t('sessionAuth.locked.unlockTitle')}
             </h1>
             <p className="typography-meta text-muted-foreground">
-              {isTunnelLocked
-                ? t('sessionAuth.locked.tunnelDescription')
+              {pairingRequired ? t('sessionAuth.pairing.description')
+                : isTunnelLocked ? t('sessionAuth.locked.tunnelDescription')
                 : t('sessionAuth.locked.passwordDescription')}
             </p>
           </div>
 
-          {!isTunnelLocked && (
+          {pairingRequired && (
+            <Button type="button" className="w-full" onClick={() => void checkStatus()}>
+              {t('sessionAuth.error.retry')}
+            </Button>
+          )}
+
+          {!isTunnelLocked && !pairingRequired && (
             <form onSubmit={handleSubmit} className="w-full space-y-2">
               {canUsePasskey && (
                 <Button

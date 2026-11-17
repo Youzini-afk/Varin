@@ -29,13 +29,14 @@ async function freePort(): Promise<number> {
   return address.port;
 }
 
-function send(port: number, target: string, options: { method?: string; cookie?: string; body?: unknown; origin?: string | null } = {}) {
+function send(port: number, target: string, options: { method?: string; cookie?: string; bearer?: string; body?: unknown; origin?: string | null } = {}) {
   return new Promise<{ status: number; headers: IncomingHttpHeaders; text: string; json: () => Record<string, unknown> }>((resolve, reject) => {
     const body = options.body === undefined ? undefined : JSON.stringify(options.body);
     const req = http.request({ hostname: '127.0.0.1', port, path: target, method: options.method ?? 'GET', headers: {
       Host: new URL(origin).host,
       ...(options.origin === null ? {} : { Origin: options.origin ?? origin }),
       ...(options.cookie ? { Cookie: options.cookie } : {}),
+      ...(options.bearer ? { Authorization: `Bearer ${options.bearer}` } : {}),
       ...(body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {}),
     } }, res => {
       const chunks: Buffer[] = [];
@@ -191,6 +192,41 @@ describe('persistent browser pairing through the public listener', () => {
     await host.clients.revokeClient(device.id);
     await ended;
     expect((await send(host.port, '/api/test-device', { cookie: second.cookie })).status).toBe(200);
+  });
+
+  it.each([undefined, 'test-password'])('identifies only the selected browser cookie, not a native bearer (password: %s)', async (password) => {
+    const host = await fixture(password);
+    const paired = await pairBrowser(host);
+    const browser = (await host.clients.listClients())[0]!;
+    const native = await host.clients.createClient({ label: 'Native desktop', clientKind: 'desktop' });
+    const status = await send(host.port, '/auth/session', { cookie: paired.cookie, bearer: native.token });
+    expect(status.status).toBe(200);
+    expect(status.headers['cache-control']).toBe('no-store');
+    expect(status.json()).toMatchObject({ authenticated: true, scope: 'client', browserDevice: { id: browser.id } });
+    expect(status.text).not.toContain('varin_client_');
+    const nativeOnly = await send(host.port, '/auth/session', { bearer: native.token });
+    expect(nativeOnly.status).toBe(200);
+    expect(nativeOnly.json()).not.toHaveProperty('browserDevice');
+    const ordinaryResponse = { body: {} as Record<string, unknown>, setHeader: () => {}, status() { return this; }, json(value: Record<string, unknown>) { this.body = value; return this; } };
+    await host.ui.handleSessionStatus({ headers: { cookie: paired.cookie, authorization: `Bearer ${native.token}` } }, ordinaryResponse);
+    expect(ordinaryResponse.body).not.toHaveProperty('browserDevice');
+
+    // A native bearer cannot hide the revoked selected browser or be revoked
+    // instead of it. Empty cookies must not select a fallback credential either.
+    const logout = await send(host.port, '/auth/browser-session', { method: 'DELETE', cookie: paired.cookie, bearer: native.token });
+    expect(logout.status).toBe(200);
+    expect((await send(host.port, '/auth/session', { cookie: paired.cookie, bearer: native.token })).status).toBe(401);
+    expect((await send(host.port, '/auth/session', { cookie: `${browserClientCookieName(host.serverId)}=`, bearer: native.token })).status).toBe(401);
+    expect((await send(host.port, '/auth/session', { bearer: native.token })).status).toBe(200);
+  });
+
+  it('never lets a URL grant replace a revoked selected browser cookie', async () => {
+    const host = await fixture();
+    const first = await pairBrowser(host);
+    const second = await pairBrowser(host);
+    const grant = await send(host.port, '/auth/url-token', { method: 'POST', cookie: second.cookie });
+    await send(host.port, '/auth/browser-session', { method: 'DELETE', cookie: first.cookie });
+    expect((await send(host.port, `/api/threads/observe?varin_url_token=${grant.json().token}`, { cookie: first.cookie })).status).toBe(401);
   });
 
   it('logs out by revoking only the current device and clearing its cookie', async () => {

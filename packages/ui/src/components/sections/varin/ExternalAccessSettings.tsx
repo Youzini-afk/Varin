@@ -1,6 +1,7 @@
 import React from 'react';
 import QRCode from 'qrcode';
 import { getRuntimeEndpointGeneration, runtimeFetch, subscribeRuntimeEndpointChanged, type ExternalAccessSnapshot } from '@varin/application-client';
+import { BrowserSessionSignOut } from '@/components/auth/BrowserSessionSignOut';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -11,6 +12,14 @@ import { openExternalUrl } from '@/lib/url';
 import { SettingsSection, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_HELPER_CLASS, SETTINGS_SELECT_SIZE } from '../shared/SettingsSection';
 
 interface Draft {
+  provider: 'reverse-proxy' | 'frp';
+  serverAddress: string;
+  serverPort: string;
+  serverName: string;
+  caFile: string;
+  proxyName: string;
+  remotePort: string;
+  tokenEnv: string;
   name: string;
   publicOrigin: string;
   host: string;
@@ -18,8 +27,22 @@ interface Draft {
 }
 
 const API = '/api/varin/external-access';
-const defaultDraft = (): Draft => ({ name: '', publicOrigin: '', host: '127.0.0.1', port: '3100' });
+const defaultDraft = (): Draft => ({
+  provider: 'reverse-proxy', name: '', publicOrigin: '', host: '127.0.0.1', port: '3100',
+  serverAddress: '', serverPort: '7000', serverName: '', caFile: '', proxyName: 'varin', remotePort: '18080', tokenEnv: 'VARIN_FRP_TOKEN',
+});
 const toDraft = (snapshot: ExternalAccessSnapshot): Draft => snapshot.entry ? {
+  ...defaultDraft(),
+  provider: snapshot.entry.configuration.provider,
+  ...(snapshot.entry.configuration.frp ? {
+    serverAddress: snapshot.entry.configuration.frp.server.address,
+    serverPort: String(snapshot.entry.configuration.frp.server.port),
+    serverName: snapshot.entry.configuration.frp.server.tls.serverName,
+    caFile: snapshot.entry.configuration.frp.server.tls.caFile,
+    proxyName: snapshot.entry.configuration.frp.proxy.name,
+    remotePort: String(snapshot.entry.configuration.frp.proxy.remotePort),
+    tokenEnv: snapshot.entry.configuration.frp.tokenEnv,
+  } : {}),
   name: snapshot.entry.configuration.name,
   publicOrigin: snapshot.entry.configuration.publicOrigin,
   host: snapshot.entry.configuration.backend.host,
@@ -40,7 +63,7 @@ const phaseKeys: Record<ExternalAccessSnapshot['phase'], I18nKey> = {
 // checked against the captured endpoint generation before they can affect UI.
 export function ExternalAccessSettings() {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
-  return <ExternalAccessPanel key={host} host={host} />;
+  return <><BrowserSessionSignOut /><ExternalAccessPanel key={host} host={host} /></>;
 }
 
 function ExternalAccessPanel({ host }: { host: number }) {
@@ -105,7 +128,7 @@ function ExternalAccessPanel({ host }: { host: number }) {
   };
 
   const environmentManaged = snapshot?.source === 'environment';
-  const readOnly = environmentManaged || snapshot?.entry?.configuration.provider === 'frp';
+  const readOnly = environmentManaged || (snapshot?.entry?.configuration.provider === 'frp' && !snapshot.entry.configuration.frp);
   const dirty = snapshot !== null && JSON.stringify(draft) !== JSON.stringify(toDraft(snapshot));
   const transition = snapshot?.phase === 'starting' || snapshot?.phase === 'reconnecting' || snapshot?.phase === 'stopping';
   const mutationBlocked = busy || !snapshot || environmentManaged || conflict || needsRefresh;
@@ -119,8 +142,22 @@ function ExternalAccessPanel({ host }: { host: number }) {
         if (origin.protocol !== 'https:' || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) throw new Error();
         const port = Number(draft.port);
         if (!/^\d+$/.test(draft.port) || !Number.isInteger(port) || port < 1 || port > 65535 || !draft.host.trim()) throw new Error();
-        configuration = { name: draft.name.trim(), provider: 'reverse-proxy', publicOrigin: origin.origin,
+        configuration = { name: draft.name.trim(), provider: draft.provider, publicOrigin: origin.origin,
           backend: { host: draft.host.trim(), port } };
+        if (draft.provider === 'frp') {
+          const serverPort = Number(draft.serverPort), remotePort = Number(draft.remotePort);
+          if (!['127.0.0.1', '::1'].includes(draft.host.trim())
+            || ![draft.serverPort, draft.remotePort].every(value => /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 65535)
+            || !draft.serverAddress.trim() || !draft.serverName.trim() || !draft.caFile.trim()
+            || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(draft.proxyName.trim())
+            || !/^VARIN_FRP_TOKEN(?:_[A-Z0-9_]+)?$/.test(draft.tokenEnv.trim())) {
+            setError(t('settings.varin.externalAccess.frp.invalid')); return;
+          }
+          configuration = { ...configuration, frp: {
+            server: { address: draft.serverAddress.trim(), port: serverPort, tls: { caFile: draft.caFile.trim(), serverName: draft.serverName.trim() } },
+            proxy: { name: draft.proxyName.trim(), remotePort }, tokenEnv: draft.tokenEnv.trim(),
+          } };
+        }
       } catch {
         setError(t('settings.varin.externalAccess.invalidConfiguration'));
         return;
@@ -230,6 +267,16 @@ function ExternalAccessPanel({ host }: { host: number }) {
         </div>}
 
         {!readOnly && <form className="space-y-3" onSubmit={event => { event.preventDefault(); void mutate('save'); }}>
+          <div className="space-y-1.5">
+            <label className={SETTINGS_FIELD_LABEL_CLASS} htmlFor={`${fieldId}-provider`}>{t('settings.varin.externalAccess.provider')}</label>
+            <Select value={draft.provider} disabled={busy} onValueChange={value => setDraft(previous => ({ ...previous, provider: value as Draft['provider'] }))}>
+              <SelectTrigger id={`${fieldId}-provider`} size={SETTINGS_SELECT_SIZE}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="reverse-proxy">{t('settings.varin.externalAccess.reverseProxy')}</SelectItem>
+                <SelectItem value="frp">{t('settings.varin.externalAccess.frp.label')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <div className="grid gap-3 @md:grid-cols-2">
             <div className="space-y-1.5">
               <label className={SETTINGS_FIELD_LABEL_CLASS} htmlFor={`${fieldId}-origin`}>{t('settings.varin.externalAccess.publicOrigin')}</label>
@@ -250,6 +297,25 @@ function ExternalAccessPanel({ host }: { host: number }) {
                 onChange={event => setDraft(value => ({ ...value, port: event.target.value }))} />
             </div>
           </div>
+          {draft.provider === 'frp' && <fieldset className="space-y-3 rounded-lg border border-border p-3">
+            <legend className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.varin.externalAccess.frp.label')}</legend>
+            <p className={SETTINGS_HELPER_CLASS}>{t('settings.varin.externalAccess.frp.operatorHint')}</p>
+            <div className="grid gap-3 @md:grid-cols-2">
+              {([
+                ['serverAddress', 'serverAddress', 'text'], ['serverPort', 'serverPort', 'number'],
+                ['serverName', 'serverName', 'text'], ['caFile', 'caFile', 'text'],
+                ['proxyName', 'proxyName', 'text'], ['remotePort', 'remotePort', 'number'],
+                ['tokenEnv', 'tokenEnv', 'text'],
+              ] as const).map(([key, label, type]) => <div key={key} className="space-y-1.5">
+                <label className={SETTINGS_FIELD_LABEL_CLASS} htmlFor={`${fieldId}-${key}`}>{t(`settings.varin.externalAccess.frp.${label}`)}</label>
+                <Input id={`${fieldId}-${key}`} type={type} required value={draft[key]} disabled={busy}
+                  {...(type === 'number' ? { min: 1, max: 65535, step: 1 } : {})}
+                  autoComplete="off" spellCheck={false}
+                  onChange={event => setDraft(value => ({ ...value, [key]: event.target.value }))} />
+              </div>)}
+            </div>
+            <p className={SETTINGS_HELPER_CLASS}>{t('settings.varin.externalAccess.frp.secretHint')}</p>
+          </fieldset>}
           <p className={SETTINGS_HELPER_CLASS}>{t('settings.varin.externalAccess.hostScope')}</p>
           {snapshot.entry?.enabled && dirty && <p role="status" className="typography-meta text-[var(--status-warning)]">{t('settings.varin.externalAccess.applyWarning')}</p>}
           <div className="flex flex-wrap items-center gap-2">

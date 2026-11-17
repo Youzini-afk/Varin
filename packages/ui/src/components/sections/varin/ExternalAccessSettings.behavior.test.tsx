@@ -16,6 +16,7 @@ vi.mock('@varin/application-client', () => ({
   getRuntimeEndpointGeneration: () => fixture.host,
   subscribeRuntimeEndpointChanged: (callback: () => void) => { fixture.listeners.add(callback); return () => { fixture.listeners.delete(callback); }; },
 }));
+vi.mock('@/components/auth/BrowserSessionSignOut', () => ({ BrowserSessionSignOut: () => null }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: fixture.translate, locale: 'en' }) }));
 vi.mock('@/lib/url', () => ({ openExternalUrl: fixture.open }));
 vi.mock('qrcode', () => ({ default: { toDataURL: async () => 'data:image/png;base64,cXI=' } }));
@@ -163,7 +164,7 @@ it('distinguishes startup failure from public verification and uses the revision
   expect(container.textContent).toContain(prefix + 'phase.disabled');
 });
 
-it.each(['environment', 'frp'])('does not expose an overwrite form for %s-managed entries', async mode => {
+it.each(['environment', 'frp'])('does not expose an overwrite form for %s-managed or redacted entries', async mode => {
   const snapshot = saved();
   if (mode === 'environment') snapshot.source = 'environment'; else snapshot.entry.configuration.provider = 'frp';
   fixture.fetch.mockResolvedValueOnce(response(snapshot)); await mount();
@@ -229,7 +230,7 @@ it('fixes a temporary device deadline at link creation, separately from the one-
   fixture.fetch.mockResolvedValueOnce(response(listening())).mockResolvedValueOnce(response({ error: 'blocked' }, 403));
   await mount(); await click('addBrowser');
   await act(async () => {
-    const select = container.querySelector('select')!;
+    const select = container.querySelector('[role="dialog"] select')!;
     select.querySelectorAll('option').forEach(option => { option.selected = option.value === 'temporary'; });
     select.dispatchEvent(new window.Event('input', { bubbles: true }));
   });
@@ -253,4 +254,54 @@ it('does not automatically retry pairing after a lost response or expose a stale
   await act(async () => [...container.querySelectorAll('button')].find(element => element.textContent === 'Close dialog')!.click());
   await act(async () => done(response({ browserUrl: 'https://home.example.com/connect/browser#late-fixture', pairing: { expiresAt: new Date(Date.now() + 60_000).toISOString() } }, 201)));
   expect(container.querySelector('[role="dialog"]')).toBeNull(); expect(fixture.copy).not.toHaveBeenCalled();
+});
+
+const frpSettings = () => ({
+  server: { address: 'frp.example.com', port: 7000, tls: { caFile: '/etc/varin/ca.pem', serverName: 'frp.example.com' } },
+  proxy: { name: 'varin', remotePort: 18080 }, tokenEnv: 'VARIN_FRP_TOKEN_HOME',
+});
+const frpSaved = (revision = 1) => ({ ...saved(revision), entry: { ...saved(revision).entry,
+  configuration: { ...saved(revision).entry.configuration, provider: 'frp', frp: frpSettings() } } });
+const chooseProvider = async (provider: string) => { await act(async () => {
+  const select = container.querySelector('form select')!;
+  select.querySelectorAll('option').forEach(option => { option.selected = option.value === provider; });
+  select.dispatchEvent(new window.Event('input', { bubbles: true }));
+}); };
+
+it('creates an existing FRP entry using only operator settings and a token environment reference, without enabling it', async () => {
+  fixture.fetch.mockResolvedValueOnce(response({ entry: null, phase: 'disabled', source: 'settings', listener: null }))
+    .mockResolvedValueOnce(response(frpSaved()));
+  await mount(); await chooseProvider('frp');
+  await edit('origin', 'https://home.example.com'); await edit('serverAddress', 'frp.example.com');
+  await edit('serverName', 'frp.example.com'); await edit('caFile', '/etc/varin/ca.pem'); await edit('tokenEnv', 'VARIN_FRP_TOKEN_HOME');
+  expect(container.textContent).toContain(prefix + 'frp.secretHint');
+  expect(container.querySelector('input[type="password"]')).toBeNull();
+  await click('save');
+  expect(body(1)).toEqual({ expectedRevision: null, configuration: {
+    name: '', provider: 'frp', publicOrigin: 'https://home.example.com', backend: { host: '127.0.0.1', port: 3100 }, frp: frpSettings(),
+  } });
+  expect(fixture.fetch).toHaveBeenCalledTimes(2);
+  expect(container.textContent).toContain(prefix + 'phase.disabled');
+});
+
+it('loads and replaces an existing FRP configuration using its original revision', async () => {
+  fixture.fetch.mockResolvedValueOnce(response(frpSaved(4))).mockResolvedValueOnce(response(frpSaved(5)));
+  await mount(); expect(field('caFile').value).toBe('/etc/varin/ca.pem'); expect(field('tokenEnv').value).toBe('VARIN_FRP_TOKEN_HOME');
+  await edit('remotePort', '19090'); await click('save');
+  expect(body(1).expectedRevision).toBe(4);
+  expect(body(1).configuration.frp).toEqual({ ...frpSettings(), proxy: { name: 'varin', remotePort: 19090 } });
+});
+
+it('preserves FRP fields on a conflicting replacement and requires review before using the latest revision', async () => {
+  fixture.fetch.mockResolvedValueOnce(response(frpSaved(1))).mockResolvedValueOnce(response({}, 409))
+    .mockResolvedValueOnce(response(frpSaved(2))).mockResolvedValueOnce(response(frpSaved(3)));
+  await mount(); await edit('proxyName', 'new-proxy'); await click('save');
+  expect(field('proxyName').value).toBe('new-proxy'); expect(button('save').disabled).toBe(true);
+  await click('keepDraft'); await click('save');
+  expect(body(3).expectedRevision).toBe(2); expect(body(3).configuration.frp.proxy.name).toBe('new-proxy');
+});
+
+it.each([['tokenEnv', 'raw-token-do-not-send'], ['host', '0.0.0.0'], ['serverPort', '65536']])('rejects invalid FRP %s without transmitting a mutation', async (name, value) => {
+  fixture.fetch.mockResolvedValueOnce(response(frpSaved())); await mount(); await edit(name, value); await click('save');
+  expect(fixture.fetch).toHaveBeenCalledTimes(1); expect(container.textContent).toContain(prefix + 'frp.invalid');
 });

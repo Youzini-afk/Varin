@@ -111,7 +111,11 @@ export function readExternalAccessRecord(value: unknown) {
   };
 }
 
-export function externalAccessConfigurationView(configuration: ExternalAccessConfiguration): ExternalAccessConfigurationView {
+export function externalAccessConfigurationView(configuration: ExternalAccessConfiguration, includeOperatorDetails = false): ExternalAccessConfigurationView {
   const { id, name, provider, publicOrigin, backend } = configuration;
-  return { id, name, provider, publicOrigin, backend };
+  const view = { id, name, provider, publicOrigin, backend };
+  if (configuration.provider !== 'frp' || !includeOperatorDetails) return view;
+  const { server, proxy, tokenEnv } = configuration.frp;
+  const frp = { server: { ...server, tls: { ...server.tls } }, proxy: { ...proxy }, tokenEnv };
+  return { ...view, frp };
 }

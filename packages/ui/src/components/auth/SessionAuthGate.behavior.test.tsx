@@ -5,7 +5,9 @@ import type { RuntimeAPIs } from '@varin/application-client';
 
 const state = vi.hoisted(() => ({
   desktop: false, offline: true, status: 401, baseUrl: '', runtimeKey: 'local',
+  payload: {} as Record<string, unknown>,
   endpointChanged: null as (() => void) | null,
+  fetch: vi.fn<(path: string, init?: RequestInit) => Promise<Response>>(),
   restore: vi.fn<() => Promise<void>>(),
   login: vi.fn<() => Promise<unknown>>(),
   hostsGet: vi.fn(), hostsSet: vi.fn(), switchRuntime: vi.fn(), dismissSplash: vi.fn(),
@@ -23,10 +25,7 @@ vi.mock('@varin/application-client', () => ({
   getRuntimeApiBaseUrl: () => state.baseUrl,
   getRuntimeExtraHeadersSync: () => ({}),
   getRuntimeKey: () => state.runtimeKey,
-  runtimeFetch: async () => {
-    if (state.offline) throw new Error('offline');
-    return Response.json({ authenticated: state.status === 200 }, { status: state.status });
-  },
+  runtimeFetch: state.fetch,
   subscribeRuntimeEndpointChanged: (listener: () => void) => {
     state.endpointChanged = listener;
     return () => { state.endpointChanged = null; };
@@ -63,7 +62,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   vi.spyOn(console, 'warn').mockImplementation(() => {});
-  Object.assign(state, { desktop: false, offline: true, status: 401, baseUrl: '', runtimeKey: 'local' });
+  Object.assign(state, { desktop: false, offline: true, status: 401, baseUrl: '', runtimeKey: 'local', payload: {} });
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+  state.fetch.mockImplementation(async () => {
+    if (state.offline) throw new Error('offline');
+    return Response.json({ authenticated: state.status === 200, ...state.payload }, { status: state.status });
+  });
   state.restore.mockResolvedValue(undefined);
   state.login.mockResolvedValue(null);
   releasePending = () => {};
@@ -136,4 +140,175 @@ it('discards a password completion after switching hosts', async () => {
   expect(state.hostsSet).not.toHaveBeenCalled();
   expect(state.switchRuntime).not.toHaveBeenCalled();
   expect(container.textContent).not.toContain('authenticated app');
+});
+
+
+it('offers pairing rather than a password for client-auth-required browsers and retries after pairing', async () => {
+  state.offline = false;
+  state.payload = { clientAuthRequired: true };
+  await render();
+  expect(container.textContent).toContain('sessionAuth.pairing.title');
+  expect(container.textContent).toContain('sessionAuth.pairing.description');
+  expect(container.querySelector('form')).toBeNull();
+  expect(container.querySelector('input[type="password"]')).toBeNull();
+  expect(state.dismissSplash).toHaveBeenCalled();
+  state.status = 200;
+  state.payload = {};
+  await act(async () => container.querySelector('button')!.click());
+  expect(container.textContent).toContain('authenticated app');
+});
+
+it('preserves password and legacy tunnel lock screens without browser pairing flags', async () => {
+  state.offline = false;
+  await render();
+  expect(container.textContent).toContain('sessionAuth.locked.unlockTitle');
+  expect(container.querySelector('input[type="password"]')).not.toBeNull();
+  state.payload = { tunnelLocked: true };
+  await act(async () => state.endpointChanged?.());
+  expect(container.textContent).toContain('sessionAuth.locked.tunnelTitle');
+  expect(container.textContent).not.toContain('sessionAuth.pairing.title');
+  expect(container.querySelector('input[type="password"]')).toBeNull();
+});
+
+it('leaves pairing-required state when switching to a password-protected host', async () => {
+  state.offline = false;
+  state.payload = { clientAuthRequired: true };
+  await render();
+  state.payload = {};
+  await act(async () => {
+    state.baseUrl = 'https://other-host.example';
+    state.runtimeKey = 'host:other';
+    state.endpointChanged?.();
+  });
+  expect(container.textContent).not.toContain('sessionAuth.pairing.title');
+  expect(container.querySelector('input[type="password"]')).not.toBeNull();
+});
+
+
+it('rechecks paired browser access once on foreground and unmounts protected content on a definitive 401', async () => {
+  state.offline = false;
+  state.status = 200;
+  state.payload = { browserDevice: { id: 'browser-1' } };
+  await render();
+  expect(container.textContent).toContain('authenticated app');
+  state.status = 401;
+  state.payload = { clientAuthRequired: true };
+  await act(async () => {
+    window.dispatchEvent(new dom.window.Event('focus'));
+    document.dispatchEvent(new dom.window.Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(100);
+  });
+  expect(state.fetch).toHaveBeenCalledTimes(2);
+  expect(container.textContent).not.toContain('authenticated app');
+  expect(container.textContent).toContain('sessionAuth.pairing.title');
+  expect(container.querySelector('input[type="password"]')).toBeNull();
+  await act(async () => vi.advanceTimersByTimeAsync(60_000));
+  expect(state.fetch).toHaveBeenCalledTimes(2);
+});
+
+it.each([{}, { scope: 'client' }, { scope: 'tunnel' }])('does not foreground-check non-browser sessions: %j', async payload => {
+  state.offline = false;
+  state.status = 200;
+  state.payload = payload;
+  await render();
+  await act(async () => {
+    window.dispatchEvent(new dom.window.Event('focus'));
+    document.dispatchEvent(new dom.window.Event('visibilitychange'));
+    await vi.runAllTimersAsync();
+  });
+  expect(state.fetch).toHaveBeenCalledTimes(1);
+});
+
+it('does not interpret a paired-browser network failure as revocation and bounds retries', async () => {
+  state.offline = false;
+  state.status = 200;
+  state.payload = { browserDevice: { id: 'browser-1' } };
+  await render();
+  state.offline = true;
+  await act(async () => {
+    window.dispatchEvent(new dom.window.Event('focus'));
+    await vi.runAllTimersAsync();
+  });
+  expect(state.fetch).toHaveBeenCalledTimes(6); // Initial status + foreground check + four retries.
+  expect(container.textContent).toContain('sessionAuth.error.networkTitle');
+  expect(container.textContent).not.toContain('sessionAuth.pairing.title');
+  expect(container.querySelector('input[type="password"]')).toBeNull();
+  await act(async () => vi.advanceTimersByTimeAsync(60_000));
+  expect(state.fetch).toHaveBeenCalledTimes(6);
+});
+
+it('ignores hidden transitions and coalesces foreground checks while one is running', async () => {
+  state.offline = false;
+  state.status = 200;
+  state.payload = { browserDevice: { id: 'browser-1' } };
+  await render();
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+  await act(async () => {
+    document.dispatchEvent(new dom.window.Event('visibilitychange'));
+    await vi.runAllTimersAsync();
+  });
+  expect(state.fetch).toHaveBeenCalledTimes(1);
+  let finish!: (response: Response) => void;
+  state.fetch.mockImplementationOnce(() => new Promise(resolve => {
+    finish = resolve;
+    releasePending = () => resolve(Response.json({ authenticated: true }));
+  }));
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+  await act(async () => {
+    document.dispatchEvent(new dom.window.Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(100);
+    window.dispatchEvent(new dom.window.Event('focus'));
+    await vi.advanceTimersByTimeAsync(100);
+  });
+  expect(state.fetch).toHaveBeenCalledTimes(2);
+  await act(async () => finish(Response.json({ authenticated: true, browserDevice: { id: 'browser-1' } })));
+});
+
+it('aborts foreground checks and discards a late 401 even after returning to the same Host', async () => {
+  state.offline = false;
+  state.status = 200;
+  state.payload = { browserDevice: { id: 'browser-1' } };
+  await render();
+  let finish!: (response: Response) => void;
+  state.fetch.mockImplementationOnce(() => new Promise(resolve => {
+    finish = resolve;
+    releasePending = () => resolve(Response.json({ authenticated: true }));
+  }));
+  await act(async () => {
+    window.dispatchEvent(new dom.window.Event('focus'));
+    await vi.advanceTimersByTimeAsync(100);
+  });
+  const signal = state.fetch.mock.calls[1]?.[1]?.signal;
+  expect(signal?.aborted).toBe(false);
+  state.payload = {};
+  await act(async () => {
+    state.runtimeKey = 'host:other';
+    state.baseUrl = 'https://other.example';
+    state.endpointChanged?.();
+  });
+  await act(async () => {
+    state.runtimeKey = 'local';
+    state.baseUrl = '';
+    state.endpointChanged?.();
+    finish(Response.json({ clientAuthRequired: true }, { status: 401 }));
+  });
+  expect(signal?.aborted).toBe(true);
+  expect(container.textContent).toContain('authenticated app');
+  expect(container.textContent).not.toContain('sessionAuth.pairing.title');
+});
+
+it('aborts pending auth reads and removes foreground listeners when unmounted', async () => {
+  let finish!: (response: Response) => void;
+  state.fetch.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await render();
+  const signal = state.fetch.mock.calls[0]?.[1]?.signal;
+  await act(async () => root.render(null));
+  expect(signal?.aborted).toBe(true);
+  await act(async () => {
+    finish(Response.json({ authenticated: true, browserDevice: { id: 'browser-1' } }));
+    window.dispatchEvent(new dom.window.Event('focus'));
+    await vi.runAllTimersAsync();
+  });
+  expect(state.fetch).toHaveBeenCalledTimes(1);
+  expect(container.textContent).toBe('');
 });

@@ -36,6 +36,7 @@ import { statusCommand } from './lib/commands-status.js';
 import { scheduleCommand } from './lib/commands-schedule.js';
 import { threadCommand } from './lib/commands-thread.js';
 import { modelsCommand } from './lib/commands-models.js';
+import { externalAccessCommand } from './lib/commands-external-access.js';
 import { projectsCommand } from './lib/commands-projects.js';
 import { createUpdateCommand } from './lib/commands-update.js';
 import { createConnectUrlCommand } from './lib/commands-connect-url.js';
@@ -142,6 +143,7 @@ type ActionCommand = (options: CliOptions, action?: string) => Promise<unknown>;
 type TunnelCommand = (options: CliOptions, subcommand?: string | null, action?: string | null) => Promise<unknown>;
 interface CliCommands extends Record<string, StandardCommand | ActionCommand | TunnelCommand> {
   'connect-url': StandardCommand;
+  'external-access': ActionCommand;
   logs: StandardCommand;
   models: ActionCommand;
   projects: ActionCommand;
@@ -166,6 +168,7 @@ const commands: CliCommands = {
   thread: threadCommand,
   models: modelsCommand,
   projects: projectsCommand,
+  'external-access': externalAccessCommand,
   logs: logsCommand,
   startup: startupCommand,
   tunnel: tunnelCommand,
@@ -174,7 +177,7 @@ const commands: CliCommands = {
 
 async function main(): Promise<void> {
   const parsed = parseArgs();
-  const { command, subcommand, tunnelAction, startupAction, scheduleAction, threadAction, options, removedFlagErrors, helpRequested, versionRequested } = parsed;
+  const { command, subcommand, tunnelAction, startupAction, scheduleAction, threadAction, externalAccessAction, options, removedFlagErrors, helpRequested, versionRequested } = parsed;
   activeCommandOptions = options;
 
   if (versionRequested) {
@@ -204,7 +207,9 @@ async function main(): Promise<void> {
   }
 
   if (helpRequested) {
-    if (command === 'tunnel') {
+    if (command === 'external-access') {
+      await commands['external-access'](options, 'help');
+    } else if (command === 'tunnel') {
       showTunnelHelp();
     } else if (command === 'startup') {
       showStartupHelp();
@@ -221,6 +226,11 @@ async function main(): Promise<void> {
     } else {
       showHelp();
     }
+    return;
+  }
+
+  if (command === 'external-access') {
+    await commands['external-access'](options, externalAccessAction ?? undefined);
     return;
   }
 
@@ -255,7 +265,7 @@ async function main(): Promise<void> {
   }
 
   if (!commands[command]) {
-    const knownCommands = ['serve', 'stop', 'restart', 'status', 'schedule', 'thread', 'models', 'projects', 'tunnel', 'startup', 'logs', 'connect-url', 'update'];
+    const knownCommands = ['serve', 'stop', 'restart', 'status', 'schedule', 'thread', 'models', 'projects', 'external-access', 'tunnel', 'startup', 'logs', 'connect-url', 'update'];
     const suggestion = findClosestMatch(command, knownCommands);
     const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
     if (isJsonMode(options)) {

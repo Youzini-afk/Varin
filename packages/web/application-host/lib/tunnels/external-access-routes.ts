@@ -8,7 +8,8 @@ const root = '/api/varin/external-access';
 export function registerExternalAccessRoutes(app: Express, dependencies: {
   json: ReturnType<typeof import('express').json>;
   authorize(request: Request, operation: 'read' | 'write'): boolean | Promise<boolean>;
-  snapshot(): Promise<ExternalAccessSnapshot>;
+  snapshot(includeOperatorDetails?: boolean): Promise<ExternalAccessSnapshot>;
+  includeOperatorDetails?(request: Request): boolean;
   save(configuration: ExternalAccessConfiguration, expectedRevision: number): Promise<unknown>;
   actions: Record<ExternalAccessAction, (expectedRevision: number) => Promise<unknown>>;
 }) {
@@ -28,7 +29,7 @@ export function registerExternalAccessRoutes(app: Express, dependencies: {
           }
           await action(request);
         }
-        response.json(await snapshot());
+        response.json(await snapshot(dependencies.includeOperatorDetails?.(request) === true));
       } catch (error) {
         const code = (error as { code?: unknown } | null)?.code;
         if (error instanceof ExternalAccessConfigurationError || code === 'invalid_config') {

@@ -1,5 +1,6 @@
 import { isAbsolute } from 'node:path';
 import type { ExternalAccessSnapshot } from '@varin/application-client';
+import { verifyPublicEndpoint } from '../platform/external-endpoint-proof.js';
 import type { createPublicIngress, ExternalIngressConfiguration } from '../platform/public-ingress.js';
 import { externalAccessConfigurationView, parseExternalAccessConfiguration, type ExternalAccessConfiguration } from './external-access-config.js';
 import { createExternalAccessRuntime, type ExternalAccessFailureCode, type ExternalAccessRecord, type ExternalAccessRuntimeStatus } from './external-access-runtime.js';
@@ -24,10 +25,11 @@ type Options = {
   reserve(): () => void;
   env?: NodeJS.ProcessEnv;
   startFrp?: typeof startFrpTunnel;
+  verifyEndpoint?: typeof verifyPublicEndpoint;
 };
 
 export function createSelfHostedAccess(options: Options) {
-  const { env = process.env, startFrp = startFrpTunnel } = options;
+  const { env = process.env, startFrp = startFrpTunnel, verifyEndpoint = verifyPublicEndpoint } = options;
   let activeIngress: PublicIngress | null = null;
   const runtime = createExternalAccessRuntime<ExternalAccessConfiguration>({
     read: options.read,
@@ -111,7 +113,13 @@ export function createSelfHostedAccess(options: Options) {
         if (disconnected) throw Object.assign(new Error('FRP disconnected during activation'), { code: 'network_error' });
         ingress.setEnabled(true);
         activeIngress = ingress;
-        return { verification: 'unverified', fence, stop };
+        const challenge = ingress.issueEndpointProof();
+        let verified: boolean;
+        try {
+          verified = await verifyEndpoint({ origin: configuration.publicOrigin, challenge, signal: context.signal });
+        } finally { challenge.clear(); }
+        context.signal.throwIfAborted();
+        return { verification: verified ? 'verified' : 'unverified', fence, stop };
       } catch (error) {
         fence();
         await stop();
@@ -123,13 +131,13 @@ export function createSelfHostedAccess(options: Options) {
   return {
     ...runtime,
     getIngress: (): PublicIngress | null => activeIngress,
-    async snapshot(): Promise<ExternalAccessSnapshot> {
+    async snapshot(includeOperatorDetails = false): Promise<ExternalAccessSnapshot> {
       const entry = await runtime.read();
       const status = runtime.getStatus();
       const binding = activeIngress?.enabled ? activeIngress.configuration : null;
       return {
         source: 'settings',
-        entry: entry.config ? { revision: entry.revision, enabled: entry.enabled, configuration: externalAccessConfigurationView(entry.config) } : null,
+        entry: entry.config ? { revision: entry.revision, enabled: entry.enabled, configuration: externalAccessConfigurationView(entry.config, includeOperatorDetails) } : null,
         listener: binding ? { host: binding.host, port: binding.port, origin: binding.origin } : null,
         phase: phase[status.state],
         ...(status.error ? { error: status.error.message } : {}),

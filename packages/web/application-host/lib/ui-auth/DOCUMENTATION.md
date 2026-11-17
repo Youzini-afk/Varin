@@ -46,6 +46,14 @@ revokes the current device and clears its cookie; stopping the listener does not
 revoke devices. This slice does not replace the old `/connect` tunnel-cookie flow
 or provide the complete external-access settings/deployment UI.
 
+On the guarded listener, a presented browser device cookie selects device
+authority even when a native bearer or URL grant is also present. A revoked
+or empty selected cookie never falls back to those credentials.
+`GET /auth/session` reports `browserDevice` only for a valid selected device
+cookie. The paired browser settings use it to show sign-out. The public login
+gate distinguishes required pairing from password login and rechecks paired
+device auth when the app regains focus, without periodic polling.
+
 Browser-owned URLs are a separate presentation of the same authenticated authority. Elements such as
 iframes, downloads, SSE, and WebSocket upgrades cannot attach the normal `Authorization` header, so
 `ui-auth.ts` can mint short-lived `varin_url_token` credentials scoped to explicit readable or

@@ -59,6 +59,7 @@ export interface ParsedCliArgs {
   helpRequested: boolean;
   options: CliOptions;
   removedFlagErrors: string[];
+  externalAccessAction: string | null;
   scheduleAction: string | null;
   threadAction: string | null;
   startupAction: string | null;
@@ -376,6 +377,13 @@ function parseArgs(argv: readonly string[] = process.argv.slice(2)): ParsedCliAr
         options.goalTokenBudget = value;
         break;
       }
+      case 'expected-revision': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        if (!value) throw new TunnelCliError('Supply --expected-revision <number|new>.', EXIT_CODE.USAGE_ERROR);
+        options.expectedRevision = value;
+        break;
+      }
       case 'config': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
@@ -544,6 +552,7 @@ function parseArgs(argv: readonly string[] = process.argv.slice(2)): ParsedCliAr
   const startupAction = command === 'startup' ? (positional[1] || 'status') : null;
   const scheduleAction = command === 'schedule' ? (positional[1] || 'help') : null;
   const threadAction = command === 'thread' ? (positional[1] || 'help') : null;
+  const externalAccessAction = command === 'external-access' ? (positional[1] || 'status') : null;
 
   if (options.lan && typeof options.host !== 'string') {
     options.host = '0.0.0.0';
@@ -560,6 +569,7 @@ function parseArgs(argv: readonly string[] = process.argv.slice(2)): ParsedCliAr
     startupAction,
     scheduleAction,
     threadAction,
+    externalAccessAction,
     options,
     removedFlagErrors,
     helpRequested,
@@ -583,6 +593,7 @@ COMMANDS:
   thread         Create, inspect, and read native Threads
   models         Show default and favorite models
   projects       Show configured projects and IDs
+  external-access Manage self-hosted HTTPS/FRP access on the local Host
   tunnel         Tunnel lifecycle commands
   startup        Manage launch at system startup
   logs           Tail Varin logs
@@ -784,7 +795,7 @@ _varin_tunnel() {
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="serve stop restart status schedule thread models projects tunnel startup logs connect-url update"
+    commands="serve stop restart status schedule thread models projects external-access tunnel startup logs connect-url update"
   tunnel_commands="help providers ready doctor status start stop profile completion"
   profile_commands="list show add remove"
   common_flags="--port --foreground --no-daemon --json --all --help --version --plain --quiet"
@@ -840,6 +851,7 @@ _varin() {
     'thread:Create native Threads'
     'models:Show default and favorite models'
     'projects:Show configured projects and IDs'
+    'external-access:Manage self-hosted HTTPS access'
     'tunnel:Tunnel lifecycle commands'
     'logs:Tail Varin logs'
     'update:Check for and install updates'
@@ -902,6 +914,7 @@ complete -c varin -n '__fish_seen_subcommand_from serve' -l no-daemon -d 'Run in
 complete -c varin -n '__fish_use_subcommand' -a 'stop' -d 'Stop running instance(s)'
 complete -c varin -n '__fish_use_subcommand' -a 'restart' -d 'Stop and start the server'
 complete -c varin -n '__fish_use_subcommand' -a 'status' -d 'Show server status'
+complete -c varin -n '__fish_use_subcommand' -a 'external-access' -d 'Manage self-hosted HTTPS access'
 complete -c varin -n '__fish_use_subcommand' -a 'tunnel' -d 'Tunnel lifecycle commands'
 complete -c varin -n '__fish_use_subcommand' -a 'logs' -d 'Tail logs'
 complete -c varin -n '__fish_use_subcommand' -a 'update' -d 'Check for updates'

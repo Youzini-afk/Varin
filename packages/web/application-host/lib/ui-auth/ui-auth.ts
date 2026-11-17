@@ -534,7 +534,7 @@ export const createUiAuth = ({
     return name ? parseCookies(req.headers.cookie)[name] ?? null : null;
   };
   const requiresClient = (req: UiAuthRequest) => requireClientAuth || Boolean(getExternalIngress(req));
-  const clientCredential = async (req: UiAuthRequest) => getBearerTokenFromRequest(req) || await browserToken(req);
+  const clientCredential = async (req: UiAuthRequest) => await browserToken(req) ?? getBearerTokenFromRequest(req);
   const issueBrowserClientCookie = async (req: UiAuthRequest, res: UiAuthHeaderResponse, credential: { token: string; expiresAt: string | null }) => {
     const ingress = getExternalIngress(req);
     const name = await getBrowserCookieName();
@@ -651,6 +651,10 @@ export const createUiAuth = ({
     req: UiAuthRequest,
     { allowUrlToken = true }: { allowUrlToken?: boolean } = {},
   ): Promise<ClientAuthResult | null> => {
+    // A presented browser cookie selects this device, even if empty, expired or
+    // revoked. Neither a native bearer nor an older URL grant may replace it.
+    const deviceToken = await browserToken(req);
+    if (deviceToken !== null) return authenticateBearerForRequest(req, deviceToken);
     if (allowUrlToken) {
       const urlAuth = await authenticateUrlAuthToken(req);
       if (urlAuth) return urlAuth;
@@ -681,6 +685,16 @@ export const createUiAuth = ({
     const raw = clientAuth?.client?.id || clientAuth?.clientId || clientAuth?.id || clientAuth?.sessionToken;
     if (typeof raw !== 'string' || raw.length === 0) return null;
     return raw.startsWith('client:') ? raw.slice('client:'.length) : raw;
+  };
+
+  const browserDeviceStatus = async (req: UiAuthRequest, clientId: string | null) => {
+    // Identify the current browser from the same selected credential used for
+    // authorization, never from a native bearer that happens to accompany it.
+    const token = await browserToken(req);
+    if (token === null || !clientId) return {};
+    const auth = await authenticateBearerForRequest(req, token);
+    if (!auth || clientAuthClientId(auth) !== clientId) return {};
+    return { browserDevice: { id: clientId, ...(auth.client?.label ? { label: auth.client.label } : {}) } };
   };
 
   const clientAuthContext = (clientAuth: ClientAuthResult) => clientAuth.session === true
@@ -829,10 +843,12 @@ export const createUiAuth = ({
       resolveRequestAuth,
       resolveWebSocketAuthContext,
       handleSessionStatus: async (req: UiAuthRequest, res: UiAuthResponse) => {
+        res.setHeader('Cache-Control', 'no-store');
         if (requiresClient(req)) {
           const clientAuth = await authenticateClientRequest(req);
           if (clientAuth) {
-            return res.json({ authenticated: true, disabled: true, scope: 'client' });
+            return res.json({ authenticated: true, disabled: true, scope: 'client',
+              ...await browserDeviceStatus(req, clientAuthClientId(clientAuth)) });
           }
           return res.status(401).json({ authenticated: false, locked: true, clientAuthRequired: true });
         }
@@ -1025,9 +1041,10 @@ export const createUiAuth = ({
   };
 
   const handleSessionStatus = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
     const context = await resolveRequestAuth(req);
     if (context) {
-      res.json({ authenticated: true, ...(context.type === 'client' ? { scope: 'client' } : {}),
+      res.json({ authenticated: true, ...(context.type === 'client' ? { scope: 'client', ...await browserDeviceStatus(req, context.clientId ?? null) } : {}),
         hostOwner: typeof context.principalId === 'string' && await principals.isOwner(context.principalId) });
       return;
     }
