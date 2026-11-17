@@ -319,7 +319,7 @@ export async function connectClaude(
     steering: false,
     protocol: {
       name: 'claude-agent-sdk',
-      version: '0.3.319',
+      ...(text(initialized.sdkVersion) ? { version: text(initialized.sdkVersion) } : {}),
       ...(text(initialized.agentVersion) ? { agentVersion: text(initialized.agentVersion) } : {}),
     },
     current: record(initialized.current),

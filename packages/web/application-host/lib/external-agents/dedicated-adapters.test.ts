@@ -414,6 +414,24 @@ describe('Codex native turn ownership', () => {
 });
 
 describe('Claude SDK bridge adapter', () => {
+  it('reports the worker SDK separately from the external CLI and shows non-blocking native warnings', async () => {
+    const peer = new Peer(), fallback = peer.handler;
+    peer.handler = (method, params) => method === 'initialize'
+      ? { sessionId: 'claude-session', bridgeProtocol: 2, sdkVersion: 'worker-sdk', agentVersion: 'user-cli' }
+      : fallback(method, params);
+    const connection = await connectClaude(peer.transport, { command: 'unused', args: [] }, '/workspace');
+    expect(connection.capabilities.protocol).toMatchObject({ version: 'worker-sdk', agentVersion: 'user-cli' });
+    const s = sink(), result = connection.prompt({ text: 'hello' }, s);
+    const turn = String(record((await peer.call('prompt')).params).uuid);
+    const warning = { type: 'system', subtype: 'informational', level: 'warning', tag: 'hook_no_verdict',
+      uuid: 'hook-notice', content: 'The pre-tool hook did not return a verdict.' };
+    claudeEvent(peer, 'previous-turn', { ...warning, content: 'Unrelated warning' });
+    claudeEvent(peer, turn, warning);
+    claudeEvent(peer, turn, { type: 'result', subtype: 'success', is_error: false, usage: {} });
+    await expect(result).resolves.toMatchObject({ status: 'completed' });
+    expect([...s.items.values()]).toEqual([expect.objectContaining({ kind: 'notice', text: warning.content })]);
+    expect(s.interaction).not.toHaveBeenCalled();
+  });
   it('reconciles per-block completions without overwriting thinking or duplicating streamed text', async () => {
     const peer = new Peer(),
       connection = await connectClaude(
