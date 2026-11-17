@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { isoCBOR } from '@simplewebauthn/server/helpers';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createUiPasskeys } from './ui-passkeys.js';
@@ -47,6 +48,43 @@ describe('passkey store', () => {
       hasPasskeys: false,
       passkeyCount: 0,
     });
+  });
+
+  it.each([
+    ['PassKeys.Example:443', 'https://passkeys.example'],
+    ['bücher.example:8443', 'https://xn--bcher-kva.example:8443'],
+  ])('verifies a signed assertion behind the forwarded host %s', async (host, origin) => {
+    const { storeFile } = await createHarness();
+    const controller = createUiPasskeys({ passwordBinding: 'binding', storeFile });
+    const req = { headers: { host: 'internal:3902', 'x-forwarded-host': host, 'x-forwarded-proto': 'https' } };
+    const rpID = new URL(origin).hostname;
+    const registration = await controller.beginRegistration(req);
+    expect(registration.optionsJSON.rp.id).toBe(rpID);
+
+    // A registered ES256 test key. Sign the challenge the Host actually issued.
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    const { x, y } = publicKey.export({ format: 'jwk' });
+    const cose = isoCBOR.encode(new Map<number, number | Uint8Array>([
+      [1, 2], [3, -7], [-1, 1], [-2, Buffer.from(x!, 'base64url')], [-3, Buffer.from(y!, 'base64url')],
+    ]));
+    const id = crypto.randomBytes(16).toString('base64url');
+    await fs.writeFile(storeFile, JSON.stringify({
+      version: 2, passwordBinding: 'binding', userID: id,
+      passkeys: [{ ...storedPasskey(id), publicKey: Buffer.from(cose).toString('base64url'), rpID }],
+    }));
+    const { optionsJSON, requestId } = await controller.beginAuthentication(req);
+    const clientData = Buffer.from(JSON.stringify({ type: 'webauthn.get', challenge: optionsJSON.challenge, origin }));
+    const hash = (data: string | Buffer) => crypto.createHash('sha256').update(data).digest();
+    const authData = Buffer.concat([hash(rpID), Buffer.from([0x05, 0, 0, 0, 1])]); // present, verified, counter = 1
+    const signature = crypto.sign('sha256', Buffer.concat([authData, hash(clientData)]), privateKey);
+
+    await expect(controller.finishAuthentication({ requestId, response: {
+      id, rawId: id, type: 'public-key', clientExtensionResults: {},
+      response: { authenticatorData: authData.toString('base64url'), clientDataJSON: clientData.toString('base64url'),
+        signature: signature.toString('base64url') },
+    } })).resolves.toMatchObject({ verified: true });
+    const persisted = JSON.parse(await fs.readFile(storeFile, 'utf8'));
+    expect(persisted.passkeys[0].counter).toBe(1);
   });
 
   it('serializes revocations from independent controllers', async () => {

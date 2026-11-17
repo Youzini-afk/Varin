@@ -118,6 +118,10 @@ requires both gates while leaving the normal origin and server authentication ch
   - `finishAuthentication(payload)`
   - `dispose()`
 
+Passkey ceremonies serialize the HTTP(S) request origin and RP ID as the browser does: the host is ASCII,
+default ports disappear from the origin, and non-default ports stay in the origin but not the RP ID.
+A TLS-terminating proxy must supply the external host and scheme.
+
 ## Stable authentication subjects
 
 `principals.ts` persists the authentication owner's subject independently of JWT secrets,

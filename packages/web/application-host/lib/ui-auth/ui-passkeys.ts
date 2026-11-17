@@ -77,7 +77,6 @@ interface PasskeyMutation<Result> {
 
 interface PasskeyRequest {
   headers: IncomingHttpHeaders;
-  hostname?: string | undefined;
   socket?: { encrypted?: boolean | undefined };
 }
 
@@ -111,50 +110,19 @@ const normalizeLabel = (value: unknown, fallback: string): string => {
   return normalized ? normalized.slice(0, 120) : fallback;
 };
 
-const normalizeHost = (value: unknown): string => {
-  if (typeof value !== 'string') {
-    return '';
-  }
+const isLocalRpId = (rpID: unknown): boolean => rpID === 'localhost' || rpID === '127.0.0.1' || rpID === '[::1]' || rpID === '::1';
 
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return '';
-  }
-
-  if (trimmed.startsWith('[')) {
-    const end = trimmed.indexOf(']');
-    return end >= 0 ? trimmed.slice(1, end).toLowerCase() : trimmed.toLowerCase();
-  }
-
-  const colonIndex = trimmed.indexOf(':');
-  return (colonIndex >= 0 ? trimmed.slice(0, colonIndex) : trimmed).toLowerCase();
-};
-
-const isLocalRpId = (rpID: unknown): boolean => rpID === 'localhost' || rpID === '127.0.0.1' || rpID === '::1';
-
-const getCurrentRequestOrigin = (req: PasskeyRequest): string => {
-  const forwardedProto = typeof req.headers['x-forwarded-proto'] === 'string'
-    ? req.headers['x-forwarded-proto'].split(',')[0]?.trim().toLowerCase() ?? ''
-    : '';
-  const protocol = forwardedProto || (req.socket && 'encrypted' in req.socket && req.socket.encrypted ? 'https' : 'http');
-  const forwardedHost = typeof req.headers['x-forwarded-host'] === 'string'
-    ? req.headers['x-forwarded-host'].split(',')[0]?.trim() ?? ''
-    : '';
-  const host = forwardedHost || (typeof req.headers.host === 'string' ? req.headers.host.trim() : '');
-
-  if (!host) {
-    return '';
-  }
-
-  return `${protocol}://${host}`;
-};
-
-const getCurrentRpId = (req: PasskeyRequest): string => {
-  const forwardedHost = typeof req.headers['x-forwarded-host'] === 'string'
-    ? req.headers['x-forwarded-host'].split(',')[0]?.trim() ?? ''
-    : '';
-  const host = forwardedHost || (typeof req.headers.host === 'string' ? req.headers.host.trim() : '');
-  return normalizeHost(host || req.hostname || '');
+const getPasskeyRequestURL = (req: PasskeyRequest): URL | null => {
+  const forwarded = (name: string) => {
+    const value = req.headers[name];
+    return typeof value === 'string' ? value.split(',')[0]?.trim() : '';
+  };
+  const scheme = forwarded('x-forwarded-proto')?.toLowerCase() || (req.socket?.encrypted ? 'https' : 'http');
+  const host = forwarded('x-forwarded-host') || req.headers.host?.trim();
+  // Host is an authority, not an arbitrary URL. Do not normalize a path or userinfo into a trusted origin.
+  if ((scheme !== 'http' && scheme !== 'https') || !host || /[\\/?#@\s]/u.test(host)) return null;
+  // Use the same ASCII host and serialized origin as the browser, including IDNs and default ports.
+  return URL.parse(`${scheme}://${host}`);
 };
 
 const parseStoredPasskey = (value: unknown): StoredPasskey | null => {
@@ -287,12 +255,8 @@ export const createUiPasskeys = ({
     }
   };
 
-  const buildOriginCandidates = async (req: PasskeyRequest): Promise<string[]> => {
-    const origins = new Set<string>();
-    const currentOrigin = getCurrentRequestOrigin(req);
-    if (currentOrigin) {
-      origins.add(currentOrigin);
-    }
+  const buildOriginCandidates = async (currentOrigin: string): Promise<string[]> => {
+    const origins = new Set([currentOrigin]);
 
     try {
       const settings = await readSettingsFromDisk?.();
@@ -316,7 +280,7 @@ export const createUiPasskeys = ({
 
   const getStatus = async (req: PasskeyRequest) => {
     const store = await loadStore();
-    const rpID = getCurrentRpId(req);
+    const rpID = getPasskeyRequestURL(req)?.hostname ?? '';
     return {
       enabled: Boolean(passwordBinding),
       hasPasskeys: rpID.length > 0 && getPasskeysForRpId(store, rpID).length > 0,
@@ -329,7 +293,7 @@ export const createUiPasskeys = ({
     assertEnabled();
 
     const store = await loadStore();
-    const rpID = getCurrentRpId(req);
+    const rpID = getPasskeyRequestURL(req)?.hostname ?? '';
     if (!rpID) {
       return [];
     }
@@ -352,7 +316,7 @@ export const createUiPasskeys = ({
       throw httpError('Passkey ID is required', 400);
     }
 
-    const rpID = getCurrentRpId(req);
+    const rpID = getPasskeyRequestURL(req)?.hostname ?? '';
     return mutateStore(async (store) => {
       const existingPasskey = store.passkeys.find((passkey) => passkey.id === normalizedPasskeyId && passkey.rpID === rpID && (!principalId || passkey.principalId === principalId));
       if (!existingPasskey) {
@@ -382,15 +346,11 @@ export const createUiPasskeys = ({
     assertEnabled();
     cleanupChallengeMap(registrationChallenges);
 
-    const rpID = getCurrentRpId(req);
-    if (!rpID) {
+    const url = getPasskeyRequestURL(req);
+    if (!url) {
       throw httpError('Unable to resolve a valid passkey host for this request', 400);
     }
-
-    const currentOrigin = getCurrentRequestOrigin(req);
-    if (!currentOrigin) {
-      throw httpError('Unable to resolve a valid passkey origin for this request', 400);
-    }
+    const rpID = url.hostname;
 
     const store = await loadStore();
     const userID = principalId ? new TextEncoder().encode(principalId) : decodeUserId(store.userID);
@@ -420,7 +380,7 @@ export const createUiPasskeys = ({
     const requestId = crypto.randomBytes(16).toString('base64url');
     registrationChallenges.set(requestId, {
       challenge: options.challenge,
-      expectedOrigins: await buildOriginCandidates(req),
+      expectedOrigins: await buildOriginCandidates(url.origin),
       expectedRPIDs: [rpID],
       rpID,
       ...(principalId ? { principalId } : {}),
@@ -500,10 +460,14 @@ export const createUiPasskeys = ({
     cleanupChallengeMap(authenticationChallenges);
 
     const store = await loadStore();
-    const rpID = getCurrentRpId(req);
+    const url = getPasskeyRequestURL(req);
+    if (!url) {
+      throw httpError('Unable to resolve a valid passkey host for this request', 400);
+    }
+    const rpID = url.hostname;
     const passkeys = getPasskeysForRpId(store, rpID);
 
-    if (!rpID || passkeys.length === 0) {
+    if (passkeys.length === 0) {
       throw httpError('No passkeys are registered for this host yet', 404);
     }
 
@@ -519,7 +483,7 @@ export const createUiPasskeys = ({
     const requestId = crypto.randomBytes(16).toString('base64url');
     authenticationChallenges.set(requestId, {
       challenge: options.challenge,
-      expectedOrigins: await buildOriginCandidates(req),
+      expectedOrigins: await buildOriginCandidates(url.origin),
       expectedRPIDs: [rpID],
       createdAt: Date.now(),
       expiresAt: Date.now() + challengeTtlMs,
