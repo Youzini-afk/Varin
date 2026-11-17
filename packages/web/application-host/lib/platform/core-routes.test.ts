@@ -398,6 +398,29 @@ describe('core-routes', () => {
     ]);
   });
 
+  it('offers the configured guarded origin to native clients without changing relay-only intent', async () => {
+    const publicOrigin = 'https://work.example.test:8443';
+    const relay = { type: 'relay', relayUrl: 'wss://relay.example/ws', serverId: 'same-host', priority: 30 };
+    const { app, dependencies } = createPairingRouteApp({
+      getExternalAccessOrigin: () => publicOrigin,
+      getRelayPairingCandidate: async () => relay,
+    });
+    const local = await request(app).post('/api/client-auth/pairing/sessions').set('Host', '127.0.0.1:3000')
+      .send({ allowedClientKinds: ['desktop'], serverUrl: 'http://192.168.1.20:3000', includeRelay: false }).expect(201);
+    expect(local.body.server.candidates).toEqual([
+      { type: 'lan', url: 'http://192.168.1.20:3000', priority: 10 },
+      { type: 'tunnel', url: publicOrigin, priority: 20 },
+    ]);
+    expect(dependencies.clientPairingRuntime.createPairingSession).toHaveBeenLastCalledWith(expect.objectContaining({ allowedClientKinds: ['desktop'], usesRelay: false }));
+    const matching = await request(app).post('/api/client-auth/pairing/sessions').set('Host', 'work.example.test:8443')
+      .set('X-Forwarded-Proto', 'https').send({ serverUrl: publicOrigin, includeRelay: false }).expect(201);
+    expect(matching.body.server.candidates).toEqual([{ type: 'tunnel', url: publicOrigin, priority: 10 }]);
+    const relayOnly = await request(app).post('/api/client-auth/pairing/sessions')
+      .send({ includeDirect: false, includeRelay: true }).expect(201);
+    expect(relayOnly.body.server.candidates).toEqual([relay]);
+    expect(dependencies.clientPairingRuntime.createPairingSession).toHaveBeenLastCalledWith(expect.objectContaining({ usesRelay: true }));
+  });
+
   it('folds in a relay candidate when the host relay is enabled', async () => {
     const relayCandidate = {
       type: 'relay',
@@ -793,6 +816,7 @@ describe('client auth routes', () => {
       getDirectCandidateUrls: () => ['http://192.168.1.20:3000', 'http://10.0.0.5:3000', 'not-a-url'],
       getRelayPairingCandidate: async () => relayCandidate,
       getServerId: async () => 'server-abc',
+      getExternalAccessOrigin: () => 'https://work.example.test',
       getServerLabel: () => 'my-host',
     };
     registerAuthAndAccessRoutes(app, dependencies);
@@ -805,6 +829,7 @@ describe('client auth routes', () => {
     expect(response.body.candidates).toEqual([
       { type: 'lan', url: 'http://192.168.1.20:3000', priority: 10 },
       { type: 'lan', url: 'http://10.0.0.5:3000', priority: 10 },
+      { type: 'tunnel', url: 'https://work.example.test', priority: 20 },
       relayCandidate,
     ]);
   });

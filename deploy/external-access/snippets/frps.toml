@@ -1,0 +1,21 @@
+# frps v0.65.0 native service + HTTPS proxy on the SAME VPS.
+# Merge deliberately with existing frps; these settings affect ALL its clients.
+bindAddr = "0.0.0.0"
+bindPort = 7000
+# Native service only. Container-loopback is not another container's loopback.
+proxyBindAddr = "127.0.0.1"
+allowPorts = [{ single = 7300 }]
+maxPortsPerClient = 1
+
+auth.method = "token"
+auth.tokenSource.type = "file"
+auth.tokenSource.file.path = "/etc/varin-frp/frp-token"
+transport.tls.force = true
+transport.tls.certFile = "/etc/varin-frp/frps.crt"
+transport.tls.keyFile = "/etc/varin-frp/frps.key"
+log.to = "console"
+log.level = "warn"
+log.disablePrintColor = true
+# Preserve upstream diagnostics so a rejected token is not retried as a network failure.
+# FRP reports the mismatch, never the token value. Do not enable debug logging.
+detailedErrorsToClient = true

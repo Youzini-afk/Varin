@@ -1,0 +1,24 @@
+# frpc v0.65.0, only for forwarding run OUTSIDE Varin by the operator.
+# Varin-managed mode writes its own config; do not run both against this mapping.
+serverAddr = "forwarding.example.com"
+serverPort = 7000
+loginFailExit = true
+
+auth.method = "token"
+auth.tokenSource.type = "file"
+auth.tokenSource.file.path = "/path/to/private/frp-token"
+transport.tls.enable = true
+transport.tls.trustedCaFile = "/path/to/private/ca.crt"
+transport.tls.serverName = "forwarding.example.com"
+# No insecureSkipVerify. The CA and certificate DNS SAN must match this server.
+log.to = "console"
+log.level = "warn"
+log.disablePrintColor = true
+
+[[proxies]]
+name = "varin-home"
+type = "tcp"
+# Always the guarded EXTERNAL listener, never the ordinary local application port.
+localIP = "127.0.0.1"
+localPort = 3100
+remotePort = 7300

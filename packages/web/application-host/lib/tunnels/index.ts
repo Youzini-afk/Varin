@@ -8,6 +8,8 @@ import {
   type TunnelController,
   type TunnelMode,
   type TunnelProviderId,
+  type TunnelStartContext,
+  type TunnelStartRequest,
 } from './types.js';
 import { getTunnelDependencyInstallInfo } from './install-help.js';
 import type { TunnelProviderRegistry } from './registry.js';
@@ -15,7 +17,10 @@ import type { TunnelProviderRegistry } from './registry.js';
 export interface TunnelServiceDependencies {
   getActivePort(): number | null;
   getController(): TunnelController | null;
+  // Supplied only by Host wiring, never copied from an HTTP request body.
+  getStartContext?(request: TunnelStartRequest): TunnelStartContext | Promise<TunnelStartContext>;
   onQuickTunnelWarning?: (() => void) | undefined;
+  reserveStart?: (() => () => void) | undefined;
   registry: Pick<TunnelProviderRegistry, 'get'>;
   setController(controller: TunnelController | null): void;
 }
@@ -25,7 +30,9 @@ export function createTunnelService({
   getController,
   setController,
   getActivePort,
+  getStartContext,
   onQuickTunnelWarning,
+  reserveStart,
 }: TunnelServiceDependencies) {
   if (!registry) {
     throw new Error('Tunnel service requires a provider registry');
@@ -77,6 +84,7 @@ export function createTunnelService({
   let startLock: Promise<void> = Promise.resolve();
 
   const start = async (rawRequest: Record<string, unknown>, options: Record<string, unknown> = {}) => {
+    const releaseReservation = reserveStart?.();
     let releaseLock: () => void = () => undefined;
     const lockPromise = new Promise<void>((resolve) => { releaseLock = resolve; });
     const previousLock = startLock;
@@ -94,7 +102,9 @@ export function createTunnelService({
 
       validateTunnelStartRequest(request, provider.capabilities);
 
-      let publicUrl = provider.resolvePublicUrl(getController());
+      // Resolve through the current owner. A provider must not interpret a
+      // different provider's controller when deciding whether to replace it.
+      let publicUrl = getPublicUrl();
       const activeMode = resolveActiveMode();
       const activeProvider = resolveActiveProvider();
 
@@ -120,11 +130,10 @@ export function createTunnelService({
 
         let controller: TunnelController;
         try {
-          controller = await provider.start(request, {
-            activePort,
-            originUrl,
-            ...options,
-          });
+          const context = getStartContext
+            ? { ...options, originUrl: undefined, ...await getStartContext(request) }
+            : { activePort, originUrl, ...options };
+          controller = await provider.start(request, context);
         } catch (error) {
           if (error instanceof TunnelServiceError) {
             throw error;
@@ -154,9 +163,11 @@ export function createTunnelService({
         activeMode: request.mode,
         provider: request.provider,
         providerMetadata: provider.getMetadata?.(getController()) ?? null,
+        endpointVerification: getController()?.getEndpointVerification?.() ?? null,
       };
     } finally {
       releaseLock();
+      releaseReservation?.();
     }
   };
 
@@ -187,6 +198,7 @@ export function createTunnelService({
     checkAvailability,
     getPublicUrl,
     getProviderMetadata,
+    getEndpointVerification: () => getController()?.getEndpointVerification?.() ?? null,
     resolveActiveMode,
     resolveActiveProvider,
   };

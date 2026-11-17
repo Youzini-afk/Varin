@@ -78,6 +78,7 @@ export const createServerBootstrapRuntime = (dependencies: ServerBootstrapDepend
       reconcileRelay,
       getPairingTransports,
       getDirectCandidateUrls,
+      getExternalAccessOrigin,
       getServerId,
       getServerPort = () => null,
       getTunnelUrl = () => null,
@@ -113,6 +114,7 @@ export const createServerBootstrapRuntime = (dependencies: ServerBootstrapDepend
       password: uiPassword,
       readSettingsFromDisk,
       clientAuthController: remoteClientAuthRuntime,
+      ...(getServerId ? { getServerId } : {}),
     });
     if (uiAuthController.enabled) {
       console.log('UI password protection enabled for browser sessions');
@@ -150,6 +152,7 @@ export const createServerBootstrapRuntime = (dependencies: ServerBootstrapDepend
       ...(reconcileRelay ? { reconcileRelay } : {}),
       ...(getPairingTransports ? { getPairingTransports } : {}),
       ...(getDirectCandidateUrls ? { getDirectCandidateUrls } : {}),
+      ...(getExternalAccessOrigin ? { getExternalAccessOrigin } : {}),
       ...(getServerId ? { getServerId } : {}),
       ...(getServerLabel ? { getServerLabel } : {}),
     });

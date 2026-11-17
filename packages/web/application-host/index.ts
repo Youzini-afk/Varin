@@ -319,12 +319,19 @@ import { PluginCredentialCapability } from './lib/extensions/credentials.js';
 import { PluginEventSources } from './lib/extensions/event-sources.js';
 import { PluginEventTransport, registerPluginEventTransportRoutes } from './lib/extensions/event-transport.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
+import { createSelfHostedAccess } from './lib/tunnels/self-hosted-access.js';
+import { EXTERNAL_ACCESS_SETTINGS_KEY, readExternalAccessRecord } from './lib/tunnels/external-access-config.js';
+import { registerExternalAccessRoutes } from './lib/tunnels/external-access-routes.js';
+import { createExternalAccessDiagnostics } from './lib/tunnels/external-access-diagnostics.js';
+import { createFrpcComponentService } from './lib/tunnels/frpc-component.js';
+import { hasHostConnectionAccess } from './lib/connections/access.js';
+import type { ExternalAccessSnapshot } from '@varin/application-client';
 import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
 import { createCloudflareTunnelProvider } from './lib/tunnels/providers/cloudflare.js';
 import { createNgrokTunnelProvider } from './lib/tunnels/providers/ngrok.js';
 import { TUNNEL_MODE_MANAGED_LOCAL, TUNNEL_MODE_MANAGED_REMOTE, TUNNEL_MODE_QUICK, TUNNEL_PROVIDER_CLOUDFLARE, TunnelServiceError, isSupportedTunnelMode, normalizeOptionalPath, normalizeTunnelMode, normalizeTunnelProvider, normalizeTunnelStartRequest, type TunnelController } from './lib/tunnels/types.js';
 import { createRequestSecurityRuntime } from './lib/security/request-security.js';
-import { getInvalidBindHostErrorMessage, getUnauthenticatedLanErrorMessage, isNetworkExposedBindHost, isUnsafeUnauthenticatedLanAllowed, normalizeBindHost } from './lib/security/bind-host.js';
+import { getInvalidBindHostErrorMessage, getUnauthenticatedLanErrorMessage, isLoopbackBindHost, isNetworkExposedBindHost, isUnsafeUnauthenticatedLanAllowed, normalizeBindHost } from './lib/security/bind-host.js';
 import { registerTtsRoutes } from './lib/tts/routes.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
 import { createTerminalRuntime } from './lib/terminal/runtime.js';
@@ -378,6 +385,7 @@ import { createStaticRoutesRuntime } from './lib/platform/static-routes-runtime.
 import { createStartupPipelineRuntime } from './lib/platform/startup-pipeline-runtime.js';
 import { createThemeRuntime } from './lib/platform/theme-runtime.js';
 import { createTunnelAuth } from './lib/platform/tunnel-auth.js';
+import { createPublicIngress, getExternalIngress, normalizeExternalIngress, readExternalIngressEnvironment, type ExternalIngressConfiguration } from './lib/platform/public-ingress.js';
 import { createTunnelWiringRuntime } from './lib/platform/tunnel-wiring-runtime.js';
 import type { StartWebUiServerOptions, WebUiServerController } from './public-contract.js';
 export type * from './public-contract.js';
@@ -811,6 +819,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const getDesktopRuntimeConfig = typeof options.getDesktopRuntimeConfig === 'function'
     ? options.getDesktopRuntimeConfig
     : null;
+  let externalIngressConfig: ReturnType<typeof readExternalIngressEnvironment> = null;
+  if (options.externalIngress) {
+    externalIngressConfig = normalizeExternalIngress(options.externalIngress);
+  } else {
+    try {
+      externalIngressConfig = readExternalIngressEnvironment(process.env);
+    } catch (error) {
+      // A malformed optional environment configuration must not bring down
+      // the primary Host or make its trusted listener the public alternative.
+      console.warn('External ingress configuration ignored:', error instanceof Error ? error.message : String(error));
+    }
+  }
   const apiOnly = options.apiOnly === true || isEnvFlagEnabled(process.env.VARIN_API_ONLY);
   const attachSignals = options.attachSignals !== false;
   const onTunnelReady = typeof options.onTunnelReady === 'function' ? options.onTunnelReady : undefined;
@@ -880,6 +900,71 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     threshold: 1024,
   }));
   server = http.createServer(app);
+  const localServer = server;
+  const createIngress = (configuration: ExternalIngressConfiguration) => createPublicIngress({
+    ...configuration,
+    // App handlers receive the original request, including its unforgeable marker.
+    onRequest: app,
+    onUpgrade: (request, socket, head) => {
+      // Some feature handlers accept their own narrower grants on the local
+      // listener. Admission here must first authenticate the public request.
+      void (async () => {
+        if (!await uiAuthController?.resolveRequestAuth(request)) {
+          if (!socket.destroyed) rejectWebSocketUpgrade(socket, 401, 'Unauthorized');
+          return;
+        }
+        if (socket.destroyed || isShuttingDown) return;
+        if (!localServer.emit('upgrade', request, socket, head)) socket.destroy();
+      })().catch(() => socket.destroy());
+    },
+    isDraining: () => isShuttingDown,
+  });
+  const externalIngress = externalIngressConfig ? createIngress(externalIngressConfig) : null;
+  let legacyReservations = 0;
+  let envOpening = 0;
+  let selfHostedReservations = 0;
+  const reserveLegacyStart = () => {
+    if (selfHostedReservations || envOpening || externalIngress?.enabled) {
+      throw new TunnelServiceError('validation_error', 'Disable self-hosted external access before starting another tunnel.');
+    }
+    legacyReservations++;
+    return () => { legacyReservations--; };
+  };
+  const frpcComponents = createFrpcComponentService({ dataDirectory: path.resolve(VARIN_DATA_DIR) });
+  const selfHosted = createSelfHostedAccess({
+    createIngress,
+    resolveFrpc: () => frpcComponents.resolveExecutable(),
+    onStatus: () => broadcastGlobalUiEvent?.({ type: 'varin:external-access-changed', properties: {} }),
+    read: async () => {
+      const record = readExternalAccessRecord((await readSettingsFromDisk())[EXTERNAL_ACCESS_SETTINGS_KEY]);
+      return record ? { revision: record.revision, enabled: record.enabled, config: record.configuration } : { revision: 0, enabled: false, config: null };
+    },
+    compareAndSwap: async (expected, next) => {
+      let changed = false;
+      await updateSettingsOnDisk(current => {
+        const record = readExternalAccessRecord(current[EXTERNAL_ACCESS_SETTINGS_KEY]);
+        if ((record?.revision ?? 0) !== expected) return;
+        changed = true;
+        return { ...current, [EXTERNAL_ACCESS_SETTINGS_KEY]: { revision: next.revision, enabled: next.enabled, configuration: next.config } };
+      });
+      return changed;
+    },
+    reserve: () => {
+      if (externalIngress || legacyReservations || activeTunnelController) {
+        throw Object.assign(new Error('Another external access method is active'), { code: 'provider_in_use' });
+      }
+      selfHostedReservations++;
+      let held = true;
+      return () => { if (held) { held = false; selfHostedReservations--; } };
+    },
+  });
+  const externalAccessDiagnostics = createExternalAccessDiagnostics(() => externalIngress ?? selfHosted.getIngress());
+  const unsubscribeExternalIngressRevocation = remoteClientAuthRuntime.onClientRevoked(clientId => {
+    externalIngress?.revokeClient(clientId);
+    selfHosted.getIngress()?.revokeClient(clientId);
+  });
+  let externalIngressError: string | undefined;
+  let ingressActivation = 0;
   const serverStartedAt = new Date().toISOString();
   type RelayService = ReturnType<typeof createRelayService>;
   type TunnelRuntimeContext = ReturnType<ReturnType<typeof createTunnelWiringRuntime>['initialize']>;
@@ -965,6 +1050,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getPairingTransports: resolvePairingTransports,
     getDirectCandidateUrls: resolveDirectLanUrls,
     getServerId: () => relayServiceInstance?.getServerId() ?? Promise.resolve(null),
+    getExternalAccessOrigin: () => {
+      const ingress = externalIngress ?? selfHosted.getIngress();
+      return ingress?.enabled ? ingress.configuration.origin : null;
+    },
     getServerPort: activePort,
     getTunnelUrl: () => tunnelService.getPublicUrl(),
     getServerLabel: () => os.hostname()?.trim() || 'Varin',
@@ -3234,7 +3323,54 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // their owners and catalog observers have been assembled.
   memoryOrganizer.start();
 
-  tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port);
+  const isDirectLocalAccessControl = (request: Request): boolean => {
+    if (getExternalIngress(request) || tunnelAuthController.classifyRequestScope(request) !== 'local'
+      || !isLoopbackBindHost(request.socket.remoteAddress)) return false;
+    try { return isLoopbackBindHost(new URL(`http://${request.headers.host ?? ''}`).hostname); }
+    catch { return false; }
+  };
+  const authorizeExternalAccessControl = async (request: Request, operation: 'read' | 'write'): Promise<boolean> => {
+    const auth = request.varinAuth;
+    if (isShuttingDown || (auth?.principalId && !await hostPrincipals().isOwner(auth.principalId))) return false;
+    if (auth?.type === 'client' && !hasHostConnectionAccess(auth, 'configuration')) return false;
+    const direct = isDirectLocalAccessControl(request);
+    if (operation === 'write') return (direct || hasHostConnectionAccess(auth, 'configuration')) && await isRequestOriginAllowed(request);
+    return direct || Boolean(auth?.principalId);
+  };
+  registerExternalAccessRoutes(app, {
+    json: express.json({ limit: '16kb' }),
+    authorize: authorizeExternalAccessControl,
+    includeOperatorDetails: request => isDirectLocalAccessControl(request) || hasHostConnectionAccess(request.varinAuth, 'configuration'),
+    checkAccess: externalAccessDiagnostics.check,
+    component: {
+      status: () => frpcComponents.getStatus({ includeOperatorDetails: true }),
+      install: () => frpcComponents.install(),
+    },
+    snapshot: async (includeOperatorDetails): Promise<ExternalAccessSnapshot> => {
+      let snapshot: ExternalAccessSnapshot;
+      if (externalIngress) {
+        const { host, port, origin } = externalIngress.configuration;
+        snapshot = {
+          source: 'environment', entry: null,
+          phase: externalIngressError ? 'failed' : externalIngress.enabled ? 'enabled' : 'disabled',
+          listener: externalIngress.enabled ? { host, port, origin } : null,
+          ...(externalIngressError ? { error: 'The configured backend failed to bind. Check the Host environment and port.' } : {}),
+        };
+      } else snapshot = await selfHosted.snapshot(includeOperatorDetails);
+      const currentSettings = includeOperatorDetails ? await readSettingsFromDisk() : undefined;
+      const pairingDefaults = currentSettings ? {
+        linkTtlMs: normalizeTunnelBootstrapTtlMs(currentSettings.tunnelBootstrapTtlMs) ?? TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS,
+        temporaryAccessTtlMs: normalizeTunnelSessionTtlMs(currentSettings.tunnelSessionTtlMs),
+      } : undefined;
+      const accessCheck = includeOperatorDetails ? externalAccessDiagnostics.getLastCheck() : undefined;
+      return { ...snapshot, hostName: os.hostname()?.trim() || 'Varin', ...(pairingDefaults ? { pairingDefaults } : {}),
+        ...(accessCheck && accessCheck.origin === snapshot.listener?.origin ? { accessCheck } : {}) };
+    },
+    save: selfHosted.save,
+    remove: selfHosted.remove,
+    actions: { enable: selfHosted.enable, disable: selfHosted.disable, retry: selfHosted.retry },
+  });
+  tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port, reserveLegacyStart);
   const { tunnelService, startTunnelWithNormalizedRequest } = tunnelRuntimeContext;
   const relayService = createRelayService({
     crypto,
@@ -3399,14 +3535,44 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   relayReconcileTimer.unref?.();
 
   let stopTask: Promise<void> | undefined;
+  const setExternalIngressEnabled = async (enabled: boolean): Promise<void> => {
+    if (!externalIngress) throw new Error('External ingress is not configured');
+    if (enabled && isShuttingDown) throw new Error('Application Host is shutting down');
+    if (enabled && (legacyReservations || activeTunnelController)) {
+      throw new Error('Disable the active tunnel before enabling the environment-managed ingress');
+    }
+    const activation = ++ingressActivation;
+    if (!enabled) { externalIngress.setEnabled(false); return; }
+    envOpening++;
+    try {
+      await externalIngress.listen();
+      if (isShuttingDown || activation !== ingressActivation) return;
+      externalIngress.setEnabled(true);
+      externalIngressError = undefined;
+    } catch (error) {
+      if (activation === ingressActivation) externalIngressError = error instanceof Error ? error.message : String(error);
+      throw error;
+    } finally {
+      envOpening--;
+    }
+  };
   const controller: WebUiServerController = {
     expressApp: app,
     connections,
     httpServer: server,
     getPort: () => tunnelRuntimeContext.getActivePort(),
+    getExternalIngressStatus: () => {
+      const ingress = externalIngress ?? selfHosted.getIngress();
+      return ingress ? {
+        ...ingress.configuration,
+        enabled: ingress.enabled,
+        ...(externalIngressError === undefined ? {} : { error: externalIngressError }),
+      } : null;
+    },
+    setExternalIngressEnabled,
     getTunnelUrl: () => tunnelService.getPublicUrl(),
     getQuitRiskStatus: async () => ({
-      tunnel: { active: Boolean(tunnelService.getPublicUrl()) },
+      tunnel: { active: Boolean(tunnelService.getPublicUrl() || externalIngress?.enabled || selfHosted.getIngress()?.enabled) },
       scheduledTasks: await scheduledTasksRuntime.getStatus(),
     }),
     isReady: () => !isShuttingDown && kernelClient.isReady,
@@ -3415,6 +3581,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const deadline = new ShutdownDeadline(SHUTDOWN_TIMEOUT_MS);
       // Fence admissions/readiness synchronously, before the first asynchronous owner.
       isShuttingDown = true;
+      ingressActivation += 1;
+      externalIngress?.setEnabled(false);
+      selfHosted.beginShutdown();
       kernelClient.beginDraining();
       terminalRuntime?.beginDraining();
       realtimeProxyRuntime.beginDraining();
@@ -3423,6 +3592,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       previewProxyRuntime.beginDraining();
       stopTask = (async () => {
         const shutdown = createShutdownCollector({ deadline, stopOnFailure: true });
+        await shutdown.run('externalIngress.close', async () => {
+          unsubscribeExternalIngressRevocation();
+          await externalIngress?.close();
+          const managedStop = await selfHosted.shutdown();
+          if (managedStop.state === 'failed') throw new Error('Self-hosted external access did not stop cleanly');
+        });
         await shutdown.run('remoteClientAuthRuntime.dispose', () => remoteClientAuthRuntime.dispose());
         await shutdown.run('unsubscribeTokenizerKernel', () => unsubscribeTokenizerKernel());
         await shutdown.run('stopTokenizerCollection?.', () => stopTokenizerCollection?.());
@@ -3594,6 +3769,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   };
   stopHostResources = controller.stop;
+  if (externalIngress) {
+    await setExternalIngressEnabled(true).then(() => {
+      const { host: bindAddress, port: bindPort, origin } = externalIngress.configuration;
+      console.log(`External access backend listening on ${bindAddress}:${bindPort}; HTTPS proxy ${origin} is not verified`);
+    }).catch((error: unknown) => {
+      externalIngressError ??= 'Environment-managed public access could not start';
+      console.warn('External ingress could not start:', error instanceof Error ? error.message : String(error));
+    });
+  } else {
+    // Startup restoration is independent of settings UI or browser lifetime.
+    void selfHosted.start().catch(() => console.warn('Saved external access could not start; see local Host settings.'));
+  }
   return controller;
 }
 

@@ -5,10 +5,37 @@ import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { cp } from 'node:fs/promises';
 import { VitePWA } from 'vite-plugin-pwa';
+import { buildExternalAccessDownloads, kitArchivePath, kitDownloadPaths, kitFiles } from './scripts/external-access-kit.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
 const productUi = process.env.VARIN_PRODUCT_UI === '1';
+const externalAccessDownloads = (): Plugin => {
+  const root = path.resolve(__dirname, '../../deploy/external-access');
+  return {
+    name: 'varin-external-access-downloads',
+    async buildStart() {
+      if (this.meta.watchMode) for (const file of kitFiles) this.addWatchFile(path.join(root, file));
+    },
+    async generateBundle() {
+      for (const [fileName, source] of await buildExternalAccessDownloads(root)) this.emitFile({ type: 'asset', fileName, source });
+    },
+    configureServer(server) {
+      server.middlewares.use(async (request, response, next) => {
+        const file = request.url?.split('?')[0]?.replace(/^\//u, '');
+        if (!file || !kitDownloadPaths.includes(file) || !['GET', 'HEAD'].includes(request.method ?? '')) return next();
+        try {
+          const content = (await buildExternalAccessDownloads(root, file)).get(file);
+          if (!content) return next();
+          response.setHeader('Content-Type', file === kitArchivePath ? 'application/gzip' : 'text/plain; charset=utf-8');
+          response.setHeader('Cache-Control', 'no-store');
+          response.setHeader('Content-Length', content.length);
+          response.end(request.method === 'HEAD' ? undefined : content);
+        } catch (error) { next(error); }
+      });
+    },
+  };
+};
 const productPublicAssets = (): Plugin => {
   let destination = '';
   return {
@@ -66,6 +93,7 @@ export default defineConfig({
   root: path.resolve(__dirname, '.'),
   publicDir: productUi ? false : 'public',
   plugins: [
+    externalAccessDownloads(),
     ...(productUi ? [productPublicAssets()] : []),
     react({
       babel: {

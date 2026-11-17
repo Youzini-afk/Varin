@@ -4,12 +4,145 @@ Use this guide when exposing a Varin Web deployment through Nginx, Nginx Proxy M
 another trusted TLS reverse proxy. Containers already expose one HTTP service on port `3000`; the
 proxy must forward the complete origin rather than selecting only ordinary REST requests.
 
+The user or their separately instructed agent configures the VPS, frps, DNS, firewall and HTTPS service
+independently. Varin connects to existing services; it does not provide VPS deployment, SSH deployment
+inspection/preview, deployment plans/receipts, certificate management or remote uninstall.
+
+Use **Settings → External Access → Get deployment files** for the downloadable
+[Varin FRP + HTTPS kit](../../deploy/external-access/README.md) and existing-service snippets.
+The archive contains only distributable templates; it never includes your Host settings or secrets.
+
 ## Before adding a proxy
 
 1. Start Varin on loopback or a private interface and confirm `GET /health` succeeds.
 2. Set a long random `VARIN_UI_PASSWORD` before allowing traffic from outside the local machine.
 3. Keep `VARIN_DATA_DIR` and workspaces outside immutable release directories.
 4. Terminate TLS at the proxy. Do not publish an unauthenticated plain-HTTP Varin server.
+
+## Dedicated external HTTP backend
+
+For a self-managed TLS proxy on the same machine (or a trusted private link),
+open **Settings → External Access** for the selected Host and save an HTTPS origin
+and a fixed IP address and port for the guarded HTTP listener. Saving does not
+restart an existing listener; **Enable** starts it and **Apply saved configuration** applies changes
+to an enabled entry. A failed replacement attempts to restore the previous
+running listener without overwriting the saved draft. **Disable** is persisted
+before the listener is fenced; shutting down the Host does not clear enabled
+intent or device authorization. An active legacy Cloudflare/ngrok tunnel must
+be stopped before another managed entry can start.
+
+Headless operators can also set the following variables on the Application Host
+before starting it. An explicitly configured environment listener takes precedence
+over the saved entry, which remains untouched and is not restored in this mode:
+
+```text
+VARIN_EXTERNAL_ORIGIN=https://varin.example.com
+VARIN_EXTERNAL_LISTEN_PORT=3100
+# Optional. Defaults to loopback. Do not publish this plain-HTTP socket.
+VARIN_EXTERNAL_LISTEN_HOST=127.0.0.1
+```
+
+Point the proxy at that backend instead of the local Application Host port,
+preserving the exact public `Host` (including its port, if nonstandard),
+`Origin`, cookies and WebSocket upgrades. Do not cache the pairing page or
+requests. The guard rejects requests for a different origin, and disabling this
+listener does not make it a local entry. The original local listener and managed
+tunnel modes are unchanged. Use **Check access** (or `varin external-access check --json`) when
+you want one bounded HTTPS check. The guarded listener answers a one-time proof; the request
+uses normal TLS certificate validation and no redirects. Private and split-horizon DNS
+addresses are supported for the owner-configured endpoint.
+A bind does not verify public HTTPS. A failed check leaves enabled forwarding unchanged;
+the Host may not have a network path back through its public address. This diagnostic does not
+inspect the server or manage certificates. Invalid environment configuration or a bind failure leaves
+the ordinary local listener unaffected; do not fall back to proxying it.
+
+For an independently managed frpc or other forwarding process, select **External forwarding**.
+Supply only the public origin and guarded backend. Keep the control port, token,
+mapping and process in your own configuration; Varin neither starts nor stops that process.
+
+An authenticated Host owner can issue a browser-only device link through
+`POST /api/client-auth/pairing/sessions` using `allowedClientKinds: ["browser"]`
+and `clientExpiresAt` (an absolute time or `null` for remembered access). Use the
+returned `browserUrl` from the HTTPS origin. The browser opens a confirmation
+page before exchanging its one-use secret. It receives a host-only Secure
+HttpOnly cookie backed by the existing device store. Remove the browser's
+record through the normal device management operation to revoke it. The paired
+browser can also send a same-origin `DELETE /auth/browser-session` to revoke its
+own grant and clear its cookies. Clearing the browser's site data still
+requires pairing again.
+
+The local settings screen can generate the same browser pairing link or QR.
+Do not route remote HTTP clients directly to the ordinary local listener as a
+substitute for this guarded backend. This mode does not provision a VPS or
+manage TLS certificates.
+
+## Existing FRP (operator-managed)
+
+**Settings → External Access** or the local management API can save an FRP
+entry pointing to a separately configured frps server. On supported Linux/macOS Hosts, Varin can
+select an existing `frpc` binary via absolute `VARIN_FRPC_PATH` or an absolute directory on `PATH`.
+You can also explicitly download Varin's pinned, checksummed component into the Host's own data directory.
+This does not install anything on the VPS or restart a running entry. Provide the existing token in
+`VARIN_FRP_TOKEN` (or a named `VARIN_FRP_TOKEN_*` environment variable).
+The saved config refers to the variable; the value never appears in the
+management API response. A trusted CA file and verified TLS server name
+are required; the backend is fixed to Host loopback.
+
+On the local Host, with the same authentication and Origin normally used
+for the local settings UI, send a `PUT /api/varin/external-access` with
+`expectedRevision` from GET (`null` only for a new entry) and a
+`configuration` object. For example:
+
+```json
+{
+  "expectedRevision": null,
+  "configuration": {
+    "name": "Home VPS",
+    "provider": "frp",
+    "publicOrigin": "https://varin.example.com",
+    "backend": { "host": "127.0.0.1", "port": 3100 },
+    "frp": {
+      "server": {
+        "address": "forwarding.example.com",
+        "port": 7000,
+        "tls": { "caFile": "/path/to/vps-ca.pem", "serverName": "forwarding.example.com" }
+      },
+      "proxy": { "name": "varin-home", "remotePort": 7300 },
+      "tokenEnv": "VARIN_FRP_TOKEN"
+    }
+  }
+}
+```
+
+Then send `POST /api/varin/external-access/enable` with the returned revision
+in `expectedRevision`. The Host opens business admission only after frpc
+reports the named TCP mapping published. The VPS HTTPS proxy should forward
+to that mapping's private VPS address, not make the TCP mapping public.
+Publication means that the FRP session is connected, not that public HTTPS
+has been verified. Run **Check access** when needed; split DNS, private trust and missing
+hairpin routing can block the Host's check even when another browser can reach the site.
+Host-side recovery continues at the final backoff interval while enabled, and does not
+retry credentials rejected by the provider. Stop waits
+for the child to exit and cleans up its private configuration files.
+
+Windows, Linux and macOS can use Host-managed frpc. The credential is passed through
+FRP's environment template; the generated runtime configuration and process arguments
+contain no token. Saving an FRP configuration does not install binaries
+or mutate the target server.
+
+For headless use, run `varin external-access status --json`. Save an entry
+with `varin external-access config --config entry.json --expected-revision new`
+(or use the current revision for replacements). Run
+`varin external-access enable --expected-revision N`, `disable` or `retry` with
+the latest revision. `varin external-access remove --expected-revision N` stops and removes only
+the local entry; device grants and external services remain. The CLI talks only to the local Host.
+
+Cloudflare/ngrok keep their existing configuration and credentials. Switching to an FRP or reverse-proxy
+entry does not update an externally managed origin or convert an old in-memory tunnel session into a
+remembered browser device. For a managed-remote Cloudflare migration, stop the legacy connection,
+enable the guarded backend and update the provider's origin to its actual Host/port within your
+trusted network. Verify public HTTPS and create a fresh browser pairing link. Existing mobile/desktop
+device grants remain with their original owner; a legacy in-memory browser session cannot migrate.
 
 ## Current realtime routes
 

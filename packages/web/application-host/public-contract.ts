@@ -28,6 +28,8 @@ export interface StartWebUiServerOptions {
   /** Electron system-network transport for desktop outbound HTTP(S). */
   desktopNetworkFetch?: ((url: string, init: RequestInit) => Promise<Response>) | undefined;
   exitOnShutdown?: boolean | undefined;
+  /** Explicit HTTP back end for an operator-managed HTTPS reverse proxy. */
+  externalIngress?: import('./lib/platform/public-ingress.js').ExternalIngressConfiguration | undefined;
   extensionCatalog?: ApplicationExtensionCatalog | undefined;
   extensionPackages?: ExtensionPackageManager | undefined;
   extensionRuntime?: ApplicationExtensionRuntime | undefined;
@@ -67,6 +69,8 @@ export interface WebUiServerController {
   getPort(): number;
   getQuitRiskStatus(): Promise<QuitRiskStatus>;
   getTunnelUrl(): string | null;
+  getExternalIngressStatus(): { origin: string; host: string; port: number; enabled: boolean; error?: string } | null;
+  setExternalIngressEnabled(enabled: boolean): Promise<void>;
   httpServer: Server;
   isReady(): boolean;
   /** Synchronously fences new admissions. Rejects on incomplete drain; callers

@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { getExternalIngress } from './public-ingress.js';
 interface TunnelRequest {
   connection?: { remoteAddress?: string | undefined } | undefined;
   headers: Record<string, string | string[] | undefined>;
@@ -289,6 +290,7 @@ export const createTunnelAuth = () => {
   };
 
   const classifyRequestScope = (req: TunnelRequest): 'local' | 'tunnel' | 'unknown-public' => {
+    if (getExternalIngress(req)) return 'tunnel';
     const hostHeader = normalizeHost(typeof req.headers.host === 'string' ? req.headers.host : '');
     const reqHost = normalizeHost(typeof req.hostname === 'string' ? req.hostname : '') || hostHeader;
 

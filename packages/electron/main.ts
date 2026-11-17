@@ -63,7 +63,7 @@ import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from 
 import { createStartupSplashHtml } from './startup-splash.js';
 import { createQuitLifecycle } from './quit-lifecycle.js';
 import { readLocalHostMode, writeLocalHostMode, restartDesktopNormally, type LocalHostModeContext } from './local-host-mode.js';
-import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.js';
+import { nativeHostRequestInit, sanitizeRuntimeRequestHeaders } from './runtime-request-headers.js';
 import { assertUpdaterCapability } from './updater-capability.js';
 import { checkForDesktopUpdate, type DesktopPendingUpdate } from './updater-check.js';
 import { resolveUpdaterChannel } from './updater-channel.js';
@@ -1823,7 +1823,8 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
     ? { clientKind: LOCAL_DESKTOP_CLIENT_KIND, dedupeKey: LOCAL_DESKTOP_CLIENT_DEDUPE_KEY, ...desktopDeviceMetadata() }
     : { clientKind: REMOTE_DESKTOP_CLIENT_KIND, dedupeKey: `desktop:${await getOrCreateDesktopInstallId()}`, ...desktopDeviceMetadata() };
 
-  const loginResponse = await fetch(new URL('/auth/session', `${baseUrl}/`).toString(), {
+  const loginUrl = new URL('/auth/session', `${baseUrl}/`);
+  const loginResponse = await fetch(loginUrl, nativeHostRequestInit(loginUrl, {
     method: 'POST',
     signal: AbortSignal.timeout(10_000),
     headers: {
@@ -1838,7 +1839,7 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
       clientLabel: 'Varin Desktop',
       ...clientIdentity,
     }),
-  });
+  }));
   if (!loginResponse.ok) {
     return { ok: false, status: loginResponse.status };
   }
@@ -1853,7 +1854,8 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
     return { ok: false, status: 401 };
   }
 
-  const tokenResponse = await fetch(new URL('/api/client-auth/clients', `${baseUrl}/`).toString(), {
+  const tokenUrl = new URL('/api/client-auth/clients', `${baseUrl}/`);
+  const tokenResponse = await fetch(tokenUrl, nativeHostRequestInit(tokenUrl, {
     method: 'POST',
     signal: AbortSignal.timeout(10_000),
     headers: {
@@ -1866,7 +1868,7 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
       label: 'Varin Desktop',
       ...clientIdentity,
     }),
-  });
+  }));
   if (!tokenResponse.ok) {
     return { ok: false, status: tokenResponse.status };
   }
@@ -2078,7 +2080,7 @@ const requestJsonWithTimeout = async (
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(url, nativeHostRequestInit(url, { ...init, signal: controller.signal }));
     const rawData = await response.json().catch(() => null);
     const data = rawData && typeof rawData === 'object' ? recordOf(rawData) : null;
     return { ok: response.ok, status: response.status, data };

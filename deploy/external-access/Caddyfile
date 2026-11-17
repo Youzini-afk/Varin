@@ -1,0 +1,68 @@
+{
+	admin off
+	persist_config off
+	# Request error records can contain URIs/headers. Keep only service/TLS logs.
+	log default {
+		exclude http.log.error http.log.access
+	}
+}
+
+(varin_transport) {
+	# No request/response buffers, cache, compression or automatic write retries.
+	# Caddy preserves Host, Origin, Cookie and Authorization and upgrades WS.
+	header_up Host {http.request.hostport}
+	flush_interval -1
+	transport http {
+		compression off
+	}
+}
+
+(varin_offline) {
+	header Cache-Control "no-store"
+	header Referrer-Policy "no-referrer"
+	header X-Content-Type-Options "nosniff"
+	root * /srv/varin-offline
+	rewrite * /index.html
+	file_server {
+		status 503
+	}
+}
+
+{$VARIN_DOMAIN} {
+	# Strict browser navigation only. Missing Fetch Metadata gets the real error.
+	@document {
+		method GET HEAD
+		header Sec-Fetch-Mode navigate
+		header Sec-Fetch-Dest document
+		header Accept *text/html*
+		header !Upgrade
+		not path /api /api/* /auth /auth/* /health /health/*
+	}
+
+	handle @document {
+		reverse_proxy frps:7300 {
+			import varin_transport
+			@disabled status 503
+			handle_response @disabled {
+				import varin_offline
+			}
+		}
+	}
+	# API, SSE, uploads, downloads and WS: untouched upstream status/body/headers.
+	handle {
+		reverse_proxy frps:7300 {
+			import varin_transport
+		}
+	}
+
+	# Dial/TLS/transport failures only. Upstream JSON 503 never enters this path.
+	handle_errors 502 503 504 {
+		handle @document {
+			import varin_offline
+		}
+		handle {
+			respond "Upstream unavailable" {err.status_code}
+		}
+	}
+	# Deliberately no access-log directive. Do not add debug/request logging.
+}

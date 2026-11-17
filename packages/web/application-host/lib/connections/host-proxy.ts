@@ -5,6 +5,7 @@ import { createProxyMiddleware, fixRequestBody } from 'http-proxy-middleware';
 import type { HostSshManager } from './ssh-manager.js';
 import { hasHostConnectionAccess } from './access.js';
 import { readHostConnections } from './hosts.js';
+import { inheritExternalIngress } from '../platform/public-ingress.js';
 
 /** Browser/mobile connections use this Host's authenticated HTTP/WS tunnel.
  * Only saved connections are addressable. Local credentials never reach the peer. */
@@ -92,6 +93,7 @@ export function attachConnectionProxy(options: {
       // The auth owner validates the original inner WS route against its URL-token
       // allowlist. Keep the real request/path intact for proxy routing and audit.
       const authRequest = Object.assign(Object.create(request) as IncomingMessage, { url: match[2], originalUrl: match[2] });
+      inheritExternalIngress(request, authRequest);
       const context = await options.authenticateUpgrade(authRequest);
       if (!context || !await options.originAllowed(request)) {
         socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); return;

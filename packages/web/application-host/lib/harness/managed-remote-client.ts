@@ -125,6 +125,10 @@ export class ManagedTargetClient {
     const headers = new Headers(this.target.connection.requestHeaders);
     if (this.target.connection.clientToken) headers.set("Authorization", `Bearer ${this.target.connection.clientToken}`);
     for (const [name, value] of Object.entries(extra)) headers.set(name, value);
+    // This is a Host-owned request, not a forwarded browser request. Match the
+    // configured HTTPS ingress without weakening its browser Origin checks.
+    const endpoint = new URL(this.target.connection.apiUrl);
+    if (endpoint.protocol === "https:") headers.set("Origin", endpoint.origin);
     return headers;
   }
 
@@ -213,6 +217,8 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
   const probe = async (connection: ConfiguredHost, signal?: AbortSignal): Promise<ManagedTarget> => {
     const headers = new Headers(connection.requestHeaders);
     headers.set("Accept", "application/json");
+    const endpoint = new URL(connection.apiUrl);
+    if (endpoint.protocol === "https:") headers.set("Origin", endpoint.origin);
     if (connection.clientToken) headers.set("Authorization", `Bearer ${connection.clientToken}`);
     const response = await fetchImpl(managedEndpointUrl(connection, '/identity'), {
       headers,

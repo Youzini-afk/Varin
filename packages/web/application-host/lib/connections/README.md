@@ -39,3 +39,9 @@ short-lived URL grants retain their issuing session or revalidate the issuing
 client's current bearer permissions. The inner URL must still pass the existing
 read/realtime allowlist. A connection proxy is not a way for a restricted client
 to inherit a saved peer's broader authority.
+
+Self-hosted external access consumes FRP or HTTPS proxy services already configured
+by the user or their separately instructed agent. It does not use these SSH work
+connections for VPS inspection, deployment previews, certificate management or
+remote uninstall. Ordinary saved SSH connections retain their existing authentication,
+remote Varin bootstrap, forwarding and recovery behavior.

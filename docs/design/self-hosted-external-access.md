@@ -1,8 +1,8 @@
 # 自建外部访问与节点接入
 
-状态：设计提案，尚未实施。日期：2026-11-17。源码基线：`de3b4afd7`。
+状态：主体已实施，完整 VPS 部署与跨设备链路仍待实测。日期：2026-11-17。下文现状表保留设计基线 `de3b4afd7`；当前接入方式见[反向代理指南](../ops/REVERSE_PROXY.md)及[部署配套](../../deploy/external-access/README.md)。
 
-对应 [#376：远程访问支持自带服务器](https://github.com/Astrmira/Varin/issues/376)。本文整理已讨论的设置交互、穿透适配、可部署配套、连接恢复与持久授权，作为后续实现依据。已按讨论收敛范围：服务器由用户或 Agent 按环境部署，Varin 提供连接能力和清晰的部署材料。文中的目标行为不表示当前版本已经支持；当前部署方法见[反向代理指南](../ops/REVERSE_PROXY.md)。
+对应 [#376：远程访问支持自带服务器](https://github.com/Astrmira/Varin/issues/376)，实现见 [#381](https://github.com/Astrmira/Varin/pull/381)。本文保留设置交互、穿透适配、部署配套、连接恢复与持久授权的设计取舍：服务器由用户或 Agent 按环境部署，Varin 提供连接能力和部署材料。当前代码已接入自建入口、Windows/Linux/macOS 本端 FRP、持久浏览器配对和原工作节点；Cloudflare/ngrok 保留原路径，切换受控入口按迁移指南处理。域名/IP 证书的实际部署与续期由部署者负责，完整 VPS 验收仍待进行。
 
 ## 1. 产品目标与决定
 

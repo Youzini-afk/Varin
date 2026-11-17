@@ -1,4 +1,4 @@
-export type GateState = 'pending' | 'authenticated' | 'locked' | 'error' | 'rate-limited';
+export type GateState = 'pending' | 'authenticated' | 'locked' | 'pairing-required' | 'error' | 'rate-limited';
 
 export type RuntimeIdentity = {
   apiBaseUrl: string;
@@ -11,7 +11,7 @@ export const runtimeIdentityMatches = (left: RuntimeIdentity, right: RuntimeIden
 
 export const resolveStatusCheckFailureState = (options: {
   shouldUseDesktopShellPasswordLogin?: boolean;
-}): Exclude<GateState, 'pending' | 'authenticated' | 'rate-limited'> => {
+}): Extract<GateState, 'locked' | 'error'> => {
   if (options.shouldUseDesktopShellPasswordLogin) {
     return 'locked';
   }

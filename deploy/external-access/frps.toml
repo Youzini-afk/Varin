@@ -1,0 +1,25 @@
+# frps v0.65.0, for the isolated Compose bridge only.
+# For a native same-machine proxy use snippets/frps.toml (loopback binding).
+bindAddr = "0.0.0.0"
+bindPort = 7000
+proxyBindAddr = "0.0.0.0"
+allowPorts = [{ single = 7300 }]
+maxPortsPerClient = 1
+
+auth.method = "token"
+auth.tokenSource.type = "file"
+auth.tokenSource.file.path = "/run/secrets/frp_token"
+
+transport.tls.force = true
+transport.tls.certFile = "/run/secrets/frps_cert"
+transport.tls.keyFile = "/run/secrets/frps_key"
+# Server-authenticated TLS + token. Do not set trustedCaFile here unless also
+# provisioning client certificates (mTLS) to every frpc.
+
+log.to = "console"
+log.level = "warn"
+log.disablePrintColor = true
+# Preserve upstream diagnostics so a rejected token is not retried as a network failure.
+# FRP reports the mismatch, never the token value. Do not enable debug logging.
+detailedErrorsToClient = true
+# No dashboard, HTTP virtual-host listener, metrics endpoint, KCP or QUIC.

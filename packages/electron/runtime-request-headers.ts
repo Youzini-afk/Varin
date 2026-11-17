@@ -14,3 +14,14 @@ export const sanitizeRuntimeRequestHeaders = (headers: unknown): Record<string, 
   }
   return next;
 };
+
+/** Native Host authentication calls declare their configured HTTPS target.
+ * Never use this for browser requests, whose actual Origin must be retained.
+ * Redirects could carry pairing secrets or custom access credentials elsewhere.
+ */
+export const nativeHostRequestInit = (url: string | URL, init: RequestInit = {}): RequestInit => {
+  const target = new URL(url);
+  const headers = new Headers(init.headers);
+  if (target.protocol === 'https:') headers.set('Origin', target.origin);
+  return { ...init, headers, redirect: 'error' };
+};

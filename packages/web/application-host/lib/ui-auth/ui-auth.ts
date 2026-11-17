@@ -2,6 +2,8 @@ import crypto from 'crypto';
 import { SignJWT, jwtVerify } from 'jose';
 import fs from 'fs';
 import path from 'path';
+import { browserClientCookie, browserClientCookieName } from '../client-auth/browser-pairing.js';
+import { getExternalIngress, markExternalIngressClient } from '../platform/public-ingress.js';
 import { createUiPasskeys } from './ui-passkeys.js';
 import { hostPrincipals, type PrincipalStore } from './principals.js';
 import { resolveVarinDataDir } from '../platform/data-paths.js';
@@ -61,6 +63,7 @@ interface ClientAuthResult {
 
 interface ClientAuthController {
   authenticateBearerToken?(token: string, req: UiAuthRequest): Promise<ClientAuthResult | null>;
+  revokeClient?(id: string): Promise<{ revoked: boolean }>;
   createClient?(input: Record<string, unknown>): Promise<{
     client: Record<string, unknown> & { id: string };
     token: string;
@@ -70,6 +73,7 @@ interface ClientAuthController {
 interface UiAuthOptions {
   clientAuthController?: ClientAuthController | null;
   cookieName?: string;
+  getServerId?: () => Promise<string | null>;
   password?: unknown;
   readSettingsFromDisk?: () => Promise<Record<string, unknown>>;
   requireClientAuth?: boolean;
@@ -517,7 +521,41 @@ export const createUiAuth = ({
   clientAuthController = null,
   requireClientAuth = false,
   principals = hostPrincipals(),
+  getServerId = async () => null,
 }: UiAuthOptions = {}) => {
+  let browserCookieName: Promise<string | null> | undefined;
+  const getBrowserCookieName = () => browserCookieName ??= getServerId().then(id => {
+    if (!id) { browserCookieName = undefined; return null; }
+    return browserClientCookieName(id);
+  }).catch(error => { browserCookieName = undefined; throw error; });
+  const browserToken = async (req: UiAuthRequest): Promise<string | null> => {
+    if (!getExternalIngress(req)) return null;
+    const name = await getBrowserCookieName();
+    return name ? parseCookies(req.headers.cookie)[name] ?? null : null;
+  };
+  const requiresClient = (req: UiAuthRequest) => requireClientAuth || Boolean(getExternalIngress(req));
+  const clientCredential = async (req: UiAuthRequest) => await browserToken(req) ?? getBearerTokenFromRequest(req);
+  const issueBrowserClientCookie = async (req: UiAuthRequest, res: UiAuthHeaderResponse, credential: { token: string; expiresAt: string | null }) => {
+    const ingress = getExternalIngress(req);
+    const name = await getBrowserCookieName();
+    if (!ingress || req.headers.origin !== ingress.origin || !name) throw Object.assign(new Error('Browser pairing is unavailable'), { statusCode: 403 });
+    res.setHeader('Set-Cookie', [browserClientCookie(name, credential.token, credential.expiresAt),
+      buildCookie({ name: cookieName, value: '', maxAge: 0, secure: true })]);
+  };
+  const handleBrowserSessionDelete = async (req: UiAuthRequest, res: UiAuthResponse) => {
+    const ingress = getExternalIngress(req);
+    if (!ingress || req.headers.origin !== ingress.origin) return res.status(403).json({ error: 'Same-origin browser request required' });
+    const token = await browserToken(req);
+    const client = token ? await authenticateBearerForRequest(req, token) : null;
+    if (client?.clientId && clientAuthController?.revokeClient) await clientAuthController.revokeClient(client.clientId);
+    const name = await getBrowserCookieName();
+    res.setHeader('Set-Cookie', [
+      ...(name ? [browserClientCookie(name, '', null)] : []),
+      buildCookie({ name: cookieName, value: '', maxAge: 0, secure: true }),
+    ]);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ signedOut: true });
+  };
   const normalizedPassword = normalizePassword(password);
   let jwtSecret = getOrCreateJwtSecret();
   const verifySessionPrincipal = async (token: string | null): Promise<string | null> => {
@@ -541,7 +579,7 @@ export const createUiAuth = ({
   const signSubject = async (principalId: string, ttlMs: number) => new SignJWT({ type: 'ui-session' })
     .setProtectedHeader({ alg: 'HS256' }).setSubject(principalId).setIssuedAt()
     .setExpirationTime(ttlMs / 1000 + 's').sign(jwtSecret);
-  const urlAuthTokens = new Map<string, { expiresAt: number; sessionToken: string; bearerToken?: string; expiryTimer: ReturnType<typeof setTimeout> }>();
+  const urlAuthTokens = new Map<string, { ingressOrigin: string | null; expiresAt: number; sessionToken: string; bearerToken?: string; expiryTimer: ReturnType<typeof setTimeout> }>();
   const removeUrlAuthToken = (token: string): void => {
     const entry = urlAuthTokens.get(token);
     if (entry) clearTimeout(entry.expiryTimer);
@@ -560,13 +598,13 @@ export const createUiAuth = ({
     }
   };
 
-  const issueUrlAuthTokenForSession = (sessionToken: string, bearerToken?: string) => {
+  const issueUrlAuthTokenForSession = (req: UiAuthRequest, sessionToken: string, bearerToken?: string) => {
     sweepUrlAuthTokens();
     const token = `${URL_AUTH_TOKEN_PREFIX}${crypto.randomBytes(24).toString('base64url')}`;
     const expiresAt = Date.now() + URL_AUTH_TOKEN_TTL_MS;
     const expiryTimer = setTimeout(() => removeUrlAuthToken(token), URL_AUTH_TOKEN_TTL_MS);
     expiryTimer.unref?.();
-    urlAuthTokens.set(token, { sessionToken, expiresAt, expiryTimer, ...(bearerToken ? { bearerToken } : {}) });
+    urlAuthTokens.set(token, { ingressOrigin: getExternalIngress(req)?.origin ?? null, sessionToken, expiresAt, expiryTimer, ...(bearerToken ? { bearerToken } : {}) });
     return { token, expiresAt };
   };
 
@@ -577,7 +615,11 @@ export const createUiAuth = ({
     let result = entries.get(token);
     if (!result) {
       result = (async () => {
-        try { const value = await clientAuthController?.authenticateBearerToken?.(token, req); return value?.ok ? value : null; }
+        try {
+          const value = await clientAuthController?.authenticateBearerToken?.(token, req);
+          if (value?.ok && value.clientId) markExternalIngressClient(req, value.clientId, typeof value.client?.expiresAt === 'string' ? value.client.expiresAt : null);
+          return value?.ok ? value : null;
+        }
         catch { return null; }
       })();
       entries.set(token, result);
@@ -594,6 +636,7 @@ export const createUiAuth = ({
       removeUrlAuthToken(token);
       return null;
     }
+    if (entry.ingressOrigin !== (getExternalIngress(req)?.origin ?? null)) return null;
     if (entry.bearerToken) {
       // A URL grant cannot outlive revocation or acquire broader capabilities
       // than its original client. The bearer stays only in this short-lived map.
@@ -608,11 +651,15 @@ export const createUiAuth = ({
     req: UiAuthRequest,
     { allowUrlToken = true }: { allowUrlToken?: boolean } = {},
   ): Promise<ClientAuthResult | null> => {
+    // A presented browser cookie selects this device, even if empty, expired or
+    // revoked. Neither a native bearer nor an older URL grant may replace it.
+    const deviceToken = await browserToken(req);
+    if (deviceToken !== null) return authenticateBearerForRequest(req, deviceToken);
     if (allowUrlToken) {
       const urlAuth = await authenticateUrlAuthToken(req);
       if (urlAuth) return urlAuth;
     }
-    const token = getBearerTokenFromRequest(req);
+    const token = await clientCredential(req);
     if (!token || typeof clientAuthController?.authenticateBearerToken !== 'function') {
       return null;
     }
@@ -640,6 +687,16 @@ export const createUiAuth = ({
     return raw.startsWith('client:') ? raw.slice('client:'.length) : raw;
   };
 
+  const browserDeviceStatus = async (req: UiAuthRequest, clientId: string | null) => {
+    // Identify the current browser from the same selected credential used for
+    // authorization, never from a native bearer that happens to accompany it.
+    const token = await browserToken(req);
+    if (token === null || !clientId) return {};
+    const auth = await authenticateBearerForRequest(req, token);
+    if (!auth || clientAuthClientId(auth) !== clientId) return {};
+    return { browserDevice: { id: clientId, ...(auth.client?.label ? { label: auth.client.label } : {}) } };
+  };
+
   const clientAuthContext = (clientAuth: ClientAuthResult) => clientAuth.session === true
     ? { type: 'session', token: clientAuth.sessionToken, principalId: clientAuth.principalId }
     : ({
@@ -661,14 +718,22 @@ export const createUiAuth = ({
     let result = entries.get(key);
     if (!result) {
       result = (async () => {
+        // A browser device cookie is the selected authority, even when invalid:
+        // never fall back to an older independent JWT after device revocation.
+        const deviceToken = await browserToken(req);
+        if (deviceToken !== null) {
+          if (!allowClientAuth) return null;
+          const client = await authenticateClientRequest(req, { allowUrlToken });
+          return client ? clientAuthContext(client) : null;
+        }
         const token = parseCookies(req.headers.cookie)[cookieName] ?? null;
-        const principalId = normalizedPassword || !requireClientAuth ? await sessionPrincipal(token, req) : null;
+        const principalId = normalizedPassword || !requiresClient(req) ? await sessionPrincipal(token, req) : null;
         if (principalId) return { type: 'session', token: token!, principalId };
         if (allowClientAuth) {
           const client = await authenticateClientRequest(req, { allowUrlToken });
           if (client) return clientAuthContext(client);
         }
-        if (!normalizedPassword && !requireClientAuth && token) return { type: 'session', token, principalId: undefined };
+        if (!normalizedPassword && !requiresClient(req) && token) return { type: 'session', token, principalId: undefined };
         return null;
       })();
       entries.set(key, result);
@@ -713,7 +778,7 @@ export const createUiAuth = ({
     };
 
     const ensureSessionToken = async (req: UiAuthRequest, res: UiAuthHeaderResponse): Promise<string | null> => {
-      if (requireClientAuth) {
+      if (requiresClient(req)) {
         const clientAuth = await authenticateClientRequest(req);
         return clientAuth ? clientSessionToken(clientAuth) : null;
       }
@@ -727,7 +792,7 @@ export const createUiAuth = ({
     };
 
     const requireAuth = async (req: UiAuthRequest, res: UiAuthResponse, next: NextFunction) => {
-      if (!requireClientAuth) {
+      if (!requiresClient(req)) {
         return requirePrincipalAccess(req, res, next);
       }
       if (req.method === 'OPTIONS') {
@@ -741,7 +806,7 @@ export const createUiAuth = ({
     };
 
     const requireSessionAuth = async (req: UiAuthRequest, res: UiAuthResponse, next: NextFunction) => {
-      if (!requireClientAuth) {
+      if (!requiresClient(req)) {
         return next();
       }
       if (req.method === 'OPTIONS') {
@@ -756,7 +821,7 @@ export const createUiAuth = ({
       options: { allowClientAuth?: boolean; allowUrlToken?: boolean } = {},
     ) => {
       const context = await resolveRequestAuth(req, options);
-      if (context || requireClientAuth || !res) return context;
+      if (context || requiresClient(req) || !res) return context;
       const token = await ensureSessionToken(req, res);
       return { type: 'session', token, principalId: undefined };
     };
@@ -764,11 +829,13 @@ export const createUiAuth = ({
     const resolveWebSocketAuthContext = async (req: UiAuthRequest) => {
       const context = await resolveRequestAuth(req);
       if (context) return filterWebSocketPrincipal(req, context);
-      return requireClientAuth ? null : { type: 'anonymous', token: 'anonymous' };
+      return requiresClient(req) ? null : { type: 'anonymous', token: 'anonymous' };
     };
 
     return {
       enabled: false,
+      issueBrowserClientCookie,
+      handleBrowserSessionDelete,
       requirePrincipalAccess,
       requireAuth,
       requireSessionAuth,
@@ -776,10 +843,12 @@ export const createUiAuth = ({
       resolveRequestAuth,
       resolveWebSocketAuthContext,
       handleSessionStatus: async (req: UiAuthRequest, res: UiAuthResponse) => {
-        if (requireClientAuth) {
+        res.setHeader('Cache-Control', 'no-store');
+        if (requiresClient(req)) {
           const clientAuth = await authenticateClientRequest(req);
           if (clientAuth) {
-            return res.json({ authenticated: true, disabled: true, scope: 'client' });
+            return res.json({ authenticated: true, disabled: true, scope: 'client',
+              ...await browserDeviceStatus(req, clientAuthClientId(clientAuth)) });
           }
           return res.status(401).json({ authenticated: false, locked: true, clientAuthRequired: true });
         }
@@ -792,15 +861,15 @@ export const createUiAuth = ({
         const clientAuth = await authenticateClientRequest(req, { allowUrlToken: false });
         if (clientAuth) {
           res.setHeader('Cache-Control', 'no-store');
-          return res.json(issueUrlAuthTokenForSession(clientSessionToken(clientAuth), getBearerTokenFromRequest(req) || undefined));
+          return res.json(issueUrlAuthTokenForSession(req, clientSessionToken(clientAuth), (await clientCredential(req)) || undefined));
         }
-        if (requireClientAuth) {
+        if (requiresClient(req)) {
           return res.status(401).json({ error: 'Client authentication required', locked: true, clientAuthRequired: true });
         }
         const sessionToken = await ensureSessionToken(req, res);
         res.setHeader('Cache-Control', 'no-store');
         if (!sessionToken) return res.status(401).json({ error: 'Authentication required' });
-        return res.json(issueUrlAuthTokenForSession(sessionToken));
+        return res.json(issueUrlAuthTokenForSession(req, sessionToken));
       },
       handlePasskeyStatus: (_req: UiAuthRequest, res: UiAuthResponse) => {
         res.json({ enabled: false, hasPasskeys: false, passkeyCount: 0, rpID: null });
@@ -929,6 +998,13 @@ export const createUiAuth = ({
     const ttlMs = resolveSessionTtlMs(trustDevice);
     const token = await signSubject(principalId ?? await principals.ownerId(), ttlMs);
     setSessionCookie(req, res, token, ttlMs);
+    if (getExternalIngress(req)) {
+      const name = await getBrowserCookieName();
+      if (name) res.setHeader('Set-Cookie', [
+        buildCookie({ name: cookieName, value: encodeURIComponent(token), maxAge: Math.floor(ttlMs / 1000), secure: true }),
+        browserClientCookie(name, '', null),
+      ]);
+    }
     return token;
   };
 
@@ -965,9 +1041,10 @@ export const createUiAuth = ({
   };
 
   const handleSessionStatus = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
+    res.setHeader('Cache-Control', 'no-store');
     const context = await resolveRequestAuth(req);
     if (context) {
-      res.json({ authenticated: true, ...(context.type === 'client' ? { scope: 'client' } : {}),
+      res.json({ authenticated: true, ...(context.type === 'client' ? { scope: 'client', ...await browserDeviceStatus(req, context.clientId ?? null) } : {}),
         hostOwner: typeof context.principalId === 'string' && await principals.isOwner(context.principalId) });
       return;
     }
@@ -981,16 +1058,16 @@ export const createUiAuth = ({
   const resolveWebSocketAuthContext = async (req: UiAuthRequest) => filterWebSocketPrincipal(req, await resolveRequestAuth(req));
 
   const handleUrlAuthToken = async (req: UiAuthRequest, res: UiAuthResponse) => {
-    const sessionToken = await resolveAuthenticatedSessionToken(req, { allowUrlToken: false });
+    const context = await resolveRequestAuth(req, { allowUrlToken: false });
+    const sessionToken = context?.token;
     if (!sessionToken) {
       clearSessionCookie(req, res);
       return respondUnauthorized(req, res);
     }
     // Preserve whether the grant came from a UI session or a bearer client.
-    const cookieToken = getTokenFromRequest(req);
-    const bearerToken = await isSessionValid(cookieToken, req) ? undefined : getBearerTokenFromRequest(req) || undefined;
+    const bearerToken = context?.type === 'client' ? await clientCredential(req) || undefined : undefined;
     res.setHeader('Cache-Control', 'no-store');
-    return res.json(issueUrlAuthTokenForSession(sessionToken, bearerToken));
+    return res.json(issueUrlAuthTokenForSession(req, sessionToken, bearerToken));
   };
 
   const handleSessionCreate = async (req: UiAuthRequest, res: UiAuthResponse): Promise<void> => {
@@ -1170,6 +1247,8 @@ export const createUiAuth = ({
 
   return {
     enabled: true,
+    issueBrowserClientCookie,
+    handleBrowserSessionDelete,
     requirePrincipalAccess,
     requireAuth,
     requireSessionAuth,

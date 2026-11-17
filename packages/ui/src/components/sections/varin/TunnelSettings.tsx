@@ -1,7 +1,7 @@
 import React from 'react';
 import QRCode from 'qrcode';
 import { toast } from '@/components/ui';
-import { runtimeFetch } from '@varin/application-client';
+import { runtimeFetch, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
@@ -18,6 +18,7 @@ import { formatTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import { SettingsSection, SettingsGroupTitle, SETTINGS_SELECT_SIZE, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_CALLOUT_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
+import { ExternalAccessSettings } from './ExternalAccessSettings';
 
 type TunnelState =
   | 'checking'
@@ -348,6 +349,35 @@ const createPresetId = (): string => {
 };
 
 export const TunnelSettings: React.FC = () => {
+  const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  return <TunnelSettingsPanel key={host} />;
+};
+
+const TunnelSettingsPanel: React.FC = () => {
+  const { t } = useI18n();
+  const [section, setSection] = React.useState('self-hosted');
+  const selected = React.useRef(false);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    void runtimeFetch('/api/varin/tunnel/status', { signal: controller.signal })
+      .then(async response => response.ok ? response.json() : null)
+      .then(status => { if (!controller.signal.aborted && !selected.current && status?.url) setSection('provider'); })
+      .catch(() => { /* The selected settings panel reports its own connection errors. */ });
+    return () => controller.abort();
+  }, []);
+  return <div className="space-y-6">
+    <Select value={section} onValueChange={value => { selected.current = true; setSection(value); }}>
+      <SelectTrigger size={SETTINGS_SELECT_SIZE} className="max-w-xs" aria-label={t('settings.varin.externalAccess.provider')}><SelectValue /></SelectTrigger>
+      <SelectContent>
+        <SelectItem value="self-hosted">{t('settings.varin.externalAccess.title')}</SelectItem>
+        <SelectItem value="provider">{t('settings.varin.externalAccess.legacyTitle')}</SelectItem>
+      </SelectContent>
+    </Select>
+    {section === 'provider' ? <LegacyTunnelSettings /> : <ExternalAccessSettings />}
+  </div>;
+};
+
+const LegacyTunnelSettings: React.FC = () => {
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
@@ -1239,7 +1269,7 @@ export const TunnelSettings: React.FC = () => {
 
   return (
     <SettingsSection
-      title={t('settings.varin.tunnel.title')}
+      title={t('settings.varin.externalAccess.legacyTitle')}
       info={(
         <div className="space-y-1">
           <p>{t('settings.varin.tunnel.description')}</p>
@@ -1247,7 +1277,7 @@ export const TunnelSettings: React.FC = () => {
           <p>{t('settings.varin.tunnel.note.connectLinksOneTime')}</p>
         </div>
       )}
-      divider={false}
+      divider
     >
       <div className="space-y-6">
       {renderedSessionRecords.length > 0 && (

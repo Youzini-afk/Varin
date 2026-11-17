@@ -49,7 +49,7 @@
 
 ## 持续演进的设计
 
-- [自建外部访问与节点接入](design/self-hosted-external-access.md)：设计提案；FRP/已有反代适配、便于用户或 Agent 使用的部署配套，以及入口启停、节点连接与持久设备授权。
+- [自建外部访问与节点接入](design/self-hosted-external-access.md)：主体已实施；FRP/已有反代适配、部署配套、入口启停、节点连接与持久设备授权。当前用法见[反代指南](ops/REVERSE_PROXY.md)，完整 VPS 链路仍待实测。
 - [会话协作与外部执行者](design/conversation-collaboration-and-executors.md)：设计提案；原生主任务与 Bot 跨会话协作、外部程序发现与无预设派发，以及 Codex／Claude Code／Pi／ACP 的能力、监控和生命周期完善。对外 MCP／CLI／Skill 协作桥接暂缓。
 - [聊天定点引用与可拖动输入标记](design/chat-quoting-and-draggable-markers.md)：实施中；按选区／正文块或具体对象引用，在输入框用可拖动的引用与图片标记安排位置，统一撤销、附件交付和历史定位，内部来源信息不再拼入模型正文。
 - [文件与终端编码](design/text-encoding.md)：设计提案；GBK／GB2312 项目的无感读改写、原格式保存、统一文件文本能力，以及独立的终端 I/O 合同，尚未实施。
