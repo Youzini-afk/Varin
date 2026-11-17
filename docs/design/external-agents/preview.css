@@ -107,8 +107,8 @@ button:disabled { cursor: default; }
 .operation-log { font-size: 12px; color: var(--muted-foreground); margin-top: 15px; }
 .operation-log pre { padding: 14px; font-size: 11px; line-height: 1.8; margin-top: 10px; border-radius: 9px; background: var(--sidebar); overflow: auto; white-space: pre-wrap; }
 .preview-notice { position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; border-radius: 10px; background: var(--popover); border: 1px solid var(--border); padding: 11px 17px; box-shadow: 0 4px 25px #0001; font-size: 13px; z-index: 80; }
-[data-slot="dialog-content"].catalog-dialog, [data-slot="dialog-content"].login-dialog { width: 520px; max-width: calc(100vw - 32px); padding: 25px; gap: 21px; }
-.catalog-dialog [data-slot="dialog-title"], .login-dialog [data-slot="dialog-title"] { font-size: 18px; }
+[data-slot="dialog-content"].catalog-dialog { width: 520px; max-width: calc(100vw - 32px); padding: 25px; gap: 21px; }
+.catalog-dialog [data-slot="dialog-title"] { font-size: 18px; }
 .catalog-search { position: relative; }
 .catalog-search > svg { position: absolute; left: 11px; top: 10px; color: var(--muted-foreground); }
 .catalog-search > input { padding-left: 35px; }
@@ -136,10 +136,6 @@ button:disabled { cursor: default; }
 .custom-fields { display: flex; flex-direction: column; gap: 18px; }
 .custom-fields label { display: flex; flex-direction: column; gap: 9px; font-size: 13px; }
 .custom-fields p, .no-results { font-size: 12px; color: var(--muted-foreground); line-height: 1.7; }
-.login-terminal { border: 1px solid var(--border); border-radius: 10px; background: var(--background); overflow: hidden; }
-.login-terminal > div { padding: 10px 14px; display: flex; gap: 7px; align-items: center; font-size: 12px; border-bottom: 1px solid var(--border); }
-.login-terminal > div > span { margin-left: auto; color: var(--muted-foreground); }
-.login-terminal pre { margin: 0; padding: 19px; font-size: 12px; line-height: 1.8; white-space: pre-wrap; }
 @container settings-frame (max-width: 760px) {
   .settings-sidebar { display: none; }
   .settings-page { padding: 30px 25px; }
