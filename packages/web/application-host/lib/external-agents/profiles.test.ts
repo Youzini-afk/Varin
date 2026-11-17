@@ -15,6 +15,7 @@ it('supplies disabled editable launch configurations, not auto-install or permis
     ['cursor', 'cursor-agent', ['acp']],
     ['qoder', 'qoder', ['--acp']],
     ['grok', 'grok', ['agent', 'stdio']],
+    ['dsh', 'dsh', ['--profile', 'acp']],
   ]);
   for (const configuration of ACP_DEFAULTS) {
     expect(configuration.enabled).toBe(false);
@@ -27,7 +28,7 @@ it('supplies disabled editable launch configurations, not auto-install or permis
     );
     expect(profile.launch.args).not.toBe(configuration.args);
   }
-  expect(ACP_PROFILES).toHaveLength(6);
+  expect(ACP_PROFILES).toHaveLength(7);
   expect(getAcpProfile('custom')).toBeUndefined();
 });
 
