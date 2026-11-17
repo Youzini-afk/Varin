@@ -30,7 +30,7 @@
     "companion:fetch": "node packages/electron/scripts/companion-assets.mjs fetch",
     "companion:lock": "node packages/electron/scripts/companion-assets.mjs lock",
     "build:cloud-runtime": "node scripts/build-cloud-runtime.mjs",
-    "update:cloud-runtime-lock": "node scripts/build-cloud-runtime.mjs --skip-build --no-archive --update-lock",
+    "update:cloud-runtime-lock": "node scripts/build-cloud-runtime.mjs --update-lock-only",
     "build:ui": "bun run --cwd packages/ui build",
     "build:monaco-smoke": "bun run --cwd packages/web build:monaco-smoke",
     "build:electron": "bun run --cwd packages/electron build",

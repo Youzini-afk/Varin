@@ -193,7 +193,7 @@ Vitest native suites，不会补跑这些 Rust 场景。需要某项 ignored 回
 
 ## 依赖与提交
 
-[bun.lock](../bun.lock) 管开发依赖图，[scripts/cloud-runtime.bun.lock](../scripts/cloud-runtime.bun.lock) 管 staged production 图。影响生产依赖时，在对应输出准备后
+[bun.lock](../bun.lock) 管开发依赖图，[scripts/cloud-runtime.bun.lock](../scripts/cloud-runtime.bun.lock) 管 staged production 图。影响生产依赖时，无需预先构建，直接
 运行 `bun run update:cloud-runtime-lock` 并核对真实差异。具体维护见[依赖说明](ops/dependency-updates.md)。
 
 修改前检查 Git 状态，保留无关用户改动。将有完整证据的阶段提交并在获准后推送，确认远端实际 SHA；没有运行的验证不作
