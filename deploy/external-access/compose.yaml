@@ -1,0 +1,70 @@
+# Standalone example. Read README.md and create private files before starting.
+name: varin-external-access
+services:
+  frps:
+    image: ghcr.io/fatedier/frps:v0.65.0
+    command: ["-c", "/etc/frp/frps.toml"]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ports:
+      - "${FRP_CONTROL_BIND_IP:-0.0.0.0}:${FRP_CONTROL_PORT:-7000}:7000/tcp"
+    # Intentionally NO published port 7300, dashboard, KCP or QUIC port.
+    networks: [forwarding]
+    volumes:
+      - type: bind
+        source: ./frps.toml
+        target: /etc/frp/frps.toml
+        read_only: true
+        bind: {create_host_path: false}
+    secrets: [frp_token, frps_cert, frps_key]
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      VARIN_DOMAIN: "${VARIN_DOMAIN:?Set VARIN_DOMAIN in .env}"
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+      - "443:443/udp"
+    networks: [forwarding]
+    volumes:
+      - type: bind
+        source: ./Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ./offline
+        target: /srv/varin-offline
+        read_only: true
+        bind: {create_host_path: false}
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
+# This dedicated bridge is not shared with unrelated containers. No host networking,
+# direct routing, routed gateway mode, application-port publish or Docker socket.
+# It is not internal:true: Caddy needs outbound ACME and frps needs inbound control.
+networks:
+  forwarding:
+    driver: bridge
+
+secrets:
+  frp_token: {file: ./secrets/frp-token}
+  frps_cert: {file: ./secrets/frps.crt}
+  frps_key: {file: ./secrets/frps.key}
+volumes:
+  caddy_data:
+  caddy_config:

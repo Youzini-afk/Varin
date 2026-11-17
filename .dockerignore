@@ -29,3 +29,10 @@ pnpm-debug.log*
 data
 workspaces
 packages/intellij
+
+# Only the checked-in external-access examples belong in product images.
+deploy/external-access/.env*
+!deploy/external-access/.env.example
+deploy/external-access/secrets
+deploy/external-access/pki
+deploy/external-access/*.local

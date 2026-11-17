@@ -19,6 +19,10 @@ export function classifyChanges(files, { full = false, called = false, qualifica
   const result = full || files === null ? all() : empty();
   const enable = (...names) => { for (const name of names) result[name] = true; };
   if (!full && files !== null) for (const file of files) {
+    // The kit README is shipped inside the browser download, not documentation-only.
+    if (file.startsWith('deploy/external-access/') || /^packages\/web\/scripts\/external-access-kit\./u.test(file)) {
+      enable('code', 'frontend'); continue;
+    }
     if (prose.test(file)) continue;
     enable('code');
     if (file === '.github/dependabot.yml' || file === '.github/renovate.json'
