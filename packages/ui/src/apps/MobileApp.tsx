@@ -5,8 +5,7 @@ import type { IconName } from '@/components/icon/icons';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { ThreadSwitcherDropdown } from '@/components/thread/ThreadSwitcherDropdown';
-import { ExternalContextDetails, useExternalContextSnapshot } from '@/components/layout/ExternalContextUsage';
-import type { ExternalContextSnapshot } from '@/stores/useExternalAgentStore';
+import { ExternalContextDetails, useExternalContextSnapshot, type MeasuredExternalContext } from '@/components/layout/ExternalContextUsage';
 import { AboutSettings } from '@/components/sections/varin/AboutSettings';
 import { MobileAppUpdateToast } from '@/components/update/MobileAppUpdateToast';
 import { Button } from '@/components/ui/button';
@@ -1339,7 +1338,7 @@ const SessionMetadataOverlay: React.FC<{
   open: boolean;
   onClose: () => void;
   anchorRef: React.RefObject<HTMLElement | null>;
-  externalContext: ExternalContextSnapshot | undefined;
+  externalContext: MeasuredExternalContext | undefined;
   branchLabel: string;
 }> = ({ open, onClose, anchorRef, externalContext, branchLabel }) => {
   const { t } = useI18n();

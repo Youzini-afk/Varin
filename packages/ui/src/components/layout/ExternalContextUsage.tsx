@@ -1,6 +1,6 @@
 import React from 'react';
 import { Popover } from '@base-ui/react/popover';
-import { getRuntimeEndpointGeneration, type ExternalTurn } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, type ExternalContextUsage as ContextMeasurement, type ExternalTurn } from '@varin/application-client';
 import { useShallow } from 'zustand/react/shallow';
 import { useExternalAgentStore, type ExternalContextSnapshot } from '@/stores/useExternalAgentStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
@@ -8,6 +8,8 @@ import { useThreadStore } from '@/stores/useThreadStore';
 import { useI18n } from '@/lib/i18n';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { externalCacheRate, externalUsageSummary } from '@/components/thread/externalUsage';
+
+export type MeasuredExternalContext = ExternalContextSnapshot & { contextUsage: ContextMeasurement };
 
 function Usage({ usage, label }: { usage: NonNullable<ExternalTurn['usage']>; label: string }) {
   const { t } = useI18n();
@@ -35,7 +37,7 @@ export function useExternalContextSnapshot(conversationId?: string) {
     : selected);
   const snapshot = useExternalAgentStore(useShallow(state => {
     const value = state.host === host && id ? state.snapshots[id] : undefined;
-    if (!value) return undefined;
+    if (!value?.contextUsage) return undefined;
     const { contextUsage, contextUsageSource, turns } = value;
     return { contextUsage, contextUsageSource, turns };
   }));
@@ -51,8 +53,8 @@ export function ExternalContextUsage({ conversationId }: { conversationId?: stri
   return <Popover.Root key={id}>
     <Popover.Trigger aria-label={contextUsageSource === 'recorded' ? title : t('contextUsage.aria.label')}
       className="app-region-no-drag shrink-0 rounded-md px-2 py-1.5 hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-      <ContextUsageDisplay totalTokens={usage?.used} contextLimit={usage?.size}
-        percentage={usage && usage.used / usage.size * 100} tooltipTitle={title} size="compact" hideIcon showPercentIcon
+      <ContextUsageDisplay totalTokens={usage.used} contextLimit={usage.size}
+        percentage={usage.used / usage.size * 100} tooltipTitle={title} size="compact" hideIcon showPercentIcon
         className={contextUsageSource === 'recorded' ? 'opacity-65' : undefined}
         valueClassName="typography-ui-label font-medium leading-none text-foreground" percentIconClassName="h-4.5 w-4.5" />
     </Popover.Trigger>
@@ -66,15 +68,14 @@ export function ExternalContextUsage({ conversationId }: { conversationId?: stri
   </Popover.Root>;
 }
 
-export function ExternalContextDetails({ snapshot }: { snapshot: ExternalContextSnapshot }) {
+export function ExternalContextDetails({ snapshot }: { snapshot: MeasuredExternalContext }) {
   const { t } = useI18n();
   const { contextUsage: usage, contextUsageSource, turns } = snapshot;
   const summary = React.useMemo(() => externalUsageSummary(turns), [turns]);
   return <>
     <h3 className="mb-2 font-medium">{t(contextUsageSource === 'recorded' ? 'external.lastRecordedContext' : 'external.contextUsage')}</h3>
     <p className="tabular-nums text-muted-foreground">
-      {usage ? `${usage.used.toLocaleString()} / ${usage.size.toLocaleString()} · ${(usage.used / usage.size * 100).toFixed(1)}%`
-        : t('external.contextUnavailable')}
+      {usage.used.toLocaleString()} / {usage.size.toLocaleString()} · {(usage.used / usage.size * 100).toFixed(1)}%
     </p>
     {summary.total && <Usage usage={summary.total} label={t(summary.complete ? 'external.conversationUsage' : 'external.recordedUsage')} />}
     {summary.lastRequest && <Usage usage={summary.lastRequest} label={t('external.lastRequest')} />}

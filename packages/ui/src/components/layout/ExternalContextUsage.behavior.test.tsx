@@ -77,9 +77,10 @@ it('opens native occupancy and scoped cumulative usage without a Varin context i
   await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
   expect(document.body.textContent).toContain('Agent-reported context');
   await publish(snapshot('one', 2));
-  expect(container.textContent).toBe('—');
-  expect(document.body.textContent).toContain('The Agent has not reported context occupancy.');
-  expect(document.body.textContent).toContain('Conversation total');
+  expect(container.querySelector('button')).toBeNull();
+  expect(document.querySelector('[role=dialog]')).toBeNull();
+  await publish(snapshot('one', 3, 400));
+  expect(container.textContent).toContain('40.0%');
 });
 
 it('labels a recorded measurement on an explicitly opened Bot task', async () => {
