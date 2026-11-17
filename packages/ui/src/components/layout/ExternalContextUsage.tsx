@@ -1,15 +1,10 @@
 import React from 'react';
 import { Popover } from '@base-ui/react/popover';
-import { getRuntimeEndpointGeneration, type ExternalContextUsage as ContextMeasurement, type ExternalTurn } from '@varin/application-client';
-import { useShallow } from 'zustand/react/shallow';
-import { useExternalAgentStore, type ExternalContextSnapshot } from '@/stores/useExternalAgentStore';
-import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
-import { useThreadStore } from '@/stores/useThreadStore';
+import type { ExternalTurn } from '@varin/application-client';
 import { useI18n } from '@/lib/i18n';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { externalCacheRate, externalUsageSummary } from '@/components/thread/externalUsage';
-
-export type MeasuredExternalContext = ExternalContextSnapshot & { contextUsage: ContextMeasurement };
+import { useExternalContextSnapshot, type MeasuredExternalContext } from './useExternalContextSnapshot';
 
 function Usage({ usage, label }: { usage: NonNullable<ExternalTurn['usage']>; label: string }) {
   const { t } = useI18n();
@@ -24,24 +19,6 @@ function Usage({ usage, label }: { usage: NonNullable<ExternalTurn['usage']>; la
       {rate !== undefined && <div className="flex justify-between gap-6"><dt>{t('external.cacheRate')}</dt><dd>{rate.toFixed(1)}%</dd></div>}
     </dl>
   </section>;
-}
-
-export function useExternalContextSnapshot(conversationId?: string) {
-  const identity = useThreadStore(state => state.selectedIdentity);
-  const draftKey = useThreadStore(state => state.selectedDraftKey);
-  const draft = useThreadDraftStore(state => draftKey ? state.drafts[draftKey] : undefined);
-  const selected = useExternalAgentStore(state => state.selectedId);
-  const host = getRuntimeEndpointGeneration();
-  const id = conversationId ?? (identity ? undefined : draftKey
-    ? draft?.harnessId && draft.externalConversationHost === host ? draft.externalConversationId : undefined
-    : selected);
-  const snapshot = useExternalAgentStore(useShallow(state => {
-    const value = state.host === host && id ? state.snapshots[id] : undefined;
-    if (!value?.contextUsage) return undefined;
-    const { contextUsage, contextUsageSource, turns } = value;
-    return { contextUsage, contextUsageSource, turns };
-  }));
-  return { id, snapshot };
 }
 
 export function ExternalContextUsage({ conversationId }: { conversationId?: string }) {
