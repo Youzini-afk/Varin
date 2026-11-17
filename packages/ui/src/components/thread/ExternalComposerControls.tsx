@@ -4,6 +4,7 @@ import { useI18n } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { ModelLogo } from '@/components/ui/ModelLogo';
 import { externalGenericOptions, externalModelChoice, externalThinkingOptions, normalizeExternalSessionChoice, type ExternalSessionChoice } from './externalSessionChoice';
 
 export interface ExternalComposerOptions {
@@ -95,7 +96,9 @@ function OptionChip({ options, kind, label, icon }: { options: ExternalComposerO
   return <DropdownMenu open={open} onOpenChange={next => { setOpen(next); if (next) options.onInteract('menu'); }}>
     <DropdownMenuTrigger asChild><button type="button" disabled={options.disabled} aria-label={label} title={`${label}: ${name}`}
       className={cn('flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 typography-meta hover:bg-interactive-hover', selected ? 'text-foreground' : 'text-muted-foreground')}>
-      {icon && <Icon name={icon} className="size-3.5 shrink-0" />}<span className="max-w-40 truncate">{name}</span>{options.source === 'cached' && <span className="text-muted-foreground/65">{t('external.previousCapabilities')}</span>}
+      {kind === 'model' ? <ModelLogo modelId={value} displayName={value ? name : undefined} className="size-3.5" />
+        : icon && <Icon name={icon} className="size-3.5 shrink-0" />}
+      <span className="max-w-40 truncate">{name}</span>{options.source === 'cached' && <span className="text-muted-foreground/65">{t('external.previousCapabilities')}</span>}
     </button></DropdownMenuTrigger>
     <DropdownMenuContent side="top" align="end" portalToBody className="overflow-y-auto overscroll-contain"><ExternalOptionMenu options={options} kind={kind} onComplete={() => setOpen(false)} /></DropdownMenuContent>
   </DropdownMenu>;
@@ -105,7 +108,7 @@ export function ExternalModelControls({ options }: { options: ExternalComposerOp
   const { t } = useI18n();
   const parameters = externalGenericOptions(options.choice, options.capabilities).filter(option => option.category === 'model_config');
   return <>{Boolean(externalThinkingOptions(options.choice, options.capabilities).levels?.length || options.capabilities?.modelsError && options.choice.thinking) && <OptionChip options={options} kind="thinking" label={t('chat.context.thinking')} icon="brain" />}
-    <OptionChip options={options} kind="model" label={t('external.model')} icon="brain" />
+    <OptionChip options={options} kind="model" label={t('external.model')} />
     {parameters.map(option => <ConfigControl key={option.id} options={options} option={option} />)}</>;
 }
 function BooleanOption({ options, id, label }: { options: ExternalComposerOptions; id: string; label: string }) {

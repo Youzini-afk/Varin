@@ -260,8 +260,11 @@ it('renders explicit authentication methods, retries failures, and never execute
 });
 
 it('separates current from next choices, clears hidden effort and does not duplicate backend commands', async () => {
-  fixture(); let chosen: ExternalSessionChoice = { model: 'first', thinking: 'high' };
-  const value = { ...capabilities(), modelsError: 'Catalog unavailable' };
+  fixture(); let chosen: ExternalSessionChoice = { thinking: 'high' };
+  const base = capabilities();
+  const value = { ...base, modelsError: 'Catalog unavailable',
+    current: { ...base.current, model: 'gpt-6.2-sol' },
+    models: [{ ...base.models[0]!, id: 'gpt-6.2-sol', name: 'GPT-6.2-Sol' }, { id: 'second', name: 'Claude Sonnet' }] };
   function Controls() {
     const [choice, setChoice] = React.useState(chosen); chosen = choice;
     const options: ExternalComposerOptions = { capabilities: value, source: 'live', choice, onChange: setChoice, onInteract: () => {} };
@@ -269,9 +272,11 @@ it('separates current from next choices, clears hidden effort and does not dupli
   }
   await act(async () => root.render(<Controls />));
   expect(container.querySelector('[role="alert"]')?.textContent).toContain('Catalog unavailable');
-  await choose('Model', 'second');
+  expect(container.querySelector('button[aria-label="Model"] [data-model-brand="openai"]')).not.toBeNull();
+  await choose('Model', 'Claude Sonnet');
+  expect(container.querySelector('button[aria-label="Model"] [data-model-brand="anthropic"]')).not.toBeNull();
   expect(chosen.thinking).toBeUndefined(); expect(container.querySelector('[aria-label="chat.context.thinking"]')).toBeNull();
-  expect(container.textContent).toContain('Use session configuration (current: First model)');
+  expect(container.textContent).toContain('Use session configuration (current: GPT-6.2-Sol)');
   expect(button('/plan')).toBeUndefined();
 });
 
