@@ -17,14 +17,15 @@ it('maps Kiro metadata and sends native reasoning commands without inventing opt
   const f = fixture({ opened: { sessionId: 'native-session', models: { currentModelId: 'model', availableModels: [{ modelId: 'model', name: 'Model' }] } },
     handle(message, reply) { if (message.method === '_kiro.dev/commands/execute') { reply(message, { success: true }); return true; } return false; } });
   const connection = await connectAcp(f.peer, '/workspace', undefined, { profile: getAcpProfile('kiro') });
-  f.emit({ jsonrpc: '2.0', method: '_kiro.dev/metadata', params: { sessionId: 'native-session', reasoning: { support: 'toggleable', thinkingEnabled: true, effortLevels: ['low', 'high'], effort: 'low' } } });
+  f.emit({ jsonrpc: '2.0', method: '_kiro.dev/metadata', params: { sessionId: 'native-session', reasoning: { support: 'toggleable', thinkingEnabled: true, effortLevels: ['low', 'high'] } } });
+  f.update({ sessionUpdate: 'config_option_update', configOptions: [select('mode', 'mode', 'ask', ['ask'])] });
   expect(connection.capabilities.models[0]?.thinkingLevels).toEqual(['low', 'high']);
   expect(connection.capabilities.configOptions?.find(option => option.id === 'kiro:thinking')?.currentValue).toBe(true);
   const result = connection.prompt({ text: 'hello', thinking: 'high' }, sink());
   await vi.waitFor(() => expect(f.latest('session/prompt')).toBeDefined());
   expect(f.latest('_kiro.dev/commands/execute').params).toEqual({ sessionId: 'native-session', command: { command: 'effort', args: { level: 'high' } } });
   // Only metadata confirms what Kiro actually applied.
-  expect(connection.capabilities.current?.thinking).toBe('low');
+  expect(connection.capabilities.current?.thinking).toBeUndefined();
   f.emit({ jsonrpc: '2.0', method: '_kiro.dev/metadata', params: { sessionId: 'native-session', reasoning: { support: 'unavailable', effortLevels: ['low', 'high'], effort: 'high' } } });
   expect(connection.capabilities.current?.thinking).toBe('high');
   expect(connection.capabilities.configOptions?.find(option => option.id === 'kiro:thinking')).toBeUndefined();
@@ -357,7 +358,7 @@ it('projects grouped model/thinking/mode and boolean options, applies before adm
   });
   expect(
     f.sent.find((m) => record(m.params).configId === 'fast')?.params,
-  ).toMatchObject({ value: true });
+  ).toMatchObject({ type: 'boolean', value: true });
   const changed = vi.fn();
   connection.onCapabilities?.(changed);
   f.update({

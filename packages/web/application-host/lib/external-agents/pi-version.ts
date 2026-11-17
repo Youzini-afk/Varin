@@ -12,7 +12,7 @@ export function requirePiRpcVersion(output?: string): string {
   const version = versions.length === 1 ? versions[0] : undefined;
   if (!version || version[4] || Number(version[1]) !== 1 || Number(version[2]) < 5)
     throw new Error(
-      'Pi RPC requires a stable Pi >=1.5.0 <2.0.0 on this execution Host. Older RPC cannot reliably distinguish handled prompts or final session settlement; unknown versions are not guessed. Update Pi with its native installation method, then reconnect.',
+      `Pi RPC requires a stable Pi >=1.5.0 <2.0.0 on this execution Host${version ? `, found ${version[0].trim()}` : ''}. Older RPC cannot reliably distinguish handled prompts or final session settlement. Update Pi with its native installation method, then reconnect.`,
     );
   return `${version[1]}.${version[2]}.${version[3]}`;
 }

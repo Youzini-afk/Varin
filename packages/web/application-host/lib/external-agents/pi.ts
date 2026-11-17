@@ -15,6 +15,16 @@ import {
   type RecordValue,
 } from './transport.js';
 
+// Pi 1.5 exposes these model fields in get_available_models. The current
+// model's own get_available_thinking_levels result remains authoritative.
+function piThinkingLevels(model: RecordValue): string[] | undefined {
+  if (typeof model.reasoning !== 'boolean') return undefined;
+  if (!model.reasoning) return ['off'];
+  const mapping = record(model.thinkingLevelMap);
+  return ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].filter(level =>
+    mapping[level] !== null && (level === 'xhigh' || level === 'max' ? typeof mapping[level] === 'string' : true));
+}
+
 export async function connectPi(
   peer: HarnessTransport,
   existing?: string,
@@ -40,6 +50,7 @@ export async function connectPi(
         return {
           id: `${text(model.provider)}/${text(model.id)}`,
           name: text(model.name) || text(model.id),
+          thinkingLevels: piThinkingLevels(model),
         };
       })
       .filter((model) => model.id.split('/').every(Boolean));
@@ -364,6 +375,8 @@ export async function connectPi(
         if (selected.thinking)
           await peer.request('set_thinking_level', { level: selected.thinking });
         await refresh();
+        if (selected.thinking && capabilities.current?.thinking !== selected.thinking)
+          throw new Error(`Pi did not apply the selected thinking level: ${selected.thinking}`);
         if (failure) throw failure;
         if (sessionBusy || compacting)
           throw new Error(

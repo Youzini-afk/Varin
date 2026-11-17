@@ -72,6 +72,8 @@ export class AcpOptions {
   private legacyMode: string | undefined;
   private grokThinking: string | undefined;
   private grokEfforts = new Map<string, string[]>();
+  private nativeOptions: ConfigOption[] | undefined;
+  private kiroOptions: ConfigOption[] = [];
   constructor(
     readonly capabilities: ExternalAgentCapabilities,
     private readonly changed: () => void,
@@ -81,14 +83,16 @@ export class AcpOptions {
   kiroMetadata(value: RecordValue): void {
     if (this.dialect !== 'kiro' || !Object.hasOwn(value, 'reasoning')) return;
     const reasoning = record(value.reasoning);
-    const options = (this.capabilities.configOptions ?? []).filter(option => !option.id.startsWith('kiro:'));
-    if (reasoning.support === 'toggleable' && typeof reasoning.thinkingEnabled === 'boolean')
-      options.push({ id: 'kiro:thinking', name: 'Thinking', type: 'boolean', currentValue: reasoning.thinkingEnabled, options: [] });
+    const options: ConfigOption[] = [];
+    if (reasoning.support === 'toggleable')
+      options.push({ id: 'kiro:thinking', name: 'Thinking', type: 'boolean',
+        ...(typeof reasoning.thinkingEnabled === 'boolean' ? { currentValue: reasoning.thinkingEnabled } : {}), options: [] });
     const levels = Array.isArray(reasoning.effortLevels) ? reasoning.effortLevels.filter((value): value is string => typeof value === 'string' && Boolean(value)) : [];
-    if (levels.length && typeof reasoning.effort === 'string' && levels.includes(reasoning.effort))
-      options.push({ id: 'kiro:effort', name: 'Reasoning effort', category: 'thought_level', type: 'select', currentValue: reasoning.effort,
+    if (levels.length)
+      options.push({ id: 'kiro:effort', name: 'Reasoning effort', category: 'thought_level', type: 'select',
+        ...(typeof reasoning.effort === 'string' && levels.includes(reasoning.effort) ? { currentValue: reasoning.effort } : {}),
         options: levels.map(value => ({ value, name: value })) });
-    this.capabilities.configOptions = options;
+    this.kiroOptions = options;
     this.publish();
   }
 
@@ -113,7 +117,7 @@ export class AcpOptions {
 
   adopt(value: RecordValue): void {
     if (Array.isArray(value.configOptions))
-      this.capabilities.configOptions = readAcpConfigOptions(
+      this.nativeOptions = readAcpConfigOptions(
         value.configOptions,
       );
     if (Object.hasOwn(value, 'models')) {
@@ -235,6 +239,8 @@ export class AcpOptions {
   }
 
   private publish(): void {
+    if (this.nativeOptions || this.kiroOptions.length || this.capabilities.configOptions)
+      this.capabilities.configOptions = [...(this.nativeOptions ?? []), ...this.kiroOptions];
     const model = this.category('model'),
       thinking = this.category('thought_level'),
       mode = this.category('mode');
@@ -320,6 +326,7 @@ export class AcpOptions {
       const response = await request('session/set_config_option', {
         sessionId,
         configId: id,
+        ...(option.type === 'boolean' ? { type: 'boolean' } : {}),
         value: wire,
       });
       if (!Array.isArray(response.configOptions))

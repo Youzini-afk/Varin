@@ -23,6 +23,7 @@ function fixture() {
       claude_code_version: '2.1.316',
     })),
     setModel: vi.fn(async (_model: string) => {}),
+    setPermissionMode: vi.fn(async (_mode: string) => {}),
     applyFlagSettings: vi.fn(async (_flags: unknown) => {}),
     interrupt: vi.fn(async () => {}),
     close: vi.fn(() => {
@@ -91,12 +92,14 @@ it('restores exactly the requested SDK session and configures before enqueuing U
     bridgeProtocol: 2,
     sessionId,
     agentVersion: '2.1.316',
+    modes: expect.arrayContaining([{ id: 'plan', name: 'Plan' }]),
   });
   expect(f.options.resume).toBe(sessionId);
   expect(f.options.sessionId).toBeUndefined();
-  await f.bridge.handle({ method: 'configure', params: { model: 'sonnet', thinking: 'high' } });
+  await f.bridge.handle({ method: 'configure', params: { model: 'sonnet', thinking: 'high', mode: 'plan' } });
   expect(f.sdk.setModel).toHaveBeenCalledWith('sonnet');
   expect(f.sdk.applyFlagSettings).toHaveBeenCalledWith({ effortLevel: 'high' });
+  expect(f.sdk.setPermissionMode).toHaveBeenCalledWith('plan');
   await expect(
     f.bridge.handle({ method: 'prompt', params: { uuid: first, text: 'hello' } }),
   ).resolves.toMatchObject({ accepted: true, turnId: first });

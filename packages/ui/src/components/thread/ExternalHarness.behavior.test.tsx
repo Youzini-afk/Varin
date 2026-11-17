@@ -136,22 +136,24 @@ const choose = (label: string, value: string) => act(async () => {
   const trigger = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
   const menu = trigger.parentElement!.querySelector('[role="menu"]')!;
   const text = ({ first: 'First model', second: 'Second model', 'value:long': 'Long' } as Record<string, string>)[value] ?? value;
-  [...menu.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === text)!.click();
+  [...menu.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.toLowerCase() === text.toLowerCase())!.click();
 });
 const submit = () => act(async () => container.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
 
-it('prepares before the first request, deduplicates focus and typing, and sends using the prepared identity and selected options', async () => {
+it('prepares a chat-only draft once and sends its selected options with the first request', async () => {
   const { api } = fixture(); let finish!: () => void;
+  useThreadDraftStore.getState().patch('draft', { workspacePath: undefined });
   const connect = api.connect.getMockImplementation()!;
   api.connect.mockImplementationOnce(id => new Promise(resolve => { finish = () => { void connect(id).then(resolve); }; }));
   await renderDraft(); expect(button('Send').disabled).toBe(false); expect(api.connect).not.toHaveBeenCalled();
   await act(async () => { f.composer?.external?.onInteract('focus'); f.composer?.external?.onInteract('input'); });
   expect(api.create).toHaveBeenCalledOnce(); expect(api.connect).toHaveBeenCalledOnce(); expect(api.send).not.toHaveBeenCalled();
+  expect(api.create.mock.calls[0]![0]).not.toHaveProperty('cwd');
   await act(async () => finish());
   expect(container.textContent).toContain('Use session configuration (current: First model)'); expect(button('Send').disabled).toBe(false);
-  await choose('Model', 'first'); await choose('chat.context.thinking', 'high'); await choose('Verbosity', 'value:long');
+  await choose('Model', 'first'); await choose('chat.context.thinking', 'high'); await choose('Mode', 'Auto'); await choose('Verbosity', 'value:long');
   await submit();
-  expect(api.create).toHaveBeenCalledOnce(); expect(api.send).toHaveBeenCalledWith('prepared', expect.any(String), expect.objectContaining({ text: 'Original question', model: 'first', thinking: 'high', config: { verbosity: 'long' } }));
+  expect(api.create).toHaveBeenCalledOnce(); expect(api.send).toHaveBeenCalledWith('prepared', expect.any(String), expect.objectContaining({ text: 'Original question', model: 'first', thinking: 'high', mode: 'auto', config: { verbosity: 'long' } }));
   expect(f.select).toHaveBeenCalledWith('prepared');
 });
 

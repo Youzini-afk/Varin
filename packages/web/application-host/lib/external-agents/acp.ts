@@ -290,6 +290,8 @@ export async function connectAcp(
         ...(options.files ? { fs: { readTextFile: true, writeTextFile: true } } : {}),
         elicitation: { form: {} },
         session: { configOptions: { boolean: {} } },
+        // Cursor advertises model parameters such as Fast only to clients that render config options independently.
+        ...(options.profile?.id === 'cursor' ? { _meta: { parameterizedModelPicker: true } } : {}),
       },
       clientInfo,
     });

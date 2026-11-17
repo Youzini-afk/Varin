@@ -50,12 +50,11 @@ export function useExternalDraftPreparation({ draftKey, host, configurationId, c
     const latest = useThreadDraftStore.getState().drafts[draftKey] ?? EMPTY_THREAD_DRAFT;
     if (latest.externalConversationId && latest.externalConversationHost === host) return Promise.resolve(latest.externalConversationId);
     if (!configurationId) return Promise.reject(new Error(t('external.noAgent')));
-    if (!cwd) return Promise.reject(new Error(t('external.sharedSource')));
     const key = latest.externalConversationHost === host && latest.externalPreparationKey ? latest.externalPreparationKey : crypto.randomUUID();
     useThreadDraftStore.getState().patch(draftKey, { externalPreparationKey: key, externalConversationHost: host });
     const token = { scope, promise: Promise.resolve(undefined) as Promise<string | undefined> };
     creating.current = token;
-    token.promise = api.create({ key, configurationId, cwd, ...(latest.sourceSelection ? {source:{resourceOwner:latest.sourceSelection.resourceOwner,path:latest.sourceSelection.path,expectedWorkspaceId:latest.sourceSelection.expectedWorkspaceId}} : {}), title: name || 'Agent', ...(latest.organization ? { organization: latest.organization } : {}) }).then(conversation => {
+    token.promise = api.create({ key, configurationId, ...(cwd ? { cwd } : {}), ...(latest.sourceSelection ? {source:{resourceOwner:latest.sourceSelection.resourceOwner,path:latest.sourceSelection.path,expectedWorkspaceId:latest.sourceSelection.expectedWorkspaceId}} : {}), title: name || 'Agent', ...(latest.organization ? { organization: latest.organization } : {}) }).then(conversation => {
       if (!current()) return;
       useThreadDraftStore.getState().patch(draftKey, { externalConversationId: conversation.id });
       return conversation.id;

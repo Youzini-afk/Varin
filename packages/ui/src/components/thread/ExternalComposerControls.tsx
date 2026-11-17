@@ -4,7 +4,7 @@ import { useI18n } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { externalModelChoice, externalThinkingOptions, normalizeExternalSessionChoice, type ExternalSessionChoice } from './externalSessionChoice';
+import { externalGenericOptions, externalModelChoice, externalThinkingOptions, normalizeExternalSessionChoice, type ExternalSessionChoice } from './externalSessionChoice';
 
 export interface ExternalComposerOptions {
   capabilities?: ExternalAgentCapabilities;
@@ -25,11 +25,12 @@ function selector(options: ExternalComposerOptions, kind: ExternalSelectorKind) 
   const { capabilities: caps, choice } = options;
   if (typeof kind === 'object') {
     const config = caps?.configOptions?.find(option => option.id === kind.config);
-    return { current: String(config?.currentValue ?? ''), selected: choice.config?.[kind.config], values: config?.type === 'boolean'
+    return { current: config?.currentValue === undefined ? undefined : String(config.currentValue), selected: choice.config?.[kind.config], values: config?.type === 'boolean'
       ? [{ id: 'true', name: 'true' }, { id: 'false', name: 'false' }] : config?.options.map(value => ({ id: value.value, name: value.name })) ?? [] };
   }
-  return { current: caps?.current?.[kind], selected: choice[kind], values: kind === 'model' ? caps?.models ?? [] : kind === 'mode' ? caps?.modes ?? []
-    : externalThinkingOptions(choice, caps).levels?.map(level => ({ id: level, name: level })) ?? [] };
+  const { levels, sessionOption, modelChanged } = externalThinkingOptions(choice, caps);
+  return { current: kind === 'thinking' && modelChanged ? undefined : caps?.current?.[kind], selected: choice[kind], values: kind === 'model' ? caps?.models ?? [] : kind === 'mode' ? caps?.modes ?? []
+    : levels?.map(level => ({ id: level, name: sessionOption?.options.find(option => option.value === level)?.name ?? level })) ?? [] };
 }
 function choose(options: ExternalComposerOptions, kind: ExternalSelectorKind, value?: string) {
   const { choice, capabilities, onChange } = options;
@@ -78,38 +79,43 @@ function OptionChip({ options, kind, label, icon }: { options: ExternalComposerO
       className={cn('flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 typography-meta hover:bg-interactive-hover', selected ? 'text-foreground' : 'text-muted-foreground')}>
       {icon && <Icon name={icon} className="size-3.5 shrink-0" />}<span className="max-w-40 truncate">{name}</span>{options.source === 'cached' && <span className="text-muted-foreground/65">{t('external.previousCapabilities')}</span>}
     </button></DropdownMenuTrigger>
-    <DropdownMenuContent side="top" align="end" portalToBody><ExternalOptionMenu options={options} kind={kind} onComplete={() => setOpen(false)} /></DropdownMenuContent>
+    <DropdownMenuContent side="top" align="end" portalToBody className="overflow-y-auto overscroll-contain"><ExternalOptionMenu options={options} kind={kind} onComplete={() => setOpen(false)} /></DropdownMenuContent>
   </DropdownMenu>;
 }
 
 export function ExternalModelControls({ options }: { options: ExternalComposerOptions }) {
   const { t } = useI18n();
+  const parameters = externalGenericOptions(options.choice, options.capabilities).filter(option => option.category === 'model_config');
   return <>{Boolean(externalThinkingOptions(options.choice, options.capabilities).levels?.length || options.capabilities?.modelsError && options.choice.thinking) && <OptionChip options={options} kind="thinking" label={t('chat.context.thinking')} icon="brain" />}
-    <OptionChip options={options} kind="model" label={t('external.model')} icon="brain" /></>;
+    <OptionChip options={options} kind="model" label={t('external.model')} icon="brain" />
+    {parameters.map(option => <ConfigControl key={option.id} options={options} option={option} />)}</>;
 }
 function BooleanOption({ options, id, label }: { options: ExternalComposerOptions; id: string; label: string }) {
   const { t } = useI18n();
   const [open, setOpen] = React.useState(false);
   const { current, selected } = selector(options, { config: id });
-  const checked = (selected ?? current) === 'true';
+  const value = selected ?? current;
+  const checked = value === undefined ? undefined : value === 'true';
   return <div className="flex shrink-0 items-center">
     <button type="button" disabled={options.disabled} aria-label={label} aria-pressed={checked}
       className={cn('rounded-md px-2 py-1 typography-meta hover:bg-interactive-hover', selected === undefined ? 'text-muted-foreground' : 'text-foreground')}
-      onClick={() => { options.onInteract('menu'); choose(options, { config: id }, checked ? 'false' : 'true'); }}>{label}: {t(checked ? 'external.yes' : 'external.no')}</button>
+      onClick={() => { options.onInteract('menu'); choose(options, { config: id }, checked ? 'false' : 'true'); }}>{label}: {t(checked === undefined ? 'external.notReported' : checked ? 'external.yes' : 'external.no')}</button>
     <DropdownMenu open={open} onOpenChange={next => { setOpen(next); if (next) options.onInteract('menu'); }}>
       <DropdownMenuTrigger asChild><button type="button" disabled={options.disabled} aria-label={t('external.optionSettings', { name: label })} className="rounded px-0.5 py-1 text-muted-foreground hover:bg-interactive-hover"><Icon name="arrow-down-s" className="size-3" /></button></DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" portalToBody><ExternalOptionMenu options={options} kind={{ config: id }} onComplete={() => setOpen(false)} /></DropdownMenuContent>
     </DropdownMenu>
   </div>;
 }
+function ConfigControl({ options, option }: { options: ExternalComposerOptions; option: NonNullable<ExternalAgentCapabilities['configOptions']>[number] }) {
+  return option.type === 'boolean' ? <BooleanOption options={options} id={option.id} label={option.name} />
+    : <OptionChip options={options} kind={{ config: option.id }} label={option.name} />;
+}
 export function ExternalModeControls({ options }: { options: ExternalComposerOptions }) {
   const { t } = useI18n();
   const root = React.useRef<HTMLDivElement>(null), row = React.useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = React.useState(false), [open, setOpen] = React.useState(false);
   const caps = options.capabilities;
-  const { levels, hideSessionConfig } = externalThinkingOptions(options.choice, caps);
-  const generic = caps?.configOptions?.filter(option => !(option.category === 'model' && caps.models.length)
-    && !(option.category === 'thought_level' && (levels?.length || hideSessionConfig)) && !(option.category === 'mode' && caps.modes?.length));
+  const generic = externalGenericOptions(options.choice, caps).filter(option => option.category !== 'model_config');
   // Measure the actual row and its toolbar neighbours, including long backend-provided labels.
   // The hidden measurement row keeps its intrinsic width while the compact menu is displayed.
   React.useLayoutEffect(() => {
@@ -135,8 +141,7 @@ export function ExternalModeControls({ options }: { options: ExternalComposerOpt
     <div ref={row} aria-hidden={collapsed || undefined} inert={collapsed || undefined} className="flex w-max items-center gap-0.5 whitespace-nowrap"
       style={collapsed ? { position: 'absolute', visibility: 'hidden', pointerEvents: 'none' } : undefined}>
       {Boolean(caps?.modes?.length) && <OptionChip options={options} kind="mode" label={t('external.mode')} icon="shield-user" />}
-      {generic?.map(option => option.type === 'boolean' ? <BooleanOption key={option.id} options={options} id={option.id} label={option.name} />
-        : <OptionChip key={option.id} options={options} kind={{ config: option.id }} label={option.name} />)}
+      {generic.map(option => <ConfigControl key={option.id} options={options} option={option} />)}
     </div>
     {collapsed && <DropdownMenu open={open} onOpenChange={next => { setOpen(next); if (next) options.onInteract('menu'); }}>
       <DropdownMenuTrigger asChild><button type="button" disabled={options.disabled} className="flex items-center gap-1 rounded-md px-2 py-1 typography-meta text-muted-foreground hover:bg-interactive-hover"><Icon name="settings-3" className="size-3.5" />{t('external.sessionOptions')}</button></DropdownMenuTrigger>

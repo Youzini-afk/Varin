@@ -312,7 +312,7 @@ export async function connectClaude(
     steering: false,
     protocol: {
       name: 'claude-agent-sdk',
-      version: '0.3.316',
+      version: '0.3.319',
       ...(text(initialized.agentVersion) ? { agentVersion: text(initialized.agentVersion) } : {}),
     },
     current: record(initialized.current),
@@ -322,6 +322,8 @@ export async function connectClaude(
       ...(text(record(value).argumentHint) ? { inputHint: text(record(value).argumentHint) } : {}),
     })),
     models: claudeModels(initialized.models),
+    modes: (Array.isArray(initialized.modes) ? initialized.modes : []).map(record)
+      .flatMap(mode => text(mode.id) && text(mode.name) ? [{ id: text(mode.id), name: text(mode.name) }] : []),
     modelsError: Array.isArray(initialized.models)
       ? undefined
       : 'Claude did not supply a model catalog; reconnect to obtain native session metadata',
@@ -355,7 +357,7 @@ export async function connectClaude(
     async prompt(input, next) {
       if (failure) throw failure;
       if (sink) throw new Error('Claude is already running');
-      const selected = dedicatedOptions(input, 'Claude');
+      const selected = dedicatedOptions(input, 'Claude', capabilities.modes);
       if (
         input.images?.some(
           (image) =>

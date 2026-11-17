@@ -352,6 +352,34 @@ describe('Codex native turn ownership', () => {
     peer.event('turn/completed', codexEvent('turn', { turn: { id: 'turn', status: 'completed' } }));
     await result;
   });
+  it('starts a Codex Plan turn with the selected model and effort in the collaboration settings', async () => {
+    const peer = new Peer(), fallback = peer.handler;
+    peer.handler = (method, params) => {
+      if (method === 'collaborationMode/list') return { data: [{ mode: 'plan', name: 'Plan', reasoning_effort: 'medium' }] };
+      if (method === 'turn/start') {
+        peer.event('thread/settings/updated', { threadId: 'thread', threadSettings: {
+          model: 'second-model', effort: 'high', collaborationMode: { mode: 'plan' },
+        } });
+        return { turn: { id: 'turn' } };
+      }
+      return fallback(method, params);
+    };
+    const connection = await connectCodex(peer.transport, '/workspace'), s = sink();
+    expect(connection.capabilities.modes).toEqual([{ id: 'plan', name: 'Plan' }]);
+    const result = connection.prompt({ text: 'Work', model: 'second-model', thinking: 'high', mode: 'plan' }, s);
+    const start = await peer.call('turn/start');
+    expect(start.params).toMatchObject({ collaborationMode: { mode: 'plan', settings: {
+      model: 'second-model', reasoning_effort: 'high', developer_instructions: null,
+    } } });
+    await vi.waitFor(() => expect(s.started).toHaveBeenCalledWith('turn'));
+    expect(connection.capabilities.current).toEqual({ model: 'second-model', thinking: 'high', mode: 'plan' });
+    peer.event('item/plan/delta', codexEvent('turn', { itemId: 'proposal', delta: 'Draft plan' }));
+    expect(s.items.get('proposal')).toMatchObject({ kind: 'plan', text: 'Draft plan' });
+    peer.event('item/completed', codexEvent('turn', { item: { type: 'plan', id: 'proposal', text: 'Final plan' } }));
+    expect(s.items.get('proposal')).toMatchObject({ kind: 'plan', text: 'Final plan', complete: true });
+    peer.event('turn/completed', codexEvent('turn', { turn: { id: 'turn', status: 'completed' } }));
+    await result;
+  });
   it('makes process death sticky even when no prompt was active', async () => {
     const peer = new Peer(),
       connection = await connectCodex(peer.transport, '/workspace'),

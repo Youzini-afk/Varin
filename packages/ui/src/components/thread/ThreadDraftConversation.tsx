@@ -102,6 +102,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   const [readingFiles, setReadingFiles] = React.useState(false);
   const generation = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const sourcePath = draft.sourceSelection?.path ?? draft.workspacePath;
+  const externalSourceUnsupported = !!draft.sourceSelection && draft.sourceSelection.mode !== 'live_root';
   const referenceScope = JSON.stringify([generation, draftKey, draft.sourceSelection ?? draft.workspacePath]);
   const preparation = useExternalDraftPreparation({ draftKey, host: generation, configurationId: draft.harnessId, cwd: sourcePath, name: external?.name });
   const capabilities = preparation.snapshot?.capabilities ?? (draft.harnessId ? externalSettings?.capabilityCache?.[draft.harnessId]?.capabilities : undefined);
@@ -121,8 +122,8 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   const [interactionScope, setInteractionScope] = React.useState<string>();
   const connectionScope = JSON.stringify([generation, draftKey, draft.harnessId, sourceOwnerKey, sourcePath]);
   const prepare = (force: boolean | 'models' = false) => {
-    if (!draft.harnessId || !external?.enabled || !sourcePath) return Promise.resolve(undefined);
-    if (draft.sourceSelection && (draft.sourceSelection.mode !== 'live_root')) { setError(t('external.sharedSource')); return Promise.resolve(undefined); }
+    if (!draft.harnessId || !external?.enabled) return Promise.resolve(undefined);
+    if (externalSourceUnsupported) { setError(t('external.sharedSource')); return Promise.resolve(undefined); }
     setExternalFailure(undefined);
     return preparation.prepare(force);
   };
@@ -217,7 +218,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   };
   const ignorePrepared = React.useCallback(() => {}, []);
   const unsupportedReferences = Boolean(draft.harnessId && (draft.selectedAttachments?.length || draft.references?.some(reference => reference.target.kind !== 'draft-file' && reference.target.kind !== 'quote' && reference.target.kind !== 'image' && !(reference.target.kind === 'backend-command' && reference.target.backend === backendIdentity) && draft.text.slice(reference.from, reference.to) === reference.text)));
-  const sendDisabled = Boolean(draft.botId && (conversationBot.loading || !conversationBot.bot || conversationBot.bot.archived || conversationBot.bot.deletion)) || sending || readingFiles || unsupportedReferences || !hasInput || (draft.harnessId ? !external?.enabled || !sourcePath : !model?.providerId || !model.modelId) || acceptsImages === false && hasDraftInlineImages(draft);
+  const sendDisabled = Boolean(draft.botId && (conversationBot.loading || !conversationBot.bot || conversationBot.bot.archived || conversationBot.bot.deletion)) || sending || readingFiles || unsupportedReferences || !hasInput || (draft.harnessId ? !external?.enabled || externalSourceUnsupported : !model?.providerId || !model.modelId) || acceptsImages === false && hasDraftInlineImages(draft);
   return <section ref={handoff.setRoot} className="regular-chat-view relative flex h-full min-h-0 min-w-0 [container-type:inline-size]" aria-label="Conversation draft">
     <div className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1">
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -237,7 +238,6 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
           if (unsupportedReferences) { setError(t('composer.references.external')); return; }
           const owner = generation;
           const current = () => mounted.current && currentDraft.current === draftKey && owner === getRuntimeEndpointGeneration();
-          if (draft.sourceSelection && (draft.sourceSelection.mode !== 'live_root')) { setError(t('external.sharedSource')); return; }
           externalSending.current = true; setExternalBusy(true); setError(undefined); setExternalFailure(undefined);
           void (async () => {
             const externalApi = createExternalAgentsHttpAPI(owner);
@@ -312,7 +312,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
           external={draft.harnessId ? { capabilities, source: capabilitiesSource, choice: externalChoice, disabled: locked, retryDisabled: preparationHasWork, retryDisabledReason: preparation.snapshot?.connected && capabilities?.resume === false && !capabilities.modelsRefresh ? t('external.reconnectUnsupported') : undefined, onChange: changeExternalChoice,
             onInteract: kind => { if (kind !== 'input' || !preparationFailure) void prepare().catch(() => {}); }, onRetryModels: () => { void prepare(capabilities?.modelsRefresh ? 'models' : true).catch(() => {}); } } : undefined}
           connectionStatus={draft.harnessId ? <ExternalConnectionStatus snapshot={preparation.snapshot} name={external?.name} cwd={sourcePath}
-            busy={preparation.busy} cancelling={preparation.cancelling} error={preparationFailure} reconnectDisabled={!external?.enabled || !sourcePath || externalBusy || preparationHasWork || Boolean(draft.externalInput)}
+            busy={preparation.busy} cancelling={preparation.cancelling} error={preparationFailure} reconnectDisabled={!external?.enabled || externalSourceUnsupported || externalBusy || preparationHasWork || Boolean(draft.externalInput)}
             onReconnect={() => { void prepare(true).catch(() => {}); }} onCancel={() => { void preparation.cancel(); }}
             onAuthenticate={methodId => { setExternalFailure(undefined); void preparation.authenticate(methodId).catch(() => {}); }} /> : undefined}
           backendCommands={capabilities?.commands}

@@ -58,7 +58,8 @@ export interface ExternalAgentConfigOption {
   name: string;
   category?: string;
   type?: 'select' | 'boolean';
-  currentValue: string | boolean;
+  /** An adapter can expose choices before the Agent reports its effective default. */
+  currentValue?: string | boolean;
   options: Array<{ value: string; name: string; description?: string }>;
 }
 export interface ExternalAgentSettings {
