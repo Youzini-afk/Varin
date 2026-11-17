@@ -96,6 +96,20 @@ export const ACP_PROFILES: readonly ExternalAgentProfile[] = [
     compatibility:
       'Launch reference: @xai-official/grok 1.0.70. Images require the live capability; Varin does not override sandbox policy or add --always-approve.',
   },
+  {
+    id: 'dsh',
+    name: 'DeepSeek Harness',
+    harness: 'acp',
+    description: 'DeepSeek Harness over its automation-only ACP stdio profile.',
+    installUrl: 'https://github.com/deepseek-ai/deepseek-harness',
+    platforms: ['darwin', 'linux', 'win32'],
+    launch: { command: 'dsh', args: ['--profile', 'acp'] },
+    versionArgs: ['--version'],
+    authentication:
+      'Sign dsh in on this execution Host, or point its acp profile at a gateway in that profile. Varin does not seed credentials or rewrite dsh model/provider configuration.',
+    compatibility:
+      'Launch reference: dsh 0.2.2-rc.3. The acp profile is automation-only by design: it exposes the standard ACP surface and omits DSH-specific presentation, so plans, titles and terminal views do not appear. Resume, list and close come from the live handshake.',
+  },
 ];
 
 export const ACP_DEFAULTS: ExternalAgentConfiguration[] = ACP_PROFILES.map(
