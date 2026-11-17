@@ -16,32 +16,45 @@ import { CSSVariableGenerator } from '@/lib/theme/cssGenerator';
 import type { Theme } from '@/types/theme';
 import light from '@/lib/theme/themes/varin-light.json';
 import dark from '@/lib/theme/themes/varin-dark.json';
+import { products, productMarks, deepseekRoute, type Product } from './catalog';
 import './preview.css';
 
 // Synthetic fixtures only. No Host, filesystem, installer, auth or model APIs.
-type Product = { id: string; name: string; harness: 'codex' | 'claude' | 'pi' | 'acp'; description: string; version: string; command: string };
 type Agent = Product & { source: 'system' | 'managed'; phase: 'installed' | 'missing' | 'installing' | 'failed'; enabled: boolean; progress?: number };
-const products: Product[] = [
-  { id: 'codex', name: 'Codex', harness: 'codex', description: '使用 Codex CLI，沿用已有的程序配置。', version: '0.167.0', command: 'codex' },
-  { id: 'claude', name: 'Claude Code', harness: 'claude', description: '沿用 Claude Code 的工具与项目配置。', version: '2.1.59', command: 'claude' },
-  { id: 'opencode', name: 'OpenCode', harness: 'acp', description: '连接 OpenCode，沿用自己的模型服务。', version: '2.2.0', command: 'opencode' },
-  { id: 'pi', name: 'Pi', harness: 'pi', description: '轻量、可扩展的编码 Agent。', version: '1.5.0', command: 'pi' },
-  { id: 'gemini', name: 'Gemini CLI', harness: 'acp', description: '在终端与工作区中使用 Gemini。', version: '0.60.0', command: 'gemini' },
-  { id: 'kimi', name: 'Kimi Code', harness: 'acp', description: '连接 Kimi Code 的原生 ACP 接口。', version: '2.4.0', command: 'kimi' },
-  { id: 'cursor', name: 'Cursor Agent', harness: 'acp', description: '使用 Cursor CLI 的模型与项目能力。', version: '2026.10.22', command: 'cursor-agent' },
-];
 const initialAgents = (): Agent[] => products.slice(0, 4).map((p, i) => ({ ...p, source: i === 2 ? 'managed' : 'system', phase: 'installed', enabled: i !== 3 }));
 const deviceNames = { local: '工作电脑', remote: '开发服务器' };
 const themeGenerator = new CSSVariableGenerator();
 const i18n = { locale: 'zh-CN' as const, locales: ['zh-CN'] as const, setLocale: () => {}, label: () => '简体中文', t: (key: string) => key.toLowerCase().includes('close') ? '关闭' : key };
 const icon = (name: IconName, className = '') => <Icon name={name} className={`size-4 ${className}`} />;
-const logo = (p: Product, large = false) => <HarnessIcon harness={p.harness} configurationId={p.id} className={large ? 'size-9' : 'size-6'} />;
+const logo = (p: Product, large = false) => p.mark
+  ? <><img src={productMarks[`./assets/${p.mark}.svg`]} alt="" className={`${large ? 'size-9' : 'size-6'} shrink-0 object-contain ${p.darkMark ? 'dark:hidden' : ''}`} />{p.darkMark && <img src={productMarks[`./assets/${p.darkMark}.svg`]} alt="" className={`${large ? 'size-9' : 'size-6'} hidden shrink-0 object-contain dark:block`} />}</>
+  : <HarnessIcon harness={p.harness} configurationId={p.id} className={large ? 'size-9' : 'size-6'} />;
 const phaseText = (a: Agent) => !a.enabled ? '已停用' : a.phase === 'missing' ? '未安装' : a.phase === 'failed' ? '安装未完成' : a.phase === 'installing' ? '正在安装' : a.version;
 const sourceText = (a: Agent) => a.source === 'managed' ? 'Varin 管理' : '已有程序';
 
 function Choice({ label, value, values, onChange }: { label: string; value: string; values: string[]; onChange(value: string): void }) {
   return <Select value={value} onValueChange={onChange}><SelectTrigger aria-label={label} className="choice-trigger"><SelectValue /></SelectTrigger><SelectContent>{values.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent></Select>;
 }
+
+function ProductSetup({ product, device, onBack, onAdd }: {
+  product: Product; device: string; onBack(): void; onAdd(product: Product, source: 'system' | 'managed'): void;
+}) {
+  const [selected, setSelected] = useState(product);
+  const [source, setSource] = useState<'install' | 'existing'>('install');
+  const [path, setPath] = useState('');
+  const managed = selected.installation === 'managed';
+  return <div className="candidate-detail">
+    <div className="candidate-brand">{logo(selected, true)}<div><strong>{selected.name}</strong><p>{selected.description}</p></div></div>
+    {product.id === 'dsh' && <div className="connection-choice"><label>连接方式</label><Choice label="DeepSeek 连接方式" value={selected.route === 'community' ? '社区桥接' : '官方 ACP'} values={['官方 ACP', '社区桥接']} onChange={value => setSelected(deepseekRoute(product, value === '社区桥接' ? 'community' : 'official'))} /><p>{selected.route === 'community' ? '安装 deepseek-acp 社区适配器，使用其面向编辑器的 ACP 接口。' : '使用 DeepSeek Harness 自带的 ACP 接口。'}</p></div>}
+    <div className="install-options">{(['install', 'existing'] as const).map(value => <button key={value} className="install-option" aria-pressed={source === value} onClick={() => setSource(value)}>
+      <span className="choice-radio">{source === value && <span />}</span><span>{value === 'existing' ? '选择已有程序' : managed ? '由 Varin 安装' : '使用官方安装器'}<small>{value === 'existing' ? '连接你已安装的程序，保留其原有配置。' : managed ? '安装到该设备的 Varin 数据目录，方便更新和移除。' : '按官方说明在目标设备安装，再连接这里。'}</small></span>
+    </button>)}</div>
+    {selected.note && <p className="product-setup-note">{selected.note}</p>}
+    {source === 'install' && managed ? <div className="install-version"><span>程序版本</span><span>{selected.version}</span></div> : <label className="advanced-field">{deviceNames[device as keyof typeof deviceNames]}上的程序路径<Input aria-label="已有程序路径" value={path} onChange={e => setPath(e.target.value)} placeholder={selected.command} /></label>}
+    <div className="dialog-actions"><Button variant="ghost" onClick={onBack}>返回</Button>{source === 'install' && !managed && selected.guide && <Button variant="outline" asChild><a href={selected.guide} target="_blank" rel="noreferrer">安装说明{icon('arrow-right-up')}</a></Button>}<Button onClick={() => onAdd({ ...selected, command: path || selected.command }, source === 'install' && managed ? 'managed' : 'system')}>{icon(source === 'install' && managed ? 'download' : 'check')}{source === 'install' && managed ? '安装' : '连接程序'}</Button></div>
+  </div>;
+}
+
 function AgentDetail({ agent, device, patch, install, onRemove }: {
   agent: Agent; device: string; patch(value: Partial<Agent>): void; install(agent: Agent): void; onRemove(): void;
 }) {
@@ -49,7 +62,7 @@ function AgentDetail({ agent, device, patch, install, onRemove }: {
   const [thinking, setThinking] = useState('沿用 Agent 配置');
   const [mode, setMode] = useState('沿用 Agent 配置');
   const [command, setCommand] = useState(agent.command);
-  const [args, setArgs] = useState(agent.harness === 'acp' ? ['acp'] : agent.harness === 'codex' ? ['app-server'] : []);
+  const [args, setArgs] = useState(agent.args);
   const [saved, setSaved] = useState(false);
   const [sourcePicker, setSourcePicker] = useState(false);
   const [version, setVersion] = useState('最新稳定版');
@@ -65,16 +78,17 @@ function AgentDetail({ agent, device, patch, install, onRemove }: {
       <DropdownMenuItem className="text-destructive" onClick={onRemove}>{agent.source === 'managed' ? '卸载程序…' : '移除接入…'}</DropdownMenuItem>
     </DropdownMenuContent></DropdownMenu></div>} className="agent-detail-page">
     <SettingsSection divider={false} title="程序" headerAction={<span className="quiet-inline">{icon(device === 'local' ? 'computer' : 'server')}{deviceNames[device as keyof typeof deviceNames]}</span>}>
-      <div className="program-line"><div className="program-summary"><span className="program-version">{missing ? '未安装' : busy ? stage : agent.version}</span><span className="text-muted-foreground">{sourceText(agent)}</span>{!agent.enabled && <span className="subtle-tag">已停用</span>}</div>
+      <div className="program-line"><div className="program-summary"><span className="program-version">{missing ? '未安装' : busy ? stage : agent.version}</span><span className="text-muted-foreground">{sourceText(agent)}</span>{agent.route && <span className="subtle-tag">{agent.route === 'community' ? '社区桥接' : '官方 ACP'}</span>}{!agent.enabled && <span className="subtle-tag">已停用</span>}</div>
         <div className="program-actions">{busy ? <Button variant="outline" size="sm" onClick={() => patch({ phase: 'missing', progress: undefined })}>取消</Button> : <>
           {!missing && <Button size="sm" variant="ghost" onClick={() => setSourcePicker(!sourcePicker)}>切换来源</Button>}
-          <Button variant={missing ? 'default' : 'outline'} size="sm" onClick={() => missing ? install(agent) : setChecked(true)}>{icon(missing ? 'download' : 'refresh')}{missing ? '安装' : '检查更新'}</Button>
+          {agent.installation === 'official' && agent.guide ? <Button variant="outline" size="sm" asChild><a href={agent.guide} target="_blank" rel="noreferrer">安装与更新说明{icon('arrow-right-up')}</a></Button> : <Button variant={missing ? 'default' : 'outline'} size="sm" onClick={() => missing && agent.installation === 'managed' ? install(agent) : setChecked(true)}>{icon(missing ? 'download' : 'refresh')}{agent.installation === 'managed' ? missing ? '安装' : '检查更新' : '重新检测'}</Button>}
         </>}</div>
       </div>
-      {checked && !busy && <p className="mt-3 text-xs text-muted-foreground" role="status">已是最新稳定版。</p>}
+      {checked && !busy && <p className="mt-3 text-xs text-muted-foreground" role="status">{missing ? '未找到程序，请检查路径。' : '当前没有可用更新。'}</p>}
+      {agent.note && <p className="product-setup-note">{agent.note}</p>}
       <AnimatePresence initial={false}>{sourcePicker && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="source-picker">
         <p>选择这台设备上的程序</p>
-        {(['system', 'managed'] as const).map(source => <button className="source-option" key={source} onClick={() => { if (source === 'managed' && agent.source !== 'managed') install(agent); else patch({ source }); setSourcePicker(false); }}>
+        {(['system', ...(agent.installation === 'managed' ? ['managed'] : [])] as Array<'system' | 'managed'>).map(source => <button className="source-option" key={source} onClick={() => { if (source === 'managed' && agent.source !== 'managed') install(agent); else patch({ source }); setSourcePicker(false); }}>
           {icon(source === 'system' ? 'folder' : 'download')}<span>{source === 'system' ? '使用已有程序' : '由 Varin 管理'}<small>{source === 'system' ? '沿用这台设备上的安装' : '单独安装，版本可在这里维护'}</small></span>{agent.source === source && icon('check')}
         </button>)}
       </motion.div>}</AnimatePresence>
@@ -89,11 +103,11 @@ function AgentDetail({ agent, device, patch, install, onRemove }: {
       <SettingsFieldRow label="执行模式"><Choice label="执行模式" value={mode} values={['沿用 Agent 配置', '默认', '只读']} onChange={setMode} /></SettingsFieldRow>
     </SettingsSection>}
     <details className="settings-disclosure advanced"><summary>{icon('arrow-right-s', 'settings-disclosure-chevron')}<span>高级设置</span><span className="ml-auto text-muted-foreground">启动方式与版本</span></summary><div className="settings-disclosure-body">
-      <SettingsFieldRow label="安装版本"><Choice label="安装版本" value={version} values={['最新稳定版', agent.version, '指定版本…']} onChange={setVersion} /></SettingsFieldRow>
-      {version === '指定版本…' && <Input aria-label="指定版本号" placeholder="例如 1.5.0" />}
+      {agent.installation === 'managed' && <SettingsFieldRow label="安装版本"><Choice label="安装版本" value={version} values={['最新稳定版', agent.version, '指定版本…']} onChange={setVersion} /></SettingsFieldRow>}
+      {agent.installation === 'managed' && version === '指定版本…' && <Input aria-label="指定版本号" placeholder="例如 1.5.0" />}
       <label className="advanced-field">程序路径<Input value={command} onChange={e => { setCommand(e.target.value); setSaved(false); }} /></label>
       <label className="advanced-field">启动参数<div className="argument-inputs">{args.map((arg, i) => <span key={i}><Input aria-label={`启动参数 ${i + 1}`} value={arg} onChange={e => setArgs(args.map((v, n) => n === i ? e.target.value : v))} /><Button size="icon" variant="ghost" aria-label={`移除参数 ${i + 1}`} onClick={() => setArgs(args.filter((_, n) => n !== i))}>{icon('close')}</Button></span>)}<Button size="sm" variant="ghost" onClick={() => setArgs([...args, ''])}>{icon('add')}添加参数</Button></div></label>
-      <Button variant="outline" size="sm" onClick={() => { patch({ command }); setSaved(true); }}>{saved ? <>{icon('check')}已保存</> : '保存启动配置'}</Button>
+      <Button variant="outline" size="sm" onClick={() => { patch({ command, args }); setSaved(true); }}>{saved ? <>{icon('check')}已保存</> : '保存启动配置'}</Button>
     </div></details>
   </SettingsPageLayout>;
 }
@@ -108,7 +122,7 @@ export function ExternalAgentsPreview() {
   const [addOpen, setAddOpen] = useState(params.get('view') === 'add');
   const [query, setQuery] = useState('');
   const [candidate, setCandidate] = useState<Product | null>(null);
-  const [installSource, setInstallSource] = useState('由 Varin 安装');
+  const [catalogScope, setCatalogScope] = useState('可添加');
   const [custom, setCustom] = useState(false);
   const [customName, setCustomName] = useState('');
   const [customPath, setCustomPath] = useState('');
@@ -117,6 +131,8 @@ export function ExternalAgentsPreview() {
   const [notice, setNotice] = useState('');
   const agents = agentsByDevice[device];
   const active = agents.find(a => a.id === selected);
+  const catalogue = products.filter(p => catalogScope === '全部' || !agents.some(a => a.id === p.id))
+    .filter(p => `${p.name} ${p.id} ${p.command} ${p.description}`.toLowerCase().includes(query.toLowerCase()));
   useEffect(() => themeGenerator.apply((theme === 'dark' ? dark : light) as Theme), [theme]);
   useEffect(() => {
     const timer = setInterval(() => setAgentsByDevice(current => {
@@ -129,7 +145,7 @@ export function ExternalAgentsPreview() {
   const patch = (id: string, values: Partial<Agent>) => setAgentsByDevice(current => ({ ...current, [device]: current[device].map(a => a.id === id ? { ...a, ...values } : a) }));
   const upsert = (agent: Agent) => setAgentsByDevice(current => ({ ...current, [device]: current[device].some(a => a.id === agent.id) ? current[device].map(a => a.id === agent.id ? agent : a) : [...current[device], agent] }));
   const install = (agent: Agent) => { upsert({ ...agent, source: 'managed', phase: 'installing', progress: 0, enabled: true }); setSelected(agent.id); setAddOpen(false); };
-  const openCatalog = () => { setQuery(''); setCandidate(null); setCustom(false); setAddOpen(true); };
+  const openCatalog = () => { setQuery(''); setCandidate(null); setCustom(false); setCatalogScope('可添加'); setAddOpen(true); };
   const scene = (value: string) => {
     setAddOpen(false); setSelected(null);
     if (value === '管理') setSelected('codex');
@@ -162,12 +178,11 @@ export function ExternalAgentsPreview() {
     <footer className="review-footer"><span>真实设置组件 · Varin 主题与产品图标</span><span>点击列表或添加，体验安装与管理。</span></footer>
     <AnimatePresence>{notice && <motion.div className="preview-notice" role="status" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}>{icon('check')}{notice}</motion.div>}</AnimatePresence>
     <Dialog open={addOpen} onOpenChange={setAddOpen}><DialogContent className="catalog-dialog"><DialogHeader><DialogTitle>{custom ? '自定义 ACP Agent' : candidate ? `添加 ${candidate.name}` : '添加 Agent'}</DialogTitle><DialogDescription>安装与连接将在{deviceNames[device]}上进行。</DialogDescription></DialogHeader>
-      {custom ? <div className="custom-fields"><label>名称<Input value={customName} onChange={e => setCustomName(e.target.value)} placeholder="例如 My Agent" /></label><label>程序路径<Input value={customPath} onChange={e => setCustomPath(e.target.value)} placeholder="可执行程序或完整路径" /></label><p>添加后可在高级设置中编辑启动参数。</p><div className="dialog-actions"><Button variant="ghost" onClick={() => setCustom(false)}>返回</Button><Button disabled={!customName.trim() || !customPath.trim()} onClick={() => { const a: Agent = { id: `custom-${Date.now()}`, name: customName, harness: 'acp', description: '自定义 ACP 程序。', command: customPath, version: '', source: 'system', enabled: true, phase: 'missing' }; upsert(a); setSelected(a.id); setAddOpen(false); }}>添加并检测</Button></div></div>
-      : candidate ? <div className="candidate-detail"><div className="candidate-brand">{logo(candidate, true)}<div><strong>{candidate.name}</strong><p>{candidate.description}</p></div></div>
-        <div className="install-options">{['由 Varin 安装', '选择已有程序'].map(value => <button key={value} className="install-option" aria-pressed={installSource === value} onClick={() => setInstallSource(value)}><span className="choice-radio">{installSource === value && <span />}</span><span>{value}<small>{value === '由 Varin 安装' ? '安装到该设备的 Varin 数据目录，方便更新和移除。' : '连接你已安装的程序，保留其原有配置。'}</small></span></button>)}</div>
-        {installSource === '由 Varin 安装' ? <div className="install-version"><span>安装版本</span><span>{candidate.version}<span className="text-muted-foreground"> · 稳定版</span></span></div> : <Input aria-label="已有程序路径" value={customPath} onChange={e => setCustomPath(e.target.value)} placeholder={candidate.command} />}
-        <div className="dialog-actions"><Button variant="ghost" onClick={() => setCandidate(null)}>返回</Button><Button onClick={() => { const a: Agent = { ...candidate, source: installSource === '由 Varin 安装' ? 'managed' : 'system', enabled: true, phase: 'installed', command: customPath || candidate.command }; if (installSource === '由 Varin 安装') install(a); else { upsert(a); setSelected(a.id); setAddOpen(false); } }}>{icon(installSource === '由 Varin 安装' ? 'download' : 'check')}{installSource === '由 Varin 安装' ? '安装' : '连接程序'}</Button></div>
-      </div> : <><div className="catalog-search">{icon('search')}<Input aria-label="搜索 Agent" value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索 Agent" /></div><div className="catalog-products">{products.filter(p => `${p.name} ${p.id}`.toLowerCase().includes(query.toLowerCase())).map(p => { const exists = agents.some(a => a.id === p.id); return <button key={p.id} className="catalog-product" onClick={() => { if (exists) { setSelected(p.id); setAddOpen(false); } else { setCandidate(p); setInstallSource('由 Varin 安装'); setCustomPath(''); } }}>{logo(p)}<span><strong>{p.name}</strong><small>{p.description}</small></span>{exists ? <span className="catalog-connected">已接入</span> : icon('add')}</button>; })}{!products.some(p => `${p.name} ${p.id}`.toLowerCase().includes(query.toLowerCase())) && <p className="no-results">没有匹配的产品，可以添加自定义 ACP 程序。</p>}</div><button className="custom-entry" onClick={() => { setCustom(true); setCustomName(''); setCustomPath(''); }}>{icon('terminal')}自定义 ACP Agent{icon('arrow-right-s', 'ml-auto')}</button></>}
+      {custom ? <div className="custom-fields"><label>名称<Input value={customName} onChange={e => setCustomName(e.target.value)} placeholder="例如 My Agent" /></label><label>程序路径<Input value={customPath} onChange={e => setCustomPath(e.target.value)} placeholder="可执行程序或完整路径" /></label><p>添加后可在高级设置中编辑启动参数。</p><div className="dialog-actions"><Button variant="ghost" onClick={() => setCustom(false)}>返回</Button><Button disabled={!customName.trim() || !customPath.trim()} onClick={() => { const a: Agent = { id: `custom-${Date.now()}`, name: customName, harness: 'acp', description: '自定义 ACP 程序。', command: customPath, args: [], installation: 'official', version: '', source: 'system', enabled: true, phase: 'missing' }; upsert(a); setSelected(a.id); setAddOpen(false); }}>添加并检测</Button></div></div>
+      : candidate ? <ProductSetup key={candidate.id} product={candidate} device={device} onBack={() => setCandidate(null)} onAdd={(product, source) => { const a: Agent = { ...product, source, enabled: true, phase: 'installed' }; if (source === 'managed') install(a); else { upsert(a); setSelected(a.id); setAddOpen(false); } }} />
+      : <><div className="catalog-search">{icon('search')}<Input aria-label="搜索 Agent" value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索名称或程序" /></div>
+        <div className="catalog-filters">{['可添加', '全部'].map(scope => <Button key={scope} variant="chip" size="sm" aria-pressed={catalogScope === scope} onClick={() => setCatalogScope(scope)}>{scope}</Button>)}<span>{catalogue.length} 个产品</span></div>
+        <div className="catalog-products">{catalogue.map(p => { const exists = agents.some(a => a.id === p.id); return <button key={p.id} className="catalog-product" onClick={() => { if (exists) { setSelected(p.id); setAddOpen(false); } else setCandidate(p); }}>{logo(p)}<span><strong>{p.name}</strong><small>{p.description}</small></span>{exists ? <span className="catalog-connected">已接入</span> : icon('add')}</button>; })}{!catalogue.length && <p className="no-results">没有匹配的产品，可以查看全部或添加自定义 ACP 程序。</p>}</div><button className="custom-entry" onClick={() => { setCustom(true); setCustomName(''); setCustomPath(''); }}>{icon('terminal')}自定义 ACP Agent{icon('arrow-right-s', 'ml-auto')}</button></>}
     </DialogContent></Dialog>
     <Dialog open={remove} onOpenChange={setRemove}><DialogContent><DialogHeader><DialogTitle>{active?.source === 'managed' ? `卸载 ${active.name}？` : `移除 ${active?.name} 接入？`}</DialogTitle><DialogDescription>{active?.source === 'managed' ? `移除${deviceNames[device]}上由 Varin 安装的程序。会话记录和 Agent 账号配置会保留。` : '移除 Varin 中的接入配置，保留设备上的程序与会话记录。'}</DialogDescription></DialogHeader><div className="dialog-actions"><Button variant="ghost" onClick={() => setRemove(false)}>取消</Button><Button variant="destructive" onClick={() => { setAgentsByDevice(current => ({ ...current, [device]: current[device].filter(a => a.id !== selected) })); setRemove(false); setSelected(null); }}>{active?.source === 'managed' ? '卸载程序' : '移除接入'}</Button></div></DialogContent></Dialog>
   </div></I18nContext.Provider>;

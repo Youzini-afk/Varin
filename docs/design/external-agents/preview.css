@@ -114,6 +114,8 @@ button:disabled { cursor: default; }
 .catalog-search { position: relative; }
 .catalog-search > svg { position: absolute; left: 11px; top: 10px; color: var(--muted-foreground); }
 .catalog-search > input { padding-left: 35px; }
+.catalog-filters { display: flex; align-items: center; gap: 7px; margin-top: -7px; }
+.catalog-filters > span { margin-left: auto; color: var(--muted-foreground); font-size: 12px; }
 .catalog-products { max-height: min(450px, 55dvh); overflow-y: auto; margin: -7px -8px; padding: 0 8px; }
 .catalog-product { display: flex; align-items: center; gap: 15px; width: 100%; min-height: 73px; text-align: left; padding: 13px 7px; border-radius: 9px; }
 .catalog-product:hover { background: var(--interactive-hover); }
@@ -125,6 +127,10 @@ button:disabled { cursor: default; }
 .custom-entry { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--border); padding-top: 18px; font-size: 13px; }
 .candidate-brand { display: flex; align-items: center; gap: 16px; padding: 7px 0 23px; }
 .candidate-brand p { font-size: 12px; margin-top: 6px; line-height: 1.7; color: var(--muted-foreground); }
+.connection-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 20px; font-size: 13px; }
+.connection-choice > [data-slot="select-trigger"] { margin-left: auto; }
+.connection-choice p, .product-setup-note { width: 100%; font-size: 12px; color: var(--muted-foreground); line-height: 1.75; }
+.product-setup-note { margin-top: 14px; }
 .install-options { display: flex; flex-direction: column; gap: 8px; }
 .install-option { display: flex; align-items: flex-start; gap: 11px; border: 1px solid var(--border); border-radius: 11px; padding: 15px; text-align: left; font-size: 13px; }
 .install-option[aria-pressed="true"] { border-color: var(--interactive-border-focus); background: color-mix(in srgb,var(--primary) 3%,var(--background)); }
@@ -134,7 +140,7 @@ button:disabled { cursor: default; }
 .install-option small { display: block; margin-top: 6px; color: var(--muted-foreground); font-size: 12px; line-height: 1.6; }
 .install-version { display: flex; justify-content: space-between; font-size: 12px; padding: 18px 1px; }
 .candidate-detail > input { margin-top: 16px; }
-.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 18px; }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 18px; }
 .custom-fields { display: flex; flex-direction: column; gap: 18px; }
 .custom-fields label { display: flex; flex-direction: column; gap: 9px; font-size: 13px; }
 .custom-fields p, .no-results { font-size: 12px; color: var(--muted-foreground); line-height: 1.7; }
