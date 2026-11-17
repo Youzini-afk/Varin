@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type RequestListener, type ServerResponse } from 'node:http';
 import { isIP, type Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
+import { createEndpointProof } from './external-endpoint-proof.js';
 
 export interface ExternalIngressConfiguration {
   origin: string;
@@ -95,6 +96,7 @@ export function createPublicIngress(options: ExternalIngressConfiguration & {
   isDraining?: () => boolean;
 }) {
   const configuration = normalizeExternalIngress(options);
+  const endpointProof = createEndpointProof();
   const sockets = new Set<Socket>();
   const deviceConnections = new Map<string, Set<() => void>>();
   let enabled = false;
@@ -155,6 +157,7 @@ export function createPublicIngress(options: ExternalIngressConfiguration & {
   const server = createServer((request, response) => {
     const status = admit(request, false);
     if (status !== null) return rejectRequest(response, status);
+    if (endpointProof.handle(request, response)) return;
     markRequest(request, () => {
       // A reverse proxy can reuse one TCP socket for several devices. End
       // this observation response, not the entire socket or an unrelated run.
@@ -224,5 +227,5 @@ export function createPublicIngress(options: ExternalIngressConfiguration & {
     for (const closeConnection of connections) closeConnection();
   }
 
-  return { configuration, listen, setEnabled, revokeClient, close, get enabled() { return enabled; } };
+  return { configuration, listen, setEnabled, revokeClient, close, issueEndpointProof: endpointProof.issue, get enabled() { return enabled; } };
 }

@@ -70,7 +70,9 @@ describe('existing FRP process adapter', () => {
   }
 
   it('writes private authenticated TLS config, keeps credentials out of argv/environment, and waits for proxy publication', async () => {
-    const run = begin();
+    const chmod = vi.fn(fs.chmod);
+    const writeFile = vi.fn(fs.writeFile);
+    const run = begin({ fs: { ...fs, chmod, writeFile } });
     const launch = await run.spawned;
     expect(launch.command).toBe(configuration.executablePath);
     expect(launch.options.shell).toBe(false);
@@ -91,8 +93,14 @@ describe('existing FRP process adapter', () => {
     expect(document.auth.token).toBeUndefined();
     expect(document.webServer).toBeUndefined();
     expect(await fs.readFile(document.auth.tokenSource.file.path, 'utf8')).toBe(token);
-    expect((await fs.stat(launch.options.cwd)).mode & 0o777).toBe(0o700);
-    for (const file of [launch.args[1]!, document.auth.tokenSource.file.path]) expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
+    expect(chmod).toHaveBeenCalledWith(launch.options.cwd, 0o700);
+    for (const file of [launch.args[1]!, document.auth.tokenSource.file.path]) {
+      expect(writeFile).toHaveBeenCalledWith(file, expect.any(String), expect.objectContaining({ mode: 0o600 }));
+      // Windows exposes no POSIX mode bits even when the fake provider platform
+      // is Linux. Real Windows still fails closed before credential creation.
+      if (process.platform !== 'win32') expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
+    }
+    if (process.platform !== 'win32') expect((await fs.stat(launch.options.cwd)).mode & 0o777).toBe(0o700);
 
     let settled = false;
     void run.starting.then(() => { settled = true; });
