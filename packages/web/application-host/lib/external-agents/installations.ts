@@ -476,9 +476,10 @@ export class ExternalAgentInstaller {
         }
       }
       signal.throwIfAborted();
-      // Verify the entry resolves inside this generation, including npm-created symlinks.
+      // Compare canonical paths so a symlink or junction above the generation is harmless.
+      const canonicalStaging = await realpath(staging);
       const entry = await realpath(childPath(staging, command));
-      childPath(staging, path.relative(staging, entry));
+      childPath(canonicalStaging, path.relative(canonicalStaging, entry));
       await writeFile(
         path.join(staging, ".varin-installation.json"),
         JSON.stringify({

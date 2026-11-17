@@ -24,6 +24,7 @@ const send=v=>process.stdout.write(JSON.stringify(v)+'\\n');const reply=(id,resu
 createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);
 if(m.method==='initialize')reply(m.id,{userAgent:'remote fixture'});
 if(m.method==='model/list')reply(m.id,{data:[{id:'remote-model',model:'remote-model',displayName:'Remote'}]});
+if(m.method==='collaborationMode/list'||m.method==='permissionProfile/list')reply(m.id,{data:[]});
 if(m.method==='thread/start'||m.method==='thread/resume'){appendFileSync('sessions',m.method+'\\n');reply(m.id,{thread:{id:'target-native-session'}})}
 if(m.method==='turn/start'){if(m.params.input[0].text.startsWith('read:'))appendFileSync('delivered',readFileSync(m.params.input[0].text.slice(5)));const id='turn-'+(++n);reply(m.id,{turn:{id}});send({method:'turn/started',params:{threadId:'target-native-session',turn:{id}}});send({method:'item/agentMessage/delta',params:{threadId:'target-native-session',turnId:id,itemId:'answer'+n,delta:'REMOTE:'+m.params.input[0].text}});send({method:'turn/completed',params:{threadId:'target-native-session',turn:{id,status:'completed'}}})}
 });`);
