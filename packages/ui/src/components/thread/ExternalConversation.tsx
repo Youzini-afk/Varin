@@ -24,6 +24,7 @@ import { EMPTY_THREAD_DRAFT, useThreadDraftStore } from '@/stores/useThreadDraft
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useI18n } from '@/lib/i18n';
+import { THINKING_LEVELS } from '@varin/protocol';
 import { ThreadComposer } from './ThreadComposer';
 import { HarnessSelector } from './HarnessSelector';
 import { HarnessIcon } from './HarnessIcon';
@@ -296,7 +297,7 @@ function Messages({
   activeTurn?: string;
   cwd: string;
   receipts: ExternalTurn[];
-  replyHeader: React.ReactNode;
+  replyHeader(execution: ExternalTurn['execution']): React.ReactNode;
 }) {
   const mode = useUIStore((state) => state.chatRenderMode);
   const groups: ExternalItem[][] = [];
@@ -365,7 +366,7 @@ function Messages({
         );
         return (
           <React.Fragment key={first.id}>
-            {startsReply ? <div>{replyHeader}{content}</div> : content}
+            {startsReply ? <div>{replyHeader(receipt?.execution)}{content}</div> : content}
             {ended && (
               <>
                 <TurnFooter
@@ -680,12 +681,25 @@ function ExternalConversationSession({ id, host, readOnly, turnId }: { id: strin
   const agentName = profile?.name ?? (c.harness === 'acp' ? agent?.name ?? t('external.agent') : {
     codex: 'Codex', claude: 'Claude Code', pi: 'Pi',
   }[c.harness]);
-  const replyHeader = (
-    <header className="flex min-h-6 min-w-0 items-center gap-2 typography-meta font-medium text-foreground/85">
-      <HarnessIcon harness={c.harness} profileId={profileId} className="size-3.5" />
-      <span className="truncate" title={agentName}>{agentName}</span>
-    </header>
-  );
+  const replyHeader = (execution: ExternalTurn['execution']) => {
+    const { model, modelName, thinking, thinkingName } = execution ?? {};
+    const level = thinking === 'none' ? 'off' : thinking;
+    const knownLevel = THINKING_LEVELS.find(value => value === level);
+    const effort = thinkingName ?? (knownLevel ? t(`settings.agents.thinking.${knownLevel}`) : thinking);
+    return (
+      <header className="flex min-h-6 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 typography-meta text-muted-foreground">
+        <span className="flex min-w-0 items-center gap-2 font-medium text-foreground/85">
+          <HarnessIcon harness={c.harness} profileId={profileId} className="size-3.5" />
+          <span className="truncate" title={agentName}>{agentName}</span>
+        </span>
+        {model && <span className="min-w-0 truncate" title={model}>{modelName || model}</span>}
+        {effort && <span className="flex min-w-0 items-center gap-1" title={`${t('chat.context.thinking')} · ${effort}`}>
+          <Icon name="brain" className="size-3 shrink-0" />
+          <span className="truncate">{effort}</span>
+        </span>}
+      </header>
+    );
+  };
   const controls = <button type="button" title={t('external.details')} onClick={() => setDetails(true)}><HarnessSelector value={c.configurationId} harness={c.harness} /></button>;
   return (
     <section className="regular-chat-view relative flex h-full min-h-0 min-w-0 flex-col">

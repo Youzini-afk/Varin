@@ -5,6 +5,7 @@ import { dedicatedOptions } from './dedicated-options.js';
 import { ContextUsage } from './context-usage.js';
 import { ClaudeContent } from './claude-content.js';
 import type { HarnessConnection, HarnessSink } from './adapter.js';
+import { describeTurnExecution } from './adapter.js';
 import { HarnessTransport, record, text, type RecordValue } from './transport.js';
 
 const claudeModels = (models: unknown): ExternalAgentCapabilities['models'] =>
@@ -161,6 +162,12 @@ export async function connectClaude(
     if (message.context_usage && !message.parent_tool_use_id) {
       const usage = record(message.context_usage);
       context.update(usage.total_tokens, usage.raw_max_tokens);
+    }
+    if (!message.parent_tool_use_id) {
+      const event = record(message.event);
+      const model = message.type === 'assistant' ? text(record(message.message).model)
+        : message.type === 'stream_event' && event.type === 'message_start' ? text(record(event.message).model) : '';
+      if (model) sink.execution?.(describeTurnExecution(capabilities, { model }));
     }
     content?.receive(message);
     if (message.type === 'result') {

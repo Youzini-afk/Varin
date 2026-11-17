@@ -850,7 +850,9 @@ it('opens a supplementary input together with the actual shared execution result
   const { view } = activeConversation();
   view.conversation.profileId = 'opencode';
   f.settings!.profiles = [{ id: 'opencode', name: 'OpenCode', harness: 'acp', description: '', platforms: [], launch: { command: 'opencode', args: [] } }];
+  view.capabilities = { ...capabilities(), current: { model: 'current-model', thinking: 'low' } };
   view.turns[0]!.status = 'completed'; view.conversation.activeTurn = undefined;
+  view.turns[0]!.execution = { model: 'original-model', modelName: 'Original model', thinking: 'high' };
   view.turns.push({ id: 'supplement', conversationId: 'prepared', key: 'supplement-key', status: 'completed', createdAt: 1, updatedAt: 1,
     consumedByTurnId: 'active', steering: { state: 'appended', targetTurnId: 'active' } });
   view.items.push({ id: 'original-user', turnId: 'active', kind: 'user', text: 'Original work', complete: true },
@@ -863,7 +865,10 @@ it('opens a supplementary input together with the actual shared execution result
   expect(container.textContent).toContain('Actual shared answer');
   const replyHeaders = container.querySelectorAll('header');
   expect(replyHeaders).toHaveLength(1);
-  expect(replyHeaders[0]?.textContent).toBe('OpenCode');
+  expect(replyHeaders[0]?.querySelector('[title="OpenCode"]')).not.toBeNull();
+  expect(replyHeaders[0]?.querySelector('[title="original-model"]')?.textContent).toBe('Original model');
+  expect(replyHeaders[0]?.textContent).toContain('settings.agents.thinking.high');
+  expect(replyHeaders[0]?.textContent).not.toContain('current-model');
   expect(replyHeaders[0]?.querySelector('img')?.getAttribute('src')).toBe(opencodeLogo);
   expect(container.textContent!.indexOf('OpenCode')).toBeLessThan(container.textContent!.indexOf('Plan for the work'));
   expect(container.textContent).not.toContain('Unrelated historical answer');

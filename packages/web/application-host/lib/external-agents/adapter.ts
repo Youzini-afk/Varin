@@ -6,6 +6,7 @@ import type {
   ExternalInteractionResponse,
   ExternalItem,
   ExternalTurn,
+  ExternalTurnExecution,
 } from '@varin/application-client';
 
 export interface HarnessInput extends Omit<ExternalInput, 'attachments'> {
@@ -39,12 +40,28 @@ export interface HarnessSink {
   /** Durably record delivery intent after configuration succeeds and before sending input. */
   beforeDispatch?(): Promise<void>;
   started?(nativeId: string): void;
+  execution?(value: ExternalTurnExecution): void;
   item(item: Omit<ExternalItem, 'turnId'>): void;
   interaction(
     request: Omit<ExternalInteraction, 'turnId'>,
     signal?: AbortSignal,
   ): Promise<ExternalInteractionResponse>;
   usage(usage: NonNullable<ExternalTurn['usage']>): void;
+}
+
+export function describeTurnExecution(
+  capabilities: ExternalAgentCapabilities,
+  { model, thinking }: NonNullable<ExternalAgentCapabilities['current']> = capabilities.current ?? {},
+): ExternalTurnExecution {
+  const modelName = model && capabilities.models.find(entry => entry.id === model)?.name;
+  const thinkingName = thinking && capabilities.configOptions?.find(option => option.category === 'thought_level')
+    ?.options.find(option => option.value === thinking)?.name;
+  return {
+    ...(model ? { model } : {}),
+    ...(modelName && modelName !== model ? { modelName } : {}),
+    ...(thinking ? { thinking } : {}),
+    ...(thinkingName && thinkingName !== thinking ? { thinkingName } : {}),
+  };
 }
 export interface HarnessConnection {
   sessionId: string;

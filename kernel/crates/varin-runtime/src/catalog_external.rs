@@ -106,6 +106,11 @@ pub enum ExternalCommand {
         turn_id: String,
         native_id: String,
     },
+    TurnExecution {
+        id: String,
+        turn_id: String,
+        execution: Value,
+    },
     Admit {
         id: String,
         key: String,
@@ -458,7 +463,15 @@ mod tests {
         let snapshot = call(&mut c, json!({"action":"read","id":"external:a"})).unwrap();
         assert_eq!(snapshot["turns"][0]["nativeId"], "native-current");
         assert_eq!(snapshot["conversation"]["activeTurn"], *turn);
+        call(&mut c, json!({"action":"observe","id":"external:a","turnId":turn,"status":"running"})).unwrap();
+        let execution = json!({"model":"native-model","thinking":"high"});
+        call(&mut c, json!({"action":"turn_execution","id":"external:a","turnId":turn,"execution":execution})).unwrap();
         call(&mut c, json!({"action":"observe","id":"external:a","turnId":turn,"status":"completed","nativeId":"native-current"})).unwrap();
+        assert!(call(&mut c, json!({"action":"turn_execution","id":"external:a","turnId":turn,"execution":{"model":"later-model"}})).is_err());
+        drop(c);
+        let mut c = Catalog::open(directory.path()).unwrap();
+        let snapshot = call(&mut c, json!({"action":"read","id":"external:a"})).unwrap();
+        assert_eq!(snapshot["turns"][0]["execution"], execution);
     }
 
     #[test]
@@ -1353,6 +1366,18 @@ impl Catalog {
                 t
             }
             ExternalCommand::Admit { id, key, .. } => admit_turn(&tx,&id,&key,&p.body.unwrap(),self.epoch)?,
+            ExternalCommand::TurnExecution { id, turn_id, execution } => {
+                let v = conversation(&tx, &id)?;
+                let mut t = turn(&tx, &id, &turn_id)?;
+                if v["activeTurn"] != turn_id || t["epoch"].as_u64() != Some(self.epoch)
+                    || !matches!(t["status"].as_str(), Some("running" | "waiting_user" | "stopping"))
+                {
+                    return Err(RuntimeError::Conflict("external execution observation belongs to an inactive turn".into()));
+                }
+                t["execution"] = execution;
+                put(&tx, "external_turns", &turn_id, &t)?;
+                t
+            }
             ExternalCommand::SteerAdmit { id, key, target_turn_id, .. } => {
                 steering_target(&tx, &id, &target_turn_id, self.epoch)?;
                 let mut t = admit_turn(&tx, &id, &key, &p.body.unwrap(), self.epoch)?;

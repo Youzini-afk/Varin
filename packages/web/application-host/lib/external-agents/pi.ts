@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ExternalAgentCapabilities } from '@varin/application-client';
 import type { HarnessConnection, HarnessSink } from './adapter.js';
-import { assertSteeringContent, HarnessSteeringRejected } from './adapter.js';
+import { assertSteeringContent, describeTurnExecution, HarnessSteeringRejected } from './adapter.js';
 import { fileInputText } from './attachments.js';
 import { dedicatedOptions } from './dedicated-options.js';
 import { ContextUsage } from './context-usage.js';
@@ -274,10 +274,24 @@ export async function connectPi(
       return;
     }
     if (!sink || !dispatched || settled) return;
-    if (event.type === 'agent_start') runStarted = true;
+    if (event.type === 'agent_start') {
+      runStarted = true;
+      sink.execution?.(describeTurnExecution(capabilities));
+    }
     // Pi has no native run ID. Its ordered session lifecycle is the ownership
     // boundary; never attribute idle/pre-start/previous-settlement frames.
     if (!runStarted) return;
+    if (event.type === 'message_start' || event.type === 'message_end') {
+      const message = record(event.message);
+      const provider = text(message.provider), modelId = text(message.model);
+      if (message.role === 'assistant' && provider && modelId) {
+        const model = `${provider}/${modelId}`;
+        sink.execution?.(describeTurnExecution(capabilities, {
+          model,
+          thinking: model === capabilities.current?.model ? capabilities.current.thinking : undefined,
+        }));
+      }
+    }
     content?.receive(event);
     if (event.type === 'agent_settled') {
       settled = true;

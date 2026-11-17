@@ -109,6 +109,7 @@ export async function connectAcp(
     capabilities,
     () => {
       for (const listener of capabilityListeners) listener();
+      if (dispatched) sink?.execution?.(state.turnExecution());
     },
     options.profile?.id === 'grok' ? 'grok' : options.profile?.id === 'kiro' ? 'kiro' : undefined,
   );
@@ -437,6 +438,7 @@ export async function connectAcp(
         if (failure) throw failure;
         if (closed) throw new Error('ACP connection is closed');
         dispatched = true;
+        next.execution?.(state.turnExecution());
         const response = await peer.request('session/prompt', {
           sessionId,
           prompt: [

@@ -201,6 +201,12 @@ export interface ExternalSendOptions {
   /** Product turn identity captured when the user chose to supplement that turn. */
   expectedTurnId?: string;
 }
+export interface ExternalTurnExecution {
+  model?: string;
+  modelName?: string;
+  thinking?: string;
+  thinkingName?: string;
+}
 export interface ExternalTurn {
   arrangementOccurrenceId?: string;
   arrangementLaunch?: Pick<ExternalAgentConfiguration, 'command' | 'args'>;
@@ -217,6 +223,7 @@ export interface ExternalTurn {
   key: string;
   status: ExternalTurnStatus;
   nativeId?: string;
+  execution?: ExternalTurnExecution;
   error?: string;
   createdAt: number;
   updatedAt: number;

@@ -17,17 +17,20 @@ it('maps Kiro metadata and sends native reasoning commands without inventing opt
   const f = fixture({ opened: { sessionId: 'native-session', models: { currentModelId: 'model', availableModels: [{ modelId: 'model', name: 'Model' }] } },
     handle(message, reply) { if (message.method === '_kiro.dev/commands/execute') { reply(message, { success: true }); return true; } return false; } });
   const connection = await connectAcp(f.peer, '/workspace', undefined, { profile: getAcpProfile('kiro') });
-  f.emit({ jsonrpc: '2.0', method: '_kiro.dev/metadata', params: { sessionId: 'native-session', reasoning: { support: 'toggleable', thinkingEnabled: true, effortLevels: ['low', 'high'] } } });
+  f.emit({ jsonrpc: '2.0', method: '_kiro.dev/metadata', params: { sessionId: 'native-session', reasoning: { support: 'toggleable', thinkingEnabled: true, effortLevels: ['low', 'high'], effort: 'low' } } });
   f.update({ sessionUpdate: 'config_option_update', configOptions: [select('mode', 'mode', 'ask', ['ask'])] });
   expect(connection.capabilities.models[0]?.thinkingLevels).toEqual(['low', 'high']);
   expect(connection.capabilities.configOptions?.find(option => option.id === 'kiro:thinking')?.currentValue).toBe(true);
-  const result = connection.prompt({ text: 'hello', thinking: 'high' }, sink());
+  const output = sink();
+  const result = connection.prompt({ text: 'hello', thinking: 'high' }, output);
   await vi.waitFor(() => expect(f.latest('session/prompt')).toBeDefined());
   expect(f.latest('_kiro.dev/commands/execute').params).toEqual({ sessionId: 'native-session', command: { command: 'effort', args: { level: 'high' } } });
   // Only metadata confirms what Kiro actually applied.
   expect(connection.capabilities.current?.thinking).toBeUndefined();
+  expect(output.execution).toHaveBeenLastCalledWith({ model: 'model', modelName: 'Model' });
   f.emit({ jsonrpc: '2.0', method: '_kiro.dev/metadata', params: { sessionId: 'native-session', reasoning: { support: 'unavailable', effortLevels: ['low', 'high'], effort: 'high' } } });
   expect(connection.capabilities.current?.thinking).toBe('high');
+  expect(output.execution).toHaveBeenLastCalledWith({ model: 'model', modelName: 'Model', thinking: 'high' });
   expect(connection.capabilities.configOptions?.find(option => option.id === 'kiro:thinking')).toBeUndefined();
   f.reply(f.latest('session/prompt'), { stopReason: 'end_turn' });
   await result;
@@ -138,11 +141,13 @@ function fixture(
 function sink(): HarnessSink & {
   item: Mock<HarnessSink['item']>;
   usage: Mock<HarnessSink['usage']>;
+  execution: Mock<NonNullable<HarnessSink['execution']>>;
   interaction: Mock<HarnessSink['interaction']>;
 } {
   return {
     item: vi.fn<HarnessSink['item']>(),
     usage: vi.fn<HarnessSink['usage']>(),
+    execution: vi.fn<NonNullable<HarnessSink['execution']>>(),
     interaction: vi.fn<HarnessSink['interaction']>(async () => ({
       cancelled: true,
     })),
@@ -182,6 +187,7 @@ it.each(ACP_PROFILES)(
     expect(initialize.clientCapabilities).toEqual({
       elicitation: { form: {} },
       session: { configOptions: { boolean: {} } },
+      ...(profile.id === 'cursor' ? { _meta: { parameterizedModelPicker: true } } : {}),
     });
     expect(f.sent.some((message) => message.method === 'authenticate')).toBe(
       false,

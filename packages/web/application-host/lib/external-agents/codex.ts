@@ -6,7 +6,7 @@ import {
   type ExternalInteractionResponse,
 } from '@varin/application-client';
 import type { HarnessConnection, HarnessSink, HarnessInput } from './adapter.js';
-import { assertSteeringContent, HarnessSteeringRejected } from './adapter.js';
+import { assertSteeringContent, describeTurnExecution, HarnessSteeringRejected } from './adapter.js';
 import { ContextUsage } from './context-usage.js';
 import { formInteraction } from './interaction-form.js';
 import { fileInputText } from './attachments.js';
@@ -88,6 +88,7 @@ export async function connectCodex(
   const modes = (Array.isArray(modeCatalog.data) ? modeCatalog.data : []).map(record)
     .filter(preset => text(preset.mode) && text(preset.name));
   let lastAcceptedModel = text(opened.model);
+  let reroutedModel: string | undefined;
   let settingsRevision = 0;
 
   const models = () =>
@@ -254,6 +255,7 @@ export async function connectCodex(
       if (permissionOption) permissionOption.currentValue = activeCodexPermission(settings);
       settingsRevision++;
       for (const listener of changed) listener();
+      if (sink && turnId && !settled && !reroutedModel) sink.execution?.(describeTurnExecution(capabilities));
       return;
     }
     if (message.method === 'item/started' || message.method === 'item/completed') {
@@ -293,6 +295,10 @@ export async function connectCodex(
     const eventTurn = text(params.turnId) || nestedId;
     if (eventTurn !== turnId || (nestedId && nestedId !== turnId)) return;
     const method = text(message.method);
+    if (method === 'model/rerouted' && text(params.toModel)) {
+      reroutedModel = text(params.toModel);
+      sink.execution?.(describeTurnExecution(capabilities, { model: reroutedModel }));
+    }
     if (method === 'turn/plan/updated')
       sink.item({
         id: 'plan',
@@ -579,6 +585,7 @@ export async function connectCodex(
       stopRequested = false;
       dispatched = false;
       settled = false;
+      reroutedModel = undefined;
       buffered = [];
       interactions = new AbortController();
       identity = new Promise((resolve) => {
@@ -644,6 +651,7 @@ export async function connectCodex(
           for (const listener of changed) listener();
         }
         next.started?.(turnId);
+        next.execution?.(describeTurnExecution(capabilities));
         identify?.(turnId);
         for (const message of buffered) receive(message);
         buffered = [];

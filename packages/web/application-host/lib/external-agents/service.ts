@@ -1386,6 +1386,7 @@ export class ExternalAgentsService {
       let dispatched = false;
       let includesArrangements = Boolean(turn.arrangementOccurrenceId);
       let usage: ExternalTurn['usage'];
+      let execution: NonNullable<ExternalTurn['execution']> = {};
       let persistence = Promise.resolve();
       const changed = new Map<string, ExternalItem>();
       const visible = new Map<string, ExternalItem>();
@@ -1516,6 +1517,15 @@ export class ExternalAgentsService {
             persistence = persistence.then(() =>
               this.command<void>({ action: 'native_turn', id, turnId: turn.id, nativeId }),
             );
+            void persistence.catch(() => {});
+          },
+          execution: (value) => {
+            if (isDeepStrictEqual(execution, value)) return;
+            execution = value;
+            persistence = persistence.then(async () => {
+              await this.command({ action: 'turn_execution', id, turnId: turn.id, execution: value });
+              this.notify(id);
+            });
             void persistence.catch(() => {});
           },
           item: publish,
