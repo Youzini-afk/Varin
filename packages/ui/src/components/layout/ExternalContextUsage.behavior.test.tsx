@@ -77,8 +77,19 @@ it('opens native occupancy and scoped cumulative usage without a Varin context i
   await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
   expect(document.body.textContent).toContain('Agent-reported context');
   await publish(snapshot('one', 2));
-  expect(container.querySelector('button')).toBeNull();
-  expect(document.querySelector('[role=dialog]')).toBeNull();
+  expect(container.textContent).toBe('—');
+  expect(document.body.textContent).toContain('The Agent has not reported context occupancy.');
+  expect(document.body.textContent).toContain('Conversation total');
+});
+
+it('labels a recorded measurement on an explicitly opened Bot task', async () => {
+  await act(async () => useThreadStore.setState({ selectedIdentity: { runtime: 'agent', threadId: 'bot', branchId: 'branch' } }));
+  await publish(snapshot('one', 1, 900));
+  await publish({ ...snapshot('task', 1, 300), connected: false, contextUsageSource: 'recorded' });
+  await act(async () => root.render(<I18nProvider><ExternalContextUsage conversationId="task" /></I18nProvider>));
+  expect(container.textContent).toContain('30.0%');
+  await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
+  expect(document.body.textContent).toContain('Last recorded context');
 });
 
 it('rejects stale and wrong-Host snapshots, hides on navigation and preserves a real zero', async () => {

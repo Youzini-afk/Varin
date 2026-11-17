@@ -40,6 +40,9 @@ createInterface({ input: process.stdin }).on('line', line => {
     reply(m.id,{turn:{id:active}}); event('turn/started',{turn:{id:active}});
     const input = m.params.input[0].text;
     if (input === 'disconnect') { process.exit(1); return; }
+    event('thread/tokenUsage/updated', {tokenUsage: {
+      last:{totalTokens:250}, total:{inputTokens:500,outputTokens:25}, modelContextWindow:1000,
+    }});
     event('item/started',{item:{id:'answer-'+count,type:'agentMessage',text:''}});
     event('item/agentMessage/delta',{itemId:'answer-'+count,delta:'收到：'+input});
     if (input === 'permission') send({jsonrpc:'2.0',id:'permission',method:'item/commandExecution/requestApproval',params:{threadId:'native-thread',turnId:active,command:'fixture',availableDecisions:['accept','decline']}});
@@ -151,13 +154,18 @@ it('keeps an interrupted external input and does not automatically replay it', a
   expect((await service.read(conversation.id)).turns).toHaveLength(1);
 });
 
-it('reclaims a real unobserved process tree, preserves Catalog binding and cached capabilities, and resumes the same native session', async () => {
+it('reclaims an unobserved process tree while preserving the session, capabilities and last context measurement', async () => {
   const { service, conversation, processes, directory } = await fixture({
     idle: { preparedMs: 100, conversationMs: 200, sweepMs: 25 }, descendant: true,
   });
   const unsubscribe = service.subscribe(conversation.id, () => true);
   await service.connect(conversation.id);
   const first = processes[0]!;
+  const turn = await service.send(conversation.id, 'measure', { text: 'measure context' });
+  await vi.waitFor(async () => expect((await service.read(conversation.id)).turns[0]?.status).toBe('completed'), { timeout: 15_000 });
+  const measured = await service.read(conversation.id);
+  expect(measured.contextUsage).toEqual({ used: 250, size: 1000 });
+  expect(measured.contextUsageSource).toBeUndefined();
   await vi.waitFor(async () => expect(await readFile(path.join(directory, 'descendant-heartbeat'), 'utf8')).not.toBe(''), { timeout: 15_000 });
   await new Promise(resolve => setTimeout(resolve, 150));
   expect(first.exitConfirmed).toBe(false);
@@ -170,13 +178,16 @@ it('reclaims a real unobserved process tree, preserves Catalog binding and cache
   expect(await readFile(path.join(directory, 'descendant-heartbeat'), 'utf8')).toBe(stoppedHeartbeat);
   const reclaimed = await service.read(conversation.id);
   expect(reclaimed.conversation.sessionId).toBe('native-thread');
-  expect(reclaimed.turns).toEqual([]);
+  expect(reclaimed.turns.map(value => value.id)).toEqual([turn.id]);
   expect(reclaimed).toMatchObject({ connected: false, capabilitiesSource: 'cached', capabilities: { models: [{ id: 'fixture-model' }] } });
+  expect(reclaimed.contextUsage).toEqual(measured.contextUsage);
+  expect(reclaimed.contextUsageSource).toBe('recorded');
   const observing = service.subscribe(conversation.id, () => true);
   await service.connect(conversation.id);
   expect(processes).toHaveLength(2);
   const resumed = await service.read(conversation.id);
   expect(resumed).toMatchObject({ connected: true, capabilitiesSource: 'live', conversation: { id: conversation.id, sessionId: 'native-thread' } });
-  expect(resumed.turns).toEqual([]);
+  expect(resumed.contextUsage).toEqual(measured.contextUsage);
+  expect(resumed.contextUsageSource).toBe('recorded');
   observing();
 });

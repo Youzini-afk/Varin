@@ -331,6 +331,8 @@ export interface ExternalConversationSnapshot {
   capabilitiesSource?: 'live' | 'cached';
   connection?: ExternalConnectionState;
   contextUsage?: ExternalContextUsage;
+  /** The current connection has no measurement, so this is from a previous turn. */
+  contextUsageSource?: 'recorded';
   interactions: ExternalInteraction[];
 }
 export type ExternalObservationChange =

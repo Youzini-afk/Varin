@@ -1,4 +1,5 @@
 import { ExternalConversationView } from '@/components/thread/ExternalConversation';
+import { ExternalContextUsage } from '@/components/layout/ExternalContextUsage';
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { ComputerDesktopPane } from '@/components/sections/computers/ComputerDesktopView';
@@ -13,6 +14,7 @@ import { springTiming } from '@/lib/motion/tokens';
 /** Tabs hold view state, while live desktop observation exists only for the visible view. */
 export function BotWorkspaceArea({ model, active, expanded, onExpand }: { model: BotPanelModel; active: boolean; expanded: boolean; onExpand(): void }) {
   const { t } = useI18n(), navigation = useBotWorkspaceNavigation()!;
+  const activeView = navigation.views.find(view => view.key === navigation.activeKey);
   const guards = React.useRef(new Map<string, () => boolean>());
   const binders = React.useRef(new Map<string, (guard: (() => boolean) | null) => void>());
   const previous = React.useRef(navigation.activeKey);
@@ -44,6 +46,7 @@ export function BotWorkspaceArea({ model, active, expanded, onExpand }: { model:
         <button type="button" role="tab" tabIndex={navigation.activeKey === view.key || navigation.activeKey === null && view === navigation.views[0] ? 0 : -1} aria-selected={navigation.activeKey === view.key} onClick={() => navigation.select(view.key)}><Icon name={view.kind === 'files' ? 'folder' : view.kind === 'computer' ? 'computer' : 'list-unordered'} className="size-3.5" /><span>{view.title}</span></button>
         <button type="button" aria-label={`${t('bot.workspace.close')} · ${view.title}`} onClick={() => { if (guards.current.get(view.key)?.() === false) return; navigation.close(view.key); }}><Icon name="close" className="size-3" /></button>
       </div>)}</div>
+      {active && activeView?.kind === 'external' && <ExternalContextUsage conversationId={activeView.id} />}
       {navigation.activeKey && <button type="button" className="bot-space-expand" aria-label={t(expanded ? 'bot.workspace.restore' : 'bot.workspace.expand')} onClick={onExpand}><Icon name={expanded ? 'fullscreen-exit' : 'fullscreen'} className="size-4" /></button>}
     </header>}
     <div className="bot-space-body">

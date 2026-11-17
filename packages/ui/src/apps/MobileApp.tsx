@@ -5,6 +5,8 @@ import type { IconName } from '@/components/icon/icons';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { ThreadSwitcherDropdown } from '@/components/thread/ThreadSwitcherDropdown';
+import { ExternalContextDetails, useExternalContextSnapshot } from '@/components/layout/ExternalContextUsage';
+import type { ExternalContextSnapshot } from '@/stores/useExternalAgentStore';
 import { AboutSettings } from '@/components/sections/varin/AboutSettings';
 import { MobileAppUpdateToast } from '@/components/update/MobileAppUpdateToast';
 import { Button } from '@/components/ui/button';
@@ -36,8 +38,6 @@ import { useI18n } from '@/lib/i18n';
 import { isIPadApp } from '@/lib/platform';
 import { readStoredThemeState } from '@/lib/theme/themeStorage';
 import { resolveProjectForDirectory } from '@/lib/projectResolution';
-const clampPercent = (value: number) => Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null;
-const resolveUsageTone = (value: number) => value >= 90 ? 'critical' : value >= 75 ? 'warn' : 'normal';
 import { runtimeFetch } from '@varin/application-client';
 import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@varin/application-client';
 import { workspaceEvents } from '@/lib/workspaceEvents';
@@ -658,12 +658,6 @@ type OverflowItem = {
   badge?: number;
   onSelect: () => void;
 };
-
-type ContextDisplay = {
-  percentage: number;
-  tokens: string;
-  colorClass: string;
-} | null;
 
 const getProjectDisplayLabel = (project: ProjectEntry | null, fallbackDirectory: string): string => {
   if (project) return project.label?.trim() || getProjectLabel(project.path);
@@ -1325,61 +1319,14 @@ const MobileInstancesSurface: React.FC<{
   );
 };
 
-const ContextProgressIcon: React.FC<{ percentage: number }> = ({ percentage }) => {
-  const progressPct = clampPercent(percentage) ?? 0;
-  const tone = resolveUsageTone(percentage);
-  const progressColor = tone === 'critical'
-    ? 'var(--status-error)'
-    : tone === 'warn'
-      ? 'var(--status-warning)'
-      : 'var(--status-success)';
-  const size = 18;
-  const stroke = 3;
-  const radius = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * radius;
-
-  return (
-    <svg
-      viewBox={`0 0 ${size} ${size}`}
-      className="size-[18px] -rotate-90"
-      role="progressbar"
-      aria-valuenow={Math.round(progressPct)}
-      aria-valuemin={0}
-      aria-valuemax={100}
-    >
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        stroke="var(--interactive-border)"
-        strokeWidth={stroke}
-      />
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        stroke={progressColor}
-        strokeWidth={stroke}
-        strokeLinecap="round"
-        strokeDasharray={circumference}
-        strokeDashoffset={circumference * (1 - progressPct / 100)}
-        className="transition-[stroke-dashoffset,stroke] duration-(--motion-dur-glide) ease-glide"
-      />
-    </svg>
-  );
-};
-
 const MetadataRow: React.FC<{
-  icon?: IconName;
-  iconNode?: React.ReactNode;
+  icon: IconName;
   label: string;
   children: React.ReactNode;
-}> = ({ icon, iconNode, label, children }) => (
+}> = ({ icon, label, children }) => (
   <div className="flex min-w-0 items-center gap-3 rounded-xl px-2.5 py-2.5">
     <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">
-      {iconNode ?? (icon ? <Icon name={icon} className="size-[18px]" /> : null)}
+      <Icon name={icon} className="size-[18px]" />
     </span>
     <span className="shrink-0 typography-ui-label text-muted-foreground">{label}</span>
     <span className="min-w-0 flex-1 truncate text-right typography-ui-label font-medium text-foreground">
@@ -1392,9 +1339,9 @@ const SessionMetadataOverlay: React.FC<{
   open: boolean;
   onClose: () => void;
   anchorRef: React.RefObject<HTMLElement | null>;
-  contextDisplay: ContextDisplay;
+  externalContext: ExternalContextSnapshot | undefined;
   branchLabel: string;
-}> = ({ open, onClose, anchorRef, contextDisplay, branchLabel }) => {
+}> = ({ open, onClose, anchorRef, externalContext, branchLabel }) => {
   const { t } = useI18n();
   const panelRef = React.useRef<HTMLDivElement>(null);
   const [shouldRender, setShouldRender] = React.useState(open);
@@ -1512,18 +1459,9 @@ const SessionMetadataOverlay: React.FC<{
           <MetadataRow icon="git-branch" label={t('mobile.header.metadata.branch')}>
             {branchLabel}
           </MetadataRow>
-          {contextDisplay ? (
-            <MetadataRow
-              iconNode={<ContextProgressIcon percentage={contextDisplay.percentage} />}
-              label={t('mobile.header.metadata.context')}
-            >
-              <span className="inline-flex items-baseline gap-1.5 tabular-nums">
-                <span className={cn('font-semibold', contextDisplay.colorClass)}>{contextDisplay.percentage.toFixed(1)}%</span>
-                <span className="text-muted-foreground">{contextDisplay.tokens}</span>
-              </span>
-            </MetadataRow>
-          ) : null}
-
+          {externalContext && <section className="border-t border-border/50 px-2.5 py-2.5 typography-meta">
+            <ExternalContextDetails snapshot={externalContext} />
+          </section>}
         </div>
       </div>
       <style>{`
@@ -1643,7 +1581,7 @@ const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataBut
 
 
 
-  const contextDisplay: ContextDisplay = null;
+  const { snapshot: externalContext } = useExternalContextSnapshot();
 
   const branchLabel = isGitRepo === true
     ? (gitStatus?.current?.trim() || t('gitView.branch.detachedHead'))
@@ -1683,7 +1621,7 @@ const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataBut
         open={open}
         onClose={() => onOpenChange(false)}
         anchorRef={metadataTriggerRef}
-        contextDisplay={contextDisplay}
+        externalContext={externalContext}
         branchLabel={branchLabel}
       />
     </>

@@ -15,6 +15,7 @@ import {
   type ExternalAgentProfile,
   type ExternalConversation,
   type ExternalConversationSnapshot,
+  type ExternalContextUsage,
   type ExternalInput,
   type ExternalSendOptions,
   type ExternalInteraction,
@@ -844,8 +845,8 @@ export class ExternalAgentsService {
   async read(id: string, before?: number, signal?: AbortSignal): Promise<ExternalConversationSnapshot> {
     let value: Omit<
       ExternalConversationSnapshot,
-      'connected' | 'interactions' | 'observationEpoch' | 'observationRevision'
-    >;
+      'connected' | 'interactions' | 'observationEpoch' | 'observationRevision' | 'contextUsage' | 'contextUsageSource'
+    > & { lastContextUsage?: ExternalContextUsage };
     for (;;) {
       const revision = this.structuralRevisions.get(id) ?? 0;
       value = await this.command({ action: 'read', id, ...(before === undefined ? {} : { before }) }, signal);
@@ -858,8 +859,11 @@ export class ExternalAgentsService {
     const connected = Boolean(live && !live.closing && !live.failure && !live.peer.disconnected && !live.connection.failure);
     const cached = connected || value.conversation.executionSource?.resource_owner.kind === 'managed_host' ? undefined : (await this.settings(signal)).capabilityCache?.[value.conversation.configurationId];
     const state = this.connectionStates.get(id);
+    const { lastContextUsage, ...snapshot } = value;
+    const liveContextUsage = connected ? live!.connection.contextUsage : undefined;
+    const contextUsage = liveContextUsage ?? lastContextUsage;
     return {
-      ...value,
+      ...snapshot,
       observationEpoch: this.observationEpoch,
       observationRevision: this.revisions.get(id) ?? 0,
       items: [...items.values()],
@@ -867,7 +871,7 @@ export class ExternalAgentsService {
       capabilities: connected ? live!.connection.capabilities : cached?.capabilities,
       ...(connected || cached ? { capabilitiesSource: connected ? 'live' as const : 'cached' as const } : {}),
       connection: connected ? { status: 'connected' } : state?.status === 'connected' ? { status: 'disconnected' } : state ?? { status: 'disconnected' },
-      ...(connected && live!.connection.contextUsage ? { contextUsage: live!.connection.contextUsage } : {}),
+      ...(contextUsage ? { contextUsage, ...(!liveContextUsage ? { contextUsageSource: 'recorded' as const } : {}) } : {}),
       interactions: [...(live?.interactions.values() ?? [])].map((v) => v.request),
     };
   }
@@ -1571,6 +1575,7 @@ export class ExternalAgentsService {
           error: result.error,
           nativeId: result.nativeId,
           usage,
+          contextUsage: live.connection.contextUsage,
         });
       } catch (error) {
         await flush().catch(() => {});
@@ -1588,6 +1593,7 @@ export class ExternalAgentsService {
           turnId: turn.id,
           status: stoppedPreparation ? 'cancelled' : dispatched ? 'interrupted' : 'failed',
           error: error instanceof Error ? error.message : String(error),
+          contextUsage: dispatched ? live?.connection.contextUsage : undefined,
         });
         return;
       } finally {

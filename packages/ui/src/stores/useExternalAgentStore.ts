@@ -12,13 +12,15 @@ import { useThreadStore } from './useThreadStore';
 import { useUIStore } from './useUIStore';
 import { useDirectoryStore } from './useDirectoryStore';
 
+export type ExternalContextSnapshot = Pick<ExternalConversationSnapshot, 'contextUsage' | 'contextUsageSource' | 'turns'>;
+
 export const useExternalAgentStore = create<{
   host: number;
   settings: ExternalAgentSettings | null;
   conversations: ExternalConversation[];
   children: ExternalDelegation[];
   selectedId: string | null;
-  snapshots: Record<string, Pick<ExternalConversationSnapshot, 'contextUsage' | 'turns' | 'observationEpoch' | 'observationRevision'> & { source?: object }>;
+  snapshots: Record<string, ExternalContextSnapshot & Pick<ExternalConversationSnapshot, 'observationEpoch' | 'observationRevision'> & { source?: object }>;
   setSnapshot(snapshot: ExternalConversationSnapshot, host: number, source?: object): void;
   clearSnapshot(id: string, host: number, source?: object): void;
   error: string | null;
@@ -42,7 +44,7 @@ export const useExternalAgentStore = create<{
     if (previous?.observationEpoch === snapshot.observationEpoch &&
         previous.observationRevision > snapshot.observationRevision) return;
     set(state => ({ snapshots: { ...state.snapshots, [id]: {
-      contextUsage: snapshot.contextUsage, turns: snapshot.turns, source,
+      contextUsage: snapshot.contextUsage, contextUsageSource: snapshot.contextUsageSource, turns: snapshot.turns, source,
       observationEpoch: snapshot.observationEpoch, observationRevision: snapshot.observationRevision,
     } } }));
   },

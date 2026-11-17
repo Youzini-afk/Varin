@@ -132,6 +132,7 @@ pub enum ExternalCommand {
         native_id: Option<String>,
         error: Option<String>,
         usage: Option<Value>,
+        context_usage: Option<Value>,
     },
     Item {
         id: String,
@@ -1166,7 +1167,8 @@ impl Catalog {
                 v
             }
             ExternalCommand::Read { id, before, limit } => {
-                let v = conversation(&tx, &id)?;
+                let mut v = conversation(&tx, &id)?;
+                let last_context_usage = v.as_object_mut().unwrap().remove("lastContextUsage");
                 let mut s = tx.prepare(
                     "SELECT body FROM external_turns WHERE conversation_id=?1 ORDER BY rowid",
                 )?;
@@ -1203,7 +1205,11 @@ impl Catalog {
                     None
                 };
                 items.reverse();
-                json!({"conversation":v,"turns":turns,"items":items.into_iter().map(|v|v.1).collect::<Vec<_>>(),"previous":previous})
+                let mut result = json!({"conversation":v,"turns":turns,"items":items.into_iter().map(|v|v.1).collect::<Vec<_>>(),"previous":previous});
+                if let Some(usage) = last_context_usage {
+                    result["lastContextUsage"] = usage;
+                }
+                result
             }
             ExternalCommand::Update {
                 id,
@@ -1489,6 +1495,7 @@ impl Catalog {
                 native_id,
                 error,
                 usage,
+                context_usage,
             } => {
                 let mut v = conversation(&tx, &id)?;
                 let mut t = turn(&tx, &id, &turn_id)?;
@@ -1532,6 +1539,9 @@ impl Catalog {
                 }
                 if terminal(&status) && v["activeTurn"] == turn_id {
                     v.as_object_mut().unwrap().remove("activeTurn");
+                    if let Some(usage) = context_usage {
+                        v["lastContextUsage"] = usage;
+                    }
                 }
                 if status == "interrupted" {
                     v["needsReview"] = json!(true);
