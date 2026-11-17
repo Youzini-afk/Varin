@@ -100,7 +100,9 @@ describe('deployment SSH transport', () => {
     expect(calls).toHaveLength(1);
   });
 
-  test('OpenSSH resolves strict options before saved flags without making a network connection', async () => {
+  // Native shell/OpenSSH fixtures exercise the supported POSIX path. The
+  // fail-closed Windows contract is tested separately with the transport fake.
+  test.skipIf(process.platform === 'win32')('OpenSSH resolves strict options before saved flags without making a network connection', async () => {
     const { transport, calls } = await fixture({ sshCommand: 'ssh -F /dev/null -A -X -D 9876 -R 8765:localhost:1234 -o StrictHostKeyChecking=no example.test' });
     await transport.openSession('vps');
     const resolved = spawnSync('ssh', ['-G', ...calls[0]!.args], { encoding: 'utf8', timeout: 3000 });
@@ -229,7 +231,7 @@ describe('deployment SSH transport', () => {
     await expect(transport.openSession('vps')).rejects.toMatchObject({ code: 'session_closed' });
   });
 
-  test('fixed inspector executes locally read-only and observes files/unsafe ownership without trusting names', async () => {
+  test.skipIf(process.platform === 'win32')('fixed inspector executes locally read-only and observes files/unsafe ownership without trusting names', async () => {
     const { transport, directory } = await fixture({ command(call) {
       const result = spawnSync('sh', ['-s'], { input: call.input, encoding: 'utf8', timeout: 10_000 });
       finish(call.child, result.status ?? 1, result.stdout, result.stderr);
