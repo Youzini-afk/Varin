@@ -190,7 +190,8 @@ const Item = React.memo(function Item({
     );
   return (
     <div
-      className={item.kind === 'user' ? 'ml-auto w-fit max-w-full rounded-2xl bg-muted px-4 py-3' : 'py-2'}
+      data-conversation-user-message={item.kind === 'user' ? '' : undefined}
+      className={item.kind === 'user' ? 'ml-auto w-fit max-w-full rounded-xl bg-[var(--chat-user-message-bg)] px-4 py-3 text-[var(--chat-user-message)]' : 'py-2'}
     >
       {!(item.kind === 'user' && (item.contentReferences?.length || item.contentReferenceOccurrences?.length)) && item.images?.length ? (
         <div className="mb-3 flex flex-wrap gap-2">
