@@ -207,7 +207,8 @@ export function createFrpcComponentService(options: Options, dependencies: Depen
 
   const base = (): FrpcComponentStatus => ({ state: 'missing', source: null, version: null, managedVersion: FRPC_MANAGED_VERSION, installSupported: supported });
   const managedSelection = async (): Promise<Selection> => {
-    if (!artifact) return { ...base(), state: 'unsupported' };
+    if (!artifact) return { ...base(), state: 'unsupported',
+      error: 'No managed FRP download is available for this Host; configure an existing executable' };
     const selected: Selection = { ...base(), source: 'managed' };
     try {
       await fs.lstat(installDirectory);
@@ -234,7 +235,10 @@ export function createFrpcComponentService(options: Options, dependencies: Depen
   };
 
   const inspect = async (): Promise<Selection> => {
-    if (!supported) return { ...base(), state: 'unsupported', error: 'Managed FRP components support Linux and macOS on x64 or arm64 Hosts' };
+    // Distribution coverage must not disable operator binaries on other
+    // POSIX targets. Windows still lacks an ACL-backed runtime credential file.
+    if (platform === 'win32') return { ...base(), state: 'unsupported',
+      error: 'Varin-managed FRP requires a POSIX Host; use externally managed forwarding on Windows' };
     const configured = env.VARIN_FRPC_PATH;
     let selectedPath: string | undefined;
     let source: 'configured' | 'path' | undefined;

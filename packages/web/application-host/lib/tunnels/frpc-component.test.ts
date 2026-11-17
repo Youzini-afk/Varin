@@ -111,6 +111,16 @@ describe('frpc component selection', () => {
     expect(JSON.stringify(await service.getStatus())).not.toContain('secret');
     expect(c.fetcher).not.toHaveBeenCalled();
   });
+  it('still selects an operator executable when the POSIX target has no managed artifact', async () => {
+    const c = await setup();
+    const installed = path.join(c.root, 'operator-bin', 'frpc');
+    await executable(installed);
+    c.options.env.VARIN_FRPC_PATH = installed;
+    const service = createFrpcComponentService(c.options, { ...c.dependencies, platform: 'linux', arch: 'riscv64' });
+    expect(await service.getStatus()).toMatchObject({ state: 'available', source: 'configured', installSupported: false });
+    expect(await service.resolveExecutable()).toBe(installed);
+    expect(c.fetcher).not.toHaveBeenCalled();
+  });
   it.each([['win32', 'x64'], ['linux', 'ia32'], ['darwin', 'riscv64'], ['freebsd', 'x64']] as const)(
     'fails closed for unsupported %s/%s', async (platform, arch) => {
       const c = await setup(); const service = createFrpcComponentService(c.options, { ...c.dependencies, platform, arch });

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
 const files = Object.freeze([
-  '.env.example', 'README.md', 'compose.yaml', 'frps.toml', 'Caddyfile', 'offline/index.html',
+  '.env.example', '.gitignore', 'README.md', 'compose.yaml', 'frps.toml', 'Caddyfile', 'offline/index.html',
   'snippets/frpc.toml', 'snippets/frps.toml', 'snippets/Caddyfile', 'snippets/nginx.conf', 'validate.sh',
 ]);
 

@@ -3357,8 +3357,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           ...(externalIngressError ? { error: 'The configured backend failed to bind. Check the Host environment and port.' } : {}),
         };
       } else snapshot = await selfHosted.snapshot(includeOperatorDetails);
+      const currentSettings = includeOperatorDetails ? await readSettingsFromDisk() : undefined;
+      const pairingDefaults = currentSettings ? {
+        linkTtlMs: normalizeTunnelBootstrapTtlMs(currentSettings.tunnelBootstrapTtlMs) ?? TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS,
+        temporaryAccessTtlMs: normalizeTunnelSessionTtlMs(currentSettings.tunnelSessionTtlMs),
+      } : undefined;
       const accessCheck = includeOperatorDetails ? externalAccessDiagnostics.getLastCheck() : undefined;
-      return { ...snapshot, hostName: os.hostname()?.trim() || 'Varin',
+      return { ...snapshot, hostName: os.hostname()?.trim() || 'Varin', ...(pairingDefaults ? { pairingDefaults } : {}),
         ...(accessCheck && accessCheck.origin === snapshot.listener?.origin ? { accessCheck } : {}) };
     },
     save: selfHosted.save,

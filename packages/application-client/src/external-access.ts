@@ -43,6 +43,7 @@ export interface ExternalAccessSnapshot {
   hostName?: string;
   /** Preserves the settings generation even after the last entry is removed. */
   settingsRevision?: number;
+  pairingDefaults?: { linkTtlMs: number; temporaryAccessTtlMs: number };
   entry: { revision: number; enabled: boolean; configuration: ExternalAccessConfigurationView } | null;
   listener: (ExternalAccessBackend & { origin: string }) | null;
   phase: 'disabled' | 'enabled' | 'starting' | 'unverified' | 'reconnecting' | 'stopping' | 'failed' | 'connected';
