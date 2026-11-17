@@ -4,8 +4,9 @@
 patched dependency, check whether its upstream release includes the change; otherwise
 port the patch and remove the obsolete version's entry and file.
 
-- `@legendapp/list`: preserve same-frame shrinking for chat rows marked
-  `data-legend-immediate-shrink` so animated collapse does not leave the following rows behind.
+- `@legendapp/list`: keep hidden timelines from losing row sizes, and measure visible rows after the commit
+  to avoid recursive layout updates on long runs of collapsed rows. Preserve upstream synchronous DOM
+  ordering for keyboard focus and same-frame shrinking for rows marked `data-legend-immediate-shrink`.
 - `app-builder-lib`: preserve Varin's NSIS extraction, old-version uninstall, assisted
   pages and app-data removal hooks.
 - `minimatch` 9.0.9 and 10.2.4–10.2.6: backport the preprocessing changes from

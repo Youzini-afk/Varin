@@ -219,7 +219,7 @@
     "minimatch@9.0.9": "bun-patches/minimatch@9.0.9.patch",
     "glob@13.0.6": "bun-patches/glob@13.0.6.patch",
     "glob@11.1.0": "bun-patches/glob@11.1.0.patch",
-    "@legendapp/list@3.7.1": "bun-patches/@legendapp%2Flist@3.7.1.patch",
+    "@legendapp/list@3.7.2": "bun-patches/@legendapp%2Flist@3.7.2.patch",
     "app-builder-lib@26.18.0": "bun-patches/app-builder-lib@26.18.0.patch"
   }
 }
