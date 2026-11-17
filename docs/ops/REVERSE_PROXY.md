@@ -39,8 +39,12 @@ preserving the exact public `Host` (including its port, if nonstandard),
 `Origin`, cookies and WebSocket upgrades. Do not cache the pairing page or
 requests. The guard rejects requests for a different origin, and disabling this
 listener does not make it a local entry. The original local listener and managed
-tunnel modes are unchanged. A successful bind does not verify your public TLS
-endpoint, certificate or reachability. An invalid environment configuration or
+tunnel modes are unchanged. For a saved entry, the Host makes one bounded HTTPS
+check at activation using a one-time proof that only the guarded listener can
+answer. The check uses normal TLS certificate validation, no redirects and
+no private or special-use addresses. A bind alone (including all
+environment-managed binds) does not verify public TLS or reachability.
+An invalid environment configuration or
 backend bind failure leaves the ordinary local listener unaffected. Do not
 fall back to proxying that listener.
 
@@ -62,8 +66,8 @@ manage TLS certificates.
 
 ## Existing FRP (operator-managed)
 
-The local management API can save an FRP entry pointing to an independently
-configured Linux/macOS Host and frps server. Provide an existing absolute
+**Settings → External Access** or the local management API can save an FRP
+entry pointing to an independently configured Linux/macOS Host and frps server. Provide an existing absolute
 `frpc` binary in `VARIN_FRPC_PATH` and an existing token in
 `VARIN_FRP_TOKEN` (or a named `VARIN_FRP_TOKEN_*` environment variable).
 The saved config refers to the variable; the value never appears in the
@@ -100,15 +104,38 @@ Then send `POST /api/varin/external-access/enable` with the returned revision
 in `expectedRevision`. The Host opens business admission only after frpc
 reports the named TCP mapping published. The VPS HTTPS proxy should forward
 to that mapping's private VPS address, not make the TCP mapping public.
-The UI still reports **public endpoint unverified**: this does not verify
-your DNS, certificate, or HTTPS proxy from a browser. Host-side retry is
+The UI reports **public endpoint unverified** until the guarded Host proof
+returns through valid HTTPS. Split DNS, custom trust, insufficient hairpin
+routing or inability to reach the site from the Host may leave it unverified
+even when a different browser can reach it. Host-side retry is
 bounded and does not retry credentials rejected by the provider. Stop waits
 for the child to exit and cleans up its private configuration files.
 
-This adapter was developed against the FRP v0.65.0 publication log format.
-Actual FRP/VPS/TLS end-to-end qualification is still pending, Windows does
-not have a supported private credential-file path, and FRP configuration
-does not install binaries or mutate the target server.
+The real FRP v0.65.0 binaries were exercised through a loopback-only TLS
+topology, not a public VPS. Windows does not yet have a supported private
+credential-file path. Saving an FRP configuration does not install binaries
+or mutate the target server.
+
+For headless use, run `varin external-access status --json`. Save an entry
+with `varin external-access config --config entry.json --expected-revision new`
+(or use the current revision for replacements). Run
+`varin external-access enable --expected-revision N`, `disable` or `retry` with
+the latest revision. The CLI talks only to the local Host.
+
+## Previewing a VPS deployment
+
+The local management API can inspect an existing saved SSH connection and
+produce a read-only plan. It uses the already accepted OpenSSH host key:
+unknown or changed keys stop inspection rather than being accepted. Use
+`POST /api/varin/external-access/deployment/preview` from the authenticated
+same-origin local Host. The request describes the saved `sshTargetId`,
+`deploymentId`, `publicOrigin`, FRP port and TLS references, and Caddy/Nginx
+choice. The response lists evidence still missing, planned service changes
+and required ports. Credential values and raw SSH output are not returned.
+
+The route is **preview only**. It does not apply the plan, install packages,
+edit a firewall or certificates, or uninstall anything. Automatic deployment
+needs a remote worker that can durably prove each operation and what it owns.
 
 ## Current realtime routes
 

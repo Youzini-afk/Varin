@@ -322,6 +322,8 @@ import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.j
 import { createSelfHostedAccess } from './lib/tunnels/self-hosted-access.js';
 import { EXTERNAL_ACCESS_SETTINGS_KEY, readExternalAccessRecord } from './lib/tunnels/external-access-config.js';
 import { registerExternalAccessRoutes } from './lib/tunnels/external-access-routes.js';
+import { registerDeploymentPreviewRoute } from './lib/tunnels/deployment-preview-routes.js';
+import { DeploymentSshTransport } from './lib/connections/deployment-ssh.js';
 import { hasHostConnectionAccess } from './lib/connections/access.js';
 import type { ExternalAccessSnapshot } from '@varin/application-client';
 import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
@@ -1704,6 +1706,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       options.onConnectionStatus?.(detail);
     },
   });
+  const deploymentSsh = new DeploymentSshTransport(connections);
   const vmGuestRegistration = createVmGuestRegistration({
     readSettings: async () => await readSettingsFromDisk() as Record<string, unknown>,
     updateSettings: (mutator) => updateSettingsOnDisk((current) => mutator(current as Record<string, unknown>) as typeof current),
@@ -3317,24 +3320,31 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // their owners and catalog observers have been assembled.
   memoryOrganizer.start();
 
+  const isDirectLocalAccessControl = (request: Request): boolean => {
+    if (getExternalIngress(request) || tunnelAuthController.classifyRequestScope(request) !== 'local'
+      || !isLoopbackBindHost(request.socket.remoteAddress)) return false;
+    try { return isLoopbackBindHost(new URL(`http://${request.headers.host ?? ''}`).hostname); }
+    catch { return false; }
+  };
+  const authorizeExternalAccessControl = async (request: Request, operation: 'read' | 'write'): Promise<boolean> => {
+    const auth = request.varinAuth;
+    if (isShuttingDown || (auth?.principalId && !await hostPrincipals().isOwner(auth.principalId))) return false;
+    if (auth?.type === 'client' && !hasHostConnectionAccess(auth, 'configuration')) return false;
+    const direct = isDirectLocalAccessControl(request);
+    if (operation === 'write') return direct && await isRequestOriginAllowed(request);
+    return direct || Boolean(auth?.principalId);
+  };
+  registerDeploymentPreviewRoute(app, {
+    json: express.json({ limit: '16kb' }),
+    authorize: request => authorizeExternalAccessControl(request, 'write'),
+    transport: deploymentSsh,
+  });
   registerExternalAccessRoutes(app, {
     json: express.json({ limit: '16kb' }),
-    authorize: async (request, operation) => {
-      const auth = request.varinAuth;
-      if (auth?.principalId && !await hostPrincipals().isOwner(auth.principalId)) return false;
-      if (auth?.type === 'client' && !hasHostConnectionAccess(auth, 'configuration')) return false;
-      const direct = !getExternalIngress(request)
-        && tunnelAuthController.classifyRequestScope(request) === 'local'
-        && isLoopbackBindHost(request.socket.remoteAddress);
-      const localHost = (() => {
-        try { return isLoopbackBindHost(new URL(`http://${request.headers.host ?? ''}`).hostname); }
-        catch { return false; }
-      })();
-      if (operation === 'write') return direct && localHost && await isRequestOriginAllowed(request);
-      return (direct && localHost) || Boolean(auth?.principalId);
-    },
-    snapshot: async (): Promise<ExternalAccessSnapshot> => {
-      if (!externalIngress) return selfHosted.snapshot();
+    authorize: authorizeExternalAccessControl,
+    includeOperatorDetails: isDirectLocalAccessControl,
+    snapshot: async (includeOperatorDetails): Promise<ExternalAccessSnapshot> => {
+      if (!externalIngress) return selfHosted.snapshot(includeOperatorDetails);
       const { host, port, origin } = externalIngress.configuration;
       return {
         source: 'environment', entry: null,
@@ -3574,6 +3584,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           const managedStop = await selfHosted.shutdown();
           if (managedStop.state === 'failed') throw new Error('Self-hosted external access did not stop cleanly');
         });
+        await shutdown.run('deploymentSsh.dispose', () => deploymentSsh.dispose());
         await shutdown.run('remoteClientAuthRuntime.dispose', () => remoteClientAuthRuntime.dispose());
         await shutdown.run('unsubscribeTokenizerKernel', () => unsubscribeTokenizerKernel());
         await shutdown.run('stopTokenizerCollection?.', () => stopTokenizerCollection?.());
