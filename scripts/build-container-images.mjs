@@ -2,7 +2,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { acceptImageRelease, createImageRegistry, dockerCommand, imageVersionParts, resolveRuntimeBase } from './docker-release.mjs';
+import { acceptImageRelease, createImageRegistry, dockerCommand, imageRegistry, imageVersionParts, resolveRuntimeBase } from './docker-release.mjs';
 import { acceptCommitPublication } from './docker-commit.mjs';
 
 const repository = 'Astrmira/Varin';
@@ -40,7 +40,7 @@ export function containerBuildConfig(input) {
   const platforms = input.publication !== 'check' || input.multiPlatform === true ? ['linux/amd64', 'linux/arm64'] : ['linux/amd64'];
   return { ...input, runId: String(input.runId), runAttempt: String(input.runAttempt), toolbelt, platforms, overrides,
     localCache: input.localCache === true,
-    registry: input.publication === 'check' ? 'localhost:5000' : 'ghcr.io/youzini-afk',
+    registry: input.publication === 'check' ? 'localhost:5000' : imageRegistry,
     sourceDirectory: path.resolve(input.sourceDirectory), outputDirectory: path.resolve(input.outputDirectory),
     tag: `candidate-${input.runId}-${input.runAttempt}` };
 }
@@ -57,7 +57,7 @@ function cache(config, phase) {
   const name = phase === 'bases' ? names.toolbelt_base : names.standard_app;
   // The optional benchmark roundtrip is confined to its disposable loopback
   // registry. It cannot select an arbitrary destination or poison release cache.
-  const registry = config.localCache ? 'localhost:5000' : 'ghcr.io/youzini-afk';
+  const registry = config.localCache ? 'localhost:5000' : imageRegistry;
   const ref = `${registry}/${name}:buildcache-v2`;
   // Only admitted release/main workflows update the shared registry cache.
   // Ordinary PR validation reads public layers, with no registry credentials.

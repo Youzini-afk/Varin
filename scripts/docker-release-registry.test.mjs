@@ -29,7 +29,7 @@ test('real loopback registry preserves indexes, exact-tag preflight, variant ali
   });
   const namespace = `${registryAddress}/varin-release-fixture-${process.pid}-${Date.now()}`;
   const dockerfile = path.join(root, 'Dockerfile');
-  const commitSource = 'c'.repeat(40), commitTooling = 'd'.repeat(40), productionPrefix = 'ghcr.io/youzini-afk/';
+  const commitSource = 'c'.repeat(40), commitTooling = 'd'.repeat(40), productionPrefix = 'ghcr.io/astrmira/';
   fs.writeFileSync(dockerfile, `FROM scratch
 ARG ROLE
 ARG VARIANT
@@ -58,7 +58,7 @@ ENV VARIN_IMAGE_VARIANT=$VARIANT
   }
   const candidate = acceptImageRelease({ eventName: 'push', ref: 'refs/tags/v0.9.39', version: '0.9.39', sha: 'a'.repeat(40) });
   const localPlan = scope => imagePromotionPlan(candidate, sources, [candidate.ref]).map(artifact => {
-    const local = ref => ref.replace('ghcr.io/youzini-afk/', `${namespace}/${scope}/`);
+    const local = ref => ref.replace('ghcr.io/astrmira/', `${namespace}/${scope}/`);
     return { ...artifact, repositories: artifact.repositories.map(local), targets: artifact.targets.map(target => ({ ...target, ref: local(target.ref) })) };
   });
   const formalWrites = () => calls.filter(call => call.args.includes('create') && !call.args[call.args.indexOf('--tag') + 1].includes(':candidate-'));

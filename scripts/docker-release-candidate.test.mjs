@@ -25,7 +25,7 @@ function fixture(t) {
     GITHUB_SHA: tooling, INPUT_RELEASE_REF: 'v0.9.42' };
   const candidate = resolveImageRelease(env, cwd);
   const images = Object.fromEntries(['standard_app', 'toolbelt_app', 'slim_base', 'toolbelt_base'].map((key, index) =>
-    [key, `ghcr.io/youzini-afk/${['varin', 'varin-toolbelt', 'varin-runtime-slim', 'varin-runtime-toolbelt'][index]}@sha256:${String(index + 1).repeat(64)}`]));
+    [key, `ghcr.io/astrmira/${['varin', 'varin-toolbelt', 'varin-runtime-slim', 'varin-runtime-toolbelt'][index]}@sha256:${String(index + 1).repeat(64)}`]));
   const result = { sourceSha: source, toolingSha: source, platforms: ['linux/amd64', 'linux/arm64'], images };
   return { cwd, git, source, tooling, env, candidate, result, images };
 }
@@ -47,7 +47,7 @@ test('saved builds retain both architectures, exact source and immutable applica
   const f = fixture(t);
   assert.deepEqual(validateReleaseBuild(f.result, f.candidate, f.source), f.images);
   for (const patch of [{ sourceSha: f.tooling }, { toolingSha: f.tooling }, { platforms: ['linux/amd64'] },
-    { images: { ...f.images, standard_app: 'ghcr.io/youzini-afk/varin:latest' } },
+    { images: { ...f.images, standard_app: 'ghcr.io/astrmira/varin:latest' } },
     { images: { ...f.images, standard_app: f.images.standard_app.replace('/varin@', '/other@') } }]) {
     assert.throws(() => validateReleaseBuild({ ...f.result, ...patch }, f.candidate, f.source));
   }

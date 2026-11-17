@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/varin-runtime-slim:latest
+ARG RUNTIME_BASE_IMAGE=ghcr.io/astrmira/varin-runtime-slim:latest
 
 # Keep Rust build products in ordinary layers: remote BuildKit caches export
 # layers, not the contents of RUN cache mounts on an ephemeral CI runner.

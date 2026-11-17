@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const legacyVersion = '0.9.38';
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
-const registryPrefix = 'ghcr.io/youzini-afk/';
+export const imageRegistry = 'ghcr.io/astrmira';
 const indexTypes = new Set(['application/vnd.oci.image.index.v1+json', 'application/vnd.docker.distribution.manifest.list.v2+json']);
 
 function versionParts(version) {
@@ -102,7 +102,7 @@ export function imageArtifactPlan({ standardApp, toolbeltApp, slimBase, toolbelt
   ];
   return images.map(([source, role, variant, names]) => {
     const { digest } = pinnedImage(source);
-    const repositories = names.map(name => `${registryPrefix}${name}`);
+    const repositories = names.map(name => `${imageRegistry}/${name}`);
     return { source, digest, role, variant, repositories, targets: repositories.flatMap(repository => aliases.map(alias => ({
       ref: `${repository}:${alias}`, immutable: immutableAliases.has(alias),
     }))) };

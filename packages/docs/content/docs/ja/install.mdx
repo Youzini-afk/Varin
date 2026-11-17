@@ -63,7 +63,7 @@ curl --fail http://127.0.0.1:3000/health
 
 `http://127.0.0.1:3000` を開き、生成されたパスワードを使います。インターネットに公開するデプロイの前には、TLS リバースプロキシか承認済みのトンネルを置いてください。本番では `VARIN_IMAGE` を `:latest` ではなく、検証済みの digest に固定してください。
 
-Compose は既定で軽量イメージ `ghcr.io/youzini-afk/varin-slim:latest` を使います（サーバーを動かすのに必要な Bun、Node、Git、SSH、cloudflared）。コンテナ内で Python、Java、Go、Rust をコンパイルする必要がある場合は、ツールベルトのオーバーレイを重ねます：
+Compose は既定で軽量イメージ `ghcr.io/astrmira/varin:latest` を使います（サーバーを動かすのに必要な Bun、Node、Git、SSH、cloudflared）。コンテナ内で Python、Java、Go、Rust をコンパイルする必要がある場合は、ツールベルトのオーバーレイを重ねます：
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d

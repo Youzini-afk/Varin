@@ -63,7 +63,7 @@ curl --fail http://127.0.0.1:3000/health
 
 Ouvrez `http://127.0.0.1:3000` et utilisez le mot de passe généré. Placez un reverse proxy TLS ou un tunnel approuvé devant tout déploiement exposé à Internet. En production, épinglez `VARIN_IMAGE` à un digest testé plutôt qu’à `:latest`.
 
-Compose tire par défaut l’image allégée `ghcr.io/youzini-afk/varin-slim:latest` (suffisante pour le serveur : Bun, Node, Git, SSH et cloudflared). Si l’agent doit compiler Python, Java, Go ou Rust dans le conteneur, appliquez la superposition outillage :
+Compose tire par défaut l’image allégée `ghcr.io/astrmira/varin:latest` (suffisante pour le serveur : Bun, Node, Git, SSH et cloudflared). Si l’agent doit compiler Python, Java, Go ou Rust dans le conteneur, appliquez la superposition outillage :
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d

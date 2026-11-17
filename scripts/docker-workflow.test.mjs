@@ -110,11 +110,11 @@ test('release smokes run candidate-owned scripts with their supported Node runti
 test('default local builds follow a published release base, not a retired main alias', () => {
   const dockerfile = fs.readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
   const direct = /^ARG RUNTIME_BASE_IMAGE=(.+)$/mu.exec(dockerfile)?.[1];
-  assert.equal(direct, 'ghcr.io/youzini-afk/varin-runtime-slim:latest');
+  assert.equal(direct, 'ghcr.io/astrmira/varin-runtime-slim:latest');
   for (const [file, image] of [['docker-compose.yml', 'varin-runtime-slim'], ['docker-compose.toolbelt.yml', 'varin-runtime-toolbelt']]) {
     const compose = parse(fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8'));
     const argument = compose.services.varin.build.args.RUNTIME_BASE_IMAGE;
-    assert.equal(argument, '${VARIN_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/' + image + ':latest}');
+    assert.equal(argument, '${VARIN_RUNTIME_BASE_IMAGE:-ghcr.io/astrmira/' + image + ':latest}');
   }
 });
 
@@ -170,10 +170,10 @@ test('real Compose merge selects standard or toolbelt while retaining deployment
   }));
   const standard = config(['docker-compose.yml']).services.varin;
   const toolbelt = config(['docker-compose.yml', 'docker-compose.toolbelt.yml']).services.varin;
-  assert.equal(standard.image, 'ghcr.io/youzini-afk/varin:latest');
-  assert.equal(toolbelt.image, 'ghcr.io/youzini-afk/varin-toolbelt:latest');
-  assert.equal(standard.build.args.RUNTIME_BASE_IMAGE, 'ghcr.io/youzini-afk/varin-runtime-slim:latest');
-  assert.equal(toolbelt.build.args.RUNTIME_BASE_IMAGE, 'ghcr.io/youzini-afk/varin-runtime-toolbelt:latest');
+  assert.equal(standard.image, 'ghcr.io/astrmira/varin:latest');
+  assert.equal(toolbelt.image, 'ghcr.io/astrmira/varin-toolbelt:latest');
+  assert.equal(standard.build.args.RUNTIME_BASE_IMAGE, 'ghcr.io/astrmira/varin-runtime-slim:latest');
+  assert.equal(toolbelt.build.args.RUNTIME_BASE_IMAGE, 'ghcr.io/astrmira/varin-runtime-toolbelt:latest');
   assert.deepEqual(toolbelt.volumes, standard.volumes);
   assert.equal(toolbelt.stop_grace_period, standard.stop_grace_period);
   assert.equal(toolbelt.user, standard.user);

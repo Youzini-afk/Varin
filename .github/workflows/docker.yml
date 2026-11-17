@@ -43,10 +43,6 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  TOOLBELT_APP_IMAGE_NAME: youzini-afk/varin-toolbelt
-  STANDARD_APP_IMAGE_NAME: youzini-afk/varin
-  TOOLBELT_BASE_IMAGE_NAME: youzini-afk/varin-runtime-toolbelt
-  SLIM_BASE_IMAGE_NAME: youzini-afk/varin-runtime-slim
 
 jobs:
   candidate:

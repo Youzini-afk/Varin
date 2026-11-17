@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createImageRegistry, dockerCommand, imageArtifactPlan, imageVersionParts,
+import { createImageRegistry, dockerCommand, imageArtifactPlan, imageRegistry, imageVersionParts,
   promoteImages, verifyImage, writeAnonymousDockerConfig } from './docker-release.mjs';
 
 const repository = 'Astrmira/Varin';
@@ -13,7 +13,7 @@ const artifactPrefix = 'varin-commit-images-';
 const producerJob = 'Record verified candidate';
 const shaPattern = /^[a-f0-9]{40}$/;
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
-const prefix = 'ghcr.io/youzini-afk/';
+const prefix = `${imageRegistry}/`;
 const imageNames = { standardApp: 'varin', toolbeltApp: 'varin-toolbelt',
   slimBase: 'varin-runtime-slim', toolbeltBase: 'varin-runtime-toolbelt' };
 const imageRoles = { standardApp: ['application', 'slim'], toolbeltApp: ['application', 'toolbelt'],

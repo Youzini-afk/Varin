@@ -11,7 +11,7 @@ import { acceptCommitPublication, assertAncestor, assertCurrentMain, commitImage
   sourceVersion, validateCandidateReceipt, verifyCommitImages } from './docker-commit.mjs';
 import { imageRegistryFixture } from './test-fixtures/image-registry.mjs';
 
-const source = 'a'.repeat(40), tooling = 'b'.repeat(40), prefix = 'ghcr.io/youzini-afk/';
+const source = 'a'.repeat(40), tooling = 'b'.repeat(40), prefix = 'ghcr.io/astrmira/';
 const digest = value => `sha256:${value.repeat(64)}`;
 const images = { standardApp: `${prefix}varin@${digest('1')}`, toolbeltApp: `${prefix}varin-toolbelt@${digest('2')}`,
   slimBase: `${prefix}varin-runtime-slim@${digest('3')}`, toolbeltBase: `${prefix}varin-runtime-toolbelt@${digest('4')}` };

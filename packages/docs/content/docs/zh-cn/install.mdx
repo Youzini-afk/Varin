@@ -63,7 +63,7 @@ curl --fail http://127.0.0.1:3000/health
 
 打开 `http://127.0.0.1:3000` 并使用生成的密码。任何面向互联网的部署前面都应放置 TLS 反向代理或已批准的隧道。生产环境请将 `VARIN_IMAGE` 固定到已测试的 digest，而不是 `:latest`。
 
-Compose 默认拉取精简镜像 `ghcr.io/youzini-afk/varin-slim:latest`（用来跑服务：Bun、Node、Git、SSH、cloudflared）。如果智能体要在容器里编译 Python、Java、Go 或 Rust，叠加工具链覆盖层：
+Compose 默认拉取精简镜像 `ghcr.io/astrmira/varin:latest`（用来跑服务：Bun、Node、Git、SSH、cloudflared）。如果智能体要在容器里编译 Python、Java、Go 或 Rust，叠加工具链覆盖层：
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d

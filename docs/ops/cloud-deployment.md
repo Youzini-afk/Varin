@@ -13,16 +13,16 @@ agent worker, SDK dependency closure, Node Storage or PTY authority is installed
 
 ## Container images
 
-正式版本发行采用以下命名的边界是：包含本发布实现、且版本 **大于 0.9.38**。
-独立的按提交发布使用 `commit-<完整 SHA>`，不占用版本号，源码 package version 仍为 0.9.38 也可以构建。
-已发行的 `v0.9.38` 及更早版本不重新解释，不补写其精确版本、SHA 标签，也不替换已有 digest。
+从 **0.9.50** 起，Docker 镜像发布到组织的 `ghcr.io/astrmira`。原个人命名空间保留已发行的历史镜像。
+已有部署如果显式设置了 `VARIN_IMAGE` 或 `VARIN_RUNTIME_BASE_IMAGE`，使用新版时请更新其中的镜像地址。
+独立的按提交发布使用 `commit-<完整 SHA>`，与正式版本共用组织命名空间。
 
 | 镜像 | 内容与兼容名 |
 | --- | --- |
-| `ghcr.io/youzini-afk/varin` | 标准应用，采用 slim runtime；Compose 默认。`varin-slim` 是同一已验证 digest 的兼容名。 |
-| `ghcr.io/youzini-afk/varin-toolbelt` | 预装开发工具链的应用，不再使用新版本的 `varin` 标签承载该变体。 |
-| `ghcr.io/youzini-afk/varin-runtime-slim` | 标准基础镜像：Bun、Node、Git、SSH、cloudflared，以及安装 native production modules 所需的 Python 和编译工具。 |
-| `ghcr.io/youzini-afk/varin-runtime-toolbelt` | 开发工具链基础镜像。`varin-runtime-base` 保留 toolbelt 含义，并指向同一 digest。 |
+| `ghcr.io/astrmira/varin` | 标准应用，采用 slim runtime，是 Compose 的默认镜像。`varin-slim` 指向同一 digest。 |
+| `ghcr.io/astrmira/varin-toolbelt` | 预装开发工具链的应用。 |
+| `ghcr.io/astrmira/varin-runtime-slim` | 标准基础镜像，包含 Bun、Node、Git、SSH、cloudflared，以及安装原生依赖所需的 Python 和编译工具。 |
+| `ghcr.io/astrmira/varin-runtime-toolbelt` | 开发工具链基础镜像。`varin-runtime-base` 指向同一 digest。 |
 
 Toolbelt 在标准环境上增加 Java/Maven、Go/gopls、Rust/rust-analyzer/rustfmt、LSP、GitHub CLI、
 ripgrep、无常驻 daemon 的 rootless BuildKit，以及 amd64 上的 Chrome/Playwright。arm64 保留其他
@@ -30,27 +30,12 @@ ripgrep、无常驻 daemon 的 rootless BuildKit，以及 amd64 上的 Chrome/Pl
 默认应用 Dockerfile 继续采用 `varin-runtime-slim`。标准环境仍含 Python 和 native 构建前置，
 不是没有工具的 sandbox。
 
-### 命名切换与现有部署
+### 标签与现有部署
 
-第一次符合上述边界的稳定发行会把 `varin:latest`、对应的 `varin:<major>.<minor>` 和
-`varin:<major>` 浮动别名改为标准环境。例如 0.9 系列的第一次新稳定发行涉及 `varin:latest`、
-`varin:0.9`、`varin:0`。同一新发行的 `varin:<完整版本>` 和 `varin:sha-<完整提交 SHA>` 也采用标准环境。
-`varin-slim` 保持标准含义，`varin-runtime-base` 保持 toolbelt 含义；新 `*-toolbelt` 仓库发布对应的
-精确版本、SHA 和稳定浮动别名。旧 `varin:0.9.38` 及其原 SHA/digest 引用继续代表原 toolbelt。
-不为历史版本回填新仓库别名。
-
-依赖 Java、Go、Rust、LSP、Chrome 或其他预装工具的部署，应在跟进新发行前改用
-`varin-toolbelt` 或下面的 Compose overlay。只跟随 `varin:latest` 的现有部署会在升级后失去这些
-额外工具，不能把镜像名称相同视为环境内容不变。追求可复现部署时固定精确版本或已核验 digest。
-新 `*-toolbelt` 仓库及其 `latest` 不是同一件事：仅完成按提交发布后，仓库可以已有 `commit-*`，
-但首次正式版本推广前仍可能没有 `latest`。因此这段过渡期必须同时固定应用和 base 的已发布引用，
-不能假定默认 toolbelt overlay 的 `latest` 已可拉取；也可继续固定旧环境：
-
-```bash
-VARIN_IMAGE=ghcr.io/youzini-afk/varin:0.9.38 \
-VARIN_RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/varin-runtime-base:0.9.38 \
-docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
-```
+正式版本提供精确版本、`sha-<完整提交 SHA>` 和适用的稳定浮动标签，如 `latest`、`0.9`、`0`。
+依赖 Java、Go、Rust、LSP、Chrome 或其他预装工具的部署使用 `varin-toolbelt` 或对应的 Compose overlay。
+需要可复现部署时固定已发布的精确版本或 digest。按提交发布的 `commit-*` 可直接部署，
+组织镜像的 `latest` 在首个稳定版本推广完成后可用。
 
 正式版本入口拒绝以 `<=0.9.38` 的版本发布，默认拒绝覆盖任何已存在且 digest 不同的精确版本/SHA 标签。
 相同 digest 的部分发布可以续做。**历史 tag 上的旧 workflow/helper 仍是旧代码**，不受这些新检查
@@ -102,9 +87,9 @@ arm64 的 native 依赖与 kernel 在镜像组装时校验，但这不等同于 
 1. 核对完整四种来源的固定 digest、双架构和 role/variant，再把候选复制到全部六个目标仓库。
    复制必须保持来源 index digest；候选标签只使用该 run/attempt 的唯一名称。
 2. 用独立空认证配置读取每个目标仓库候选 digest、两个平台 manifest/config，验证匿名拉取权限。
-   新 `varin-toolbelt`、`varin-runtime-toolbelt` 包可能默认私有；已登录的 push/smoke 成功不证明普通
-   用户能访问。若失败，停止在正式别名之前，由 owner 按预期公开访问策略配置包，再续跑推广；
-   workflow 不自动扩大可见性或请求新凭据。这一门禁验证 registry 内容访问，不宣称已匿名下载每一层。
+   GitHub 新建的容器包默认私有。组织首次发布时，推广会先创建六个包，随后在匿名检查处停住。
+   在 [Astrmira Packages](https://github.com/orgs/Astrmira/packages) 将这六个包设为公开，再在同一 run 重跑失败的 job。
+   这项检查先于正式标签写入。
 3. 对全部目标的精确版本、SHA 与计划更新的浮动标签完成预检。仅明确不存在可当作新标签；
    认证失败、网络错误或未知结果都停止。已有 SHA 标签只能与目标 digest 相同；精确版本默认也如此，
    只有手动启用 `replace_version` 才允许替换本次所选版本。
@@ -173,15 +158,15 @@ workflow 不会自行更改可见性、权限或凭据。
 首次成功发布所选 SHA 后，可以显式拉取或选择 Compose 镜像：
 
 ```bash
-docker pull "ghcr.io/youzini-afk/varin:commit-$SHA"
-docker pull "ghcr.io/youzini-afk/varin-toolbelt:commit-$SHA"
+docker pull "ghcr.io/astrmira/varin:commit-$SHA"
+docker pull "ghcr.io/astrmira/varin-toolbelt:commit-$SHA"
 
-VARIN_IMAGE="ghcr.io/youzini-afk/varin:commit-$SHA" \
-VARIN_RUNTIME_BASE_IMAGE="ghcr.io/youzini-afk/varin-runtime-slim:commit-$SHA" \
+VARIN_IMAGE="ghcr.io/astrmira/varin:commit-$SHA" \
+VARIN_RUNTIME_BASE_IMAGE="ghcr.io/astrmira/varin-runtime-slim:commit-$SHA" \
 docker compose up -d
 
-VARIN_IMAGE="ghcr.io/youzini-afk/varin-toolbelt:commit-$SHA" \
-VARIN_RUNTIME_BASE_IMAGE="ghcr.io/youzini-afk/varin-runtime-toolbelt:commit-$SHA" \
+VARIN_IMAGE="ghcr.io/astrmira/varin-toolbelt:commit-$SHA" \
+VARIN_RUNTIME_BASE_IMAGE="ghcr.io/astrmira/varin-runtime-toolbelt:commit-$SHA" \
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
 
@@ -242,9 +227,7 @@ export VARIN_UI_PASSWORD="$(openssl rand -base64 24)"
 docker compose up -d
 ```
 
-新命名发行发布后，默认拉取 `ghcr.io/youzini-afk/varin:latest`，即标准环境。
-发布切换前旧 `varin:latest` 仍是 toolbelt；需要预先固定标准环境时显式设置
-`VARIN_IMAGE=ghcr.io/youzini-afk/varin-slim:0.9.38`。开发工具链环境使用：
+默认拉取标准环境 `ghcr.io/astrmira/varin:latest`。需要开发工具链时使用：
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d

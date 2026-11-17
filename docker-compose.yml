@@ -1,13 +1,13 @@
 services:
   varin:
-    image: ${VARIN_IMAGE:-ghcr.io/youzini-afk/varin:latest}
+    image: ${VARIN_IMAGE:-ghcr.io/astrmira/varin:latest}
     build:
       context: .
       dockerfile: Dockerfile
       args:
         # Standard (slim) by default. Use docker-compose.toolbelt.yml for the language
         # toolbelt, or build Dockerfile.base --target slim as a local base.
-        RUNTIME_BASE_IMAGE: ${VARIN_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/varin-runtime-slim:latest}
+        RUNTIME_BASE_IMAGE: ${VARIN_RUNTIME_BASE_IMAGE:-ghcr.io/astrmira/varin-runtime-slim:latest}
     container_name: varin
     init: true
     # Keep this larger than the Host's complete stop budget below. These retain

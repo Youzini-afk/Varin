@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { acceptImageRelease, assertImageReleaseTag } from './docker-release.mjs';
+import { acceptImageRelease, assertImageReleaseTag, imageRegistry } from './docker-release.mjs';
 import { assertAncestor, sourceVersion } from './docker-commit.mjs';
 
 const repository = 'Astrmira/Varin';
@@ -47,7 +47,7 @@ export function validateReleaseBuild(result, candidate, toolingSha) {
   }
   for (const [key, reference] of Object.entries(result.images)) {
     if (!/^[a-z0-9][a-z0-9._:/-]*@sha256:[a-f0-9]{64}$/.test(reference)) throw new Error(`Missing immutable ${key} digest`);
-    if (key.endsWith('_app') && !reference.startsWith(`ghcr.io/youzini-afk/${imageNames[key]}@`)) throw new Error(`Unexpected ${key} repository`);
+    if (key.endsWith('_app') && !reference.startsWith(`${imageRegistry}/${imageNames[key]}@`)) throw new Error(`Unexpected ${key} repository`);
   }
   return result.images;
 }

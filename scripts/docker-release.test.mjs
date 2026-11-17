@@ -12,7 +12,7 @@ const source = 'a'.repeat(40);
 const input = { eventName: 'push', ref: 'refs/tags/v0.9.39', sha: source, version: '0.9.39' };
 const candidate = acceptImageRelease(input);
 const digest = value => `sha256:${value.repeat(64)}`;
-const prefix = 'ghcr.io/youzini-afk/';
+const prefix = 'ghcr.io/astrmira/';
 const images = { standardApp: `${prefix}varin@${digest('1')}`, toolbeltApp: `${prefix}varin-toolbelt@${digest('2')}`,
   slimBase: `${prefix}varin-runtime-slim@${digest('3')}`, toolbeltBase: `${prefix}varin-runtime-toolbelt@${digest('4')}` };
 const plan = () => imagePromotionPlan(candidate, images, [input.ref]);

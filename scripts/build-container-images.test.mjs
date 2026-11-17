@@ -9,8 +9,8 @@ const sha = 'a'.repeat(40), tooling = 'b'.repeat(40), digest = value => `sha256:
 const input = { publication: 'commit', sourceSha: sha, toolingSha: tooling, version: '0.9.39', runId: '12', runAttempt: '1',
   repository: 'Astrmira/Varin', githubSha: tooling, ref: 'refs/heads/main', eventName: 'workflow_dispatch',
   sourceDirectory: '/source', outputDirectory: '/output' };
-const bases = { slim_base: `ghcr.io/youzini-afk/varin-runtime-slim@${digest('1')}`,
-  toolbelt_base: `ghcr.io/youzini-afk/varin-runtime-toolbelt@${digest('2')}` };
+const bases = { slim_base: `ghcr.io/astrmira/varin-runtime-slim@${digest('1')}`,
+  toolbelt_base: `ghcr.io/astrmira/varin-runtime-toolbelt@${digest('2')}` };
 
 test('privileged build input rejects untrusted channels, refs, identities and override paths before building', () => {
   for (const patch of [{ publication: 'push' }, { sourceSha: 'main' }, { toolingSha: 'HEAD' }, { repository: 'outside/Varin' },
