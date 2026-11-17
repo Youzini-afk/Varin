@@ -189,6 +189,12 @@ export const stopVarinExtensionCatalog = (): void => {
   if (state.loading) publish({ ...state, loading: false });
 };
 
+/** A mobile connection can change the Application Host that owns this catalog. */
+export const resetVarinExtensionCatalogForHostSwitch = (): void => {
+  stopVarinExtensionCatalog();
+  publish(initialState());
+};
+
 export const refreshVarinExtensionCatalog = async (): Promise<void> => {
   const requestGeneration = generation;
   try {

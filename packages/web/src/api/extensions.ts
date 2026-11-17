@@ -25,9 +25,21 @@ import {
 import type { ExtensionsAPI } from '@varin/application-client';
 import { createPluginCenterHttpAPI } from '@varin/application-client';
 import { buildLocalRuntimeAuthHeaders } from '@varin/application-client';
-import { fetchWithoutRuntimeRouting } from '@varin/application-client';
+import { fetchWithoutRuntimeRouting, getRuntimeApiBaseUrl, getRuntimeEndpointGeneration, runtimeFetch } from '@varin/application-client';
+import { isCapacitorApp } from '@varin/ui/lib/platform';
 
 const normalizeOrigin = (value: string): string => value.trim().replace(/\/+$/, '');
+
+// The native mobile shell has no local Application Host. Route the workbench's
+// catalog reads, lifecycle reports and profile selection to its connected Host. Extension package
+// management still uses its existing Application Host owner.
+const MOBILE_WORKBENCH_ROUTES = new Set([
+  '/api/varin/extensions/v1/catalog',
+  '/api/varin/extensions/v1/host-state',
+  '/api/varin/extensions/v1/host-state/wait',
+  '/api/varin/extensions/v1/actual',
+  '/api/varin/extensions/v1/workbench/profile/select',
+]);
 
 const applicationHostOrigin = (): string => {
   if (typeof window === 'undefined') return '';
@@ -43,33 +55,39 @@ const errorResult = (message: string, retryable: boolean): VarinExtensionCatalog
   error: { code: 'application_host_unavailable', message, retryable },
 });
 
-const applicationHostRequest = async (
+const fetchApplicationHost = async (path: string, init: RequestInit): Promise<Response> => {
+  if (MOBILE_WORKBENCH_ROUTES.has(path) && isCapacitorApp()) {
+    if (!getRuntimeApiBaseUrl()) throw new Error('Connect to a Varin Host before loading the mobile workbench');
+    const endpoint = getRuntimeEndpointGeneration();
+    const response = await runtimeFetch(path, { ...init, credentials: 'include' });
+    if (endpoint !== getRuntimeEndpointGeneration()) {
+      void response.body?.cancel().catch(() => undefined);
+      throw new Error('Application Host changed while loading the mobile workbench');
+    }
+    return response;
+  }
+  const origin = applicationHostOrigin();
+  const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
+  const headers = await buildLocalRuntimeAuthHeaders(origin, init.headers);
+  return fetchWithoutRuntimeRouting(target, { ...init, credentials: 'include', headers });
+};
+
+const applicationHostRequest = (
   path: string,
   body: unknown,
   signal?: AbortSignal,
   method = 'POST',
   accept = 'application/json',
-): Promise<Response> => {
-  const origin = applicationHostOrigin();
-  const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
-  const headers = await buildLocalRuntimeAuthHeaders(origin, { Accept: accept, 'Content-Type': 'application/json' });
-  return fetchWithoutRuntimeRouting(target, {
-    body: JSON.stringify(body),
-    credentials: 'include',
-    headers,
-    method,
-    signal,
-  });
-};
+): Promise<Response> => fetchApplicationHost(path, {
+  body: JSON.stringify(body),
+  headers: { Accept: accept, 'Content-Type': 'application/json' },
+  method,
+  signal,
+});
 
-const applicationHostRead = async (path: string): Promise<Response> => {
-  const origin = applicationHostOrigin();
-  const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
-  return fetchWithoutRuntimeRouting(target, {
-    credentials: 'include',
-    headers: await buildLocalRuntimeAuthHeaders(origin, { Accept: 'application/json' }),
-  });
-};
+const applicationHostRead = (path: string): Promise<Response> => (
+  fetchApplicationHost(path, { headers: { Accept: 'application/json' } })
+);
 
 const readJsonOrThrow = async (response: Response): Promise<unknown> => {
   const payload = await response.json().catch(() => null) as unknown;

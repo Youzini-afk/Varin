@@ -59,6 +59,8 @@ import { usePwaManifestSync } from '@/hooks/usePwaManifestSync';
 import { bindMobileWorkspaceShell } from './mobileWorkspaceShell';
 import { WorkbenchProfileBridge, WorkbenchReplacement, WORKBENCH_REPLACEMENT_TARGETS } from '@/lib/extensions/workbench-registry';
 import { WorkbenchShellHost } from '@/lib/extensions/workbench-shell-host';
+import { startBuiltinVarinExtensions } from '@/lib/extensions/builtin-surface-manager';
+import { resetVarinExtensionCatalogForHostSwitch, startVarinExtensionCatalog } from '@/lib/extensions/catalog-store';
 import { MOBILE_WORKSPACE_DISCONNECTED_EVENT } from '@/workbenches/agent/AgentWorkspaceShell';
 import { MobileChangesSurface } from './MobileChangesSurface';
 import { MobileFilesSurface } from './MobileFilesSurface';
@@ -2581,11 +2583,12 @@ export function MobileApp({ apis }: MobileAppProps) {
         setConnectionEpoch((epoch) => epoch + 1);
         return;
       }
+      if (isNativeMobileApp) resetVarinExtensionCatalogForHostSwitch();
       resetAppForRuntimeEndpointChange(detail);
       setRuntimeEndpointEpoch((epoch) => epoch + 1);
       setConnectionEpoch((epoch) => epoch + 1);
     });
-  }, []);
+  }, [isNativeMobileApp]);
 
   // On cold launch, silently reconnect to the most-recent saved instance so a
   // returning user — and notification deep-links — land in the app instead of the
@@ -2638,6 +2641,14 @@ export function MobileApp({ apis }: MobileAppProps) {
   React.useEffect(() => {
     if (catalogLoaded) setHasLoadedCatalog(true);
   }, [catalogLoaded]);
+
+  React.useEffect(() => {
+    if (!isNativeMobileApp || !catalogLoaded) return;
+    // A native instance switch can reset the catalog while its consumers are still mounted.
+    void Promise.all([startVarinExtensionCatalog(), startBuiltinVarinExtensions()]).catch((error) => {
+      console.error('[Varin Extensions] Mobile workbench startup failed:', error);
+    });
+  }, [catalogLoaded, isNativeMobileApp, runtimeEndpointEpoch]);
 
   // Gated on the Thread catalog handshake (and re-run on instance switch): probing the
   // GitHub auth status before the runtime is reachable cached a "not connected"
