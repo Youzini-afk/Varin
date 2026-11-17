@@ -28,14 +28,14 @@ describe('Host connection gateway', () => {
     const peerApp = express();
     peerApp.use(express.json());
     peerApp.post('/api/echo', (request, response) => response.set('Set-Cookie', 'peer=secret').json({
-      body: request.body, authorization: request.headers.authorization, cookie: request.headers.cookie ?? null, url: request.url,
+      body: request.body, authorization: request.headers.authorization, cookie: request.headers.cookie ?? null, origin: request.headers.origin, url: request.url,
     }));
     const peer = createServer(peerApp);
     const peerUrl = await listen(peer);
     const upstreamWs = new WebSocketServer({ server: peer });
     cleanup.push(() => { for (const client of upstreamWs.clients) client.terminate(); upstreamWs.close(); });
     upstreamWs.on('connection', (socket, request) => socket.on('message', (data) => socket.send(JSON.stringify({
-      data: data.toString(), authorization: request.headers.authorization, cookie: request.headers.cookie ?? null, url: request.url,
+      data: data.toString(), authorization: request.headers.authorization, cookie: request.headers.cookie ?? null, origin: request.headers.origin, url: request.url,
     }))));
     await writeHostConnections(settings, { hosts: [{ id: 'remote', label: 'Remote', url: peerUrl, clientToken: 'peer-token' }], defaultHostId: 'remote' });
     const app = express();
@@ -57,7 +57,7 @@ describe('Host connection gateway', () => {
     });
     expect(response.status).toBe(200);
     expect(response.headers.get('set-cookie')).toBeNull();
-    expect(await response.json()).toEqual({ body: { text: '你好' }, authorization: 'Bearer peer-token', cookie: null, url: '/api/echo' });
+    expect(await response.json()).toEqual({ body: { text: '你好' }, authorization: 'Bearer peer-token', cookie: null, origin: peerUrl, url: '/api/echo' });
     expect((await fetch(`${base}/api/echo`, { method: 'POST' })).status).toBe(401);
     expect(await (await fetch(`${base}/auth/url-token`, { method: 'POST', headers: { authorization: 'Bearer local-token' } })).json()).toEqual({ token: 'local-url-token' });
     const socket = new WebSocket(`${resolver.websocket('/api/terminal/ws')}?varin_url_token=local-url-token`, { headers: { cookie: 'local=private' } });
@@ -65,7 +65,7 @@ describe('Host connection gateway', () => {
     await once(socket, 'open');
     socket.send('terminal input');
     const [data] = await once(socket, 'message');
-    expect(JSON.parse(String(data))).toEqual({ data: 'terminal input', authorization: 'Bearer peer-token', cookie: null, url: '/api/terminal/ws' });
+    expect(JSON.parse(String(data))).toEqual({ data: 'terminal input', authorization: 'Bearer peer-token', cookie: null, origin: peerUrl, url: '/api/terminal/ws' });
     const closed = once(socket, 'close');
     const upstreamClosed = Promise.all([...upstreamWs.clients].map(peer => once(peer, 'close')));
     gateway.beginDraining();

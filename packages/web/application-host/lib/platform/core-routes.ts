@@ -626,6 +626,12 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
       if (origin && direct && origin !== direct && !isLoopbackCandidateUrl(origin)) {
         candidates.push({ type: candidateUrlType(origin), url: origin, priority: 20 });
       }
+      // A local operator cannot discover the fixed public address from LAN
+      // interfaces. Offer the configured transport without changing its grant.
+      const external = normalizeCandidateUrl(getExternalAccessOrigin());
+      if (external && !candidates.some(candidate => candidate.url === external)) {
+        candidates.push({ type: 'tunnel', url: external, priority: 20 });
+      }
     }
     // The client races candidates and falls back to relay only if the direct URL
     // is unreachable (relay carries a higher priority number).
@@ -954,6 +960,10 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
       for (const url of directUrls) {
         const normalized = normalizeCandidateUrl(url);
         if (normalized) candidates.push({ type: 'lan', url: normalized, priority: 10 });
+      }
+      const external = normalizeCandidateUrl(getExternalAccessOrigin());
+      if (external && !candidates.some(candidate => 'url' in candidate && candidate.url === external)) {
+        candidates.push({ type: 'tunnel', url: external, priority: 20 });
       }
       try {
         const relayCandidate = await getRelayPairingCandidate({ ensureEnabled: false });
