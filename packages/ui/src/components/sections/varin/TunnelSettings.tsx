@@ -18,6 +18,7 @@ import { formatTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import { SettingsSection, SettingsGroupTitle, SETTINGS_SELECT_SIZE, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_CALLOUT_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
+import { ExternalAccessSettings } from './ExternalAccessSettings';
 
 type TunnelState =
   | 'checking'
@@ -347,7 +348,12 @@ const createPresetId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 };
 
-export const TunnelSettings: React.FC = () => {
+export const TunnelSettings: React.FC = () => <>
+  <ExternalAccessSettings />
+  <LegacyTunnelSettings />
+</>;
+
+const LegacyTunnelSettings: React.FC = () => {
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
@@ -1239,7 +1245,7 @@ export const TunnelSettings: React.FC = () => {
 
   return (
     <SettingsSection
-      title={t('settings.varin.tunnel.title')}
+      title={t('settings.varin.externalAccess.legacyTitle')}
       info={(
         <div className="space-y-1">
           <p>{t('settings.varin.tunnel.description')}</p>
@@ -1247,7 +1253,7 @@ export const TunnelSettings: React.FC = () => {
           <p>{t('settings.varin.tunnel.note.connectLinksOneTime')}</p>
         </div>
       )}
-      divider={false}
+      divider
     >
       <div className="space-y-6">
       {renderedSessionRecords.length > 0 && (
