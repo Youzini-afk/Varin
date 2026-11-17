@@ -40,30 +40,8 @@ client's current bearer permissions. The inner URL must still pass the existing
 read/realtime allowlist. A connection proxy is not a way for a restricted client
 to inherit a saved peer's broader authority.
 
-`deployment-ssh.ts` is the Host-only deployment transport. It reuses saved SSH
-parsing, authentication and subprocess ownership without calling the work
-connection's `connect()` or starting a remote Varin. A dedicated private
-ControlMaster uses strict existing OpenSSH known-host verification, disables
-host-key updates, TTY allocation and forwards, and pins commands to that exact
-connection. Missing multiplex sockets cannot fall back to a new target connection.
-Unknown or changed keys, ambiguous target fingerprints and edited saved targets
-pause the attempt; this module never accepts or repairs a known-host record.
-Windows Hosts fail closed until there is an equivalent pinned transport.
-
-Read-only inspection runs a fixed Python 3 probe for Linux/systemd, prerequisites,
-requested paths, listeners and units. `inventoryComplete` covers only those
-requested observations, not DNS, firewall, certificate trust or shared proxy
-compatibility. Parent-path trust is explicit. An ownership marker is returned
-only from a private root-owned regular file with trusted non-symlink ancestors;
-the deployment owner must still validate its schema, target, digest and resource
-ownership. A marker name alone is not evidence.
-
-Session handles and reviewed-action capabilities are in-process identities, not
-serializable HTTP authority. Only a trusted provisioner may register generated
-scripts after reviewing its plan. Scripts and payloads travel on stdin, never in
-argv; raw subprocess errors are not exposed as status or logs. Action capabilities
-are single-use, and unknown effects pause the session. The deployment lifecycle
-owner remains responsible for durable remote operation records, locking,
-reconciliation and stop proof; killing an SSH client does not prove that a remote
-operation stopped. Tests use fake SSH children, a local read-only probe and
-`ssh -G` (configuration resolution only), not a deployed SSH server.
+Self-hosted external access consumes FRP or HTTPS proxy services already configured
+by the user or their separately instructed agent. It does not use these SSH work
+connections for VPS inspection, deployment previews, certificate management or
+remote uninstall. Ordinary saved SSH connections retain their existing authentication,
+remote Varin bootstrap, forwarding and recovery behavior.

@@ -4,6 +4,10 @@ Use this guide when exposing a Varin Web deployment through Nginx, Nginx Proxy M
 another trusted TLS reverse proxy. Containers already expose one HTTP service on port `3000`; the
 proxy must forward the complete origin rather than selecting only ordinary REST requests.
 
+The user or their separately instructed agent configures the VPS, frps, DNS, firewall and HTTPS service
+independently. Varin connects to existing services; it does not provide VPS deployment, SSH deployment
+inspection/preview, deployment plans/receipts, certificate management or remote uninstall.
+
 ## Before adding a proxy
 
 1. Start Varin on loopback or a private interface and confirm `GET /health` succeeds.
@@ -43,7 +47,9 @@ tunnel modes are unchanged. For a saved entry, the Host makes one bounded HTTPS
 check at activation using a one-time proof that only the guarded listener can
 answer. The check uses normal TLS certificate validation, no redirects and
 no private or special-use addresses. A bind alone (including all
-environment-managed binds) does not verify public TLS or reachability.
+environment-managed binds) does not verify public TLS or reachability. This check confirms only the
+current HTTPS path to this Host; it does not inspect server software, manage certificates or verify
+future renewal.
 An invalid environment configuration or
 backend bind failure leaves the ordinary local listener unaffected. Do not
 fall back to proxying that listener.
@@ -111,9 +117,8 @@ even when a different browser can reach it. Host-side retry is
 bounded and does not retry credentials rejected by the provider. Stop waits
 for the child to exit and cleans up its private configuration files.
 
-The real FRP v0.65.0 binaries were exercised through a loopback-only TLS
-topology, not a public VPS. Windows does not yet have a supported private
-credential-file path. Saving an FRP configuration does not install binaries
+Windows does not yet have a supported private
+credential-file path for this FRP mode. Saving an FRP configuration does not install binaries
 or mutate the target server.
 
 For headless use, run `varin external-access status --json`. Save an entry
@@ -122,20 +127,10 @@ with `varin external-access config --config entry.json --expected-revision new`
 `varin external-access enable --expected-revision N`, `disable` or `retry` with
 the latest revision. The CLI talks only to the local Host.
 
-## Previewing a VPS deployment
-
-The local management API can inspect an existing saved SSH connection and
-produce a read-only plan. It uses the already accepted OpenSSH host key:
-unknown or changed keys stop inspection rather than being accepted. Use
-`POST /api/varin/external-access/deployment/preview` from the authenticated
-same-origin local Host. The request describes the saved `sshTargetId`,
-`deploymentId`, `publicOrigin`, FRP port and TLS references, and Caddy/Nginx
-choice. The response lists evidence still missing, planned service changes
-and required ports. Credential values and raw SSH output are not returned.
-
-The route is **preview only**. It does not apply the plan, install packages,
-edit a firewall or certificates, or uninstall anything. Automatic deployment
-needs a remote worker that can durably prove each operation and what it owns.
+Cloudflare/ngrok keep their existing configuration and credentials. Switching to an FRP or reverse-proxy
+entry does not update an externally managed origin or convert an old in-memory tunnel session into a
+remembered browser device. Create a browser pairing link explicitly when moving to persistent device
+access; existing mobile/desktop device grants remain with their original owner.
 
 ## Current realtime routes
 

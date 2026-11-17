@@ -23,7 +23,7 @@ The existing-proxy adapter has its own `reverse-proxy` provider/mode and `revers
 
 `getPublicUrl()` is an address, not a readiness assertion. `getEndpointVerification()` and the service's `endpointVerification` result are `unverified` for the existing-proxy adapter; legacy providers return `null` until they supply evidence. Public HTTPS, current-Host identity, and full proxy reachability have not been checked merely because the local listener is bound.
 
-The adapter is intentionally **not registered in the legacy Cloudflare/ngrok registry**. The self-hosted lifecycle below calls it directly because legacy stop and URL-based status do not represent asynchronous release or endpoint verification. SSH deployment and a public HTTPS verification probe are not implemented here.
+The adapter is intentionally **not registered in the legacy Cloudflare/ngrok registry**. The self-hosted lifecycle below calls it directly because legacy stop and URL-based status do not represent asynchronous release or endpoint verification. The adapter itself does not run the public HTTPS check; the assembled Host owner below does.
 
 ## Public exports (`routes.ts`)
 - `createTunnelRoutesRuntime(dependencies)`: creates tunnel routes runtime and helpers.
@@ -35,8 +35,13 @@ The adapter is intentionally **not registered in the legacy Cloudflare/ngrok reg
 
 `self-hosted-access` assembles the Host-owned guarded listener and the existing-proxy adapter or operator-provided FRP child. `external-access-runtime` owns serialized activation, fenced teardown, rollback, and bounded retries; configuration and intent use the existing settings file owner with compare-and-swap. The local management API uses separate save/enable/disable/retry actions. Runtime state does not treat a listener bind or a published FRP mapping as proof of public HTTPS. A fresh listener issues one bounded single-use HTTPS proof after enabling; only the same guarded Host may answer. It preserves unverified for unreachable/private answers. Legacy starts reserve the external-access slot through the original tunnel service.
 
-Deployment preview is composed from the existing SSH owner and a pure typed planner. Raw inspection evidence is mapped conservatively; DNS, firewall, installed component provenance and certificate/renewal compatibility are not assumed. The receipt-based deployment lifecycle is separately tested, but has no production remote executor yet, so the local preview cannot apply or uninstall.
+Self-hosted entries consume services already configured by the user or their separately instructed
+agent. They do not inspect or provision a VPS over SSH, generate deployment plans or receipts, manage
+certificates, update remote services or uninstall them. Public HTTPS verification checks the current
+application path and Host identity, not server inventory or future certificate renewal. Ordinary SSH work
+connections remain with `connections`.
 
-The POSIX deployment receipt store persists operation ownership, checkpoints and terminal records. Exact duplicates re-read evidence rather than repeating the effect. It is not yet run by a remote service. A future detached executor must use receipt evidence independently of SSH and systemd: transient units can disappear after exit, so a missing unit does not prove completion or cancellation. On reconnect, inspect the same operation identity and do not replay a write with unknown outcome. Separately, Certbot exit zero does not prove a renewed certificate was loaded; capture a hook result tied to the attempt and compare the stored and normally verified served leaf certificate.
-
-References: [systemd-run transient service lifetime](https://www.freedesktop.org/software/systemd/man/252/systemd-run.html) and [Certbot renewal and hook results](https://eff-certbot.readthedocs.io/en/stable/using.html#renewing-certificates).
+Cloudflare/ngrok retain their existing settings and credentials. Enabling a new entry does not migrate
+an external origin or convert legacy in-memory tunnel sessions into persistent browser grants. Browser
+pairing, expiry, sign-out and device revocation stay with the existing authentication owners; disabling
+ingress closes its connections without deleting device grants or cancelling accepted Agent work.
