@@ -205,7 +205,8 @@ describe('Varin cloud runtime layout', () => {
     for (const relative of [
       'scripts/build-cloud-runtime.mjs', 'scripts/sync-workspace-lock-versions.mjs',
       'scripts/smoke-kernel-release.mjs', 'scripts/smoke-cloud-services.mjs',
-      'bun-patches/braces@3.0.3.patch', 'kernel/THIRD_PARTY_NOTICES.md',
+      'bun-patches/braces@3.0.3.patch', 'bun-patches/picomatch@4.0.7.patch',
+      'kernel/THIRD_PARTY_NOTICES.md',
     ]) {
       fs.mkdirSync(path.dirname(path.join(source, relative)), { recursive: true });
       fs.copyFileSync(path.join(repoRoot, relative), path.join(source, relative));

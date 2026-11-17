@@ -1,0 +1,28 @@
+diff --git a/lib/parse.js b/lib/parse.js
+--- a/lib/parse.js
++++ b/lib/parse.js
+@@ -539,12 +539,21 @@
+   const extglobClose = token => {
+     const literal = input.slice(token.startIndex, state.index + 1);
+     const body = input.slice(token.startIndex + 2, state.index);
+     const analysis = analyzeRepeatedExtglob(body, opts);
+ 
+-    if ((token.type === 'plus' || token.type === 'star') && analysis.risky) {
+-      const safeOutput = analysis.safeOutput
+-        ? (token.output ? '' : ONE_CHAR) + (opts.capture ? `(${analysis.safeOutput})` : analysis.safeOutput)
++    const repeated = token.type === 'plus' || token.type === 'star';
++    const bodyTokens = repeated && opts.maxExtglobRecursion !== false
++      ? tokens.slice(token.tokensIndex + 2) : [];
++    // A raw wildcard inside a repeat nests an unbounded quantifier even in one branch.
++    // Use parsed tokens so escaped, quoted and bracketed stars stay literal.
++    const rawStar = bodyTokens.some((part, index) => part.value &&
++      (part.type === 'globstar' || (part.type === 'star' && bodyTokens[index + 1]?.extglob !== true)));
++
++    if (repeated && (analysis.risky || rawStar)) {
++      const flat = analysis.safeOutput || (rawStar && body === '*' ? bodyTokens[0].output : undefined);
++      const safeOutput = flat
++        ? (token.output ? '' : ONE_CHAR) + (opts.capture ? `(${flat})` : flat)
+         : undefined;
+       const open = tokens[token.tokensIndex];
+ 
+       open.type = 'text';

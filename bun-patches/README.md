@@ -20,6 +20,9 @@ port the patch and remove the obsolete version's entry and file.
   Version 13's default exports normally use bundled copies of the walker. Its patch
   routes all entrypoints to the equivalent unbundled implementation so the fix
   applies to both `import` and `require`.
+- `picomatch` 4.0.7 uses its existing safe compilation path for repeated extglobs
+  containing a raw wildcard, including single-branch groups
+  ([GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)).
 
 `bun run audit:dependencies` verifies the installed security repairs before excluding
 their version-only advisory reports. `scripts/glob-security.test.mjs` exercises CJS and

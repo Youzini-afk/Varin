@@ -67,11 +67,14 @@ export const verifyCloudRuntimeLock = (root = repoRoot, candidate = path.join(ro
 
 // All shipped native authorities use verified prebuilt binaries. No PTY source rebuild fallback.
 export const CLOUD_RUNTIME_TRUSTED_DEPENDENCIES = Object.freeze([]);
-const cloudRuntimePatches = (rootPackage) => {
-  const bracePatch = rootPackage.patchedDependencies?.['braces@3.0.3'];
-  if (bracePatch !== 'bun-patches/braces@3.0.3.patch') throw new Error('Cloud runtime is missing its pinned braces security patch');
-  return { 'braces@3.0.3': bracePatch };
-};
+const cloudPatchedPackages = ['braces@3.0.3', 'picomatch@4.0.7'];
+const cloudRuntimePatches = (rootPackage) => Object.fromEntries(cloudPatchedPackages.map(dependency => {
+  const relative = `bun-patches/${dependency}.patch`;
+  if (rootPackage.patchedDependencies?.[dependency] !== relative) {
+    throw new Error(`Cloud runtime is missing its pinned security patch for ${dependency}`);
+  }
+  return [dependency, relative];
+}));
 
 // Inherited services, endpoints and commands that must never ship: Varin has its own update path and
 // no default relay (VARIN_RELAY_URL only).
@@ -352,9 +355,8 @@ export const verifyCloudRuntimeLayout = (outputDir, { requireLock = true, requir
   if (rootManifest.license !== 'AGPL-3.0-only') {
     throw new Error(`Unexpected cloud runtime license: ${rootManifest.license || '(missing)'}`);
   }
-  for (const relative of Object.values(rootManifest.patchedDependencies ?? {})) {
-    if (typeof relative !== 'string' || relative.split(/[\\/]/).includes('..')
-      || relative !== 'bun-patches/braces@3.0.3.patch'
+  for (const [dependency, relative] of Object.entries(rootManifest.patchedDependencies ?? {})) {
+    if (!cloudPatchedPackages.includes(dependency) || relative !== `bun-patches/${dependency}.patch`
       || !existsSync(path.join(outputDir, relative))) {
       throw new Error(`Cloud runtime patch is missing: ${String(relative)}`);
     }

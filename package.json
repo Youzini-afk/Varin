@@ -209,6 +209,7 @@
     "vitest": "^5.1.0"
   },
   "patchedDependencies": {
+    "picomatch@4.0.7": "bun-patches/picomatch@4.0.7.patch",
     "ghostty-web@0.4.0": "bun-patches/ghostty-web+0.4.0.patch",
     "braces@3.0.3": "bun-patches/braces@3.0.3.patch",
     "http-cache-semantics@4.2.0": "bun-patches/http-cache-semantics@4.2.0.patch",

@@ -123,6 +123,7 @@
     },
   },
   "patchedDependencies": {
+    "picomatch@4.0.7": "bun-patches/picomatch@4.0.7.patch",
     "braces@3.0.3": "bun-patches/braces@3.0.3.patch",
   },
   "overrides": {
