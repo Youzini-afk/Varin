@@ -126,6 +126,13 @@ fn catalog_archive_search_pin_and_restore_use_real_metadata() {
         query: Some("RÉSUMÉ".into()),
         archived: None,
     };
+    // Queries run on independent WAL connections in production. The scalar function
+    // is connection-local, including after the writer reopens the existing Catalog.
+    let reader = db.read_view().unwrap();
+    assert_eq!(reader.list_thread_catalog(&query).unwrap()[0]["thread_id"], "thread");
+    drop(reader);
+    drop(db);
+    let mut db = f.open();
     assert_eq!(db.list_thread_catalog(&query).unwrap().len(), 1);
     let mut archive = patch("archive", 2);
     archive.archived = Some(true);
