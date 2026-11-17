@@ -267,7 +267,12 @@ URL. Browser URL admission remains a narrow authenticated Host contract.
 Direct-browser long observations use `transport/observation-transport.ts` to multiplex the fixed
 `observation-protocol.ts` route allowlist over `/api/varin/observations/ws`. This keeps HTTP/1
 connections available across views and tabs; relay requests retain their existing transport.
-Each channel still receives the original HTTP status, headers and body, with pull-based backpressure.
+Each channel receives the original HTTP status, headers and body. Peers negotiate binary data frames
+and a byte-credit receive window; readers replenish capacity before the window empties, so a stream
+can carry several chunks per network round trip. Older peers retain their original pull protocol.
+The window bounds queued bytes and never limits the response's total size. Desktop streams negotiate
+length-prefixed JSON metadata and image bytes through `binary-events.ts`; `RuntimeEventSource` retains
+the original reconnect and cancellation lifecycle for both this format and SSE.
 Cancellation closes only that original observation; a socket failure fails all unfinished channels
 without replaying them. Existing consumers own cursor/revision recovery and resource-lease lifetime.
 The Host validates the WebSocket identity and Origin, then reuses each original route's authorization.

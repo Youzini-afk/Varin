@@ -132,9 +132,10 @@ export function createThreadAttachments(options: {
     } while (offset < byteLength);
   };
   const transferPages = (target: KernelScopedClient, hash: string, byteLength: number,
-    read: (offset: number, length: number, view?: FileContentReadOptions) => Promise<KernelObjectSlice>, operationId: string, signal?: AbortSignal) => {
-    if (hash.startsWith('ranges-')) return copyRangeContent(target, hash, byteLength, read, signal, operationId);
-    const stream = (async function* () {
+    read: (offset: number, length: number, view?: FileContentReadOptions) => Promise<KernelObjectSlice>, operationId: string, signal?: AbortSignal,
+    readStream?: (rangeObject?: string) => AsyncIterable<Uint8Array>) => {
+    if (hash.startsWith('ranges-')) return copyRangeContent(target, hash, byteLength, read, signal, operationId, readStream);
+    const stream = readStream ? readStream() : (async function* () {
       let offset = 0;
       do {
         signal?.throwIfAborted();
@@ -240,8 +241,12 @@ export function createThreadAttachments(options: {
           const original = await client.service({ ...address, requestId: `describe:${selectedRef}`, operation: { kind: 'attachment_describe', ref: selectedRef } }, signal);
           if (original.attachment.ref !== selectedRef) throw new HarnessServiceError('unavailable', 'The original file receipt changed identity');
           return inScope(scope, 'attachment-write', async context => {
-            const object = await transferPages(context.client, original.contentHash, original.attachment.byteLength, (offset, length, view = {}) =>
-              client.service({ ...address, requestId: `receipt-read:${randomUUID()}`, operation: { kind: 'attachment_read', ref: selectedRef, offset, length, ...view } }, signal), `receipt-transfer:${selectedRef}`, signal);
+            const read = (offset: number, length: number, view: FileContentReadOptions = {}) => client.service({ ...address,
+              requestId: `receipt-read:${randomUUID()}`, operation: { kind: 'attachment_read', ref: selectedRef, offset, length, ...view } }, signal);
+            const stream = client.attachmentContent ? (rangeObject?: string) => client.attachmentContent!({ ...address,
+              requestId: `receipt-stream:${randomUUID()}`, ref: selectedRef, ...(rangeObject ? { rangeObject } : {}) }, signal) : undefined;
+            const transferId = `receipt-transfer:${selectedRef}`;
+            const object = await transferPages(context.client, original.contentHash, original.attachment.byteLength, read, transferId, signal, stream);
             return write(context, scope, { attachment: original.attachment, contentHash: object.hash, operationId }, [object.ownerId]);
           });
         }, signal);

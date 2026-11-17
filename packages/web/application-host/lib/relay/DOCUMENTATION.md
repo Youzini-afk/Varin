@@ -94,6 +94,13 @@ belong to a different machine.
 
 ## Two implementations, kept in sync
 
+HTTP bodies use per-stream byte windows. The request advertises the response window, and the response
+confirms flow control before the client sends credit updates. Upload windows are negotiated through
+the `httpFlowControl` handshake flag. Consumption replenishes credit; a paused reader blocks its own
+stream while other requests continue. Uploads also await the encryption send chain and socket capacity.
+The first data frame of each stream is sent immediately. Subsequent frames coalesce within the event
+loop by default; WebSocket input never waits for an operator-configured HTTP batching delay.
+
 The E2EE and framing logic exists twice: TypeScript in `packages/ui/src/lib/relay/` (the client and normative reference) and a separate TypeScript implementation in this Host module. They **must stay byte-compatible** — a client encrypted by one must decrypt on the other. A cross-compatibility test (`cross-compat.test.ts`) imports the TS modules directly and exercises a full client ↔ Host exchange. Any change to the wire format, frame codec, handshake, or batching must update both sides and keep that test green.
 
 ## Runtime integration (client)

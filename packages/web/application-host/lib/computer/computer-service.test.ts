@@ -955,6 +955,8 @@ describe("computer service (BC5 control + view)", () => {
     expect(seenA.length).toBeGreaterThan(0);
     expect(seenB.length).toBeGreaterThan(0);
     expect(seenA[0]).toBe("image/jpeg");
+    expect(seenA).toHaveLength(1);
+    expect(seenB).toHaveLength(1);
     // One viewer leaving keeps the other subscribed and the task untouched.
     await new Promise((resolve) => setTimeout(resolve, 300));
     const after = seenB.length;

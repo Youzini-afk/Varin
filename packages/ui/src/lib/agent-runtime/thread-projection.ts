@@ -1,5 +1,5 @@
 import { countUiWork } from '../performance-observation';
-import { getThreadObservationBus, subscribeRuntimeEndpointWillChange } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, getThreadObservationBus, subscribeRuntimeEndpointWillChange } from '@varin/application-client';
 import type { ThreadIdentity, ThreadSnapshot, ThreadsAPI, ThreadObservationEvent } from '@varin/application-client';
 import type { AgentResourceReference } from '@varin/protocol';
 import { shareSnapshot } from './structural-sharing';
@@ -29,8 +29,69 @@ export type StreamingTextPart = { type: 'text'; text: string; id?: string; order
 interface ProviderProgress { kind?: string; data?: { kind?: string; item_id?: string; text?: string; call_id?: string; name?: string; request_id?: string; delta?: string; attempt?: number; delay_ms?: number } }
 export interface ProgressActivity { runId: string; requestId?: string; activity?: 'text' | 'thinking' | 'retry' | 'provider'; generation?: import('@varin/protocol').GenerationMetrics }
 
-/** Rebuildable view only. No model history or running state is written by the UI. */
+type ProjectionArguments = ConstructorParameters<typeof ThreadProjectionOwner>;
+interface SharedProjection {
+  owner: ThreadProjectionOwner;
+  subscribers: Set<ProjectionArguments>;
+  snapshot?: ThreadSnapshot;
+  error?: unknown;
+  progress: [StreamingTextPart[], ProgressActivity?];
+  tools: StreamingToolCall[];
+  toolProgress: ToolExecutionProgress[];
+}
+const projections = new WeakMap<ThreadsAPI, Map<string, SharedProjection>>();
+
+/** Each view owns its subscription; one projection reads each Host/branch. */
 export class ThreadProjection {
+  private entry?: SharedProjection;
+  private release?: () => void;
+  constructor(...args: ProjectionArguments) { this.args = args; }
+  private readonly args: ProjectionArguments;
+
+  start(): void {
+    if (this.entry) return;
+    const [api, identity, publish, report, progress, tools, toolProgress, options] = this.args;
+    let entries = projections.get(api);
+    if (!entries) { entries = new Map(); projections.set(api, entries); }
+    const key = JSON.stringify([getRuntimeEndpointGeneration(), identity.runtime, identity.threadId, identity.branchId]);
+    let entry = entries.get(key);
+    const created = !entry;
+    if (!entry) {
+      const subscribers = new Set<ProjectionArguments>();
+      const shared: SharedProjection = {
+        subscribers, progress: [[]], tools: [], toolProgress: [],
+        owner: new ThreadProjectionOwner(api, identity,
+          snapshot => { shared.snapshot = snapshot; shared.error = undefined; for (const args of subscribers) args[2](snapshot); },
+          error => { shared.error = error; for (const args of subscribers) args[3](error); },
+          (parts, activity) => { shared.progress = [parts, activity]; for (const args of subscribers) args[4]?.(parts, activity); },
+          calls => { shared.tools = calls; for (const args of subscribers) args[5]?.(calls); },
+          value => { shared.toolProgress = value; for (const args of subscribers) args[6]?.(value); },
+          { get contextInspection() { return [...subscribers].some(args => args[7]?.contextInspection !== false); } }),
+      };
+      entry = shared; entries.set(key, entry);
+    }
+    const inspectPreviously = [...entry.subscribers].some(args => args[7]?.contextInspection !== false);
+    this.entry = entry;
+    entry.subscribers.add(this.args);
+    const shared = entry;
+    this.release = () => {
+      shared.subscribers.delete(this.args);
+      if (!shared.subscribers.size) { shared.owner.close(); entries.delete(key); }
+    };
+    if (created) entry.owner.start();
+    else {
+      if (entry.snapshot) publish(entry.snapshot);
+      if (entry.error !== undefined) report(entry.error);
+      progress?.(...entry.progress); tools?.(entry.tools); toolProgress?.(entry.toolProgress);
+      if (!inspectPreviously && options?.contextInspection !== false) entry.owner.inspectContext();
+    }
+  }
+  async refresh(full = true): Promise<void> { await this.entry?.owner.refresh(full); }
+  close(): void { this.release?.(); this.release = undefined; this.entry = undefined; }
+}
+
+/** Rebuildable view only. No model history or running state is written by the UI. */
+class ThreadProjectionOwner {
   private readonly abort = new AbortController();
   private cursor = 0;
   private initialized = false;
@@ -143,6 +204,13 @@ export class ThreadProjection {
         }
       }
     } finally { this.contextRefreshing = false; }
+  }
+
+  inspectContext(): void {
+    if (this.snapshot && this.options.contextInspection !== false) {
+      this.contextSnapshot = this.snapshot;
+      void this.refreshContext();
+    }
   }
 
   start(): void {

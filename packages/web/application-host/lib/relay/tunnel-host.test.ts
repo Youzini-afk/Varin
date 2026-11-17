@@ -76,6 +76,20 @@ const firstRequest = (loopback: LoopbackServer) => {
 };
 
 describe('relay request body integrity', () => {
+  test('streams up to the receive window and resumes with credit without blocking another request', async () => {
+    const { host, loopback, sentFrames } = await createHarness();
+    try {
+      await host.handleFrame(requestHead({ method: 'GET', responseWindow: 4 }));
+      expect(await waitFor(() => sentFrames.some(frame => frame.frameType === TunnelFrameType.HttpBody))).toBe(true);
+      expect(sentFrames.filter(frame => frame.frameType === TunnelFrameType.HttpBody).map(frame => Buffer.from(frame.payload).toString())).toEqual(['{"ok']);
+      const other = encodeTunnelFrame(TunnelFrameType.HttpRequest, 3, encodeJsonPayload({ method: 'GET', path: '/api/submit', query: '', headers: {} }));
+      await host.handleFrame(other);
+      expect(await waitFor(() => sentFrames.some(frame => frame.streamId === 3 && frame.frameType === TunnelFrameType.StreamEnd))).toBe(true);
+      await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpCredit, 1, encodeJsonPayload(100)));
+      expect(await waitFor(() => sentFrames.some(frame => frame.streamId === 1 && frame.frameType === TunnelFrameType.StreamEnd))).toBe(true);
+      expect(Buffer.concat(sentFrames.filter(frame => frame.streamId === 1 && frame.frameType === TunnelFrameType.HttpBody).map(frame => Buffer.from(frame.payload))).toString()).toBe('{"ok":true}');
+    } finally { host.close(); await loopback.stop(); }
+  });
   test('forwards buffered frames only after the complete body arrives', async () => {
     const { host, loopback } = await createHarness();
     await host.handleFrame(requestHead({ hasBody: true }));

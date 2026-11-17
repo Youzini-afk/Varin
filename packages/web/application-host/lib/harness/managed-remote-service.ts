@@ -196,8 +196,9 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     if (!machine) throw new Error("Managed remote target resource identity is unavailable");
     return {
       protocolVersion: MANAGED_REMOTE_PROTOCOL_VERSION,
+      requestHostIdentity: true,
       hostId: options.hostId,
-      capabilities: ["materials", "process", "attach", "cancel", "logs", "outputs", "resource-admission", "remote-shell", ...(sourceOwner ? ['sources'] : []), ...(options.storageAvailable ? ['storage'] : [])],
+      capabilities: ["materials", "process", "attach", "cancel", "logs", "outputs", "resource-admission", "remote-shell", ...(sourceOwner ? ['sources', 'attachment-stream'] : []), ...(options.storageAvailable ? ['storage'] : [])],
       machine,
     };
   };

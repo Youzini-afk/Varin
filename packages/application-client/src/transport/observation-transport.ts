@@ -1,7 +1,7 @@
 import { getRuntimeExtraHeadersSync, refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from './runtime-auth.js';
 import { getRuntimeEndpointGeneration } from './runtime-switch.js';
 import { getRuntimeUrlResolver } from './runtime-url.js';
-import { isAllowedObservationRequest, OBSERVATION_WEBSOCKET_PATH, type ObservationClientMessage, type ObservationServerMessage } from './observation-protocol.js';
+import { decodeObservationData, isAllowedObservationRequest, OBSERVATION_WINDOW_BYTES, OBSERVATION_WEBSOCKET_PATH, type ObservationClientMessage, type ObservationServerMessage } from './observation-protocol.js';
 
 interface ObservationTarget {
   key: string;
@@ -71,6 +71,7 @@ const resolveTarget = (input: RequestInfo | URL, method: string, headers: Header
 interface Observation {
   id: number;
   opened: boolean;
+  credit: number;
   controller?: ReadableStreamDefaultController<Uint8Array>;
   resolve(response: Response): void;
   reject(error: unknown): void;
@@ -103,6 +104,7 @@ class ObservationConnection {
       if (this.closed) throw abortError();
       if (typeof WebSocket !== 'function') throw new Error('WebSocket observations are unavailable');
       const socket = this.socket = new WebSocket(url);
+      socket.binaryType = 'arraybuffer';
       await new Promise<void>((resolve, reject) => {
         socket.onopen = () => resolve();
         socket.onmessage = event => this.receive(event.data);
@@ -164,6 +166,15 @@ class ObservationConnection {
 
   private receive(raw: unknown): void {
     try {
+      if (raw instanceof ArrayBuffer) {
+        const { id, bytes } = decodeObservationData(raw);
+        const observation = this.observations.get(id);
+        if (!observation) return;
+        if (!observation.controller || bytes.byteLength > observation.credit) throw new Error('Unexpected observation data');
+        observation.credit -= bytes.byteLength;
+        observation.controller.enqueue(bytes);
+        return;
+      }
       if (typeof raw !== 'string') throw new Error('Invalid observation response');
       const message = JSON.parse(raw) as ObservationServerMessage;
       if (!message || !Number.isSafeInteger(message.id) || message.id <= 0) throw new Error('Invalid observation response');
@@ -176,12 +187,12 @@ class ObservationConnection {
         }
         const body = new ReadableStream<Uint8Array>({
           start: controller => { observation.controller = controller; },
-          pull: () => new Promise<void>((resolve, reject) => {
+          pull: () => message.binary ? this.replenish(observation) : new Promise<void>((resolve, reject) => {
             observation.releasePull = resolve;
             try { this.send({ type: 'pull', id: message.id }); } catch (error) { reject(error); }
           }),
           cancel: () => this.cancel(observation),
-        }, { highWaterMark: 0 });
+        }, { highWaterMark: message.binary ? OBSERVATION_WINDOW_BYTES : 0, size: bytes => bytes.byteLength });
         const noBody = [204, 205, 304].includes(message.status);
         observation.resolve(new Response(noBody ? null : body, {
           status: message.status,
@@ -211,6 +222,14 @@ class ObservationConnection {
     } catch (error) { this.fail(error); }
   }
 
+  private replenish(observation: Observation): void {
+    if (!this.observations.has(observation.id) || observation.credit > OBSERVATION_WINDOW_BYTES / 2) return;
+    const bytes = (observation.controller?.desiredSize ?? 0) - observation.credit;
+    if (bytes <= 0) return;
+    observation.credit += bytes;
+    this.send({ type: 'credit', id: observation.id, bytes });
+  }
+
   private cancel(observation: Observation, reason?: unknown): void {
     if (!this.observations.has(observation.id)) return;
     if (observation.opened && !this.closed) {
@@ -225,7 +244,7 @@ class ObservationConnection {
     return new Promise<Response>((resolve, reject) => {
       const id = this.nextId++;
       const observation: Observation = {
-        id, opened: false, resolve, reject, signal,
+        id, opened: false, credit: 0, resolve, reject, signal,
         onAbort: () => this.cancel(observation, signal?.reason ?? abortError()),
       };
       this.observations.set(id, observation);
@@ -233,7 +252,7 @@ class ObservationConnection {
       if (signal?.aborted) { observation.onAbort(); return; }
       void this.ready.then(() => {
         if (!this.observations.has(id)) return;
-        this.send({ type: 'open', id, path, method, headers: Object.fromEntries(headers.entries()), ...(body === undefined ? {} : { body }) });
+        this.send({ type: 'open', id, path, method, headers: Object.fromEntries(headers.entries()), binary: true, ...(body === undefined ? {} : { body }) });
         observation.opened = true;
       }).catch(error => {
         if (this.observations.has(id)) this.rejectObservation(observation, error);

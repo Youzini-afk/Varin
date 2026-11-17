@@ -100,7 +100,7 @@ export const sendDesktopInput = (desktopId: string, holderId: string, input: Com
 export type DesktopStreamEvent =
   | { type: 'gesture'; gesture: ComputerGesture }
   | { type: 'control'; control: ComputerControlState }
-  | { type: 'frame'; frame: ComputerDesktopFrame }
+  | { type: 'frame'; frame: ComputerDesktopFrame & { url?: string } }
   | { type: 'error'; error: string };
 
 /**
@@ -111,7 +111,16 @@ export type DesktopStreamEvent =
 export const subscribeDesktopStream = (desktopId: string, viewerId: string, frames = true): RuntimeEventSource => (
   new RuntimeEventSource(
     `/api/computers/desktops/${encodeURIComponent(desktopId)}/stream`,
-    { query: { viewer: viewerId, ...(frames ? {} : { frames: '0' }) } },
+    { query: { viewer: viewerId, ...(frames ? {} : { frames: '0' }) },
+      decodeBinaryEvent(event, body) {
+        const value = event as DesktopStreamEvent;
+        if (value.type === 'frame') {
+          value.frame.base64 = '';
+          value.frame.url = URL.createObjectURL(new Blob([body as Uint8Array<ArrayBuffer>], { type: value.frame.mime }));
+        }
+        return JSON.stringify(value);
+      },
+    },
   )
 );
 

@@ -6,12 +6,15 @@ import type RFB from '@novnc/novnc';
  * keyboard/pointer/clipboard writes; parent input handlers use Host ownership. */
 export const VncDesktop = React.forwardRef<HTMLDivElement, {
   desktopId: string;
+  active?: boolean;
   onGeometry(width: number, height: number): void;
   onConnected(connected: boolean): void;
-}>(({ desktopId, onGeometry, onConnected }, ref) => {
+}>(({ desktopId, active = true, onGeometry, onConnected }, ref) => {
   const target = React.useRef<HTMLDivElement>(null);
   React.useImperativeHandle(ref, () => target.current!, []);
   React.useEffect(() => {
+    onConnected(false);
+    if (!active) return;
     let cancelled = false;
     let connection: RFB | undefined;
     let observer: ResizeObserver | undefined;
@@ -51,7 +54,7 @@ export const VncDesktop = React.forwardRef<HTMLDivElement, {
     };
     void start();
     return () => { cancelled = true; if (retry) clearTimeout(retry); observer?.disconnect(); geometryObserver?.disconnect(); connection?.disconnect(); };
-  }, [desktopId, onConnected, onGeometry]);
+  }, [desktopId, active, onConnected, onGeometry]);
   return <div ref={target} className="h-full w-full pointer-events-none" />;
 });
 VncDesktop.displayName = 'VncDesktop';

@@ -8,6 +8,7 @@ import {
   clearRuntimeAuthCredentialProvider, configureRuntimeUrlResolver, runtimeFetch,
   setRuntimeBearerToken, setRuntimeExtraHeaders, setRuntimeUrlAuthToken,
   type ObservationServerMessage,
+  decodeObservationData,
 } from '@varin/application-client';
 import { attachObservations } from './observations.js';
 import { createUiAuth } from './ui-auth/ui-auth.js';
@@ -62,8 +63,10 @@ const connect = async (origin: string, headers: Record<string, string> = {}, que
   const received: ObservationServerMessage[] = [];
   const queued: ObservationServerMessage[] = [];
   const listeners = new Set<() => void>();
-  socket.on('message', (data) => {
-    const message = JSON.parse(data.toString()) as ObservationServerMessage;
+  socket.on('message', (data, binary) => {
+    const frame = binary ? decodeObservationData(Uint8Array.from(data as Buffer).buffer) : null;
+    const message: ObservationServerMessage = frame ? { type: 'data', id: frame.id, data: Buffer.from(frame.bytes).toString('base64') }
+      : JSON.parse(data.toString()) as ObservationServerMessage;
     received.push(message); queued.push(message);
     for (const listener of listeners) listener();
   });
@@ -96,6 +99,23 @@ const connect = async (origin: string, headers: Record<string, string> = {}, que
 };
 
 describe('same-Host observation transport', () => {
+  it('sends multiple binary chunks per credit window and stops when a reader exhausts it', async () => {
+    const host = await startHost((_req, res) => { res.flushHeaders(); });
+    let reads = 0;
+    vi.spyOn(Readable, 'toWeb').mockReturnValue(new ReadableStream<Uint8Array>({
+      pull(controller) { reads++; controller.enqueue(new Uint8Array(64 * 1024)); },
+    }, { highWaterMark: 0 }));
+    const client = await connect(host.origin);
+    client.open(1, '/api/threads/observe', { binary: true });
+    expect(await client.next(1, 'headers')).toMatchObject({ binary: true });
+    client.send({ type: 'credit', id: 1, bytes: 256 * 1024 });
+    for (let index = 0; index < 4; index++) await client.next(1, 'data');
+    expect(reads).toBe(4);
+    client.send({ type: 'credit', id: 1, bytes: 256 * 1024 });
+    for (let index = 0; index < 4; index++) await client.next(1, 'data');
+    expect(reads).toBe(8);
+    client.send({ type: 'cancel', id: 1 });
+  });
   it('uses a specifically bound listener address instead of assuming the default loopback address', async () => {
     const host = await startHost((req, res) => {
       expect(req.socket.localAddress).toBe('::1');
@@ -312,6 +332,7 @@ describe('same-Host observation transport', () => {
     const host = await startHost((req, res) => {
       expect(req.headers['cf-access-client-secret']).toBeUndefined();
       expect(req.headers['x-varin-application-token']).toBeUndefined();
+      if (req.query.large) { res.end(Buffer.alloc(3 * 1024 * 1024, 71)); return; }
       if (req.path === '/api/varin/extensions/v1/host-state/wait') {
         res.status(409).json({ error: { code: 'stale_revision' }, revision: req.body.revision });
         return;
@@ -346,6 +367,8 @@ describe('same-Host observation transport', () => {
     });
     expect(failed.status).toBe(409);
     expect(await failed.json()).toEqual({ error: { code: 'stale_revision' }, revision: 17 });
+    const large = await runtimeFetch('/api/threads/observe?large=1');
+    expect(Buffer.from(await large.arrayBuffer())).toEqual(Buffer.alloc(3 * 1024 * 1024, 71));
     await streams[0]!.body?.cancel();
     await expect.poll(() => observers).toBe(7);
     await Promise.all(streams.slice(1).map((response) => response.body?.cancel()));

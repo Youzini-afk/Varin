@@ -9,7 +9,8 @@ type ReadPage = (offset: number, length: number, options: FileContentReadOptions
  * file version and tree identities across resource Hosts. The Rust receiver
  * validates the descriptor, ranges and owners before publishing any root. */
 export async function copyRangeContent(target: Pick<KernelScopedClient, 'putBlobStream' | 'releaseBlob'>,
-  reference: string, length: number, read: ReadPage, signal?: AbortSignal, operationId?: string): Promise<KernelPutBlobResult> {
+  reference: string, length: number, read: ReadPage, signal?: AbortSignal, operationId?: string,
+  readStream?: (hash: string) => AsyncIterable<Uint8Array>): Promise<KernelPutBlobResult> {
   const pageSize = 256 * 1024;
   const manifests: Buffer[] = [];
   let offset = 0;
@@ -35,7 +36,7 @@ export async function copyRangeContent(target: Pick<KernelScopedClient, 'putBlob
   const owners: string[] = [];
   try {
     for (const [hash, byteLength] of dependencies) {
-      const chunks = (async function* () {
+      const chunks = readStream ? readStream(hash) : (async function* () {
         let position = 0;
         while (position < byteLength) {
           signal?.throwIfAborted();

@@ -255,7 +255,7 @@ export const base64UrlToBytes = (value: string): Uint8Array => {
 // ---------------------------------------------------------------------------
 
 type HandshakeMessage =
-  | { batch: boolean; t: 'hello'; v: 1; clientPubJwk: webcrypto.JsonWebKey; nonce: string }
+  | { batch: boolean; httpFlowControl: boolean; t: 'hello'; v: 1; clientPubJwk: webcrypto.JsonWebKey; nonce: string }
   | { batch: boolean; t: 'ready'; v: 1 };
 
 export interface RelayFrameChannel {
@@ -285,7 +285,7 @@ const parseHandshakeMessage = (raw: string): HandshakeMessage | null => {
     return { t: 'ready', v: RELAY_PROTOCOL_VERSION, batch };
   }
   if (parsed.t === 'hello' && typeof parsed.nonce === 'string' && typeof parsed.clientPubJwk === 'object' && parsed.clientPubJwk !== null) {
-    return { t: 'hello', v: RELAY_PROTOCOL_VERSION, clientPubJwk: parsed.clientPubJwk as webcrypto.JsonWebKey, nonce: parsed.nonce, batch };
+    return { t: 'hello', v: RELAY_PROTOCOL_VERSION, clientPubJwk: parsed.clientPubJwk as webcrypto.JsonWebKey, nonce: parsed.nonce, batch, httpFlowControl: parsed.httpFlowControl === true };
   }
   return null;
 };
@@ -350,11 +350,8 @@ export const createHostHandshake = (hostEncPrivateKey: webcrypto.CryptoKey, opti
       acceptedClientKeyFingerprint = fingerprint;
       // Batching runs only if both peers advertised it.
       negotiatedBatch = localBatch && message.batch === true;
-      readyText = JSON.stringify(
-        negotiatedBatch
-          ? { t: 'ready', v: RELAY_PROTOCOL_VERSION, batch: true }
-          : { t: 'ready', v: RELAY_PROTOCOL_VERSION },
-      );
+      readyText = JSON.stringify({ t: 'ready', v: RELAY_PROTOCOL_VERSION,
+        ...(negotiatedBatch ? { batch: true } : {}), ...(message.httpFlowControl ? { httpFlowControl: true } : {}) });
       established = true;
       return {
         type: 'established',

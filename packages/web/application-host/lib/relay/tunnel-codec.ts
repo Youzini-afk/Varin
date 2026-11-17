@@ -34,6 +34,7 @@ export const TunnelFrameType = {
   WsClose: 10,
   Ping: 11,
   Pong: 12,
+  HttpCredit: 13,
 } as const;
 
 export interface TunnelFrame {
@@ -295,9 +296,10 @@ const BUFFERED_FRAME_TYPES = new Set<number>([
   TunnelFrameType.WsBinary,
 ]);
 
-// See the TS mirror (tunnel-codec.ts) for the 150ms rationale: the chat render pipeline's
-// 100ms input throttle + ~64ms paced-reveal smoothing make a 150ms batch window invisible.
-export const DEFAULT_BATCH_WINDOW_MS = 150;
+// Coalesce queued HTTP body frames within one event-loop turn.
+// The first data frame of each stream flushes immediately. WebSocket bursts use
+// the event-loop window even when an operator configures a longer HTTP delay.
+export const DEFAULT_BATCH_WINDOW_MS = 0;
 export const DEFAULT_BATCH_MAX_BYTES = 24 * 1024;
 export const DEFAULT_BATCH_MAX_FRAMES = 32;
 
@@ -334,6 +336,7 @@ export const createOutboundFrameBatcher = (options: {
   let timer: unknown = null;
   let lastFlushAt = 0;
   let disposed = false;
+  const bodyStreams = new Set<number>();
 
   const clearPendingTimer = (): void => {
     if (timer !== null) {
@@ -349,34 +352,39 @@ export const createOutboundFrameBatcher = (options: {
     buffer = [];
     bufferedBytes = 0;
     lastFlushAt = now();
+    bodyStreams.clear();
     options.sendBatch(encodeFrameBatch(frames));
   };
 
   const enqueue = (frame: Uint8Array): void => {
     if (disposed) return;
     const frameType = (frame[0] ?? 0) & ~TUNNEL_FRAGMENT_FLAG;
+    const streamId = new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getUint32(1);
+    const firstBody = BUFFERED_FRAME_TYPES.has(frameType) && !bodyStreams.has(streamId);
+    if (frameType === TunnelFrameType.StreamEnd || frameType === TunnelFrameType.StreamAbort) bodyStreams.delete(streamId);
+    const frameCost = BATCH_FRAME_LENGTH_BYTES + frame.length;
+    if (buffer.length > 0 && 1 + bufferedBytes + frameCost > MAX_PLAINTEXT_FRAME_BYTES) flush();
     if (!BUFFERED_FRAME_TYPES.has(frameType)) {
       buffer.push(frame);
       flush();
       return;
     }
     const at = now();
-    if (buffer.length === 0 && at - lastFlushAt >= windowMs) {
+    if (firstBody || (windowMs > 0 && buffer.length === 0 && at - lastFlushAt >= windowMs)) {
       buffer.push(frame);
       flush();
+      bodyStreams.add(streamId);
       return;
     }
-    const frameCost = BATCH_FRAME_LENGTH_BYTES + frame.length;
-    if (buffer.length > 0 && 1 + bufferedBytes + frameCost > MAX_PLAINTEXT_FRAME_BYTES) {
-      flush();
-    }
+    bodyStreams.add(streamId);
     buffer.push(frame);
     bufferedBytes += frameCost;
     if (bufferedBytes >= maxBatchBytes || buffer.length >= maxBatchFrames) {
       flush();
       return;
     }
-    if (timer === null) timer = setTimer(flush, windowMs);
+    if (frameType !== TunnelFrameType.HttpBody) clearPendingTimer();
+    if (timer === null) timer = setTimer(flush, frameType === TunnelFrameType.HttpBody ? windowMs : 0);
   };
 
   return {
@@ -387,6 +395,7 @@ export const createOutboundFrameBatcher = (options: {
       clearPendingTimer();
       buffer = [];
       bufferedBytes = 0;
+      bodyStreams.clear();
     },
   };
 };

@@ -252,13 +252,10 @@ const BUFFERED_FRAME_TYPES = new Set<number>([
   TunnelFrameType.WsBinary,
 ]);
 
-// 150ms: the chat render pipeline already decouples visible streaming from arrival — a 100ms
-// input throttle (useStreamingTextThrottle) feeding a frame-paced reveal (usePacedText) that
-// catches up with bursts on a 0.24s time constant, and the app already tolerates 200ms under
-// backpressure. So a 150ms batch window is invisible to users while cutting DO messages ~33% more
-// than 100ms.
-// Leading-edge flush keeps time-to-first-token and terminal echo instant regardless of this value.
-export const DEFAULT_BATCH_WINDOW_MS = 150;
+// Coalesce queued HTTP body frames within one event-loop turn.
+// The first data frame of each stream flushes immediately. WebSocket bursts use
+// the event-loop window even when an operator configures a longer HTTP delay.
+export const DEFAULT_BATCH_WINDOW_MS = 0;
 export const DEFAULT_BATCH_MAX_BYTES = 24 * 1024;
 export const DEFAULT_BATCH_MAX_FRAMES = 32;
 
@@ -287,7 +284,7 @@ export interface OutboundFrameBatcher {
 /**
  * Outbound batching buffer shared by the client and (mirrored in JS) the host
  * send paths. Policy:
- *  - Leading edge: if nothing flushed within windowMs, the frame ships now
+ *  - Leading edge: each newly active stream sends its first data frame now
  *    (batch of 1) — keeps time-to-first-token and keystroke echo instant.
  *  - Trailing window: subsequent body frames buffer and flush when the timer
  *    fires, buffered bytes >= maxBatchBytes, buffered frames >= maxBatchFrames,
@@ -310,6 +307,7 @@ export const createOutboundFrameBatcher = (
   let timer: ReturnType<typeof setTimeout> | null = null;
   let lastFlushAt = 0; // 0 => idle, so the first frame takes the leading edge
   let disposed = false;
+  const bodyStreams = new Set<number>();
 
   const clearPendingTimer = (): void => {
     if (timer !== null) {
@@ -325,12 +323,18 @@ export const createOutboundFrameBatcher = (
     buffer = [];
     bufferedBytes = 0;
     lastFlushAt = now();
+    bodyStreams.clear();
     options.sendBatch(encodeFrameBatch(frames));
   };
 
   const enqueue = (frame: Uint8Array): void => {
     if (disposed) return;
     const frameType = frame[0] & ~TUNNEL_FRAGMENT_FLAG;
+    const streamId = new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getUint32(1);
+    const firstBody = BUFFERED_FRAME_TYPES.has(frameType) && !bodyStreams.has(streamId);
+    if (frameType === TunnelFrameType.StreamEnd || frameType === TunnelFrameType.StreamAbort) bodyStreams.delete(streamId);
+    const frameCost = BATCH_FRAME_LENGTH_BYTES + frame.length;
+    if (buffer.length > 0 && 1 + bufferedBytes + frameCost > MAX_PLAINTEXT_FRAME_BYTES) flush();
     if (!BUFFERED_FRAME_TYPES.has(frameType)) {
       // Immediate frame: append then flush so it never overtakes buffered body.
       buffer.push(frame);
@@ -338,23 +342,22 @@ export const createOutboundFrameBatcher = (
       return;
     }
     const at = now();
-    if (buffer.length === 0 && at - lastFlushAt >= windowMs) {
-      // Leading edge: nothing flushed recently, ship this one right away.
+    if (firstBody || (windowMs > 0 && buffer.length === 0 && at - lastFlushAt >= windowMs)) {
+      // The first data of this stream never waits behind another stream's timer.
       buffer.push(frame);
       flush();
+      bodyStreams.add(streamId);
       return;
     }
-    const frameCost = BATCH_FRAME_LENGTH_BYTES + frame.length;
-    if (buffer.length > 0 && 1 + bufferedBytes + frameCost > MAX_PLAINTEXT_FRAME_BYTES) {
-      flush();
-    }
+    bodyStreams.add(streamId);
     buffer.push(frame);
     bufferedBytes += frameCost;
     if (bufferedBytes >= maxBatchBytes || buffer.length >= maxBatchFrames) {
       flush();
       return;
     }
-    if (timer === null) timer = setTimer(flush, windowMs);
+    if (frameType !== TunnelFrameType.HttpBody) clearPendingTimer();
+    if (timer === null) timer = setTimer(flush, frameType === TunnelFrameType.HttpBody ? windowMs : 0);
   };
 
   return {
@@ -365,6 +368,7 @@ export const createOutboundFrameBatcher = (
       clearPendingTimer();
       buffer = [];
       bufferedBytes = 0;
+      bodyStreams.clear();
     },
   };
 };

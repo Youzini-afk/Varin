@@ -447,7 +447,7 @@ const shouldSkipApiCompression = (): boolean => {
   if (isEnvFlagEnabled(process.env.VARIN_SKIP_API_COMPRESSION)) return true;
   if (isEnvFlagEnabled(process.env.VARIN_COMPRESS_API)) return false;
   if (isEnvFlagDisabled(process.env.VARIN_COMPRESS_API)) return true;
-  return process.env.VARIN_RUNTIME === 'desktop';
+  return false;
 };
 
 const SSE_PATHS = new Set([
@@ -458,7 +458,6 @@ const SSE_PATHS = new Set([
 ]);
 
 const shouldSkipCompression = (req: Request, res: Response): boolean => {
-  if (process.env.VARIN_RUNTIME === 'desktop') return true;
   const acceptsSse = (value: unknown): boolean => Array.isArray(value)
     ? value.some((entry) => typeof entry === 'string' && entry.toLowerCase().includes('text/event-stream'))
     : typeof value === 'string' && value.toLowerCase().includes('text/event-stream');

@@ -153,6 +153,7 @@ const startFakeRelay = (): Promise<FakeRelay> => {
 const startLoopbackOrigin = (): Promise<LoopbackOrigin> =>
   new Promise((resolve) => {
     const server = http.createServer((req, res) => {
+      if (req.url === '/api/echo') { res.setHeader('Content-Type', 'application/octet-stream'); req.pipe(res); return; }
       if (req.url === '/health') {
         const expectedOrigin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
         if (req.headers.origin !== expectedOrigin) {
@@ -352,5 +353,21 @@ describe('relay host-client integration', () => {
     const plaintextForwarded = forwarded.filter((frame) => !frame.isBinary);
     expect(plaintextForwarded.length).toBe(2); // hello + ready only
     expect(forwarded.filter((frame) => frame.isBinary).length).toBeGreaterThan(0);
+    const { createRelayTunnelClient } = await import(new URL('../../../../ui/src/lib/relay/tunnel-client.ts', import.meta.url).href);
+    const tunnel = createRelayTunnelClient({ relayUrl: relay.wsUrl, serverId: identity.serverId, hostEncPubJwk: identity.hostEncPubJwk,
+      createWireSocket(url: string) {
+        const endpoint = new URL(url); endpoint.searchParams.set('connectionId', 'flow-controlled');
+        const socket = new WebSocket(endpoint); socket.binaryType = 'arraybuffer'; return socket;
+      },
+    });
+    try {
+      const bytes = crypto.randomBytes(3 * 1024 * 1024);
+      const echoed = await tunnel.fetch('/api/echo', { method: 'POST', body: bytes });
+      // Keep this response unread while another request completes. Its exhausted
+      // receive window must pause only this stream, including its echoed upload.
+      const health = await tunnel.fetch('/health');
+      expect((await health.json()).ok).toBe(true);
+      expect(Buffer.from(await echoed.arrayBuffer())).toEqual(bytes);
+    } finally { tunnel.close(); }
   }, 45_000);
 });

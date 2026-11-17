@@ -10,6 +10,26 @@ const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:projectio
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; };
 afterEach(() => { vi.useRealTimers(); });
 
+it('shares a pending snapshot across views and only cancels when the final view leaves', async () => {
+  vi.useFakeTimers();
+  let signal: AbortSignal | undefined;
+  const snapshot = vi.fn<ThreadsAPI['snapshot']>(async (_identity, current) => {
+    signal = current;
+    return new Promise((_resolve, reject) => current?.addEventListener('abort', () => reject(current.reason), { once: true }));
+  });
+  const api = { snapshot, observe: async (_cursor: unknown, _listener: unknown, options: { signal: AbortSignal }) => {
+    await new Promise<void>(resolve => options.signal.addEventListener('abort', () => resolve(), { once: true }));
+  } } as unknown as ThreadsAPI;
+  const first = new ThreadProjection(api, identity, vi.fn(), vi.fn());
+  const second = new ThreadProjection(api, identity, vi.fn(), vi.fn());
+  try {
+    first.start(); second.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    first.close(); expect(signal?.aborted).toBe(false);
+    second.close(); expect(signal?.aborted).toBe(true);
+  } finally { first.close(); second.close(); }
+});
+
 it('cancels an unfinished snapshot when leaving a conversation without reporting a load failure', async () => {
   vi.useFakeTimers();
   let reading: AbortSignal | undefined;

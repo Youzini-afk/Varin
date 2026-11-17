@@ -12,7 +12,6 @@ import type { RawData } from 'ws';
 import {
   MAX_TUNNEL_PAYLOAD_BYTES,
   TunnelFrameType,
-  chunkPayload,
   createFragmentAssembler,
   decodeJsonPayload,
   decodeTunnelFrame,
@@ -22,6 +21,8 @@ import {
 } from './tunnel-codec.js';
 
 interface HttpRequestPayload {
+  responseWindow?: number;
+  requestFlowControl?: boolean;
   hasBody?: boolean;
   headers: Record<string, string>;
   method: string;
@@ -47,6 +48,8 @@ interface HttpBodySink {
 }
 
 interface HttpTunnelStream {
+  responseCredit?: number;
+  resumeResponse?: (() => void) | undefined;
   abort: AbortController;
   body: HttpBodySink | null;
   kind: 'http';
@@ -121,6 +124,7 @@ const BACKPRESSURE_POLL_MS = 20;
 // preventing a reconnect from turning a partial request into a misleading 400.
 // Larger uploads keep the existing streaming behavior instead of being rejected.
 const BODY_BUFFER_MAX_BYTES = 512 * 1024;
+const UPLOAD_WINDOW_BYTES = 1024 * 1024;
 const BODY_DELIVERY_TIMEOUT_MS = 15_000;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -190,6 +194,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     if (!stream) return;
     dropStream(streamId);
     if (stream.kind === 'http') {
+      stream.resumeResponse?.();
       try {
         stream.body?.error(new Error(String(reason ?? 'aborted')));
       } catch {
@@ -274,16 +279,23 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       if (STRIPPED_RESPONSE_HEADERS.has(name)) continue;
       responseHeaders[name] = value;
     }
-    await sendJson(TunnelFrameType.HttpResponse, streamId, { status: response.status, headers: responseHeaders });
+    await sendJson(TunnelFrameType.HttpResponse, streamId, { status: response.status, headers: responseHeaders,
+      ...(stream.responseCredit === undefined ? {} : { flowControl: true }) });
 
     try {
       if (response.body) {
         for await (const chunk of response.body) {
           if (closed || stream.abort.signal.aborted) return;
           const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
-          for (const piece of chunkPayload(bytes, MAX_TUNNEL_PAYLOAD_BYTES)) {
+          let offset = 0;
+          while (offset < bytes.byteLength) {
+            if (stream.responseCredit === 0) await new Promise<void>(resolve => { stream.resumeResponse = resolve; });
             await waitForBackpressure(stream.abort.signal);
             if (closed || stream.abort.signal.aborted) return;
+            const length = Math.min(bytes.byteLength - offset, MAX_TUNNEL_PAYLOAD_BYTES, stream.responseCredit ?? Infinity);
+            const piece = bytes.subarray(offset, offset + length);
+            offset += length;
+            if (stream.responseCredit !== undefined) stream.responseCredit -= length;
             await send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
           }
         }
@@ -326,6 +338,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     let liveStream: ReadableStream<Uint8Array> | null = null;
     let liveController: ReadableStreamDefaultController<Uint8Array> | null = null;
     let completed = false;
+    let uploadCredit = request.requestFlowControl ? UPLOAD_WINDOW_BYTES : Infinity;
     let bodyFailure: Error | null = null;
     let resolveBodyEnd: () => void = () => undefined;
     const bodyEnded = new Promise<void>((resolve) => { resolveBodyEnd = resolve; });
@@ -350,9 +363,16 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       liveStream = new ReadableStream<Uint8Array>({
         start(controller: ReadableStreamDefaultController<Uint8Array>) {
           liveController = controller;
-          stream.body = controller;
         },
-      });
+        pull(controller) {
+          if (!request.requestFlowControl || completed || uploadCredit > UPLOAD_WINDOW_BYTES / 2) return;
+          const credit = (controller.desiredSize ?? 0) - uploadCredit;
+          if (credit > 0) {
+            uploadCredit += credit;
+            void send(encodeTunnelFrame(TunnelFrameType.HttpCredit, streamId, encodeJsonPayload(credit)));
+          }
+        },
+      }, { highWaterMark: UPLOAD_WINDOW_BYTES, size: bytes => bytes.byteLength });
       const controller = liveController;
       if (!controller) throw new Error('request body stream did not initialize');
       for (const chunk of buffered) {
@@ -367,6 +387,8 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     stream.body = {
       enqueue(payload) {
         if (completed) return;
+        if (payload.byteLength > uploadCredit) throw new Error('Upload exceeded receive window');
+        uploadCredit -= payload.byteLength;
         bodyFrameCount += 1;
         if (liveController) {
           try { liveController.enqueue(payload); } catch {
@@ -385,6 +407,8 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
         finishBody(error);
       },
     };
+
+    if (request.requestFlowControl) void send(encodeTunnelFrame(TunnelFrameType.HttpCredit, streamId, encodeJsonPayload(UPLOAD_WINDOW_BYTES)));
 
     deliveryDeadline = setTimeout(() => {
       if (streams.get(streamId) === stream && !completed && !liveStream) {
@@ -429,7 +453,11 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       void sendAbort(streamId, errorMessage(error, 'malformed request'));
       return;
     }
-    const stream: HttpTunnelStream = { kind: 'http', abort: new AbortController(), body: null, noBody: false };
+    if (request.responseWindow !== undefined && (!Number.isSafeInteger(request.responseWindow) || request.responseWindow <= 0)) {
+      void sendAbort(streamId, 'Invalid response window'); return;
+    }
+    const stream: HttpTunnelStream = { kind: 'http', abort: new AbortController(), body: null, noBody: false,
+      ...(request.responseWindow === undefined ? {} : { responseCredit: request.responseWindow }) };
     streams.set(streamId, stream);
     void runHttpStream(streamId, request);
   };
@@ -595,6 +623,17 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
 
     switch (frame.frameType) {
+      case TunnelFrameType.HttpCredit: {
+        const stream = streams.get(frame.streamId);
+        if (!stream || stream.kind !== 'http' || stream.responseCredit === undefined) return;
+        const credit: unknown = JSON.parse(new TextDecoder().decode(frame.payload));
+        if (typeof credit !== 'number' || !Number.isSafeInteger(credit) || credit <= 0 || !Number.isSafeInteger(stream.responseCredit + credit)) {
+          abortLocalStream(frame.streamId, 'Invalid response credit'); return;
+        }
+        stream.responseCredit += credit;
+        stream.resumeResponse?.(); stream.resumeResponse = undefined;
+        return;
+      }
       case TunnelFrameType.HttpRequest:
         handleHttpRequest(frame.streamId, frame.payload);
         return;

@@ -1,4 +1,4 @@
-import { Router, type Express } from 'express';
+import express, { Router, type Express } from 'express';
 import { describe, expect, it, vi } from 'vitest';
 import { routerTransport } from '../extensions/direct-router.test-helper.js';
 import { createManagedRemoteTargetRegistry, managedEndpointIdentity } from './managed-remote-client.js';
@@ -46,12 +46,50 @@ function fixture(capabilities = ['filesystem:read'], mount = '') {
     endpointIdentity: managedEndpointIdentity({ apiUrl: `https://original.invalid${mount}` }) };
   const registry = createManagedRemoteTargetRegistry({ coordinatorHostId, kernel: {} as never, resources: {} as never,
     readSettings: async () => settings, fetch: fetch as typeof globalThis.fetch });
-  return { sources, transport, urls, fetch, registry, owner, changeEndpoint(apiUrl = 'https://replacement.invalid') {
+  return { sources, transport, router: mountedRouter, urls, fetch, registry, owner, changeEndpoint(apiUrl = 'https://replacement.invalid') {
     settings = { desktopHosts: settings.desktopHosts.map(entry => entry.id === 'original' ? { ...entry, apiUrl } : entry) };
   } };
 }
 
 describe('managed Source authenticated transport without listeners', () => {
+  it('streams an immutable attachment through one request while the source reads its own pages', async () => {
+    const f = fixture();
+    const bytes = Buffer.alloc(600 * 1024, 73);
+    vi.mocked(f.sources.service).mockImplementation(async (_principal, input) => {
+      if (input.operation.kind !== 'attachment_read') throw new Error('Expected attachment content read');
+      const { offset, length, ref } = input.operation;
+      expect(ref).toBe('attachment:original'); expect(input.authorityId).toBe(request.authorityId);
+      const page = bytes.subarray(offset, offset + length);
+      return { hash: 'original-content', byteLength: bytes.length, offset, nextOffset: offset + page.length,
+        eof: offset + page.length === bytes.length, bytesBase64: page.toString('base64') } as never;
+    });
+    const app = express(); app.use(express.json()); app.use(f.router);
+    const server = await new Promise<import('node:http').Server>(resolve => { const value = app.listen(0, '127.0.0.1', () => resolve(value)); });
+    const address = server.address() as import('node:net').AddressInfo;
+    f.fetch.mockImplementation((url, init) => fetch(`http://127.0.0.1:${address.port}${new URL(String(url)).pathname}`, init));
+    try {
+      const client = await f.registry.source(f.owner);
+      const chunks: Buffer[] = [];
+      for await (const chunk of client.attachmentContent!({ ...request, requestId: 'read-original', ref: 'attachment:original' })) chunks.push(Buffer.from(chunk));
+      expect(Buffer.concat(chunks)).toEqual(bytes);
+      expect(f.fetch.mock.calls.filter(([url]) => String(url).endsWith('/sources/attachmentContent'))).toHaveLength(1);
+      expect(f.fetch.mock.calls.filter(([url]) => String(url).endsWith('/sources/service'))).toHaveLength(0);
+      expect(f.sources.service).toHaveBeenCalledTimes(3);
+    } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+  });
+  it('reuses discovered identity and rejects the wrong target before an effect is dispatched', async () => {
+    const f = fixture();
+    await f.registry.sourceTargets();
+    const probes = f.urls.filter(url => url.endsWith('/identity')).length;
+    await (await f.registry.source(f.owner)).observe(request);
+    await (await f.registry.source(f.owner)).observe(request);
+    expect(f.urls.filter(url => url.endsWith('/identity'))).toHaveLength(probes);
+    const response = await f.transport(new URL('https://original.invalid/api/harness/managed-execution/v1/sources/execute'), {
+      method: 'POST', headers: { Authorization: 'Bearer trusted', 'X-Varin-Managed-Target': 'other-host' }, body: JSON.stringify(request),
+    });
+    expect(response.status).toBe(409);
+    expect(f.sources.execute).not.toHaveBeenCalled();
+  });
   it('keeps the configured mount in Source identity, authenticated discovery and original-owner calls', async () => {
     const f = fixture(['filesystem:read'], '/team/original');
     const discovered = await f.registry.sourceTargets();

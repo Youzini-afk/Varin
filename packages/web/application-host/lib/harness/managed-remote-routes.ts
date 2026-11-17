@@ -1,4 +1,7 @@
 import {sendResourceAsset} from '../workspace/asset-response.js';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { randomUUID } from 'node:crypto';
 import {writeTerminalFrame} from '../terminal/stream-backpressure.js';
 import type { Express, NextFunction, Request, RequestHandler, Response } from "express";
 import type { VarinAuthenticatedClient } from "../client-auth/request-context.js";
@@ -112,8 +115,13 @@ export function registerManagedRemoteRoutes(
     if (!principal) throw new Error("Managed execution has no authenticated principal");
     return { coordinatorHostId: coordinator, principalId: principal.principalId };
   };
-  app.use(base, (_request, response, next) => {
+  app.use(base, (request, response, next) => {
     response.setHeader("X-Varin-Managed-Host", service.hostId);
+    const expectedHost = request.headers['x-varin-managed-target'];
+    if (expectedHost !== undefined && expectedHost !== service.hostId) {
+      response.status(409).json({ error: 'Managed target identity changed', code: 'target-identity-changed' });
+      return;
+    }
     next();
   });
 
@@ -189,6 +197,39 @@ export function registerManagedRemoteRoutes(
       }
     }));
   }
+
+  app.post(`${base}/sources/attachmentContent`, requireAuth, requireSourceAuth, route(async (request, response) => {
+    const input = value(request.body);
+    authorize(request, input.coordinatorHostId);
+    const ref = asString(input.ref, 'Attachment reference');
+    const source = service.sources(), principal = principals.get(request)!;
+    await whileResponseOpen(response, async signal => {
+      const read = (offset: number) => source.service(principal, {
+        coordinatorHostId: asString(input.coordinatorHostId, 'Coordinator'), authorityId: asString(input.authorityId, 'Authority'),
+        resourceEpoch: asString(input.resourceEpoch, 'Resource epoch'), requestId: `attachment-stream:${randomUUID()}`,
+        operation: { kind: 'attachment_read', ref, offset, length: 256 * 1024,
+          ...(input.rangeObject === undefined ? {} : { rangeObject: asString(input.rangeObject, 'Range object') }) },
+      }, signal) as Promise<import('../kernel/protocol.generated.js').KernelObjectSlice>;
+      let page = await read(0);
+      const hash = page.hash, length = page.byteLength;
+      response.setHeader('Content-Type', 'application/octet-stream');
+      response.setHeader('Cache-Control', 'no-store');
+      response.setHeader('Content-Length', length);
+      const content = async function* () {
+        let offset = 0;
+        for (;;) {
+          signal.throwIfAborted();
+          const bytes = Buffer.from(page.bytesBase64, 'base64');
+          if (page.hash !== hash || page.byteLength !== length || page.offset !== offset || page.nextOffset !== offset + bytes.length
+            || page.nextOffset > length || page.eof !== (page.nextOffset === length) || (!page.eof && !bytes.length)) throw new Error('Attachment content changed during transfer');
+          if (bytes.length) yield bytes;
+          if (page.eof) break;
+          offset = page.nextOffset; page = await read(offset);
+        }
+      };
+      await pipeline(Readable.from(content()), response);
+    });
+  }));
 
   app.post(`${base}/sources/terminalStream`,requireAuth,requireSourceAuth,route(async(request,response)=>{
     const input=value(request.body) as unknown as Parameters<ManagedSourceService['terminalStream']>[1];authorize(request,input.coordinatorHostId);

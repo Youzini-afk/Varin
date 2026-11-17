@@ -89,6 +89,7 @@ type SourceClientMethod<Method> = Method extends (principal: infer _Principal, .
   ? (...args: Args) => Result : never;
 /** An authenticated connection to one frozen Host. No credential is included in source metadata. */
 export type ManagedSourceClient = Omit<{ [Method in keyof ManagedSourceService]: SourceClientMethod<ManagedSourceService[Method]> }, 'service'> & {
+  attachmentContent?(input: Omit<ManagedSourceServiceRequest, 'operation'> & { ref: string; rangeObject?: string }, signal?: AbortSignal): AsyncIterable<Uint8Array>;
   documents(path: string, method: 'GET' | 'POST', body?: unknown, signal?: AbortSignal): Promise<Response>;
   service<Operation extends SourceServiceOperation>(input: Omit<ManagedSourceServiceRequest, 'operation'> & { operation: Operation }, signal?: AbortSignal): Promise<SourceServiceResponse<Operation>>;
 };
@@ -125,6 +126,7 @@ export class ManagedTargetClient {
     const headers = new Headers(this.target.connection.requestHeaders);
     if (this.target.connection.clientToken) headers.set("Authorization", `Bearer ${this.target.connection.clientToken}`);
     for (const [name, value] of Object.entries(extra)) headers.set(name, value);
+    headers.set('X-Varin-Managed-Target', this.target.hostId);
     // This is a Host-owned request, not a forwarded browser request. Match the
     // configured HTTPS ingress without weakening its browser Origin checks.
     const endpoint = new URL(this.target.connection.apiUrl);
@@ -199,6 +201,8 @@ export const configuredHosts = (settings: Record<string, unknown>): ConfiguredHo
 
 export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRegistryOptions) {
   const fetchImpl = options.fetch ?? fetch;
+  const peers = new Map<string, ManagedTarget>();
+  const connectionKey = (connection: ConfiguredHost) => digest(managedEndpointUrl(connection).href, connection.clientToken ?? '', JSON.stringify(connection.requestHeaders));
   const targets = new Map<string, ManagedTarget>();
   /** machineId → workspaces whose callers resolved that machine's backend. */
   const workspaceBindings = new Map<string, Set<string>>();
@@ -215,6 +219,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
   const report = (error: unknown) => options.onError?.(error instanceof Error ? error : new Error(String(error)));
 
   const probe = async (connection: ConfiguredHost, signal?: AbortSignal): Promise<ManagedTarget> => {
+    peers.delete(connection.id);
     const headers = new Headers(connection.requestHeaders);
     headers.set("Accept", "application/json");
     const endpoint = new URL(connection.apiUrl);
@@ -232,12 +237,14 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     if (identity.protocolVersion !== MANAGED_REMOTE_PROTOCOL_VERSION) throw new Error(`Unsupported managed target protocol ${String(identity.protocolVersion)}`);
     if (response.headers.get("x-varin-managed-host") !== identity.hostId) throw new Error("Managed target identity receipt is inconsistent");
     if (identity.hostId === options.coordinatorHostId) throw new Error("Configured target resolves to this coordinator Host");
-    return {
+    const target: ManagedTarget = {
       machineId: `managed:${identity.hostId}`,
       hostId: identity.hostId,
       connection,
       identity,
     };
+    peers.set(connection.id, target);
+    return target;
   };
 
   const registrationFor = (target: ManagedTarget): ResourceMachineRegistration => ({
@@ -381,7 +388,11 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     }
     // A machine may have multiple configured connections. Never substitute the
     // registry's preferred machine connection for this Source's actual endpoint.
-    const target = await probe(connection, signal);
+    const cached = peers.get(connection.id);
+    // Peers that check the target before dispatch can reuse discovery across
+    // requests. Older Hosts still need the original preflight handshake.
+    const target = cached?.identity.requestHostIdentity && connectionKey(cached.connection) === connectionKey(connection)
+      ? { ...cached, connection } : await probe(connection, signal);
     if (target.hostId !== owner.hostId) throw new Error('The original managed source Host identity changed');
     return target;
   };
@@ -433,7 +444,10 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       sourceReached(owner);
       return target;
     } catch (error) {
-      if (!signal?.aborted) reachableSources.delete(sourceKey(owner));
+      if (!signal?.aborted) {
+        reachableSources.delete(sourceKey(owner));
+        peers.delete(owner.connectionId);
+      }
       throw error;
     }
   };
@@ -444,7 +458,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     const client = new ManagedTargetClient(target, async (url, init) => {
       try { return await fetchImpl(url, { ...init, redirect: 'error' }); }
       catch (error) {
-        if (!init?.signal?.aborted) reachableSources.delete(sourceKey(owner));
+        if (!init?.signal?.aborted) { reachableSources.delete(sourceKey(owner)); peers.delete(owner.connectionId); }
         throw error;
       }
     });
@@ -464,6 +478,18 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       return result;
     };
     return {
+      ...(target.identity.capabilities.includes('attachment-stream') ? {
+        attachmentContent: async function* (input: Omit<ManagedSourceServiceRequest, 'operation'> & { ref: string; rangeObject?: string }, signal?: AbortSignal) {
+          if (input.coordinatorHostId !== options.coordinatorHostId) throw new Error('Attachment belongs to another coordinator');
+          const response = await client.response('/sources/attachmentContent', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(input), ...(signal ? { signal } : {}) });
+          if (!response.body) throw new Error('Attachment response has no content stream');
+          const reader = response.body.getReader();
+          try {
+            for (;;) { const chunk = await reader.read(); if (chunk.done) break; yield chunk.value; }
+          } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+        },
+      } : {}),
       attachmentBegin: async (input, signal) => {
         const result = await request('attachmentBegin', input, signal);
         if (result.retained !== true || typeof result.complete !== 'boolean') throw new Error('Managed attachment retention is unconfirmed');

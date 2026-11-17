@@ -7,6 +7,7 @@ import type { ComputerDesktop, ComputerMachine } from "@varin/protocol";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
+import { BINARY_EVENT_CONTENT_TYPE, decodeBinaryEvents } from '@varin/application-client';
 
 const machine: ComputerMachine = {
   id: "local",
@@ -42,6 +43,26 @@ const fixture = () => {
 };
 
 describe("computer routes (BC4)", () => {
+  it('sends screenshot bytes directly alongside control events', async () => {
+    const { app, computers } = fixture();
+    const bytes = Buffer.from([0, 1, 255, 38, 0, 254]);
+    computers.subscribeFrames = vi.fn(async (_desktop, _viewer, listener) => {
+      listener({ type: 'frame', frame: { mime: 'image/png', base64: bytes.toString('base64'), bounds: { x: 0, y: 0, width: 2, height: 1 }, capturedAt: 'now' } });
+      listener({ type: 'error', error: 'ended', terminal: true });
+      return () => {};
+    });
+    const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
+    try {
+      const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/computers/desktops/local-console/stream`, { headers: { Accept: BINARY_EVENT_CONTENT_TYPE } });
+      expect(response.headers.get('content-type')).toContain(BINARY_EVENT_CONTENT_TYPE);
+      const frames = [];
+      for await (const frame of decodeBinaryEvents(response.body!.getReader())) frames.push(frame);
+      expect(frames[0]!.event).toMatchObject({ type: 'frame', frame: { mime: 'image/png' } });
+      expect(frames[0]!.event).not.toHaveProperty('frame.base64');
+      expect(Buffer.from(frames[0]!.body)).toEqual(bytes);
+      expect(frames[1]!.event).toMatchObject({ type: 'error', terminal: true });
+    } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+  });
   it('rejects automatic input without an assignment even on an authenticated route', async () => {
     const { app, computers } = fixture(); computers.act = vi.fn();
     const response = await request(app).post('/api/computers/desktops/local-console/act').send({ action: { kind: 'key', app: 'editor', key: 'enter' } });

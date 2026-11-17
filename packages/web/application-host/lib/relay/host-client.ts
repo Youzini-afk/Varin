@@ -8,7 +8,7 @@ import type { RawData } from 'ws';
 
 import { RELAY_PROTOCOL_VERSION, RelayCloseCode, createHostHandshake } from './e2ee.js';
 import type { RelayFrameChannel } from './e2ee.js';
-import { createOutboundFrameBatcher, decodeFrameBatch } from './tunnel-codec.js';
+import { createOutboundFrameBatcher, decodeFrameBatch, DEFAULT_BATCH_WINDOW_MS } from './tunnel-codec.js';
 import { createTunnelHost } from './tunnel-host.js';
 import type { RelayIdentity } from './identity.js';
 
@@ -30,10 +30,9 @@ const DATA_SOCKET_IDLE_SWEEP_INTERVAL_MS = 30_000;
 // terminates the socket, which drives the normal reconnect + re-registration.
 const CONTROL_PING_INTERVAL_MS = 30_000;
 const CONTROL_PONG_GRACE_MS = 10_000;
-const DEFAULT_BATCH_WINDOW_MS = 150;
 
 // Resolve the frame-batching flush window: explicit option wins, then env, then
-// the 150 ms default. Only applies on directions where batching was negotiated.
+// the event-loop default. Only applies where batching was negotiated.
 type RelayHostState = 'connected' | 'connecting' | 'disabled' | 'reconnecting';
 
 interface RelayHostStatus {
@@ -181,7 +180,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
         .then(async () => {
           if (dataSockets.get(connectionId) !== entry || socket.readyState !== WebSocket.OPEN || !channel) return;
           const encrypted = await channel.encryptor.encrypt(plaintext);
-          socket.send(encrypted, { binary: true });
+          await new Promise<void>((resolve, reject) => socket.send(encrypted, { binary: true }, error => error ? reject(error) : resolve()));
         })
         .catch((error) => {
           logger.warn(`[Relay] host-data send failed: ${errorMessage(error)}`);
@@ -219,6 +218,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
               if (dataSockets.get(connectionId) !== entry || socket.readyState !== WebSocket.OPEN) return;
               if (entry.batcher) entry.batcher.enqueue(plaintextFrame);
               else sendEncryptedPlaintext(plaintextFrame);
+              return sendChain;
             },
           });
           if (action.replyText) socket.send(action.replyText);

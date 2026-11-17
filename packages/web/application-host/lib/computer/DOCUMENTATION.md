@@ -301,6 +301,11 @@ They do not capture frames, delay input or enter model history. Linux's Page-key
 identifies the window instead of inventing a pointer target.
 
 Existing desktop SSE carries gestures alongside frames/control, including remote and noVNC viewers.
+Updated peers negotiate a binary event stream on that same route. Screenshot metadata and original
+image bytes travel separately, including between Hosts; older peers continue using SSE. The owner
+suppresses unchanged frames and supplies the latest frame to a newly joined viewer. A slow response
+retains one newest pending frame and sends it on drain. Hidden views stop requesting frames while
+retaining their control observation. VNC media reconnects when the view becomes visible.
 The shared presentation maps physical coordinates, negative origins, scaling and letterboxes into
 cursor movement, click ripples, drag updates, target highlights and keyboard/scroll badges. Raw events
 are forwarded without React coalescing away a fast dispatch. Stop and takeover clear the visual layer.

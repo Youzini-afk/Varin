@@ -292,6 +292,7 @@ export type SourceServiceResponse<Operation extends SourceServiceOperation> = So
 
 export interface ManagedRemoteIdentity {
   protocolVersion: typeof MANAGED_REMOTE_PROTOCOL_VERSION;
+  requestHostIdentity?: boolean;
   hostId: string;
   capabilities: string[];
   machine: ResourceMachineView;

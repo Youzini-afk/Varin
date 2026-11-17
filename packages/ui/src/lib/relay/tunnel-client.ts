@@ -9,12 +9,12 @@ import { createClientHandshake, type EstablishedChannelCrypto } from './handshak
 import {
   RELAY_PROTOCOL_VERSION,
   RelayCloseCode,
+  MAX_TUNNEL_PAYLOAD_BYTES,
   TunnelFrameType,
   type TunnelHttpRequestPayload,
   type TunnelWsOpenPayload,
 } from './protocol';
 import {
-  chunkPayload,
   createFragmentAssembler,
   createOutboundFrameBatcher,
   createStreamIdAllocator,
@@ -37,6 +37,8 @@ import {
 } from './tunnel-payloads';
 
 const EMPTY_PAYLOAD = new Uint8Array(0);
+const RESPONSE_WINDOW_BYTES = 1024 * 1024;
+const SEND_BUFFER_BYTES = 4 * 1024 * 1024;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -46,6 +48,7 @@ const abortError = (): DOMException => new DOMException('The operation was abort
 // Minimal wire surface the client needs from the relay WebSocket. Injectable
 // so tests can substitute an in-memory transport pair.
 export interface TunnelWireSocket {
+  readonly bufferedAmount?: number;
   readonly readyState: number;
   send(data: string | ArrayBuffer | Uint8Array): void;
   close(code?: number, reason?: string): void;
@@ -58,6 +61,7 @@ export interface TunnelWireSocket {
 const wrapNativeWebSocket = (ws: WebSocket): TunnelWireSocket => {
   ws.binaryType = 'arraybuffer';
   const wire: TunnelWireSocket = {
+    get bufferedAmount() { return ws.bufferedAmount; },
     get readyState() {
       return ws.readyState;
     },
@@ -157,7 +161,7 @@ export interface RelayTunnelClientOptions {
   helloTimeoutMs?: number;
   pingIntervalMs?: number;
   pingTimeoutMs?: number;
-  /** Frame-batching flush window in ms (default 150). Only applies once negotiated. */
+  /** HTTP batching delay in ms; defaults to coalescing in the current event-loop turn. */
   batchWindowMs?: number;
   /** Advertise frame batching in the handshake. Default true. */
   batch?: boolean;
@@ -199,6 +203,8 @@ type StreamHandler = {
 };
 
 type ActiveChannel = {
+  httpFlowControl: boolean;
+  drain(): Promise<void>;
   streams: Map<number, StreamHandler>;
   assembler: ReturnType<typeof createFragmentAssembler>;
   nextStreamId(): number;
@@ -443,7 +449,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       }
     };
 
-    const establish = (crypto: EstablishedChannelCrypto, batch: boolean): void => {
+    const establish = (crypto: EstablishedChannelCrypto, batch: boolean, httpFlowControl: boolean): void => {
       cryptoChannel = crypto;
       batchNegotiated = batch;
       if (helloInterval !== null) {
@@ -477,6 +483,14 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         : null;
       batcher = localBatcher;
       const channelObj: ActiveChannel = {
+        httpFlowControl,
+        async drain() {
+          localBatcher?.flush();
+          await sendChain;
+          while (!channelObj.dead && (wire.bufferedAmount ?? 0) > SEND_BUFFER_BYTES) {
+            await new Promise(resolve => setTimeout(resolve, 20));
+          }
+        },
         streams,
         assembler,
         nextStreamId: () => allocator.next(),
@@ -575,7 +589,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
             const action = await handshake.handleText(data);
             if (action.type === 'established') {
               if (cryptoChannel) return;
-              establish(action.channel, action.batch);
+              establish(action.channel, action.batch, action.httpFlowControl);
             } else if (action.type === 'fail') {
               failAttemptLocal(new Error(`relay handshake failed: ${action.reason}`));
             }
@@ -692,9 +706,14 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       let responseDelivered = false;
       let finished = false;
       let bodyController: ReadableStreamDefaultController<Uint8Array> | null = null;
+      let responseCredit = RESPONSE_WINDOW_BYTES;
+      let flowControl = false;
+      let uploadCredit = channel.httpFlowControl ? 0 : Infinity;
+      let resumeUpload: (() => void) | undefined;
       let onAbort: (() => void) | null = null;
 
       const cleanupStream = (): void => {
+        resumeUpload?.();
         channel.streams.delete(streamId);
         channel.assembler.dropStream(streamId);
         if (onAbort && signal) signal.removeEventListener('abort', onAbort);
@@ -728,6 +747,15 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
 
       channel.streams.set(streamId, {
         handleFrame(frameType, payload) {
+          if (frameType === TunnelFrameType.HttpCredit) {
+            const credit: unknown = JSON.parse(textDecoder.decode(payload));
+            if (typeof credit !== 'number' || !Number.isSafeInteger(credit) || credit <= 0 || !Number.isSafeInteger(uploadCredit + credit)) {
+              sendAbort('Invalid upload credit'); finishError(new Error('Invalid upload credit')); return;
+            }
+            uploadCredit += credit;
+            resumeUpload?.(); resumeUpload = undefined;
+            return;
+          }
           if (frameType === TunnelFrameType.HttpResponse) {
             if (responseDelivered || finished) return;
             let head;
@@ -738,6 +766,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
               finishError(toError(error));
               return;
             }
+            flowControl = head.flowControl === true;
             const nullBody = head.status === 204 || head.status === 205 || head.status === 304;
             let body: ReadableStream<Uint8Array> | null = null;
             if (!nullBody) {
@@ -745,13 +774,21 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
                 start(controller) {
                   bodyController = controller;
                 },
+                pull(controller) {
+                  if (!flowControl || finished || responseCredit > RESPONSE_WINDOW_BYTES / 2) return;
+                  const bytes = (controller.desiredSize ?? 0) - responseCredit;
+                  if (bytes > 0) {
+                    responseCredit += bytes;
+                    channel.send(encodeTunnelFrame(TunnelFrameType.HttpCredit, streamId, encodeJsonPayload(bytes)));
+                  }
+                },
                 cancel() {
                   if (finished) return;
                   finished = true;
                   cleanupStream();
                   sendAbort('response body cancelled');
                 },
-              });
+              }, { highWaterMark: RESPONSE_WINDOW_BYTES, size: bytes => bytes.byteLength });
             }
             responseDelivered = true;
             resolve(new Response(body, { status: head.status, headers: head.headers }));
@@ -763,6 +800,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
           }
           if (frameType === TunnelFrameType.HttpBody) {
             if (!responseDelivered || finished) return;
+            if (flowControl) responseCredit -= payload.byteLength;
             try {
               bodyController?.enqueue(payload);
             } catch {
@@ -803,6 +841,8 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       if (signal) signal.addEventListener('abort', onAbort, { once: true });
 
       const head: TunnelHttpRequestPayload = {
+        responseWindow: RESPONSE_WINDOW_BYTES,
+        requestFlowControl: channel.httpFlowControl,
         method: request.method,
         path: request.path,
         query: request.query,
@@ -816,8 +856,15 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
           if (request.body) {
             for await (const chunk of request.body) {
               if (finished || channel.dead) return;
-              for (const piece of chunkPayload(chunk)) {
+              let offset = 0;
+              while (offset < chunk.byteLength) {
+                if (uploadCredit === 0) await new Promise<void>(resolve => { resumeUpload = resolve; });
+                if (finished || channel.dead) return;
+                const length = Math.min(chunk.byteLength - offset, uploadCredit, MAX_TUNNEL_PAYLOAD_BYTES);
+                const piece = chunk.subarray(offset, offset + length);
+                offset += length; uploadCredit -= length;
                 channel.send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
+                await channel.drain();
                 sentBodyFrame = true;
               }
             }

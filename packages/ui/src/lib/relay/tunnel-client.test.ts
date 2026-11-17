@@ -98,7 +98,7 @@ type MiniHostOptions = {
 // A minimal host responder wired to one endpoint. Answers a few routes so the
 // client's HTTP/WS/abort paths can be exercised end to end.
 const attachMiniHost = (endpoint: FakeEndpoint, hostPrivateKey: CryptoKey, options: MiniHostOptions = {}): void => {
-  const handshake = createHostHandshake(hostPrivateKey, { batch: options.batch });
+  const handshake = createHostHandshake(hostPrivateKey, { batch: options.batch, httpFlowControl: false });
   let encryptor: FrameEncryptor | null = null;
   let decryptor: FrameDecryptor | null = null;
   let batchNegotiated = false;

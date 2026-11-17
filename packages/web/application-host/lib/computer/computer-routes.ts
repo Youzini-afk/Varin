@@ -1,4 +1,5 @@
 import { computerReadRequest } from './computer-request.js';
+import { BINARY_EVENT_CONTENT_TYPE, encodeBinaryEvent } from '@varin/application-client';
 import type { Express, Request, RequestHandler, Response } from "express";
 import { HarnessServiceError } from "../harness/service-error.js";
 import { ComputerBeforeDispatchError, ComputerEffectError, type ComputerService } from "./computer-service.js";
@@ -473,6 +474,7 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
    * pending-recovery instead of silently handing back.
    */
   app.get("/api/computers/desktops/:desktopId/stream", requireAuth, async (request: Request, response: Response) => {
+    const binary = request.query.encoding === 'binary' || request.headers.accept?.includes(BINARY_EVENT_CONTENT_TYPE);
     response.setHeader("Cache-Control", "no-store");
     const desktopId = String(request.params.desktopId ?? "");
     const viewerId = typeof request.query.viewer === "string" && request.query.viewer
@@ -481,23 +483,33 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
     // SSE headers must be committed before subscribing — the first control
     // event is delivered synchronously on subscribe.
     response.status(200);
-    response.setHeader("Content-Type", "text/event-stream");
+    response.setHeader("Content-Type", binary ? BINARY_EVENT_CONTENT_TYPE : 'text/event-stream');
     response.setHeader("Connection", "keep-alive");
     response.flushHeaders();
     let unsubscribe: (() => void) | null = null;
     let closed = false;
+    let pendingFrame: import('./computer-service.js').DesktopViewEvent | undefined;
+    const write = (event: import('./computer-service.js').DesktopViewEvent) => {
+      if (binary && event.type === 'frame') {
+        const { base64, ...frame } = event.frame;
+        response.write(encodeBinaryEvent({ type: 'frame', frame }, Buffer.from(base64, 'base64')));
+      } else response.write(binary ? encodeBinaryEvent(event) : `data: ${JSON.stringify(event)}\n\n`);
+    };
+    response.on('drain', () => {
+      if (!closed && pendingFrame) { const event = pendingFrame; pendingFrame = undefined; write(event); }
+    });
     response.on("close", () => { closed = true; unsubscribe?.(); });
     try {
       unsubscribe = await computers.subscribeFrames(desktopId, viewerId, (event) => {
         if (closed || response.writableEnded) return;
         // A slow viewer needs the next current frame, not an ever-growing
         // backlog of obsolete screenshots. Control receipts are still sent.
-        if (event.type === "frame" && response.writableNeedDrain) return;
-        response.write(`data: ${JSON.stringify(event)}\n\n`);
+        if (event.type === "frame" && response.writableNeedDrain) { pendingFrame = event; return; }
+        write(event);
         if (event.type === "error" && event.terminal) response.end();
       }, { frames: request.query.frames !== "0" });
     } catch (error) {
-      response.write(`data: ${JSON.stringify({ type: "error", error: error instanceof Error ? error.message : "subscribe failed" })}\n\n`);
+      write({ type: 'error', error: error instanceof Error ? error.message : 'subscribe failed' });
       response.end();
       return;
     }

@@ -1,8 +1,10 @@
 import { buildRuntimeFetchUrl, runtimeFetch } from './runtime-fetch.js';
 import { getRuntimeEndpointGeneration } from './runtime-switch.js';
+import { BINARY_EVENT_CONTENT_TYPE, decodeBinaryEvents } from './binary-events.js';
 import type { RuntimeUrlQuery } from './runtime-url.js';
 
 export interface RuntimeEventSourceOptions {
+  decodeBinaryEvent?(event: unknown, body: Uint8Array): string;
   query?: RuntimeUrlQuery;
   withCredentials?: boolean;
   /** False when the domain consumer already owns its reconnect/backoff. */
@@ -74,7 +76,7 @@ export class RuntimeEventSource extends EventTarget {
         retry = false;
         throw new Error('Application Host changed during event observation');
       }
-      const headers = new Headers({ Accept: 'text/event-stream' });
+      const headers = new Headers({ Accept: this.options.decodeBinaryEvent ? `${BINARY_EVENT_CONTENT_TYPE}, text/event-stream` : 'text/event-stream' });
       if (this.lastEventId) headers.set('Last-Event-ID', this.lastEventId);
       const response = await runtimeFetch(this.url, {
         ...(this.options.query ? { query: this.options.query } : {}),
@@ -83,7 +85,8 @@ export class RuntimeEventSource extends EventTarget {
         credentials: this.withCredentials ? 'include' : 'same-origin',
         cache: 'no-store',
       });
-      if (response.status !== 200 || !response.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream')) {
+      const binary = Boolean(this.options.decodeBinaryEvent && response.headers.get('content-type')?.startsWith(BINARY_EVENT_CONTENT_TYPE));
+      if (response.status !== 200 || (!binary && !response.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream'))) {
         retry = false;
         await response.body?.cancel();
         throw new Error(`Event observation was rejected (${response.status})`);
@@ -93,6 +96,13 @@ export class RuntimeEventSource extends EventTarget {
       this.readyState = RuntimeEventSource.OPEN;
       this.emit(new Event('open'));
       reader = this.reader = response.body.getReader();
+      if (binary) {
+        for await (const { event, body } of decodeBinaryEvents(reader)) {
+          controller.signal.throwIfAborted();
+          this.emit(new MessageEvent('message', { data: this.options.decodeBinaryEvent!(event, body) }));
+        }
+        throw new Error('Event observation ended');
+      }
       const decoder = new TextDecoder();
       let line = '';
       let ignoreLf = false;

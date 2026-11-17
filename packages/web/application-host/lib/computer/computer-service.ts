@@ -1,4 +1,5 @@
 import { outlineObservation, semanticBaseline, semanticCondition, waitForSemanticSample, semanticDeadline } from './semantic-wait.js';
+import { BINARY_EVENT_CONTENT_TYPE, decodeBinaryEvents } from '@varin/application-client';
 import { ComputerError } from './computer-error.js';
 import { parseComputerWorkRef, sameComputerWork, sameComputerExecution, type ComputerWorkRef, type ComputerExecutionRef, type ComputerWorkScope } from '@varin/protocol';
 import { decodeComputerRuntime, type ComputerPhysicalControl, type PendingComputerControlEvent, type PendingComputerControlCancellation, type ComputerInterrupted } from './computer-records.js';
@@ -396,6 +397,7 @@ export type DesktopViewEvent =
   | { type: "error"; error: string; terminal?: boolean };
 
 interface DesktopViewers {
+  frame?: ComputerDesktopFrame;
   viewers: Map<string, (event: DesktopViewEvent) => void>;
   frameViewers: Set<string>;
   timer: NodeJS.Timeout | null;
@@ -3210,7 +3212,12 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         }
         return;
       }
+      const previous = entry.frame;
+      const unchanged = entry.failures === 0 && previous?.base64 === frame.base64 && previous.mime === frame.mime
+        && JSON.stringify(previous.bounds) === JSON.stringify(frame.bounds);
+      entry.frame = frame;
       entry.failures = 0;
+      if (unchanged) return;
       const event: DesktopViewEvent = { type: "frame", frame };
       for (const [viewerId, listener] of current.viewers) {
         if (current.frameViewers.has(viewerId)) try { listener(event); } catch { /* broken viewer */ }
@@ -3228,7 +3235,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       // Frames for a remote desktop come off the remote Host's own stream —
       // the same authenticated Host-to-Host connection carries them (BC6).
       const controller = new AbortController();
-      const path = `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/stream?viewer=${encodeURIComponent(viewerId)}${subscription?.frames === false ? "&frames=0" : ""}`;
+      const path = `/api/computers/desktops/${encodeURIComponent(remote.remoteId)}/stream?viewer=${encodeURIComponent(viewerId)}&encoding=binary${subscription?.frames === false ? "&frames=0" : ""}`;
       const response = await remoteFetch(remote.connection, "GET", path, undefined, subscription?.signal ? AbortSignal.any([controller.signal, subscription.signal]) : controller.signal);
       if (!response.ok) {
         const payload = await response.json().catch(() => null) as { error?: string } | null;
@@ -3241,6 +3248,21 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         try {
           const reader = response.body?.getReader();
           if (!reader) throw new Error("Remote desktop stream has no body");
+          const deliver = (event: DesktopViewEvent) => {
+            if (event.type === 'control') {
+              const operator = automation.controller(id);
+              listener({ ...event, control: { ...event.control, desktopId: id, ...(operator && event.control.operator ? { operator } : {}) } });
+            } else if (event.type === 'gesture') listener({ ...event, gesture: { ...event.gesture, desktopId: id } });
+            else listener(event);
+          };
+          if (response.headers.get('content-type')?.startsWith(BINARY_EVENT_CONTENT_TYPE)) {
+            for await (const { event, body } of decodeBinaryEvents(reader)) {
+              const value = event as DesktopViewEvent;
+              if (value.type === 'frame') value.frame.base64 = Buffer.from(body).toString('base64');
+              deliver(value);
+            }
+            throw new Error('Remote desktop stream ended');
+          }
           const decoder = new TextDecoder();
           let buffer = "";
           for (;;) {
@@ -3255,14 +3277,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
               if (!dataLine) continue;
               try {
                 const event = JSON.parse(dataLine.slice(5).trim()) as DesktopViewEvent;
-                if (event.type === "control") {
-                  const operator = automation.controller(id);
-                  listener({ ...event, control: { ...event.control, desktopId: id, ...(operator && event.control.operator ? { operator } : {}) } });
-                } else if (event.type === 'gesture') {
-                  listener({ ...event, gesture: { ...event.gesture, desktopId: id } });
-                } else {
-                  listener(event);
-                }
+                deliver(event);
               } catch { /* malformed stream chunk is dropped */ }
             }
           }
@@ -3290,6 +3305,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     entry.viewers.set(viewerId, listener);
     if (subscription?.frames !== false) entry.frameViewers.add(viewerId);
     else entry.frameViewers.delete(viewerId);
+    if (subscription?.frames !== false && entry.frame) listener({ type: 'frame', frame: entry.frame });
     try { listener({ type: "control", control: controlState(id) }); } catch { /* */ }
     if (entry.timer && entry.frameViewers.size === 0) { clearInterval(entry.timer); entry.timer = null; }
     if (!entry.timer && entry.frameViewers.size > 0) {
@@ -3320,6 +3336,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
         }
       }
       if (current.frameViewers.size === 0) {
+        delete current.frame;
         if (current.timer) clearInterval(current.timer);
         current.timer = null;
       }

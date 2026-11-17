@@ -1,6 +1,7 @@
 import type { BrowserConnection, BrowserManagementSnapshot, BrowserObservation, BrowserPage, BrowserPageUsage, BrowserResource, BrowserResourceBinding, BrowserSettingsDevice, BrowserSettingsSnapshot, BrowserTaskSelection } from '@varin/protocol';
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
+import { BINARY_EVENT_CONTENT_TYPE, decodeBinaryEvents } from './transport/binary-events.js';
 
 export type BrowserPageBinding = BrowserResourceBinding & { pageId: string };
 export interface BrowserPageSnapshot { observation: BrowserObservation; usage: BrowserPageUsage }
@@ -18,8 +19,22 @@ const pagesPath = (binding: BrowserResourceBinding) => `/api/browser-resources/$
 const pagePath = (binding: BrowserPageBinding) => `${pagesPath(binding)}/${segment(binding.pageId)}`;
 async function request<T>(path: string, method = 'GET', signal?: AbortSignal, body?: unknown): Promise<T> {
   const generation = getRuntimeEndpointGeneration();
-  const response = await runtimeFetch(path, { method, ...(signal ? { signal } : {}), headers: { accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  const result = await response.json();
+  const response = await runtimeFetch(path, { method, ...(signal ? { signal } : {}), headers: { accept: `${BINARY_EVENT_CONTENT_TYPE}, application/json`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  let result;
+  if (response.headers.get('content-type')?.startsWith(BINARY_EVENT_CONTENT_TYPE) && response.body) {
+    const reader = response.body.getReader();
+    try {
+      for await (const frame of decodeBinaryEvents(reader)) {
+        result = frame.event as BrowserPageSnapshot;
+        if (result.observation.image) {
+          const parts: string[] = [];
+          // Whole triples allow independently encoded slices to concatenate.
+          for (let offset = 0; offset < frame.body.length; offset += 24576) parts.push(btoa(String.fromCharCode(...frame.body.subarray(offset, offset + 24576))));
+          result.observation.image.base64 = parts.join('');
+        }
+      }
+    } finally { reader.releaseLock(); }
+  } else result = await response.json();
   if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during browser request');
   if (!response.ok) throw new BrowserResourceRequestError(response.status,
     typeof result?.error === 'string' ? result.error : `Browser request failed (${response.status})`,

@@ -32,8 +32,25 @@ export function ComputerDesktopPane({ desktop }: { desktop: ComputerDesktop }) {
 
 function ComputerDesktopPaneView({ desktop }: { desktop: ComputerDesktop }) {
   const { t } = useI18n();
+  const surface = React.useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = React.useState(() => document.visibilityState !== 'hidden');
+  React.useEffect(() => {
+    let intersects = true;
+    const update = () => setVisible(intersects && document.visibilityState !== 'hidden');
+    const observer = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => {
+      intersects = entries.some(entry => entry.isIntersecting); update();
+    }) : undefined;
+    if (surface.current) observer?.observe(surface.current);
+    document.addEventListener('visibilitychange', update);
+    return () => { observer?.disconnect(); document.removeEventListener('visibilitychange', update); };
+  }, []);
   const [viewerId] = React.useState(newViewerId);
   const [frameUrl, setFrameUrl] = React.useState<string | null>(null);
+  const frameUrls = React.useRef(new Set<string>());
+  React.useEffect(() => {
+    for (const url of frameUrls.current) if (url !== frameUrl) { URL.revokeObjectURL(url); frameUrls.current.delete(url); }
+  }, [frameUrl]);
+  React.useEffect(() => () => { for (const url of frameUrls.current) URL.revokeObjectURL(url); frameUrls.current.clear(); }, []);
   const [frame, setFrame] = React.useState<ComputerDesktopFrame | null>(null);
   const [control, setControl] = React.useState<ComputerControlState | null>(null);
   const controlRevision = React.useRef(0);
@@ -58,19 +75,18 @@ function ComputerDesktopPaneView({ desktop }: { desktop: ComputerDesktop }) {
 
   React.useEffect(() => {
     connected.current = true;
-    setFrameUrl(null);
-    setFrame(null);
     setControl(null);
     setStreamError(null);
     setInputError(null);
     feedback.current?.clear();
-    const source = subscribeDesktopStream(desktop.id, viewerId, !useVnc);
+    const source = subscribeDesktopStream(desktop.id, viewerId, visible && !useVnc);
     source.onmessage = (message) => {
       try {
         const event = JSON.parse(message.data as string) as DesktopStreamEvent;
         if (event.type === 'frame') {
+          if (event.frame.url) frameUrls.current.add(event.frame.url);
           setFrame(event.frame);
-          setFrameUrl(`data:${event.frame.mime};base64,${event.frame.base64}`);
+          setFrameUrl(event.frame.url ?? `data:${event.frame.mime};base64,${event.frame.base64}`);
           setStreamError(null);
         } else if (event.type === 'control') {
           // The next gesture may arrive in this same SSE batch, before React
@@ -94,7 +110,7 @@ function ComputerDesktopPaneView({ desktop }: { desktop: ComputerDesktop }) {
       // Closing the page closes only this subscription — never the task.
       source.close();
     };
-  }, [desktop.id, viewerId, t, useVnc]);
+  }, [desktop.id, viewerId, t, useVnc, visible]);
 
   const weHoldControl = control?.owner === 'human' && control.holderId === viewerId;
   const mayRelease = weHoldControl && control.reachable && !control.transitioning;
@@ -210,7 +226,7 @@ function ComputerDesktopPaneView({ desktop }: { desktop: ComputerDesktop }) {
   };
 
   return (
-    <div className="flex flex-col gap-3 min-h-0">
+    <div ref={surface} className="flex flex-col gap-3 min-h-0">
       {control && (control.operator || control.owner === 'human' || control.transitioning || control.workStatus === 'cancel-unconfirmed' || control.workStatus === 'cancelling') ? <div className="order-2 flex items-center justify-center gap-3 rounded-xl bg-muted/30 px-3 py-2">
         <span className="typography-meta text-muted-foreground" data-control={control?.owner ?? 'unknown'}>
           {control?.workStatus === 'cancelling' ? t('computer.automation.cancelling') : control?.workStatus === 'cancel-unconfirmed' ? t('computer.automation.cancel-unconfirmed') : controlLabel}
@@ -244,7 +260,7 @@ function ComputerDesktopPaneView({ desktop }: { desktop: ComputerDesktop }) {
       {inputError ? <p role="alert" className="typography-meta text-destructive">{inputError}</p> : null}
       <div className="relative rounded-lg border border-border/60 bg-black/80 overflow-hidden flex items-center justify-center min-h-[240px]">
         {useVnc ? <div {...inputHandlers} className="h-[60vh] w-full select-none touch-none" aria-label={desktop.label}>
-          <VncDesktop ref={vncRef} desktopId={desktop.id} onGeometry={vncGeometry} onConnected={vncConnected} />
+          <VncDesktop ref={vncRef} desktopId={desktop.id} active={visible} onGeometry={vncGeometry} onConnected={vncConnected} />
         </div> : frameUrl ? (
           <img
             ref={frameRef}

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { BINARY_EVENT_CONTENT_TYPE, encodeBinaryEvent, decodeBinaryEvents } from '@varin/application-client';
 import type { Express, Request, RequestHandler, Response } from 'express';
 import { BROWSER_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import {
@@ -136,6 +137,10 @@ export function registerManagedBrowserRoutes(app: Express, options: {
   };
   app.use(base, options.requireAuth, (req, res, next) => {
     res.setHeader('X-Varin-Managed-Host', options.hostId);
+    const expectedHost = req.headers['x-varin-managed-target'];
+    if (expectedHost !== undefined && expectedHost !== options.hostId) {
+      res.status(409).json({ error: 'Managed target identity changed', effect: 'none', executorStopped: true }); return;
+    }
     res.setHeader('Cache-Control', 'no-store');
     void options.clientId(req).then(clientId => {
       if (!clientId) { res.status(403).json({ error: 'A paired Host credential is required', effect: 'none', executorStopped: true }); return; }
@@ -194,7 +199,13 @@ export function registerManagedBrowserRoutes(app: Express, options: {
             (call.args[2] as { name: string; bytesBase64: string }[]).map(file => ({ name: file.name, bytes: Buffer.from(file.bytesBase64, 'base64') })));
         }
       }, { writes: mutates, observes: call.method === 'read' });
-      if (!res.destroyed) res.json({ value });
+      if (!res.destroyed) {
+        const image = call.method === 'read' ? (value as BrowserObservation).image : undefined;
+        if (image && req.headers.accept?.includes(BINARY_EVENT_CONTENT_TYPE)) {
+          const { base64, ...metadata } = image;
+          res.type(BINARY_EVENT_CONTENT_TYPE).send(Buffer.from(encodeBinaryEvent({ value: { ...value as BrowserObservation, image: metadata } }, Buffer.from(base64, 'base64'))));
+        } else res.json({ value });
+      }
     } catch (error) {
       if (isBrowserExecutionError(error)) {
         if (error.completion) await error.completion.catch(() => undefined);
@@ -263,9 +274,19 @@ export class ManagedBrowserOwner implements BrowserOwner {
         instanceId, method, args, ...(scope.threadId ? { threadId: scope.threadId } : {}) };
       // Mutation response lifetime is independent of the caller's cancellation.
       dispatched = true;
-      const response = await client.response(`${relative}/call`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const response = await client.response(`${relative}/call`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: `${BINARY_EVENT_CONTENT_TYPE}, application/json` },
         body: JSON.stringify(call), ...(!mutates && scope.signal ? { signal: scope.signal } : {}) }, true);
-      const reply: unknown = await response.json();
+      let reply: unknown;
+      if (response.headers.get('content-type')?.startsWith(BINARY_EVENT_CONTENT_TYPE) && response.body) {
+        const reader = response.body.getReader();
+        try {
+          for await (const frame of decodeBinaryEvents(reader)) {
+            const result = frame.event as { value: BrowserObservation };
+            if (result.value.image) result.value.image.base64 = Buffer.from(frame.body).toString('base64');
+            reply = result;
+          }
+        } finally { reader.releaseLock(); }
+      } else reply = await response.json();
       if (!response.ok) {
         if (!object(reply) || typeof reply.error !== 'string') throw new Error('Managed browser operation returned no receipt');
         throw new BrowserExecutionError(reply.error, reply.effect === 'none' ? 'none' : mutates ? 'unknown' : 'none', reply.executorStopped === true);

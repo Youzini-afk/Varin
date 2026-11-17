@@ -47,6 +47,7 @@ export const TunnelFrameType = {
   WsClose: 10,
   Ping: 11,
   Pong: 12,
+  HttpCredit: 13,
 } as const;
 
 export type TunnelFrameTypeValue = (typeof TunnelFrameType)[keyof typeof TunnelFrameType];
@@ -57,6 +58,8 @@ export const isTunnelFrameType = (value: number): value is TunnelFrameTypeValue 
   TUNNEL_FRAME_TYPE_VALUES.has(value);
 
 export interface TunnelHttpRequestPayload {
+  responseWindow?: number;
+  requestFlowControl?: boolean;
   method: string;
   path: string;
   query: string;
@@ -66,6 +69,7 @@ export interface TunnelHttpRequestPayload {
 }
 
 export interface TunnelHttpResponsePayload {
+  flowControl?: boolean;
   status: number;
   headers: Record<string, string>;
 }
@@ -91,6 +95,7 @@ export interface TunnelWsClosePayload {
 
 // Layer 2 handshake messages (plaintext JSON text frames, before encryption starts).
 export interface E2eeHelloMessage {
+  httpFlowControl?: boolean;
   t: 'hello';
   v: typeof RELAY_PROTOCOL_VERSION;
   clientPubJwk: JsonWebKey;
@@ -101,6 +106,7 @@ export interface E2eeHelloMessage {
 }
 
 export interface E2eeReadyMessage {
+  httpFlowControl?: boolean;
   t: 'ready';
   v: typeof RELAY_PROTOCOL_VERSION;
   // Host echoes `batch: true` only when it also supports batching AND the client

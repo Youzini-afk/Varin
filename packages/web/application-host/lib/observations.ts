@@ -6,6 +6,7 @@ import { getExternalIngress } from './platform/public-ingress.js';
 import {
   OBSERVATION_WEBSOCKET_PATH,
   isAllowedObservationRequest,
+  encodeObservationData,
   type ObservationClientMessage,
   type ObservationServerMessage,
 } from '@varin/application-client';
@@ -23,6 +24,8 @@ interface Channel {
   credits: number;
   reading: boolean;
   ready: boolean;
+  binary: boolean;
+  pending?: Uint8Array | undefined;
 }
 
 const requestHeaders = new Set([
@@ -165,9 +168,9 @@ export const attachObservations = (options: ObservationOptions) => {
       dispose();
       socket.terminate();
     };
-    const send = (message: ObservationServerMessage): Promise<boolean> => new Promise((resolve) => {
+    const send = (message: ObservationServerMessage | Uint8Array): Promise<boolean> => new Promise((resolve) => {
       if (closed || socket.readyState !== WebSocket.OPEN) { resolve(false); return; }
-      socket.send(JSON.stringify(message), (error) => {
+      socket.send(message instanceof Uint8Array ? message : JSON.stringify(message), (error) => {
         if (error) failSocket();
         resolve(!error && !closed);
       });
@@ -177,16 +180,23 @@ export const attachObservations = (options: ObservationOptions) => {
       channel.reading = true;
       try {
         while (channels.get(id) === channel && channel.credits > 0) {
-          channel.credits -= 1;
-          const chunk = await channel.reader.read();
+          const chunk = channel.pending ? { done: false, value: channel.pending } : await channel.reader.read();
           if (channels.get(id) !== channel) return;
           if (chunk.done) {
             await send({ type: 'end', id });
             cancel(id);
             return;
           }
-          // Await the socket's write completion before consuming more credits.
-          if (!await send({ type: 'data', id, data: Buffer.from(chunk.value).toString('base64') })) return;
+          const bytes = chunk.value!;
+          if (channel.binary) {
+            const length = Math.min(channel.credits, bytes.byteLength);
+            channel.pending = length < bytes.byteLength ? bytes.subarray(length) : undefined;
+            channel.credits -= length;
+            if (!await send(encodeObservationData(id, bytes.subarray(0, length)))) return;
+          } else {
+            channel.credits -= 1;
+            if (!await send({ type: 'data', id, data: Buffer.from(bytes).toString('base64') })) return;
+          }
         }
       } catch {
         if (channels.get(id) === channel) {
@@ -202,7 +212,7 @@ export const attachObservations = (options: ObservationOptions) => {
         const response = await requestObservation(server, request, message, channel.abort.signal);
         if (channels.get(message.id) !== channel) { await response.reader?.cancel(); return; }
         channel.reader = response.reader;
-        if (!await send({ type: 'headers', id: message.id, status: response.status, statusText: response.statusText, headers: response.headers })) return;
+        if (!await send({ type: 'headers', id: message.id, status: response.status, statusText: response.statusText, headers: response.headers, ...(channel.binary ? { binary: true } : {}) })) return;
         channel.ready = true;
         if (!channel.reader) {
           await send({ type: 'end', id: message.id });
@@ -227,11 +237,13 @@ export const attachObservations = (options: ObservationOptions) => {
       }
       const id = value.id as number;
       if (value.type === 'cancel') { cancel(id); return; }
-      if (value.type === 'pull') {
+      if (value.type === 'pull' || value.type === 'credit') {
         const channel = channels.get(id);
         if (!channel) return;
-        if (channel.credits === Number.MAX_SAFE_INTEGER) { failSocket(); return; }
-        channel.credits += 1;
+        const credit = value.type === 'credit' ? value.bytes : 1;
+        if (channel.binary !== (value.type === 'credit') || typeof credit !== 'number' || !Number.isSafeInteger(credit)
+          || credit <= 0 || !Number.isSafeInteger(channel.credits + credit)) { failSocket(); return; }
+        channel.credits += credit;
         void pump(id, channel);
         return;
       }
@@ -242,7 +254,7 @@ export const attachObservations = (options: ObservationOptions) => {
         void send({ type: 'error', id, message: 'Observation request is not allowed' });
         return;
       }
-      const channel: Channel = { abort: new AbortController(), reader: null, credits: 0, reading: false, ready: false };
+      const channel: Channel = { abort: new AbortController(), reader: null, credits: 0, reading: false, ready: false, binary: value.binary === true };
       channels.set(id, channel);
       void open(value, channel);
     });

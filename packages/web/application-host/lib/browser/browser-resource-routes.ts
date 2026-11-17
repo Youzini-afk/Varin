@@ -1,4 +1,5 @@
 import { json } from 'express';
+import { BINARY_EVENT_CONTENT_TYPE, encodeBinaryEvent } from '@varin/application-client';
 import type { Express, Request, RequestHandler, Response } from 'express';
 import type { BrowserResourceBinding } from '@varin/protocol';
 import { ConnectedBrowserOwner, connectorResourceId, type ConnectorExchange } from './browser-connector.js';
@@ -107,7 +108,10 @@ export function registerBrowserResourceRoutes(app: Express, resources: BrowserRe
       resources.use(binding, { signal }, owner => owner.read({ pageId: binding.pageId!, view }, signal)),
       resources.currentUsage(binding, signal),
     ]);
-    res.json({ observation, usage });
+    if (observation.image && req.headers.accept?.includes(BINARY_EVENT_CONTENT_TYPE)) {
+      const { base64, ...image } = observation.image;
+      res.type(BINARY_EVENT_CONTENT_TYPE).send(Buffer.from(encodeBinaryEvent({ observation: { ...observation, image }, usage }, Buffer.from(base64, 'base64'))));
+    } else res.json({ observation, usage });
   }));
   app.post(pages + '/:pageId/:action', route(async (req, res) => {
     const action = req.params.action;
