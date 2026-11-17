@@ -60,7 +60,8 @@ export async function remoteExternalReviewTarget(root:string): Promise<RemoteExt
   const script=path.join(root,'target-external.mjs');await fs.writeFile(script,`import{createInterface}from'node:readline';import{writeFileSync}from'node:fs';
 if(process.argv.includes('--version')){console.log('target fixture');process.exit(0)}
 const send=v=>process.stdout.write(JSON.stringify(v)+'\\n');createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line),reply=result=>send({jsonrpc:'2.0',id:m.id,result});
-if(m.method==='initialize')reply({});if(m.method==='thread/start'||m.method==='thread/resume')reply({thread:{id:'target-real-session'}});if(m.method==='model/list')reply({data:[]});
+if(m.method==='initialize')reply({});if(m.method==='thread/start'||m.method==='thread/resume')reply({thread:{id:'target-real-session'}});
+if(['model/list','collaborationMode/list','permissionProfile/list'].includes(m.method))reply({data:[]});
 if(m.method==='turn/start'){reply({turn:{id:'target-turn'}});writeFileSync('external-result.txt','Original target external bytes');send({method:'item/completed',params:{threadId:'target-real-session',turnId:'target-turn',item:{id:'target-answer',type:'agentMessage',text:'TARGET_EXTERNAL_RESULT'}}});send({method:'turn/completed',params:{threadId:'target-real-session',turn:{id:'target-turn',status:'completed'}}});}});`);
   const settings=await external.settings();await external.configure({defaultAgent:null,agents:[{id:'fixture',name:'External fixture',harness:'codex',enabled:true,command:process.execPath,args:[script]}]},settings.revision,'target-preset');
   const terminalOwner: { current?: ReturnType<typeof createTerminalRuntime> } = {};

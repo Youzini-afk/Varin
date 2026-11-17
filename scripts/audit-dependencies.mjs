@@ -17,6 +17,7 @@ const repairs = [
   ['minimatch@10.2.6', 'GHSA-g3hv-75wg-m249'],
   ['glob@11.1.0', 'GHSA-3g3m-2fjr-6pw4'],
   ['glob@13.0.6', 'GHSA-3g3m-2fjr-6pw4'],
+  ['picomatch@4.0.7', 'GHSA-fc5q-39xc-vjpf'],
 ];
 for (const [dependency] of repairs) {
   if (manifest.patchedDependencies?.[dependency] !== `bun-patches/${dependency}.patch`) {

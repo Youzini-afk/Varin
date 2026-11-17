@@ -136,7 +136,7 @@ The repository does not ship another product's Firebase or Apple credentials.
 - If `xcodebuild` reports that the active developer directory is Command Line Tools, keep using the provided scripts or set `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
 - If Android builds fail with `Unable to locate a Java Runtime` or `source release: 21`, install/use JDK 21 and set `JAVA_HOME` accordingly.
 - If Android SDK packages are missing, install `platform-tools`, `platforms;android-36`, and `build-tools;36.0.0`, then accept SDK licenses.
-- If CocoaPods cannot find Capacitor pods after reinstalling dependencies, run `bun install` from the workspace root, then rerun `bun run sync`.
+- If CocoaPods cannot find Capacitor pods after reinstalling dependencies, run `bun install` from the workspace root, then rerun `bun run sync`. Before the first simulator build on a fresh checkout, or after native plugins change, run that sync once: the simulator intentionally copies web assets without regenerating the device Podfile on every build.
 - If connecting to a remote Varin server fails from the app while `/health` works in curl, check that the server build includes the packaged-client CORS allowlist for `capacitor://localhost` and local dev origins.
 - If `serve-sim` preview says the stream is not producing frames, check the raw MJPEG stream before assuming the simulator stopped. In prior testing the raw stream worked while the browser preview UI stayed stale.
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { EventEmitter } from "node:events";
+import { createRequire } from "node:module";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,6 +38,25 @@ describe("PDF engine", () => {
     context.drawImage(await loadImage(image.data), 0, 0);
     expect([...context.getImageData(40, 20, 1, 1).data]).toEqual([255, 0, 0, 255]);
     expect([...context.getImageData(180, 20, 1, 1).data]).toEqual([255, 255, 255, 255]);
+  });
+
+  it("rasterizes both text columns without painting the gap between them", async () => {
+    const hostRequire = createRequire(import.meta.url);
+    const pdfRequire = createRequire(hostRequire.resolve("pdfjs-dist/legacy/build/pdf.mjs"));
+    expect(pdfRequire("@napi-rs/canvas/package.json").version).toBe(hostRequire("@napi-rs/canvas/package.json").version);
+    // Extraction can succeed even when native font shaping paints a blank PNG.
+    const image = await createPdfEngine().renderPage({ source: makePdf(), page: 1, scale: 1 });
+    const canvas = createCanvas(image.width, image.height);
+    const context = canvas.getContext("2d");
+    context.drawImage(await loadImage(image.data), 0, 0);
+    const hasInk = (x: number, width: number) => {
+      const { data } = context.getImageData(x, 12, width, 22);
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i]! < 128 && data[i + 1]! < 128 && data[i + 2]! < 128 && data[i + 3]! > 128) return true;
+      }
+      return false;
+    };
+    expect([hasInk(18, 48), hasInk(72, 38), hasInk(118, 60)]).toEqual([true, false, true]);
   });
 
   it("honors cancellation and reports absent optional components", async () => {

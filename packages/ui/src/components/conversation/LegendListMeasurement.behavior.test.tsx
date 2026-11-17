@@ -103,6 +103,21 @@ const rows = (length: number, revision = 0) => Array.from({ length }, (_, i) => 
 }));
 
 describe.each([['ESM', LegendList], ['CJS', cjs.LegendList]] as const)('%s measurement', (_entry, List) => {
+  it('keeps mounted rows in reading order when older messages are prepended', async () => {
+    rowHeight = 48;
+    const data = rows(4);
+    const render = (items: typeof data) => <List data={items} estimatedItemSize={48}
+      style={{ height: 600 }} keyExtractor={item => item.id} recycleItems={false}
+      renderItem={({ item }) => <button data-measurement-row={item.id}>{item.text}</button>} />;
+    await act(async () => root.render(render(data.slice(1)))); await settle();
+    const retained = mount.querySelector('[data-measurement-row="row-2"]');
+    expect(retained).not.toBeNull();
+    await act(async () => root.render(render(data))); await settle();
+    expect([...mount.querySelectorAll('[data-measurement-row]')].map(row =>
+      row.getAttribute('data-measurement-row'))).toEqual(data.map(item => item.id));
+    expect(mount.querySelector('[data-measurement-row="row-2"]')).toBe(retained);
+  });
+
   it('renders after a long prefix of collapsed rows without recursive updates', async () => {
     zeroPrefix = 1800;
     const ref = React.createRef<LegendListRef>();

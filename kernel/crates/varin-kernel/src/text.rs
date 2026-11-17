@@ -684,8 +684,8 @@ fn raw_positions(
 /// may coarsen a replacement, never omit text or split a Unicode scalar. Exact
 /// editor-provided edits bypass this inference entirely.
 fn replacement_ranges(old: &str, new: &str) -> Vec<(usize, usize, String)> {
-    fn ranges<'a>(
-        diff: &similar::TextDiff<'a, 'a, 'a, str>,
+    fn ranges(
+        diff: &similar::TextDiff<'_, '_, str>,
         offset: usize,
     ) -> Vec<(usize, usize, String)> {
         let mut result = Vec::new();
@@ -729,9 +729,12 @@ fn replacement_ranges(old: &str, new: &str) -> Vec<(usize, usize, String)> {
             refined.push((start, end, replacement));
             continue;
         }
+        // For byte-preserving saves prefer unchanged scalars to a prettier display diff.
+        // RawMyers retains the shortest-edit policy within the shared deadline.
         let diff = similar::TextDiff::configure()
+            .algorithm(similar::Algorithm::RawMyers)
             .deadline(deadline)
-            .diff_chars(&old[start..end], &replacement);
+            .diff_chars(&old[start..end], replacement.as_str());
         refined.extend(ranges(&diff, start));
     }
     refined
@@ -1597,6 +1600,20 @@ mod tests {
         let (bytes, _) = serialize(&new, Some(original), Some(&format), None, true, None).unwrap();
         assert_eq!(bytes, b"new\r\n\xa3\xa0keep\ndone\r");
     }
+    #[test]
+    fn inferred_inline_changes_keep_original_gbk_aliases_on_the_changed_line() {
+        let original = b"left A\xa3\xa0B right\r\nkeep\n";
+        let (old, format) = decode(original, Some("gbk"), None).unwrap();
+        assert_ne!(encode(&old, &format).unwrap(), original);
+        let new = normalize(&old).replace("left", "新").replace("right", "尾");
+        let (saved, _) = serialize(&new, Some(original), Some(&format), None, true, None).unwrap();
+        let mut expected = encode("新 A", &format).unwrap();
+        expected.extend_from_slice(b"\xa3\xa0B ");
+        expected.extend(encode("尾", &format).unwrap());
+        expected.extend_from_slice(b"\r\nkeep\n");
+        assert_eq!(saved, expected);
+    }
+
     #[test]
     fn format_only_conversion_preserves_each_original_line_ending() {
         let original = b"a\r\nb\nc\r";

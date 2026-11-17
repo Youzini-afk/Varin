@@ -58,7 +58,7 @@ pub struct ThreadRead {
 pub(super) fn install_functions(db: &Connection) -> Result<()> {
     db.create_scalar_function("varin_lower", 1,
         rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC | rusqlite::functions::FunctionFlags::SQLITE_INNOCUOUS,
-        |context| Ok(context.get::<String>(0)?.to_lowercase()))?;
+        |context| Ok(context.get_raw(0).as_str()?.to_lowercase()))?;
     Ok(())
 }
 

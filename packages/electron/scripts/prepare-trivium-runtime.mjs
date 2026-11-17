@@ -10,7 +10,7 @@ import { patchTriviumArm64Loader } from './patch-trivium-arm64-loader.mjs';
 const require = createRequire(import.meta.url);
 const { detectKernelBinaryIdentity, normalizeKernelArchitecture } = require('../../../scripts/kernel-binary-identity.cjs');
 const packages = [
-  { name: 'triviumdb', version: '0.9.0', commit: '7edf8ceacd85cd71944a3471ac05df377995a172' },
+  { name: 'triviumdb', version: '0.9.1', commit: '46f767f8c5befeb7da091267f2b19052f3cba8d9' },
   { name: 'triviumdb-upgrade-0.8', version: '0.8.10', commit: '221a628209838483e20296d29bcf35fc3e2dd156' },
 ];
 const TARGET = 'aarch64-pc-windows-msvc';

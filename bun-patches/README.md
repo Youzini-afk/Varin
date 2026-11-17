@@ -4,8 +4,9 @@
 patched dependency, check whether its upstream release includes the change; otherwise
 port the patch and remove the obsolete version's entry and file.
 
-- `@legendapp/list`: preserve same-frame shrinking for chat rows marked
-  `data-legend-immediate-shrink` so animated collapse does not leave the following rows behind.
+- `@legendapp/list`: keep hidden timelines from losing row sizes, and measure visible rows after the commit
+  to avoid recursive layout updates on long runs of collapsed rows. Preserve upstream synchronous DOM
+  ordering for keyboard focus and same-frame shrinking for rows marked `data-legend-immediate-shrink`.
 - `app-builder-lib`: preserve Varin's NSIS extraction, old-version uninstall, assisted
   pages and app-data removal hooks.
 - `minimatch` 9.0.9 and 10.2.4–10.2.6: backport the preprocessing changes from
@@ -19,6 +20,9 @@ port the patch and remove the obsolete version's entry and file.
   Version 13's default exports normally use bundled copies of the walker. Its patch
   routes all entrypoints to the equivalent unbundled implementation so the fix
   applies to both `import` and `require`.
+- `picomatch` 4.0.7 uses its existing safe compilation path for repeated extglobs
+  containing a raw wildcard, including single-branch groups
+  ([GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)).
 
 `bun run audit:dependencies` verifies the installed security repairs before excluding
 their version-only advisory reports. `scripts/glob-security.test.mjs` exercises CJS and

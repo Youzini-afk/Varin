@@ -1,15 +1,22 @@
 import { it, expect, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import type { ExternalAgentSettings } from "@varin/application-client";
 import { ExternalAgentInstaller } from "./installations.js";
 import type { createKernelProcessService } from "../kernel/process-service.js";
 
-async function fixture() {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "varin-install-"));
+async function fixture(aliasRoot = false) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "varin-install-"));
+  let directory = root;
+  if (aliasRoot) {
+    const physical = path.join(root, "physical");
+    await mkdir(physical);
+    directory = path.join(root, "alias");
+    await symlink(physical, directory, process.platform === "win32" ? "junction" : "dir");
+  }
   let settings: ExternalAgentSettings = {
     revision: 1,
     defaultAgent: null,
@@ -142,16 +149,17 @@ async function fixture() {
     },
     close: async () => {
       await installer.close();
-      await rm(directory, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true });
     },
   };
 }
 
 it("activates a complete private generation and leaves it in place after a failed update", async () => {
-  const f = await fixture();
+  const f = await fixture(true);
   try {
     await f.installer.request({ action: "install", id: "codex" });
-    expect((await f.complete()).status).toBe("succeeded");
+    const operation = await f.complete();
+    expect(operation.status, operation.error).toBe("succeeded");
     const installed = f.settings().agents[0]!;
     expect(await f.installer.inspect(installed)).toMatchObject({
       version: "1.2.3",
@@ -181,7 +189,8 @@ it("preserves enable changes during installation and waits for native cancellati
     await vi.waitFor(() => expect(finish).toBeDefined());
     f.disable();
     finish();
-    expect((await f.complete()).status).toBe("succeeded");
+    const operation = await f.complete();
+    expect(operation.status, operation.error).toBe("succeeded");
     expect(f.settings().agents[0]!.enabled).toBe(false);
     let cancelled!: () => void;
     f.hold(

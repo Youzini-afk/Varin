@@ -120,7 +120,6 @@ updates:
         patterns:
           - globals
           - tsx
-          - concurrently
           - cross-env
           - nodemon
         update-types: [minor, patch]

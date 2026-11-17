@@ -8,7 +8,11 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk/core';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { record, text, type RecordValue } from './transport.js';
+
+// The worker's own Host manifest pins the SDK; the selected CLI reports its version separately.
+const sdkVersion: string = createRequire(import.meta.url)('../../../package.json').dependencies['@anthropic-ai/claude-agent-sdk'];
 
 type NativeCorrelation = {
   turnId: string;
@@ -233,7 +237,7 @@ export class ClaudeBridge {
                 turnId,
                 name,
                 input,
-                suggestions: options.suggestions,
+                suggestions: options.suppressAlwaysAllowRule ? undefined : options.suggestions,
                 toolUseId: options.toolUseID,
               },
             });
@@ -251,6 +255,7 @@ export class ClaudeBridge {
         return {
           sessionId: this.sessionId,
           bridgeProtocol: 2,
+          sdkVersion,
           models: initialized.models,
           modes: this.modes,
           commands: initialized.commands,

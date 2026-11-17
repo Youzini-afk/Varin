@@ -26,6 +26,13 @@ export class ClaudeContent {
 
   receive(frame: RecordValue) {
     const scope = JSON.stringify([text(frame.session_id), text(frame.parent_tool_use_id)]);
+    // A failed hook can warn without blocking a tool. Preserve the native warning
+    // as a notice, not as a tool verdict, permission request, or terminal result.
+    if (frame.type === 'system' && frame.subtype === 'informational' && frame.level === 'warning'
+        && text(frame.uuid) && text(frame.content)) {
+      this.publish({ id: `warning:${scope}:${frame.uuid}`, kind: 'notice', text: text(frame.content), complete: true });
+      return;
+    }
     if (frame.type === 'stream_event') {
       const event = record(frame.event);
       if (event.type === 'message_start') {

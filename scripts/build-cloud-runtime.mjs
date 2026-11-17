@@ -5,6 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   cpSync,
   existsSync,
+  mkdtempSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -13,6 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { syncWorkspaceLockVersions } from './sync-workspace-lock-versions.mjs';
@@ -36,8 +38,8 @@ export const CLOUD_RUNTIME_PACKAGE_DIRS = Object.freeze([
 // A frozen install alone can accept a workspace manifest whose new production
 // dependency was never recorded. Keep this inexpensive check with the builder,
 // so CI preflight and normal packaging use the same production boundary.
-export const verifyCloudRuntimeLock = (root = repoRoot) => {
-  const lock = JSON.parse(readFileSync(path.join(root, 'scripts/cloud-runtime.bun.lock'), 'utf8')
+export const verifyCloudRuntimeLock = (root = repoRoot, candidate = path.join(root, 'scripts/cloud-runtime.bun.lock')) => {
+  const lock = JSON.parse(readFileSync(candidate, 'utf8')
     .replace(/,(\s*[}\]])/g, '$1'));
   const rootPackage = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
   // createRuntimeRootPackage forwards all root overrides, including transitive
@@ -65,11 +67,14 @@ export const verifyCloudRuntimeLock = (root = repoRoot) => {
 
 // All shipped native authorities use verified prebuilt binaries. No PTY source rebuild fallback.
 export const CLOUD_RUNTIME_TRUSTED_DEPENDENCIES = Object.freeze([]);
-const cloudRuntimePatches = (rootPackage) => {
-  const bracePatch = rootPackage.patchedDependencies?.['braces@3.0.3'];
-  if (bracePatch !== 'bun-patches/braces@3.0.3.patch') throw new Error('Cloud runtime is missing its pinned braces security patch');
-  return { 'braces@3.0.3': bracePatch };
-};
+const cloudPatchedPackages = ['braces@3.0.3', 'picomatch@4.0.7'];
+const cloudRuntimePatches = (rootPackage) => Object.fromEntries(cloudPatchedPackages.map(dependency => {
+  const relative = `bun-patches/${dependency}.patch`;
+  if (rootPackage.patchedDependencies?.[dependency] !== relative) {
+    throw new Error(`Cloud runtime is missing its pinned security patch for ${dependency}`);
+  }
+  return [dependency, relative];
+}));
 
 // Inherited services, endpoints and commands that must never ship: Varin has its own update path and
 // no default relay (VARIN_RELAY_URL only).
@@ -217,6 +222,61 @@ const createRuntimeRootPackage = (rootPackage) => ({
   patchedDependencies: cloudRuntimePatches(rootPackage),
 });
 
+const writeRuntimeDependencyInputs = (outputDir) => {
+  const rootPackage = readJson(path.join(repoRoot, 'package.json'));
+  mkdirSync(outputDir, { recursive: true });
+  writeFileSync(path.join(outputDir, 'package.json'),
+    `${JSON.stringify(createRuntimeRootPackage(rootPackage), null, 2)}\n`);
+  for (const relative of Object.values(cloudRuntimePatches(rootPackage))) {
+    copyEntry(path.join(repoRoot, relative), path.join(outputDir, relative), true);
+  }
+  for (const directory of CLOUD_RUNTIME_PACKAGE_DIRS) {
+    const relative = path.join('packages', directory);
+    const stagedManifest = readJson(path.join(repoRoot, relative, 'package.json'));
+    delete stagedManifest.devDependencies;
+    stagedManifest.private = true;
+    mkdirSync(path.join(outputDir, relative), { recursive: true });
+    writeFileSync(path.join(outputDir, relative, 'package.json'),
+      `${JSON.stringify(stagedManifest, null, 2)}\n`);
+  }
+  return rootPackage;
+};
+
+const reconcileRuntimeLock = (outputDir, { updateLock = false, json = false } = {}) => {
+  const lock = path.join(outputDir, 'bun.lock');
+  if (existsSync(canonicalLockPath)) {
+    cpSync(canonicalLockPath, lock, { force: true });
+  } else if (!updateLock) {
+    throw new Error(`Canonical cloud runtime lockfile is missing: ${canonicalLockPath}`);
+  }
+  if (updateLock) {
+    syncWorkspaceLockVersions(lock, CLOUD_RUNTIME_PACKAGE_DIRS.map(directory => {
+      const manifest = readJson(path.join(outputDir, 'packages', directory, 'package.json'));
+      return { directory: `packages/${directory}`, name: manifest.name, version: manifest.version };
+    }));
+    run('bun', ['install', '--lockfile-only', '--ignore-scripts'], {
+      cwd: outputDir, json, label: 'Cloud runtime lockfile generation',
+    });
+  }
+  run('bun', ['install', '--lockfile-only', '--production', '--frozen-lockfile', '--ignore-scripts'], {
+    cwd: outputDir, json, label: 'Cloud runtime production lock verification',
+  });
+  if (updateLock) {
+    verifyCloudRuntimeLock(repoRoot, lock);
+    cpSync(lock, canonicalLockPath, { force: true });
+  }
+};
+
+const updateRuntimeLockOnly = () => {
+  const outputDir = mkdtempSync(path.join(tmpdir(), 'varin-cloud-lock-'));
+  try {
+    writeRuntimeDependencyInputs(outputDir);
+    reconcileRuntimeLock(outputDir, { updateLock: true });
+  } finally {
+    rmSync(outputDir, { recursive: true, force: true });
+  }
+};
+
 const collectPackageMetadata = (root = repoRoot) => Object.fromEntries(
   CLOUD_RUNTIME_PACKAGE_DIRS.map((directory) => {
     const manifest = readJson(path.join(root, 'packages', directory, 'package.json'));
@@ -295,9 +355,8 @@ export const verifyCloudRuntimeLayout = (outputDir, { requireLock = true, requir
   if (rootManifest.license !== 'AGPL-3.0-only') {
     throw new Error(`Unexpected cloud runtime license: ${rootManifest.license || '(missing)'}`);
   }
-  for (const relative of Object.values(rootManifest.patchedDependencies ?? {})) {
-    if (typeof relative !== 'string' || relative.split(/[\\/]/).includes('..')
-      || relative !== 'bun-patches/braces@3.0.3.patch'
+  for (const [dependency, relative] of Object.entries(rootManifest.patchedDependencies ?? {})) {
+    if (!cloudPatchedPackages.includes(dependency) || relative !== `bun-patches/${dependency}.patch`
       || !existsSync(path.join(outputDir, relative))) {
       throw new Error(`Cloud runtime patch is missing: ${String(relative)}`);
     }
@@ -410,6 +469,9 @@ export const installCloudRuntimeDependencies = (
       const pdfjsEntry = webRequire.resolve('pdfjs-dist/legacy/build/pdf.mjs');
       const pdfRequire = createRequire(pdfjsEntry);
       const canvas = pdfRequire('@napi-rs/canvas');
+      if (pdfRequire('@napi-rs/canvas/package.json').version !== webRequire('@napi-rs/canvas/package.json').version) {
+        throw new Error('PDF.js and Host previews resolved different native Canvas versions');
+      }
       const surface = canvas.createCanvas(2, 2);
       const context = surface.getContext('2d');
       context.fillStyle = '#ff0000';
@@ -441,15 +503,7 @@ const stageRuntimeTree = (outputDir, productWeb = false) => {
   rmSync(outputDir, { recursive: true, force: true });
   mkdirSync(path.join(outputDir, 'packages'), { recursive: true });
 
-  const rootPackage = readJson(path.join(repoRoot, 'package.json'));
-  const runtimePatches = cloudRuntimePatches(rootPackage);
-  writeFileSync(
-    path.join(outputDir, 'package.json'),
-    `${JSON.stringify(createRuntimeRootPackage(rootPackage), null, 2)}\n`,
-  );
-  for (const relative of Object.values(runtimePatches)) {
-    copyEntry(path.join(repoRoot, relative), path.join(outputDir, relative), true);
-  }
+  const rootPackage = writeRuntimeDependencyInputs(outputDir);
   copyEntry(path.join(repoRoot, 'scripts/smoke-kernel-release.mjs'), path.join(outputDir, 'verify-kernel.mjs'), true);
   copyEntry(path.join(repoRoot, 'scripts/smoke-cloud-services.mjs'), path.join(outputDir, 'verify-services.mjs'), true);
   copyEntry(path.join(repoRoot, 'kernel/THIRD_PARTY_NOTICES.md'), path.join(outputDir, 'KERNEL_THIRD_PARTY_NOTICES.md'), true);
@@ -464,6 +518,7 @@ const stageRuntimeTree = (outputDir, productWeb = false) => {
     const sourceRoot = path.join(repoRoot, 'packages', directory);
     const destinationRoot = path.join(outputDir, 'packages', directory);
     for (const entry of packageFiles[directory].required) {
+      if (entry === 'package.json') continue; // Written with the production dependency inputs.
       const productEntry = directory === 'web' && productWeb && ['server', 'dist', 'kernel', 'bin'].includes(entry)
         ? path.join(repoRoot, 'artifacts/build/web', entry) : path.join(sourceRoot, entry);
       copyEntry(productEntry, path.join(destinationRoot, entry), true);
@@ -472,11 +527,6 @@ const stageRuntimeTree = (outputDir, productWeb = false) => {
       copyEntry(path.join(sourceRoot, entry), path.join(destinationRoot, entry), false);
     }
 
-    const stagedManifestPath = path.join(destinationRoot, 'package.json');
-    const stagedManifest = readJson(stagedManifestPath);
-    delete stagedManifest.devDependencies;
-    stagedManifest.private = true;
-    writeFileSync(stagedManifestPath, `${JSON.stringify(stagedManifest, null, 2)}\n`);
   }
 
   pruneNonRuntimeFiles(path.join(outputDir, 'packages'));
@@ -539,42 +589,7 @@ export const buildCloudRuntime = ({
     throw new Error('--update-lock cannot be combined with --no-lock.');
   }
 
-  if (generateLock) {
-    // Refresh workspace identities from the existing graph without upgrading unrelated dependencies.
-    if (existsSync(canonicalLockPath)) {
-      cpSync(canonicalLockPath, path.join(resolvedOutput, 'bun.lock'), { force: true });
-    } else if (!updateLock) {
-      throw new Error(`Canonical cloud runtime lockfile is missing: ${canonicalLockPath}`);
-    }
-    if (updateLock) {
-      syncWorkspaceLockVersions(path.join(resolvedOutput, 'bun.lock'), CLOUD_RUNTIME_PACKAGE_DIRS.map((directory) => {
-        const manifest = readJson(path.join(resolvedOutput, 'packages', directory, 'package.json'));
-        return { directory: `packages/${directory}`, name: manifest.name, version: manifest.version };
-      }));
-    }
-    run('bun', [
-      'install',
-      '--lockfile-only',
-      '--ignore-scripts',
-      // Staged manifests already omit devDependencies. Bun's production install freezes an
-      // existing lock; refresh without that flag, then consumers verify it in production mode.
-      ...(updateLock ? [] : ['--production', '--frozen-lockfile']),
-    ], {
-      cwd: resolvedOutput,
-      json,
-      label: updateLock
-        ? 'Cloud runtime lockfile generation'
-        : 'Cloud runtime lockfile verification',
-    });
-    if (updateLock) {
-      run('bun', ['install', '--lockfile-only', '--production', '--frozen-lockfile', '--ignore-scripts'], {
-        cwd: resolvedOutput,
-        json,
-        label: 'Cloud runtime production lock verification',
-      });
-      cpSync(path.join(resolvedOutput, 'bun.lock'), canonicalLockPath, { force: true });
-    }
-  }
+  if (generateLock) reconcileRuntimeLock(resolvedOutput, { updateLock, json });
 
   verifyCloudRuntimeLayout(resolvedOutput, { requireLock: generateLock });
 
@@ -621,17 +636,20 @@ const parseArgs = (argv) => {
       case '--skip-build': options.build = false; break;
       case '--no-lock': options.generateLock = false; break;
       case '--update-lock': options.updateLock = true; break;
+      case '--update-lock-only': options.updateLockOnly = true; break;
       case '--check-lock': options.checkLock = true; break;
       case '--install': options.install = true; break;
       case '--cache-dir': options.cacheDir = value(); break;
       case '--json': options.json = true; break;
       case '--help':
-        console.log(`Usage: node scripts/build-cloud-runtime.mjs [options]\n\nOptions:\n  --output <dir>      Runtime tree output (default: artifacts/cloud-runtime)\n  --archive <file>    Create a .tgz archive\n  --no-archive        Do not create an archive\n  --skip-build        Stage existing package build outputs\n  --no-lock           Skip production lockfile generation\n  --update-lock       Regenerate scripts/cloud-runtime.bun.lock\n  --check-lock        Check committed production manifests without building\n  --install           Install target-platform production dependencies\n  --cache-dir <dir>   Bun cache used by --install\n  --json              Print the final metadata as JSON only`);
+        console.log(`Usage: node scripts/build-cloud-runtime.mjs [options]\n\nOptions:\n  --output <dir>      Runtime tree output (default: artifacts/cloud-runtime)\n  --archive <file>    Create a .tgz archive\n  --no-archive        Do not create an archive\n  --skip-build        Stage existing package build outputs\n  --no-lock           Skip production lockfile generation\n  --update-lock       Regenerate the lock while staging the runtime\n  --update-lock-only  Regenerate the production lock without building or staging runtime outputs\n  --check-lock        Check committed production manifests without building\n  --install           Install target-platform production dependencies\n  --cache-dir <dir>   Bun cache used by --install\n  --json              Print the final metadata as JSON only`);
         return null;
       default: throw new Error(`Unknown option: ${arg}`);
     }
   }
-  if (options.checkLock && argv.length !== 1) throw new Error('--check-lock must be used on its own.');
+  if ((options.checkLock || options.updateLockOnly) && argv.length !== 1) {
+    throw new Error('--check-lock and --update-lock-only must be used on their own.');
+  }
   return options;
 };
 
@@ -644,6 +662,8 @@ if (isDirectExecution) {
     if (options?.checkLock) {
       verifyCloudRuntimeLock();
       console.log('Cloud runtime lock matches the production workspace.');
+    } else if (options?.updateLockOnly) {
+      updateRuntimeLockOnly();
     } else if (options) {
       const result = buildCloudRuntime(options);
       if (options.json) console.log(JSON.stringify(result));

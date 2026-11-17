@@ -31,6 +31,28 @@ function legacy(checkpoint: boolean, dim = 8) {
   return file;
 }
 
+it('recovers the previous release checkpoint and WAL together before publishing a new checkpoint', () => {
+  // Frozen file group from the published 0.9.0 addon: insert + createIndex + flush,
+  // then insert + link and immediate process exit. No old engine is shipped for this path.
+  const fixture = new URL('./fixtures/trivium-0.9.0-checkpoint-wal.json', import.meta.url);
+  const files: Record<string, string> = JSON.parse(readFileSync(fixture, 'utf8'));
+  const root = mkdtempSync(join(tmpdir(), 'varin-tdb-v10-')); roots.push(root);
+  for (const [name, data] of Object.entries(files)) writeFileSync(join(root, name), Buffer.from(data, 'base64'));
+  const file = join(root, 'knowledge.tdb');
+  const db = openKnowledgeDatabase(file, options);
+  try {
+    expect(db.getPayload(1)).toEqual({ type: 'knowledge', content: 'checkpoint' });
+    expect(db.get(2)).toMatchObject({ payload: { type: 'knowledge', content: 'pending WAL' }, vector: Array(8).fill(0.25) });
+    expect(db.get(1)?.edges).toContainEqual(expect.objectContaining({ targetId: 2, label: 'related' }));
+    db.updatePayload(2, { type: 'knowledge', content: 'after upgrade' });
+  } finally { db.close(); }
+  const reader = openKnowledgeDatabase(file, { ...options, accessMode: 'readOnly' });
+  try {
+    expect(reader.getPayload(2)).toEqual({ type: 'knowledge', content: 'after upgrade' });
+    expect(reader.get(1)?.edges).toContainEqual(expect.objectContaining({ targetId: 2, label: 'related' }));
+  } finally { reader.close(); }
+});
+
 it('upgrades a 0.8 checkpoint and its pending WAL without changing node identities or graph links', () => {
   const file = legacy(true);
   const db = openKnowledgeDatabase(file, options);

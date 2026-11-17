@@ -23,6 +23,20 @@ const minimatchConsumers = [
   from(from(from(from(web, 'exceljs'), 'archiver'), 'archiver-utils'), 'glob'),
 ];
 
+test('installed picomatch flattens a repeated wildcard or uses its literal fallback (GHSA-fc5q-39xc-vjpf)', () => {
+  const consumers = [web, from(from(web, 'http-proxy-middleware'), 'micromatch')];
+  const tested = new Set();
+  for (const consumer of consumers) {
+    tested.add(consumer('picomatch/package.json').version);
+    const picomatch = consumer('picomatch');
+    assert.equal(picomatch('src/+(*)/icon.svg')('src/icons/icon.svg'), true);
+    assert.equal(picomatch('src/+(icon*)/file.svg')('src/+(icon*)/file.svg'), true);
+    assert.equal(picomatch('src/+(small|large)/icon.svg')('src/smalllarge/icon.svg'), true);
+    assert.equal(picomatch('src/+(a[*])/icon.svg')('src/a*a*/icon.svg'), true);
+  }
+  assert.deepEqual([...tested].sort(), lockedVersions('picomatch'));
+});
+
 test('all installed minimatch lines preserve matches and avoid globparts amplification (GHSA-g3hv-75wg-m249)', async () => {
   const tested = new Set();
   for (const consumer of minimatchConsumers) {

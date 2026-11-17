@@ -71,15 +71,10 @@ jobs:
         with:
           node-version: 24
 
-      # The workspace lockfile already matches, because Dependabot maintains it.
-      - run: bun install --frozen-lockfile
+      # Check the candidate workspace graph without running dependency lifecycle scripts.
+      - run: bun install --lockfile-only --frozen-lockfile --ignore-scripts
 
-      # `update:cloud-runtime-lock` stages existing package build outputs rather than building, so
-      # the workspace has to be built first, the same order the production-build job uses.
-      - run: bun run build
-
-      # Regenerates scripts/cloud-runtime.bun.lock. The underlying install runs with
-      # `--ignore-scripts`, so no package lifecycle script executes here.
+      # Regenerate the same production manifest graph as the runtime builder, without compiling it.
       - run: bun run update:cloud-runtime-lock
 
       - name: Commit the refreshed lockfile

@@ -1,8 +1,8 @@
 diff --git a/react.js b/react.js
-index 4500177b44094138489d1581f6ece97e719dc4de..2978ca7616ae7197a4122588eeea8dc4a76b9133 100644
+index 515545471e08426fc90856256db9491db0ca4b92..39e3be44ff2b11d9ca51c11639a900461cef7099 100644
 --- a/react.js
 +++ b/react.js
-@@ -5504,6 +5504,12 @@ function measureContainersInLayoutEffect(ctx, targetContainerIds = null) {
+@@ -5647,6 +5647,12 @@ function measureContainersInLayoutEffect(ctx, targetContainerIds = null) {
      if (itemKey !== void 0 && element && isContainerItemCurrent(ctx, containerId, itemKey)) {
        const generation = (_b = ctx.state.containerItemGenerations[containerId]) != null ? _b : 0;
        const rect = element.getBoundingClientRect();
@@ -15,15 +15,14 @@ index 4500177b44094138489d1581f6ece97e719dc4de..2978ca7616ae7197a4122588eeea8dc4
        setContainerLayoutBaseline(element, rect);
        measurements.push({
          containerId,
-@@ -5553,12 +5559,16 @@ var ContainerLayoutCoordinator = typedMemo(function ContainerLayoutCoordinatorCo
-   const ctx = useStateContext();
-   const [containerLayoutEpoch] = useArr$(["containerLayoutEpoch"]);
-   React3__namespace.useLayoutEffect(() => {
+@@ -5815,12 +5821,15 @@ var ContainerLayoutCoordinator = typedMemo(function ContainerLayoutCoordinatorCo
+     {
+       sortContainerElements(ctx);
+     }
 -    {
-+    // Varin: measure after the commit, before paint. Filling zero-height rows can
-+    // otherwise synchronously allocate and measure another batch inside React's
-+    // layout phase until it exceeds the nested-update depth. The existing work
-+    // owner coalesces commits and cancels this measurement when the list unmounts.
++    // Varin: preserve synchronous DOM ordering above; only defer measurement.
++    // Filling collapsed rows can allocate another batch recursively during
++    // React's layout phase. Coalesce it after the commit and before paint.
 +    ctx.state.scheduledWork.microtask(() => {
        const targetContainerIds = getContainerLayoutEffectScope(ctx);
        if (targetContainerIds !== void 0) {
@@ -34,7 +33,7 @@ index 4500177b44094138489d1581f6ece97e719dc4de..2978ca7616ae7197a4122588eeea8dc4
    }, [ctx, containerLayoutEpoch]);
    return children;
  });
-@@ -5995,6 +6005,12 @@ var pendingWebShrinkFrame;
+@@ -6257,6 +6266,12 @@ var pendingWebShrinkFrame;
  function cancelWebShrinkMeasurement(state) {
    pendingWebShrinkMeasurements.delete(state);
  }
@@ -47,7 +46,7 @@ index 4500177b44094138489d1581f6ece97e719dc4de..2978ca7616ae7197a4122588eeea8dc4
  function scheduleWebShrinkMeasurement(state, confirmMeasurement) {
    pendingWebShrinkMeasurements.set(state, confirmMeasurement);
    if (pendingWebShrinkFrame === void 0) {
-@@ -6028,7 +6044,7 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+@@ -6290,7 +6305,7 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
        size: layout
      });
    };
@@ -57,10 +56,10 @@ index 4500177b44094138489d1581f6ece97e719dc4de..2978ca7616ae7197a4122588eeea8dc4
      scheduleWebShrinkMeasurement(state, () => {
        var _a4;
 diff --git a/react.mjs b/react.mjs
-index 1dab5e5a279a58ba07deb490aa87231415d37210..72b3a41ccb13189e7fae342fdaac6a49ba4951cd 100644
+index ce08abe7ee62e8940f9c6ff169829244bd6bb736..62d27cd1f09b6462d47545859431a0522aa609b5 100644
 --- a/react.mjs
 +++ b/react.mjs
-@@ -5483,6 +5483,12 @@ function measureContainersInLayoutEffect(ctx, targetContainerIds = null) {
+@@ -5626,6 +5626,12 @@ function measureContainersInLayoutEffect(ctx, targetContainerIds = null) {
      if (itemKey !== void 0 && element && isContainerItemCurrent(ctx, containerId, itemKey)) {
        const generation = (_b = ctx.state.containerItemGenerations[containerId]) != null ? _b : 0;
        const rect = element.getBoundingClientRect();
@@ -73,15 +72,14 @@ index 1dab5e5a279a58ba07deb490aa87231415d37210..72b3a41ccb13189e7fae342fdaac6a49
        setContainerLayoutBaseline(element, rect);
        measurements.push({
          containerId,
-@@ -5532,12 +5538,16 @@ var ContainerLayoutCoordinator = typedMemo(function ContainerLayoutCoordinatorCo
-   const ctx = useStateContext();
-   const [containerLayoutEpoch] = useArr$(["containerLayoutEpoch"]);
-   React3.useLayoutEffect(() => {
+@@ -5794,12 +5800,15 @@ var ContainerLayoutCoordinator = typedMemo(function ContainerLayoutCoordinatorCo
+     {
+       sortContainerElements(ctx);
+     }
 -    {
-+    // Varin: measure after the commit, before paint. Filling zero-height rows can
-+    // otherwise synchronously allocate and measure another batch inside React's
-+    // layout phase until it exceeds the nested-update depth. The existing work
-+    // owner coalesces commits and cancels this measurement when the list unmounts.
++    // Varin: preserve synchronous DOM ordering above; only defer measurement.
++    // Filling collapsed rows can allocate another batch recursively during
++    // React's layout phase. Coalesce it after the commit and before paint.
 +    ctx.state.scheduledWork.microtask(() => {
        const targetContainerIds = getContainerLayoutEffectScope(ctx);
        if (targetContainerIds !== void 0) {
@@ -92,7 +90,7 @@ index 1dab5e5a279a58ba07deb490aa87231415d37210..72b3a41ccb13189e7fae342fdaac6a49
    }, [ctx, containerLayoutEpoch]);
    return children;
  });
-@@ -5974,6 +5984,12 @@ var pendingWebShrinkFrame;
+@@ -6236,6 +6245,12 @@ var pendingWebShrinkFrame;
  function cancelWebShrinkMeasurement(state) {
    pendingWebShrinkMeasurements.delete(state);
  }
@@ -105,7 +103,7 @@ index 1dab5e5a279a58ba07deb490aa87231415d37210..72b3a41ccb13189e7fae342fdaac6a49
  function scheduleWebShrinkMeasurement(state, confirmMeasurement) {
    pendingWebShrinkMeasurements.set(state, confirmMeasurement);
    if (pendingWebShrinkFrame === void 0) {
-@@ -6007,7 +6023,7 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+@@ -6269,7 +6284,7 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
        size: layout
      });
    };

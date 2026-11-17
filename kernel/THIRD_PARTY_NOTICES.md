@@ -7,7 +7,7 @@ used by the private executable retain their upstream licenses:
 - `serde`, `serde_json`, `thiserror`, `uuid`, `sha2`, `hex`, and `base64` — MIT or Apache-2.0.
 - `flate2` and its Rust compression backend `miniz_oxide` — MIT or Apache-2.0.
 - `tree-sitter` — MIT.
-- `similar` 2.7.0 — Apache-2.0; bounded deterministic text diffs for format-preserving serialization.
+- `similar` 3.2.1 — Apache-2.0; bounded deterministic text diffs for format-preserving serialization.
 - `vt100` — MIT; maintains the derived PTY viewport without replacing the original output log.
 - `wasmtime`, its C API, and Cranelift — Apache-2.0 with LLVM exceptions.
 - Optional native workspace mount prototypes: `winfsp` / `winfsp-sys` — GPL-3.0;
@@ -353,9 +353,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
-## similar 2.7.0
+## similar 3.2.1
 
-Source: https://crates.io/crates/similar/2.7.0. The following upstream license is retained unmodified.
+Source: https://crates.io/crates/similar/3.2.1. The following upstream license is retained unmodified.
 
                               Apache License
                         Version 2.0, January 2004

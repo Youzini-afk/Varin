@@ -15,6 +15,7 @@ const require = createRequire(import.meta.url);
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const destDir = path.join(webRoot, "application-host", "lib", "structure", "runtime");
 const force = process.argv.includes("--force");
+const refreshParserRuntime = force || process.argv.includes("--refresh-parser-runtime");
 // Checked-in wasm in destDir is the source of truth (D-101). This script
 // skips existing files larger than 1 KiB; pass --force to refresh from npm.
 
@@ -22,9 +23,9 @@ const log = (message) => process.stdout.write(`[copy-structure-runtime] ${messag
 
 fs.mkdirSync(destDir, { recursive: true });
 
-const copyIfNeeded = (source, destName) => {
+const copyIfNeeded = (source, destName, refresh = force) => {
   const dest = path.join(destDir, destName);
-  if (!force && fs.existsSync(dest) && fs.statSync(dest).size > 1024) {
+  if (!refresh && fs.existsSync(dest) && fs.statSync(dest).size > 1024) {
     log(`keep ${destName}`);
     return;
   }
@@ -32,13 +33,18 @@ const copyIfNeeded = (source, destName) => {
     throw new Error(`Missing structure runtime source: ${source}`);
   }
   fs.copyFileSync(source, dest);
+  fs.chmodSync(dest, 0o644);
   log(`copied ${destName} from ${source} (${fs.statSync(dest).size} bytes)`);
 };
 
 const packageRoot = (name) => path.dirname(require.resolve(`${name}/package.json`));
 
 const webTreeSitterWasm = fileURLToPath(import.meta.resolve("web-tree-sitter/web-tree-sitter.wasm"));
-copyIfNeeded(webTreeSitterWasm, "web-tree-sitter.wasm");
+const shippedParserWasm = path.join(destDir, "web-tree-sitter.wasm");
+copyIfNeeded(webTreeSitterWasm, "web-tree-sitter.wasm", refreshParserRuntime);
+if (!fs.readFileSync(shippedParserWasm).equals(fs.readFileSync(webTreeSitterWasm))) {
+  throw new Error("Bundled web-tree-sitter.wasm does not match the installed parser; run structure:copy-runtime with --refresh-parser-runtime and commit the runtime asset.");
+}
 
 const typescriptRoot = packageRoot("tree-sitter-typescript");
 copyIfNeeded(path.join(typescriptRoot, "tree-sitter-typescript.wasm"), "tree-sitter-typescript.wasm");
@@ -65,8 +71,7 @@ const sha256 = (file) => `sha256-${createHash("sha256").update(fs.readFileSync(f
 
 const validateBundledGrammars = async () => {
   const { Parser, Language, Query } = await import("web-tree-sitter");
-  const runtimeWasm = fileURLToPath(import.meta.resolve("web-tree-sitter/web-tree-sitter.wasm"));
-  await Parser.init({ locateFile: () => runtimeWasm });
+  await Parser.init({ locateFile: () => shippedParserWasm });
   let checked = 0;
   for (const [languageId, pack] of Object.entries(manifest.packs ?? {})) {
     const grammarPath = path.join(destDir, pack.grammarFile);

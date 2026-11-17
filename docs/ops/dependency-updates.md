@@ -119,7 +119,8 @@ or type check does not establish native loading, PDF rendering, account authenti
 The report only runs default-branch code and reads PR metadata; it neither installs PR dependencies nor
 executes PR code or project tests. `node --test scripts/dependabot-report.test.mjs` exercises its parsing.
 
-When production dependencies change, prepare the relevant outputs, refresh
-`scripts/cloud-runtime.bun.lock` through `bun run update:cloud-runtime-lock`, and review the resulting graph.
+When production dependencies change, refresh `scripts/cloud-runtime.bun.lock` through
+`bun run update:cloud-runtime-lock` and review the resulting graph. This command projects the same
+production manifests as staging, but does not require built package or kernel outputs.
 Native executables and assets need target-platform validation; historical SDK patches and verification
 batches remain in Git rather than acting as current installation instructions.

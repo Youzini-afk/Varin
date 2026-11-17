@@ -2,19 +2,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { stat, realpath } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import type { GoogleAuth } from 'google-auth-library';
 
-interface GoogleAuthClient { getRequestHeaders(): Promise<Headers> }
-interface GoogleAuthModule { GoogleAuth: new (options: { scopes: string[]; keyFilename?: string }) => GoogleAuthClient }
 export interface GoogleCredentialSource { identity: string; keyFilename?: string }
-let modulePromise: Promise<GoogleAuthModule> | undefined;
-function googleAuthLibrary(): Promise<GoogleAuthModule> {
-  modulePromise ??= import('google-auth-library') as unknown as Promise<GoogleAuthModule>;
-  return modulePromise;
-}
 const fail = (code: string): never => { throw Object.assign(new Error(code), { code }); };
 export class GoogleCredentialOwner {
   readonly #ambientIdentity = randomUUID();
-  readonly #clients = new Map<string, Promise<GoogleAuthClient>>();
+  readonly #clients = new Map<string, Promise<GoogleAuth>>();
   async source(env?: Record<string, string>): Promise<GoogleCredentialSource> {
     const explicit = env?.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_APPLICATION_CREDENTIALS
       || process.env.google_application_credentials;
@@ -39,7 +33,7 @@ export class GoogleCredentialOwner {
   async headers(source: GoogleCredentialSource): Promise<Record<string, string>> {
     let pending = this.#clients.get(source.identity);
     if (!pending) {
-      pending = googleAuthLibrary().then(({ GoogleAuth }) => new GoogleAuth({
+      pending = import('google-auth-library').then(({ GoogleAuth }) => new GoogleAuth({
         scopes: ['https://www.googleapis.com/auth/cloud-platform'],
         ...(source.keyFilename ? { keyFilename: source.keyFilename } : {}),
       }));

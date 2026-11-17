@@ -34,6 +34,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   if (m.method === 'initialize') reply(m.id, {userAgent:'fixture'});
   if (m.method === 'thread/start' || m.method === 'thread/resume') reply(m.id,{thread:{id:'native-thread'}});
   if (m.method === 'model/list') reply(m.id,{data:[{id:'fixture-model',model:'fixture-model',displayName:'Fixture'}]});
+  if (m.method === 'collaborationMode/list' || m.method === 'permissionProfile/list') reply(m.id, {data:[]});
   if (m.method === 'turn/start') {
     active = 'turn-' + ++count;
     reply(m.id,{turn:{id:active}}); event('turn/started',{turn:{id:active}});
