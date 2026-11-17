@@ -28,9 +28,10 @@ const run = (command, args, cwd = mobileRoot) => {
   }
 };
 
-// 1. Build the web bundle and copy it into the iOS project (no pod regen — `copy`, not `sync`).
+// 1. Regenerate the device Podfile from the installed plugins before temporarily removing MLKit.
+// `cap copy` alone would leave versioned Bun paths and the plugin list from an older installation.
 run('bun', ['run', 'build']);
-run('cap', ['copy', 'ios']);
+run('cap', ['sync', 'ios']);
 
 // 2. Strip the MLKit barcode-scanning pod, then reinstall pods without it.
 const originalPodfile = readFileSync(podfilePath, 'utf8');
@@ -59,7 +60,7 @@ try {
   ]);
 } finally {
   // 4. Always restore the Podfile + Pods so device/TestFlight builds keep the scanner. Pods/
-  //    and Podfile.lock return to their original state (a no-op for git once this completes).
+  //    and Podfile.lock return to the current device configuration.
   if (strippedPodfile !== originalPodfile) {
     writeFileSync(podfilePath, originalPodfile);
     run('pod', ['install'], iosAppDir);
