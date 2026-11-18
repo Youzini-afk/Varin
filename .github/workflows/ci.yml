@@ -36,8 +36,39 @@ concurrency:
   cancel-in-progress: ${{ inputs.source_sha == '' && github.event_name != 'workflow_dispatch' }}
 
 jobs:
+  dependabot-preflight:
+    name: Dependency update preflight
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]' && inputs.source_sha == ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Verify production lockfile
+        run: node scripts/build-cloud-runtime.mjs --check-lock
+      - name: Check for Bun workspace changes
+        id: bun-changes
+        run: |
+          if git diff --quiet HEAD^1 HEAD -- bun.lock ':(glob)**/package.json' ':(glob)bun-patches/**'; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.bun-changes.outputs.changed == 'true'
+        uses: ./.github/actions/setup-bun
+        with:
+          bun-version: 1.3.14
+      - if: steps.bun-changes.outputs.changed == 'true'
+        name: Verify Bun lockfile without installing packages
+        run: bun install --lockfile-only --frozen-lockfile --ignore-scripts
+
   changes:
     name: Identify affected owners
+    if: github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]' || inputs.source_sha != ''
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.surface.outputs.code }}
@@ -95,9 +126,6 @@ jobs:
     name: Portable source checks
     runs-on: ubuntu-latest
     needs: changes
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-source-{0}', github.run_id) }}
-      queue: max
     steps:
       - uses: actions/checkout@v7
         with:
@@ -172,9 +200,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.native == 'true' || needs.changes.outputs.production == 'true'
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-kernel-{0}', github.run_id) }}
-      queue: max
     steps:
       - uses: actions/checkout@v7
         with:
@@ -205,9 +230,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [changes, native-build]
     if: ${{ !cancelled() && needs.changes.outputs.native == 'true' && needs.native-build.result == 'success' }}
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-native-{0}', github.run_id) }}
-      queue: max
     env:
       VARIN_KERNEL_ARTIFACT: ${{ github.workspace }}/.build-input/kernel
       VARIN_TEST_KERNEL_PATH: ${{ github.workspace }}/artifacts/build/kernel-linux-x64/varin-kernel
@@ -256,9 +278,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [changes, native-build]
     if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.native-build.result == 'success' }}
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-rust-{0}', github.run_id) }}
-      queue: max
     env:
       VARIN_KERNEL_ARTIFACT: ${{ github.workspace }}/.build-input/kernel
       VARIN_TEST_KERNEL_PATH: ${{ github.workspace }}/artifacts/build/kernel-linux-x64/varin-kernel
@@ -353,9 +372,6 @@ jobs:
     runs-on: windows-latest
     needs: changes
     if: needs.changes.outputs.windows == 'true'
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-windows-{0}', github.run_id) }}
-      queue: max
     steps:
       - uses: actions/checkout@v7
         with:
@@ -409,9 +425,6 @@ jobs:
     runs-on: windows-latest
     needs: changes
     if: needs.changes.outputs.windows == 'true' && needs.changes.outputs.native == 'true'
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-windows-build-{0}', github.run_id) }}
-      queue: max
     steps:
       - uses: actions/checkout@v7
         with:
@@ -441,9 +454,6 @@ jobs:
     runs-on: windows-latest
     needs: [changes, windows-native-build]
     if: ${{ !cancelled() && needs.changes.outputs.windows == 'true' && needs.changes.outputs.native == 'true' && needs.windows-native-build.result == 'success' }}
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-windows-native-{0}', github.run_id) }}
-      queue: max
     env:
       VARIN_KERNEL_ARTIFACT: ${{ github.workspace }}/.build-input/kernel
       VARIN_TEST_KERNEL_PATH: ${{ github.workspace }}/artifacts/build/kernel-win32-x64/varin-kernel.exe
@@ -482,9 +492,6 @@ jobs:
     runs-on: windows-latest
     needs: changes
     if: needs.changes.outputs.windows == 'true' && needs.changes.outputs.rust == 'true'
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-windows-workspace-{0}', github.run_id) }}
-      queue: max
     steps:
       - uses: actions/checkout@v7
         with:
@@ -543,9 +550,6 @@ jobs:
     runs-on: macos-latest
     needs: changes
     if: needs.changes.outputs.macos == 'true'
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-macos-{0}', github.run_id) }}
-      queue: max
     steps:
       - uses: actions/checkout@v7
         with:
@@ -627,9 +631,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [changes, native-build, production-preflight]
     if: ${{ !cancelled() && needs.changes.outputs.production == 'true' && needs.native-build.result == 'success' && needs.production-preflight.result == 'success' }}
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-build-{0}', github.run_id) }}
-      queue: max
     env:
       VARIN_KERNEL_ARTIFACT: ${{ github.workspace }}/.build-input/kernel
     steps:
@@ -684,9 +685,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.android == 'true'
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-android-{0}', github.run_id) }}
-      queue: max
     steps:
       - uses: actions/checkout@v7
         with:
@@ -705,13 +703,12 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
-  # Keep one always-present check, including affected platform/product results.
-  # A cancelled, failed, missing or unexpectedly skipped requirement is not green.
+  # Aggregate applicable checks for the ordinary and explicit qualification paths.
   source-quality:
     name: Source quality
     runs-on: ubuntu-latest
     needs: [changes, production-preflight, portable-source, native-build, linux-native, rust-workspace, windows-runtime, windows-native-build, windows-native, windows-workspace, macos-storage, production-build, container-check, android-build]
-    if: ${{ always() }}
+    if: ${{ always() && needs.changes.result != 'skipped' }}
     steps:
       - uses: actions/checkout@v7
         with:

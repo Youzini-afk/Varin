@@ -83,22 +83,20 @@ tree-sitter/Wasmtime/Cranelift 和 artifact actions 按各自联动边界分组�
 
 ### PR 验证与报告
 
-Dependabot's expensive source/native/platform/container jobs share the existing job-level
-`varin-dependabot-background` group with `queue: max`; change detection and the cheap production-lock
-preflight do not wait behind those builds. Windows/macOS are selected by affected owners, not simply
-by a non-documentation diff, and CI publishes no images. The current dependency report still shares
-the background group. Per-PR cancellation supersedes obsolete validation; explicit release and daily
-full qualification are not cancelled by ordinary main pushes. Human PRs and releases keep independent
-build groups; only image alias promotion is serialized across releases. This controls runner contention,
-not dependency discovery or the permitted number of upgrade proposals.
+Dependabot PRs run **Dependency update preflight** automatically. It checks the production graph against
+the cloud lockfile. Bun changes also get a frozen workspace lockfile check with lifecycle scripts
+disabled. A newer revision supersedes the previous PR run. After a merge, CI scopes its checks to the
+actual changes on `main`. Scheduled checks and release qualification keep their existing coverage.
+To investigate a higher-risk proposal during review, run **CI → Run workflow** on the proposal branch
+to run the full checks.
 
 The [dependency report workflow](../../.github/workflows/dependency-report.yml) runs when a Dependabot PR
-opens, reopens, changes head, or edits its description. It updates one report comment with version
+opens, reopens, or changes head. New report runs supersede older ones for the same PR. It updates one report comment with version
 ranges, upstream excerpts, and migration hints found in the text. Shared release notes are deduplicated;
 missing or truncated material is called out. The run's `dependency-report` artifact contains the report
 and original API data. Existing PRs can be covered with `gh workflow run dependency-report.yml -f pull-request=NUMBER`.
-A scheduled check with no update produces no report message. Rebases, title edits, and workflow reruns
-leave the existing comment untouched when dependency versions and collected material are unchanged.
+A scheduled check with no update produces no report message. Rebases and workflow reruns leave the
+existing comment untouched when dependency versions and collected material are unchanged.
 
 This is automatic evidence collection, not model-generated compatibility analysis. When reviewing an
 upgrade, use upstream release/changelog/compare links to cover the entire current-to-target interval,

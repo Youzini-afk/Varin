@@ -182,7 +182,7 @@ export function run({ repo, number, output, publish = false }) {
   }
   const current = api(`${base}/pulls/${number}`);
   if (current.state !== 'open' || current.head.sha !== pr.head.sha || current.body !== pr.body) {
-    console.log('PR changed during reporting; a subsequent event will refresh the report.');
+    console.log('PR changed during reporting; the saved snapshot will not replace the current report.');
     return report;
   }
   const existing = paginate(`${base}/issues/${number}/comments`)

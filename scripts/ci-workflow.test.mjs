@@ -207,8 +207,8 @@ test('test leaves accumulate mixed changes and preserve deleted or renamed owner
   }
 });
 
-test('the always-present gate rejects every missing/failed/cancelled/unexpectedly skipped requirement', () => {
-  assert.equal(workflow.jobs['source-quality'].if, '${{ always() }}');
+test('the qualification gate rejects every missing/failed/cancelled/unexpectedly skipped requirement', () => {
+  assert.equal(workflow.jobs['source-quality'].if, "${{ always() && needs.changes.result != 'skipped' }}");
   const expectedJobs = Object.keys(requiredJobs(all));
   assert.deepEqual(new Set(workflow.jobs['source-quality'].needs), new Set(['changes', ...expectedJobs]));
   for (const scope of [all, ...['docs/guide.md', 'packages/ui/src/file.ts',
@@ -292,9 +292,8 @@ test('independent Linux lanes restore the same kernel and retain their real runt
     assert.ok(steps.indexOf(prepare) < steps.indexOf(fuse));
     assert.ok(steps.every(step => !step['continue-on-error']));
   }
-  assert.notEqual(native.concurrency.group, rust.concurrency.group);
-  assert.ok(native.concurrency.group.includes("format('varin-ci-native-{0}', github.run_id)"));
-  assert.ok(rust.concurrency.group.includes("format('varin-ci-rust-{0}', github.run_id)"));
+  assert.equal(native.concurrency, undefined);
+  assert.equal(rust.concurrency, undefined);
   const authority = native.steps.find(step => step.run === 'node scripts/test-kernel-authority.mjs');
   assert.equal(authority.if, prerequisite);
   assert.ok(native.steps.indexOf(authority) > native.steps.findIndex(step => step.name?.startsWith('Prepare FUSE')));
@@ -391,13 +390,14 @@ test('release automation can build an older source without borrowing its tool se
   assert.ok(release.jobs.assemble.needs.includes('native-quality'));
 });
 
-test('all heavy Dependabot lanes share one non-cancelling queue, including reusable containers', () => {
-  const container = parse(fs.readFileSync(new URL('../.github/workflows/container-check.yml', import.meta.url), 'utf8'));
-  for (const job of [...['portable-source', 'native-build', 'linux-native', 'rust-workspace', 'windows-runtime', 'windows-native-build', 'windows-native', 'windows-workspace',
-    'macos-storage', 'production-build', 'android-build'].map(name => workflow.jobs[name]), container.jobs.verify]) {
-    assert.ok(job.concurrency.group.includes("github.event.pull_request.user.login == 'dependabot[bot]'"));
-    assert.ok(job.concurrency.group.includes("'varin-dependabot-background'"));
-    assert.equal(job.concurrency.queue, 'max');
-    assert.notEqual(job.concurrency['cancel-in-progress'], true);
-  }
+test('automatic Dependabot PRs run only lock preflight and a separate, superseding report', () => {
+  const preflight = workflow.jobs['dependabot-preflight'];
+  assert.equal(preflight.if, "github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]' && inputs.source_sha == ''");
+  assert.equal(workflow.jobs.changes.if, "github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]' || inputs.source_sha != ''");
+  assert.ok(preflight.steps.some(step => step.run === 'node scripts/build-cloud-runtime.mjs --check-lock'));
+  assert.ok(preflight.steps.some(step => step.run === 'bun install --lockfile-only --frozen-lockfile --ignore-scripts'));
+  const report = parse(fs.readFileSync(new URL('../.github/workflows/dependency-report.yml', import.meta.url), 'utf8'));
+  assert.deepEqual(report.on.pull_request_target.types, ['opened', 'reopened', 'synchronize']);
+  assert.equal(report.concurrency['cancel-in-progress'], true);
+  assert.equal(report.jobs.report.concurrency, undefined);
 });

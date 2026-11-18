@@ -2,7 +2,7 @@ name: Dependency change report
 
 on:
   pull_request_target:
-    types: [opened, reopened, synchronize, edited]
+    types: [opened, reopened, synchronize]
   workflow_dispatch:
     inputs:
       pull-request:
@@ -16,15 +16,12 @@ permissions:
 
 concurrency:
   group: dependency-report-${{ github.event.pull_request.number || inputs.pull-request }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   report:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
-    concurrency:
-      group: varin-dependabot-background
-      queue: max
     steps:
       # Only the trusted default-branch script runs. PR code and dependencies are
       # never checked out, installed, or executed in this write-capable job.

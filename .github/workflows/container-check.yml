@@ -50,9 +50,6 @@ jobs:
     defaults:
       run:
         working-directory: source
-    concurrency:
-      group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-ci-container-{0}', github.run_id) }}
-      queue: max
     steps:
       - name: Checkout reviewed validation tooling
         uses: actions/checkout@v7
