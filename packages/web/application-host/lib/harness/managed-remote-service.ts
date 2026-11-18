@@ -126,6 +126,7 @@ export interface ManagedRemoteExecutionServiceOptions {
   now?: () => number;
   onError?: (error: Error) => void;
   sourceOwner?: ManagedSourceService;
+  liveSourceOnly?: boolean;
   storageAvailable?: boolean;
 }
 
@@ -207,7 +208,10 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
       protocolVersion: MANAGED_REMOTE_PROTOCOL_VERSION,
       requestHostIdentity: true,
       hostId: options.hostId,
-      capabilities: ["materials", "process", "attach", "cancel", "logs", "outputs", "resource-admission", "remote-shell", ...(sourceOwner ? ['sources', 'attachment-stream', 'work-location-read'] : []), ...(options.storageAvailable ? ['storage'] : [])],
+      capabilities: options.liveSourceOnly
+        ? (sourceOwner ? ['sources', 'work-location-read'] : [])
+        : ['materials', 'process', 'attach', 'cancel', 'logs', 'outputs', 'resource-admission', 'remote-shell',
+          ...(sourceOwner ? ['sources', 'attachment-stream', 'work-location-read'] : []), ...(options.storageAvailable ? ['storage'] : [])],
       machine,
     };
   };

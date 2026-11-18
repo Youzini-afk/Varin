@@ -15,6 +15,7 @@ import { assertResourcePathAllowed } from '../workspace/resource-access.js';
 
 export interface ManagedRemoteRoutesOptions {
   isDraining?: () => boolean;
+  trackRequest?(work: Promise<void>): void;
   documents?: import('../documents/authority.js').DocumentAuthority;
   service: ManagedRemoteExecutionService;
   requireAuth?: RequestHandler;
@@ -69,7 +70,7 @@ const whileResponseOpen = async <T>(response: Response, work: (signal: AbortSign
   finally { response.off("close", abort); }
 };
 
-const route = (handler: (request: Request, response: Response) => Promise<void>) => (
+const managedRoute = (handler: (request: Request, response: Response) => Promise<void>) => (
   async (request: Request, response: Response, next: NextFunction) => {
     try { await handler(request, response); } catch (error) {
       if (response.destroyed) return;
@@ -81,8 +82,13 @@ const route = (handler: (request: Request, response: Response) => Promise<void>)
 
 export function registerManagedRemoteRoutes(
   app: Express,
-  { service, requireAuth = noAuth, resolveAuthContext, documents, isDraining = () => false }: ManagedRemoteRoutesOptions,
+  { service, requireAuth = noAuth, resolveAuthContext, documents, trackRequest, isDraining = () => false }: ManagedRemoteRoutesOptions,
 ): void {
+  const route = (handler: Parameters<typeof managedRoute>[0]) => managedRoute((req, res) => {
+    const work = handler(req, res);
+    trackRequest?.(work);
+    return work;
+  });
   const base = "/api/harness/managed-execution/v1";
   const principals = new WeakMap<Request, ManagedSourcePrincipal>();
   const requiredCapabilities = ["filesystem:read", "filesystem:write", "logs:read", "terminal:use", "process:control"];

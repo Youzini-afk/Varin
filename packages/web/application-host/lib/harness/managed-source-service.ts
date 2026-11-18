@@ -16,6 +16,7 @@ import type { LaunchSource, SourceAuthorityAddress, SourceAuthorityResult, Sourc
 import { admitMaterializedRoot, originalMaterializationLocation } from '../kernel/source-launch.js';
 import { SourceAdmissionError, sourceReadError } from '../kernel/source-admission-error.js';
 import { normalizeThreadSourcePreparation } from '../kernel/thread-sources.js';
+import { assertResourcePathAllowed } from '../workspace/resource-access.js';
 import { normalizePathIdentity } from '../workspace/path-safety.js';
 import { createManagedAttachmentImport } from './managed-attachment-import.js';
 import { ManagedSourceDrainedError } from './managed-source-drain.js';
@@ -29,7 +30,13 @@ import type { ManagedSourceAddress, ManagedSourceBindRequest, ManagedSourceBindi
 import type { ManagedSourceCleanupScope } from './managed-remote-types.js';
 import type { ManagedRecoveryReply, ManagedRecoveryRequest } from './managed-recovery-contract.js';
 
+// The node only wires original native file and process tools. No project configuration,
+// editors, MCP, retrieval provider, external harness or Agent service is started.
+const liveNodeTools = new Set(['file_read', 'file_list', 'file_search', 'file_write', 'file_edit',
+  'process_inspect', 'process_read', 'process_spawn', 'process_write', 'process_resize']);
+
 export interface ManagedSourceServiceOptions {
+  liveSourceOnly?: boolean;
   prepareExternalLiveSource?: (workspaceId:string,executionWorkspaceId:string,conversationId:string,signal?:AbortSignal)=>Promise<import('../kernel/protocol.generated.js').LiveRoot>;
   externalChildSource?: ReturnType<typeof import('../external-agents/managed-child-source.js').createManagedExternalChildSourceOwner>;
   projectManagement?: ReturnType<typeof import('../projects/managed-project-management.js').createManagedProjectManagementOwner>;
@@ -132,17 +139,34 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
   const capabilities: ManagedSourceService['capabilities'] = async (principal, input, signal) => {
     requireReadPrincipal(principal, input.coordinatorHostId);
     await kernel.start();
-    const selected = await kernel.sourceRequest<ManagedSourceCapabilities>('source.capabilities', { mode: input.mode,
+    if (options.liveSourceOnly && (input.mode !== 'live_root' || input.enabledTools?.some(name => !liveNodeTools.has(name))))
+      throw new SourceAdmissionError('source_unavailable');
+    let selected = await kernel.sourceRequest<ManagedSourceCapabilities>('source.capabilities', { mode: input.mode,
       ...(input.enabledTools ? { enabledTools: input.enabledTools } : {}),
       clientCapabilities: [...principal.capabilities] }, signal);
+    if (options.liveSourceOnly && !input.enabledTools && selected.tools.some(tool => !liveNodeTools.has(tool.name))) {
+      // Rust derives the grant from the actual advertised tools and the paired principal.
+      selected = await kernel.sourceRequest<ManagedSourceCapabilities>('source.capabilities', { mode: input.mode,
+        enabledTools: selected.tools.filter(tool => liveNodeTools.has(tool.name)).map(tool => tool.name),
+        clientCapabilities: [...principal.capabilities] }, signal);
+    }
     return { ...selected, ...(selected.tools.some(tool => tool.name === 'process_spawn')
       ? { executionEnvironment: await (options.executionEnvironment?.() ?? defaultExecutionEnvironment.snapshot()) } : {}) };
   };
-  const registration = async (source: LaunchSource, signal?: AbortSignal, metadataOnly=false): Promise<void> => {
+  const registration = async (source: LaunchSource, signal?: AbortSignal, metadataOnly=false, principal?: ManagedSourcePrincipal): Promise<void> => {
     if (source.resource_owner.kind !== 'managed_host' || source.resource_owner.hostId !== options.hostId) {
       throw new SourceAdmissionError('source_changed');
     }
-    await documents.admitWorkspaceRegistration(source.workspace_id, signal);
+    const registered = await documents.admitWorkspaceRegistration(source.workspace_id, signal);
+    if (options.liveSourceOnly) {
+      if (!principal || source.mode !== 'live_root' || !source.live_root || source.execution_workspace_id !== source.workspace_id)
+        throw new SourceAdmissionError('source_unavailable');
+      if (normalizePathIdentity(registered.canonicalPath) !== normalizePathIdentity(source.live_root.canonicalRoot))
+        throw new SourceAdmissionError('source_changed');
+      await assertResourcePathAllowed(registered.canonicalPath, principal.allowedDirectories).catch(cause => {
+        throw new SourceAdmissionError('source_authority_denied', { cause });
+      });
+    }
     if (source.execution_workspace_id !== source.workspace_id) await documents.admitWorkspaceRegistration(source.execution_workspace_id, signal);
     if (metadataOnly) return;
     if(source.mode==='native_workspace'){if(!kernel.nativeWorkspaces)throw new SourceAdmissionError('source_unavailable');await kernel.nativeWorkspaces.open(source,signal);}
@@ -230,7 +254,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     if (closing.has(authorityKey(principal, input))) throw new SourceAdmissionError('source_authority_denied');
     const authority = await inspect(principal, input, signal);
     if (authority.phase !== 'ready') throw new SourceAdmissionError('source_authority_denied');
-    await registration(authority.source, signal, authority.purpose === 'result');
+    await registration(authority.source, signal, authority.purpose === 'result', principal);
     if (authority.purpose === 'work_location_read') {
       if (!isDeepStrictEqual(enabledTools,['file_read'])) throw new SourceAdmissionError('source_authority_denied');
       await admitLocationRoot(principal, authority.source, signal);
@@ -516,6 +540,9 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     async resolve(principal, input, signal) {
       requireReadPrincipal(principal, input.coordinatorHostId);
       if (typeof input.path !== 'string' || !input.path.trim()) throw new SourceAdmissionError('source_changed');
+      if (options.liveSourceOnly) await assertResourcePathAllowed(input.path, principal.allowedDirectories).catch(cause => {
+        throw new SourceAdmissionError('source_authority_denied', { cause });
+      });
       signal?.throwIfAborted();
       if (principal.allowedDirectories?.length) {
         const { assertResourcePathAllowed } = await import('../workspace/resource-access.js');
@@ -621,6 +648,8 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     async bind(principal, input, signal) {
       requireReadPrincipal(principal, input.coordinatorHostId);
       const source = selectedSource(input);
+      if (options.liveSourceOnly && (!['read', 'source', 'result', 'process_view'].includes(input.purpose) || !['run', 'source_read'].includes(input.scope.kind) || input.handoff || input.continuation))
+        throw new SourceAdmissionError('source_unavailable');
       if (input.purpose === 'external_harness' && (input.scope.kind !== 'external' || input.retention !== 'caller' || input.operationId !== input.scope.transportId)) throw new SourceAdmissionError('source_authority_denied');
       const alternateRead = input.purpose === 'work_location_read';
       if (alternateRead) {
@@ -635,7 +664,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         throw new SourceAdmissionError('source_authority_denied');
       if (['script_environment', 'mcp_owner', 'external_harness'].includes(input.purpose) && (source.mode === 'fixed_branch'
         || !['terminal:use', 'process:control'].every(capability => principal.capabilities.includes(capability)))) throw new SourceAdmissionError('source_authority_denied');
-      await registration(source, signal,resultOnly);
+      await registration(source, signal,resultOnly, principal);
       const selected = await capabilities(principal, { coordinatorHostId: input.coordinatorHostId, mode: source.mode,
         enabledTools: input.scope.kind === 'source_read' || input.scope.kind === 'external' || resultOnly || input.purpose === 'mcp_owner' ? [] : input.source.tools }, signal);
       const integration = input.purpose === 'integration';
@@ -723,7 +752,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
             : source.mode==='native_workspace'?{nativeWorkspace:native?.address??{branchId:source.branch_id!,...(source.native_scope?{sourcePath:source.native_scope}:{})},...(native?{rootId:native.rootId,liveRoot:physicalRoot!}:{})}
             : { ...(physicalRoot ? { rootId: physicalRoot.rootId } : {}), materializedSource: fixed }),
         };
-        await registration(source, signal,resultOnly);
+        await registration(source, signal,resultOnly, principal);
         const bound = await kernel.sourceRequest<SourceAuthorityResult>('source.authority.bind', {
           ...address(principal, { coordinatorHostId: input.coordinatorHostId, authorityId: opened.authorityId, resourceEpoch: opened.resourceEpoch }),
           toolBinding, physicalRoot,
@@ -757,6 +786,12 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         ...(input.journal ? { journal: input.journal } : {}) }, signal);
     },
     async service(principal, input, signal) {
+      if (options.liveSourceOnly && input.operation.kind !== 'validate') {
+        if (input.operation.kind !== 'native_resource' || !['read', 'process_observation', 'reconcile_mutation'].includes(input.operation.action.kind))
+          throw new SourceAdmissionError('source_unavailable');
+        if (input.operation.action.kind === 'reconcile_mutation' && !principal.capabilities.includes('filesystem:write'))
+          throw new SourceAdmissionError('source_authority_denied');
+      }
       if (['attachment_cleanup', 'attachment_discard'].includes(input.operation.kind) && !principal.capabilities.includes('filesystem:write')) throw new SourceAdmissionError('source_authority_denied');
       const mcpRelease = input.operation.kind === 'mcp' && input.operation.action.kind === 'release';
       const mcpContinuation = input.operation.kind === 'mcp' && (isManagedMcpDerivationContinuation(input.operation.action) || isManagedMcpChildContinuation(input.operation.action) || isManagedMcpTaskContinuation(input.operation.action) || isManagedMcpResourceContinuation(input.operation.action) || isManagedMcpInteractionContinuation(input.operation.action));

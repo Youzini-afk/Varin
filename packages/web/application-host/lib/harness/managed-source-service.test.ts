@@ -15,7 +15,7 @@ const source: ThreadSource = { resourceOwner: { kind: 'managed_host', hostId: 't
 const request: ManagedSourceBindRequest = { coordinatorHostId: 'coordinator', scope: { kind: 'source_read', threadId: 'thread', branchId: 'history', key: 'context' },
   source, purpose: 'read', retention: 'caller' };
 
-function fixture() {
+function fixture(liveSourceOnly = false) {
   const state = { trusted: true, authority: null as SourceAuthorityResult | null };
   const events: string[] = [];
   const grants = new Map<string, KernelGrantHandle>();
@@ -70,7 +70,7 @@ function fixture() {
     failure: { code: 'operation-not-found' as const, message: 'Original journal is unavailable', retryable: false } }));
   const readCodeExchange = vi.fn(async () => ({ operationId: 'exchange', sourceThreadId: 'sender', targetThreadId: 'target', state: 'applied', files: [] }));
   const validateLiveSource = vi.fn(async () => {});
-  const service = createManagedSourceService({ kernel, hostId: 'target', releaseMcpView, mcpInteractionContinuation, documents: {
+  const service = createManagedSourceService({ kernel, hostId: 'target', liveSourceOnly, releaseMcpView, mcpInteractionContinuation, documents: {
     admitWorkspaceRegistration: async () => {
       events.push('registration'); if (!state.trusted) throw new Error('Trust withdrawn');
       return { workspaceId: 'workspace', canonicalPath: '/target/project', hostId: 'target' };
@@ -107,6 +107,29 @@ describe('managed Source target admission orchestration', () => {
     await expect(f.service.execute(principal,{...address,call:{...call,name:'file_write'}})).rejects.toThrow();
     await expect(f.service.service(principal,{...address,requestId:'service',operation:{kind:'validate'}})).rejects.toThrow();
     expect(f.sourceRequest.mock.calls.map(([name])=>name)).not.toContain('source.resource.execute');
+    expect(f.serviceOperation).not.toHaveBeenCalled();
+  });
+
+  it('publishes only the native tools installed on a live-directory node and asks Rust for their actual grant', async () => {
+    const f = fixture(true);
+    f.sourceRequest.mockResolvedValueOnce({ tools: [{ name: 'file_read' }, { name: 'code_retrieval' }] })
+      .mockResolvedValueOnce({ tools: [{ name: 'file_read' }], grantCapabilities: ['storage.read', 'storage.write'] });
+    const input = { coordinatorHostId: 'coordinator', mode: 'live_root' as const };
+    expect((await f.service.capabilities(principal, input)).tools.map(tool => tool.name)).toEqual(['file_read']);
+    expect(f.sourceRequest.mock.calls.at(-1)?.[1]).toMatchObject({ enabledTools: ['file_read'], clientCapabilities: principal.capabilities });
+    await expect(f.service.capabilities(principal, { ...input, enabledTools: ['code_retrieval'] })).rejects.toMatchObject({ code: 'source_unavailable' });
+    await expect(f.service.capabilities(principal, { ...input, mode: 'fixed_branch' })).rejects.toMatchObject({ code: 'source_unavailable' });
+    expect(f.sourceRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it('denies unrelated roots and uninstalled Host service calls before issuing a node grant', async () => {
+    const f = fixture(true);
+    const selected = { resourceOwner: source.resourceOwner, workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId,
+      mode: 'live_root' as const, liveRoot: { hostId: 'target', canonicalRoot: '/elsewhere', rootId: 'other-root' }, tools: ['file_read'] };
+    await expect(f.service.bind(principal, { ...request, source: selected })).rejects.toMatchObject({ code: 'source_changed' });
+    await expect(f.service.service(principal, { coordinatorHostId: 'coordinator', authorityId: 'none', resourceEpoch: 'none',
+      requestId: 'unsupported', operation: { kind: 'read', path: 'file.txt' } })).rejects.toMatchObject({ code: 'source_unavailable' });
+    expect(f.issueGrant).not.toHaveBeenCalled();
     expect(f.serviceOperation).not.toHaveBeenCalled();
   });
 
