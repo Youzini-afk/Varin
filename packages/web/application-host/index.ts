@@ -2460,7 +2460,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     } });
   const modelWorkLocations = createModelWorkLocations({runtime: agentRuntime, kernel: kernelClient, directory: sourceDirectory, prepare: prepareThreadSource});
   kernelClient.setModelWorkLocationOwner(modelWorkLocations.query);
-  kernelClient.onToolReleased(runId => { void modelWorkLocations.releaseRun(runId).catch(() => console.error('[Thread] Work-location read authority retirement is pending')); });
+  const releaseLocationReads = (runId?: string) => {
+    void modelWorkLocations.releaseRun(runId).catch(() => console.error('[Thread] Work-location read authority retirement is pending'));
+  };
+  kernelClient.onToolReleased(releaseLocationReads);
+  kernelClient.subscribeExit(() => releaseLocationReads());
   projectSourceDirectory = sourceDirectory;
   registerProjectManagementRoutes(app, { requireAuth: uiAuthController.requireAuth,
     authorize: async (req, res) => {

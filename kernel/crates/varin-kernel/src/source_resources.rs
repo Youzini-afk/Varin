@@ -1102,6 +1102,9 @@ pub(crate) fn prepare_request(
                 resource_epoch: p.resource_epoch,
             };
             let record = storage.source_authority(&address, false, epoch)?;
+            if record.purpose == "work_location_read" && record.operation_id.as_deref() != Some(p.operation_id.as_str()) {
+                return Err(denied("Work location control belongs to another Operation"));
+            }
             if let Some(receipt) = storage.recall_source_schedule(&record, &p.operation_id, method == "source.resource.cancel")? {
                 return Ok(receipt);
             }

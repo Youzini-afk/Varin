@@ -17,7 +17,7 @@ function fixture() {
   const row = {id:'favorite',name:'Logs',path:'/logs',workspaceId:'logs',resourceOwner:owner};
   const workspace = {locations:[row] as ThreadLocationDirectory['locations']};
   const targets = [{resourceOwner:owner,label:'https://private.example/?token=secret',capabilities:['sources','work-location-read']}];
-  const bound = {source:{...resourceSource(source),environment_run_id:null},physicalRoot:root,capabilities:{tools:[{name:'file_read'}]},
+  const bound = {source:{...resourceSource(source),environment_run_id:null},physicalRoot:root,capabilities:{tools:[{name:'file_read'}],grantCapabilities:['storage.read']},
     authorityId:'read-only',resourceEpoch:'epoch',executionOwner:{kind:'external',epoch:'epoch',identity:'target-private'}};
   const client = {bind:vi.fn(async()=>bound),release:vi.fn(async()=>({phase:'retired'})),inspectScope:vi.fn(async()=>[])};
   const principalCanUseHostResources = vi.fn(async()=>true);

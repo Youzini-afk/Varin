@@ -3769,11 +3769,14 @@ fn one_operation_location_read_cannot_move_the_run_source_or_borrow_device_acces
     assert_eq!(receipt["result"]["completion"]["content"]["data"]["content"]["text"],"alternate", "{receipt}");
     let original=owner.tool(&main,"file_read","ordinary-read",json!({"path":"same.txt"})).unwrap();
     assert_eq!(original["result"]["completion"]["content"]["data"]["content"]["text"],"primary", "{original}");
-    let mut retire=address.clone(); retire["mode"]=json!("retire");
-    owner.rpc("source.authority.release",retire,None).unwrap();
+    let mut recall=address.clone(); recall["operationId"]=json!(call_id);
+    assert_eq!(owner.rpc("source.resource.observe",recall.clone(),None).unwrap(),receipt);
+    let mut wrong=address.clone(); wrong["operationId"]=json!("unrelated");
+    assert!(owner.rpc("source.resource.release",wrong,None).is_err());
+    assert_eq!(owner.rpc("source.resource.release",recall,None).unwrap()["released"],true);
     assert!(owner.tool(&address,"file_read","alternate-read",json!({"path":"same.txt"})).is_err());
     issue("replacement",Some(call_id),vec!["storage.read"]);
     assert!(open("replacement").is_err());
-    let mut recall=address; recall["operationId"]=json!(call_id);
-    assert_eq!(owner.rpc("source.resource.observe",recall,None).unwrap(),receipt);
+    drop(owner);
+    std::fs::remove_dir_all(root).unwrap();
 }

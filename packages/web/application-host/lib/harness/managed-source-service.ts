@@ -193,7 +193,8 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
   const project = (authority: SourceAuthorityResult, selected: ManagedSourceCapabilities): ManagedSourceBinding => ({
     ...(authority.toolBinding?.textEncoding ? { textEncoding: authority.toolBinding.textEncoding } : {}),
     authorityId: authority.authorityId, resourceEpoch: authority.resourceEpoch, executionOwner: authority.executionOwner,
-    source: authority.source, physicalRoot: authority.physicalRoot, capabilities: selected,
+    source: authority.source, physicalRoot: authority.physicalRoot,
+    capabilities: authority.purpose === 'work_location_read' ? {...selected, grantCapabilities:['storage.read']} : selected,
     ...(authority.toolBinding?.executionEnvironment ? { executionEnvironment: authority.toolBinding.executionEnvironment } : {}),
   });
   type NativeRelease = { authorityId: string; phase: string; receipt?: { pendingProcesses?: unknown; processStopFailures?: unknown } };

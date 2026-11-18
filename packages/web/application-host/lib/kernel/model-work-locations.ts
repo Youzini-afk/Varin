@@ -85,6 +85,7 @@ export function createModelWorkLocations(options: {
         if (!isDeepStrictEqual({...bound.source,environment_run_id:bound.source.environment_run_id ?? null},
           {...resourceSource(source),environment_run_id:null}) || !isDeepStrictEqual(bound.physicalRoot, source.liveRoot)
           || !isDeepStrictEqual(bound.capabilities.tools.map(tool => tool.name), ['file_read'])
+          || !isDeepStrictEqual(bound.capabilities.grantCapabilities, ['storage.read'])
           || bound.executionOwner.kind !== 'external' || bound.executionOwner.epoch !== bound.resourceEpoch) throw changed();
         return {operationId, release, binding:{...base, grantId:bound.authorityId,
           ...(bound.textEncoding ? {textEncoding:bound.textEncoding} : {}),
@@ -182,8 +183,8 @@ export function createModelWorkLocations(options: {
       throw new SourceAdmissionError(sourceFailureCode(error) ?? 'source_unavailable');
     }
   };
-  return {query, async releaseRun(runId:string) {
-    for (const [key, controller] of preparing) if (JSON.parse(key)[0] === runId) controller.abort();
-    await Promise.all([...leases].filter(([,entry])=>entry.binding.runId===runId).map(([key,entry])=>releaseEntry(key,entry)));
+  return {query, async releaseRun(runId?:string) {
+    for (const [key, controller] of preparing) if (runId === undefined || JSON.parse(key)[0] === runId) controller.abort();
+    await Promise.all([...leases].filter(([,entry])=>runId === undefined || entry.binding.runId===runId).map(([key,entry])=>releaseEntry(key,entry)));
   }};
 }

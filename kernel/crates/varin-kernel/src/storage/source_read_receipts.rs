@@ -218,6 +218,9 @@ impl Storage {
         epoch: &str,
     ) -> Result<Value, KernelError> {
         let record = self.source_authority(address, false, epoch)?;
+        if record.purpose == "work_location_read" && record.operation_id.as_deref() != Some(id) {
+            return Err(crate::source_resources::denied("Work location release belongs to another Operation"));
+        }
         let mut prior = self.operation_get(&json!({"operationId":id}))?;
         if prior.is_null() {
             // An acknowledged pre-dispatch cancellation may never have reached B.
@@ -253,6 +256,14 @@ impl Storage {
         if released && prior["result"]["released"] != true {
             // Retain the original fingerprint so a late execute cannot read new bytes.
             self.operation_finish(id,&json!({"authorityId":record.result.authority_id,"grantId":record.result.grant_id,"released":true}))?;
+        }
+        // A recovered coordinator can acknowledge the durable original read
+        // without its old preparation. Never retire the ordinary Run grant.
+        if released && record.purpose == "work_location_read"
+            && !matches!(record.result.phase.as_str(), "retired" | "revoked") {
+            let host = record.result.source.resource_owner.host_id()
+                .ok_or_else(|| crate::source_resources::denied("Original work location Host is missing"))?;
+            self.release_source_authority(address, "retire", host, epoch)?;
         }
         Ok(
             json!({"operationId":id,"resourceEpoch":record.result.resource_epoch,"executionOwner":record.result.execution_owner,"released":released}),

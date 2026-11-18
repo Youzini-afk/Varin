@@ -123,7 +123,7 @@ export function createManagedRecoveryService(options: ManagedRecoveryServiceOpti
       const originals = await options.kernel.sourceRequest<SourceAuthorityResult[]>('source.authority.inspect_scope', {
         principalId: principal.principalId, coordinatorHostId, threadId: anchor.threadId, runId: anchor.runId,
       }, signal);
-      const matching = originals.filter(original => original.scope.kind === 'run'
+      const matching = originals.filter(original => original.purpose !== 'work_location_read' && original.scope.kind === 'run'
         && original.scope.threadId === anchor.threadId && original.scope.runId === anchor.runId
         && isDeepStrictEqual(original.source, source));
       if (!matching.length) return denied('Recovery has no original Source belonging to this authenticated coordinator');

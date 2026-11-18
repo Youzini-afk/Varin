@@ -99,6 +99,7 @@ describe('managed Source target admission orchestration', () => {
     const bound = await f.service.bind(principal,read);
     expect(f.issueGrant).toHaveBeenCalledWith(expect.objectContaining({capabilities:['storage.read'],operationId:read.operationId,runId:'run',pathScopes:['']}),undefined);
     expect(f.fileRootRegister).not.toHaveBeenCalled();
+    expect(bound.capabilities.grantCapabilities).toEqual(['storage.read']);
     expect(f.state.authority?.toolBinding?.enabledTools).toEqual(['file_read']);
     const address={coordinatorHostId:'coordinator',authorityId:bound.authorityId,resourceEpoch:bound.resourceEpoch};
     const call={runId:'run',operationId:'req:tool:read',origin:{kind:'model_step' as const,request_id:'req'},
