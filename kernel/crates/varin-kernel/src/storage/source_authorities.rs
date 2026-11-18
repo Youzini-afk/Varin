@@ -88,9 +88,14 @@ impl Storage {
             || !p.scope.validate()
             || !matches!(
                 p.purpose.as_str(),
-                "source" | "read" | "integration" | "result" | "process_view" | "script_environment" | "external_harness" | "mcp_owner"
+                "source" | "read" | "work_location_read" | "integration" | "result" | "process_view" | "script_environment" | "external_harness" | "mcp_owner"
             )
             || (matches!(p.scope, SourceAuthorityScope::External { .. }) != (p.purpose == "external_harness"))
+            || (p.purpose == "work_location_read" && (!matches!(p.scope, SourceAuthorityScope::Run { .. })
+                || p.operation_id.as_deref().is_none_or(str::is_empty)
+                || p.source.mode != varin_runtime::SourceMode::LiveRoot
+                || p.source.workspace_id != p.source.execution_workspace_id
+                || p.enabled_tools != ["file_read"]))
             || (p.purpose == "external_harness" && (!p.enabled_tools.is_empty()
                 || p.operation_id.as_deref().is_none_or(str::is_empty)
                 || !matches!(&p.scope, SourceAuthorityScope::External { transport_id, .. } if p.operation_id.as_deref() == Some(transport_id.as_str()))
@@ -164,6 +169,8 @@ impl Storage {
             || grant.run_id.as_deref() != p.scope.run_id()
             || grant.owning_workspace.as_deref() != Some(&p.source.workspace_id)
             || grant.execution_workspace.as_deref() != Some(&p.source.execution_workspace_id)
+            || (p.purpose == "work_location_read" && (grant.capabilities.len() != 1
+                || !grant.capabilities.contains("storage.read")))
             || grant.operation_id != p.operation_id
             || grant.external_transport_id.as_deref() != match &p.scope {
                 SourceAuthorityScope::External { transport_id, .. } => Some(transport_id.as_str()), _ => None,
@@ -173,14 +180,23 @@ impl Storage {
                 "Source grant differs from its original admitted scope",
             ));
         }
+        // One normal Run scope still has exactly one source. A temporary read
+        // owns one Operation scope; neither a new grant nor a different source
+        // may reuse the same Operation after partial preparation or retirement.
+        let identity = if p.purpose == "work_location_read" {
+            json!(["work_location_read", p.scope.identity(), p.operation_id])
+        } else { p.scope.identity() };
         let scope_id = format!(
             "source-scope:{}",
             hash_json(&json!([
                 p.principal_id,
                 p.coordinator_host_id,
-                p.scope.identity()
+                identity
             ]))?
         );
+        if p.purpose == "work_location_read" && self.source_record::<ScopeRecord>("source.scope", &scope_id)?.is_some() {
+            return Err(denied("Work location read was already prepared for this Operation"));
+        }
         let mut scope: ScopeRecord =
             self.source_record("source.scope", &scope_id)?
                 .unwrap_or(ScopeRecord {
@@ -864,7 +880,7 @@ impl Storage {
                 continue;
             }
             self.require_native_source_owner(&record)?;
-            if p.mode == "retire" && record.operation_id.is_some() {
+            if p.mode == "retire" && record.operation_id.is_some() && record.purpose != "work_location_read" {
                 continue;
             }
             let address = SourceAuthorityAddress {

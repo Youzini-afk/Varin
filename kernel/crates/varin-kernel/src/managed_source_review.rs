@@ -3721,3 +3721,59 @@ fn external_source_stop_fences_late_spawn_and_recalls_original_after_reopen() {
     drop(reopened);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn one_operation_location_read_cannot_move_the_run_source_or_borrow_device_access() {
+    let root = std::env::temp_dir().join(format!("work-location-read-{}",uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let owner = Owner::new(root.join("target"), "target", "gen", "epoch");
+    let primary = root.join("primary");
+    let alternate = root.join("alternate");
+    for (directory, value) in [(&primary, "primary"), (&alternate, "alternate")] {
+        std::fs::create_dir(directory).unwrap();
+        std::fs::write(directory.join("same.txt"), value).unwrap();
+    }
+    let (main, _) = owner.bind_live(&primary, "primary-grant", 1);
+    // Source preparation registers the folder. This stage is not the read grant.
+    let issue = |grant: &str, operation: Option<&str>, caps: Vec<&str>| {
+        owner.rpc("authority.grant.issue", json!({"grantId":grant,"hostGeneration":owner.generation,
+            "storageIdentity":owner.root,"sessionId":null,"owningWorkspace":"alternate","executionWorkspace":"alternate",
+            "threadId":"thread","runId":"run","operationId":operation,"capabilities":caps,"pathScopes":[""]}),None).unwrap();
+    };
+    issue("preparer", None, vec!["storage.read","storage.write"]);
+    let registration = owner.rpc("file.root.register",json!({"workspaceId":"alternate","executionWorkspaceId":"alternate",
+        "canonicalRoot":alternate}),Some("preparer")).unwrap();
+    let live = json!({"hostId":"target","rootId":registration["rootId"],"canonicalRoot":registration["canonicalRoot"]});
+    let source = json!({"resource_owner":{"kind":"managed_host","hostId":"target","connectionId":"registered","endpointIdentity":"identity"},
+        "workspace_id":"alternate","execution_workspace_id":"alternate","mode":"live_root","branch_id":null,"revision":null,"live_root":live});
+    let call_id = "request:tool:alternate-read";
+    let open = |grant: &str| owner.rpc("source.authority.open",json!({"principalId":"client","coordinatorHostId":"coordinator",
+        "scope":{"kind":"run","threadId":"thread","runId":"run","epoch":1},"source":source,"grantId":grant,
+        "operationId":call_id,"enabledTools":["file_read"],"purpose":"work_location_read"}),None);
+    issue("too-broad",Some(call_id),vec!["storage.read","filesystem.device"]);
+    assert!(open("too-broad").is_err());
+    issue("read-grant",Some(call_id),vec!["storage.read"]);
+    let opened=open("read-grant").unwrap();
+    let address=json!({"principalId":"client","coordinatorHostId":"coordinator","authorityId":opened["authorityId"],"resourceEpoch":opened["resourceEpoch"]});
+    let mut binding=address.clone();
+    binding["physicalRoot"]=live.clone();
+    binding["toolBinding"]=json!({"resourceOwner":source["resource_owner"],"grantId":"read-grant","runId":"run","threadId":"thread",
+        "workspaceId":"alternate","executionWorkspaceId":"alternate","rootId":registration["rootId"],"sourceMode":"live_root","liveRoot":live,"enabledTools":["file_read"]});
+    owner.rpc("source.authority.bind",binding,None).unwrap();
+    for bad in [json!({"path":"../primary/same.txt"}),json!({"path":"C:\\test.txt"}),json!({"path":primary.join("same.txt")}),json!({"ref":"file:1"}),json!({"path":"same.txt","unit":{"line":1}})] {
+        assert!(owner.tool(&address,"file_read","alternate-read",bad).is_err());
+    }
+    assert!(owner.tool(&address,"file_write","alternate-read",json!({"path":"same.txt","content":"bad"})).is_err());
+    assert!(owner.tool(&address,"file_read","different-call",json!({"path":"same.txt"})).is_err());
+    let receipt=owner.tool(&address,"file_read","alternate-read",json!({"path":"same.txt"})).unwrap();
+    assert_eq!(receipt["result"]["completion"]["content"]["data"]["content"]["text"],"alternate", "{receipt}");
+    let original=owner.tool(&main,"file_read","ordinary-read",json!({"path":"same.txt"})).unwrap();
+    assert_eq!(original["result"]["completion"]["content"]["data"]["content"]["text"],"primary", "{original}");
+    let mut retire=address.clone(); retire["mode"]=json!("retire");
+    owner.rpc("source.authority.release",retire,None).unwrap();
+    assert!(owner.tool(&address,"file_read","alternate-read",json!({"path":"same.txt"})).is_err());
+    issue("replacement",Some(call_id),vec!["storage.read"]);
+    assert!(open("replacement").is_err());
+    let mut recall=address; recall["operationId"]=json!(call_id);
+    assert_eq!(owner.rpc("source.resource.observe",recall,None).unwrap(),receipt);
+}

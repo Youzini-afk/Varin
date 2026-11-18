@@ -105,6 +105,7 @@ import { createSemanticInferenceLedger } from './lib/knowledge/semantic/inferenc
 import { createSemanticInference } from './lib/knowledge/semantic/runtime-inference.js';
 import { createLanguageOwner } from './lib/kernel/language-owner.js';
 import { createThreadSourceFiles } from './lib/kernel/thread-source-files.js';
+import { createModelWorkLocations } from './lib/kernel/model-work-locations.js';
 import { createSourceQueryOwner } from './lib/kernel/source-query.js';
 import { createFollowupEventOwner } from './lib/kernel/followup-event-owner.js';
 import { createLiveSourceOwner } from './lib/kernel/live-source.js';
@@ -2457,6 +2458,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const saved = await readSettingsFromDisk();
       return listWorkLocations(saved, sanitizeProjects(saved.projects) ?? [], workspaceConfig.root);
     } });
+  const modelWorkLocations = createModelWorkLocations({runtime: agentRuntime, kernel: kernelClient, directory: sourceDirectory, prepare: prepareThreadSource});
+  kernelClient.setModelWorkLocationOwner(modelWorkLocations.query);
+  kernelClient.onToolReleased(runId => { void modelWorkLocations.releaseRun(runId).catch(() => console.error('[Thread] Work-location read authority retirement is pending')); });
   projectSourceDirectory = sourceDirectory;
   registerProjectManagementRoutes(app, { requireAuth: uiAuthController.requireAuth,
     authorize: async (req, res) => {

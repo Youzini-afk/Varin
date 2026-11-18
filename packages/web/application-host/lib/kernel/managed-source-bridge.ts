@@ -7,6 +7,7 @@ import { controlManagedScript } from './managed-script-source.js';
 import { releaseManagedPackageSource, type ManagedPackageCleanup } from './managed-package-source.js';
 import { recallManagedScheduleReceipt, type ManagedScheduleReceiptQuery } from './managed-schedule-receipt.js';
 import { ManagedResponseError } from '../harness/managed-remote-client.js';
+import { SourceAdmissionError } from './source-admission-error.js';
 import { KernelClientError } from './kernel-error.js';
 import type { FollowupEventOwner } from './followup-event-owner.js';
 
@@ -31,6 +32,8 @@ function source(binding: SourceToolBinding): LaunchSource {
 /** Only the original private Rust transport can call this bridge. It never owns effects. */
 export class ManagedSourceBridge {
   private owner?: ManagedSourceOwner;
+  private workLocations?: import('./model-work-locations.js').ModelWorkLocationOwner;
+  setWorkLocations(owner: import('./model-work-locations.js').ModelWorkLocationOwner): void { this.workLocations = owner; }
   private followupEvents?: FollowupEventOwner;
   private coordinator?: () => string;
   private readonly active = new Map<string, { epoch: string; cancel?: () => Promise<unknown>; cancelled: boolean; abortOnClose?: () => void }>();
@@ -79,7 +82,14 @@ export class ManagedSourceBridge {
     void (async () => {
       let result: Extract<PrivateManagedSourceFrame, { kind: 'source-resource-response' }>['result'];
       try {
-        if (record(value.query) && ['followup_event_sources', 'followup_event_source_validate'].includes(String(value.query.kind))) {
+        if (record(value.query) && ['work_locations', 'work_location_bind', 'work_location_release'].includes(String(value.query.kind))) {
+          if (!this.workLocations) throw new Error('Work location owner is unavailable');
+          const controller = new AbortController();
+          pending.cancel = async () => controller.abort();
+          pending.abortOnClose = () => controller.abort();
+          if (pending.cancelled) controller.abort();
+          result = { ok: true, value: await this.workLocations(value.query, controller.signal) };
+        } else if (record(value.query) && ['followup_event_sources', 'followup_event_source_validate'].includes(String(value.query.kind))) {
           if (!this.followupEvents) throw new Error('Plugin event source owner is unavailable');
           const controller = new AbortController();
           pending.cancel = async () => controller.abort();
@@ -178,8 +188,8 @@ export class ManagedSourceBridge {
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        result = { ok: false, message, ...((error instanceof ManagedResponseError || error instanceof KernelClientError) && typeof error.code === 'string'
-          ? { error: { code: error.code, message, ...(error.details === undefined ? {} : { details: error.details }) } } : {}) };
+        result = { ok: false, message, ...((error instanceof ManagedResponseError || error instanceof KernelClientError || error instanceof SourceAdmissionError) && typeof error.code === 'string'
+          ? { error: { code: error.code, message, ...(!('details' in error) || error.details === undefined ? {} : { details: error.details }) } } : {}) };
       }
       if (this.active.get(id) !== pending) return;
       this.active.delete(id); if (this.epoch() !== epoch) return;

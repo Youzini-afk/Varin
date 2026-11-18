@@ -88,6 +88,28 @@ async function bindMcp(f: ReturnType<typeof fixture>) {
 }
 
 describe('managed Source target admission orchestration', () => {
+  it('binds a registered alternate live read with no device, write, or process authority and rechecks the current folder policy', async () => {
+    const f = fixture(), path = '/target/project';
+    const root = {hostId:'target',rootId:'prepared-root',canonicalRoot:path};
+    const read: ManagedSourceBindRequest = {...request, purpose:'work_location_read',operationId:'req:tool:read',retention:'caller',
+      scope:{kind:'run',runId:'run',threadId:'thread',epoch:1},source:{resourceOwner:source.resourceOwner,
+        workspaceId:'workspace',executionWorkspaceId:'workspace',mode:'live_root',liveRoot:root,tools:['file_read']}};
+    const selected = {tools:[{name:'file_read'}],grantCapabilities:['storage.read','storage.write'],clientCapabilities:['filesystem:read'],unavailable:[]};
+    f.sourceRequest.mockResolvedValueOnce(selected);
+    const bound = await f.service.bind(principal,read);
+    expect(f.issueGrant).toHaveBeenCalledWith(expect.objectContaining({capabilities:['storage.read'],operationId:read.operationId,runId:'run',pathScopes:['']}),undefined);
+    expect(f.fileRootRegister).not.toHaveBeenCalled();
+    expect(f.state.authority?.toolBinding?.enabledTools).toEqual(['file_read']);
+    const address={coordinatorHostId:'coordinator',authorityId:bound.authorityId,resourceEpoch:bound.resourceEpoch};
+    const call={runId:'run',operationId:'req:tool:read',origin:{kind:'model_step' as const,request_id:'req'},
+      callId:'read',name:'file_read',schemaVersion:'2',arguments:{path:'latest.log'}};
+    await expect(f.service.execute({...principal,allowedDirectories:['/another-authorized-root']},{...address,call})).rejects.toThrow();
+    await expect(f.service.execute(principal,{...address,call:{...call,name:'file_write'}})).rejects.toThrow();
+    await expect(f.service.service(principal,{...address,requestId:'service',operation:{kind:'validate'}})).rejects.toThrow();
+    expect(f.sourceRequest.mock.calls.map(([name])=>name)).not.toContain('source.resource.execute');
+    expect(f.serviceOperation).not.toHaveBeenCalled();
+  });
+
   it('reads a completed file exchange through its original receipt with read permission and no new source grant', async () => {
     const f = fixture();
     const originalSource: LaunchSource = { resource_owner: source.resourceOwner, workspace_id: 'workspace', execution_workspace_id: 'workspace',

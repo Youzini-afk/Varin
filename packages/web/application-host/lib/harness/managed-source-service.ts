@@ -152,6 +152,15 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         liveRoot: source.live_root }, signal);
     }
   };
+  const admitLocationRoot = async (principal: ManagedSourcePrincipal, source: LaunchSource, signal?: AbortSignal) => {
+    const registration = await documents.admitWorkspaceRegistration(source.workspace_id, signal);
+    if (source.mode !== 'live_root' || source.execution_workspace_id !== source.workspace_id || !source.live_root
+      || registration.hostId !== options.hostId || normalizePathIdentity(source.live_root.canonicalRoot) !== normalizePathIdentity(registration.canonicalPath)) throw new SourceAdmissionError('source_changed');
+    if (principal.allowedDirectories?.length) {
+      const { assertResourcePathAllowed } = await import('../workspace/resource-access.js');
+      await assertResourcePathAllowed(registration.canonicalPath, principal.allowedDirectories);
+    }
+  };
   const selectedSource = (input: ManagedSourceBindRequest): LaunchSource => ({ ...(input.source.mode==='native_workspace'&&input.source.nativeScope?{native_scope:input.source.nativeScope}:{}),resource_owner: input.source.resourceOwner,
     mode: input.source.mode, workspace_id: input.source.workspaceId, execution_workspace_id: input.source.executionWorkspaceId,
     branch_id: input.source.branchId ?? null, revision: input.source.revision ?? null, live_root: input.source.liveRoot ?? null,
@@ -222,6 +231,10 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     const authority = await inspect(principal, input, signal);
     if (authority.phase !== 'ready') throw new SourceAdmissionError('source_authority_denied');
     await registration(authority.source, signal, authority.purpose === 'result');
+    if (authority.purpose === 'work_location_read') {
+      if (!isDeepStrictEqual(enabledTools,['file_read'])) throw new SourceAdmissionError('source_authority_denied');
+      await admitLocationRoot(principal, authority.source, signal);
+    }
     await capabilities(principal, { coordinatorHostId: input.coordinatorHostId, mode: authority.source.mode,
       enabledTools }, signal);
     if(authority.scope.kind === 'external') await kernel.assertGrantForScope(kernel.sourceAuthorityGrant(authority));
@@ -504,9 +517,17 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       requireReadPrincipal(principal, input.coordinatorHostId);
       if (typeof input.path !== 'string' || !input.path.trim()) throw new SourceAdmissionError('source_changed');
       signal?.throwIfAborted();
+      if (principal.allowedDirectories?.length) {
+        const { assertResourcePathAllowed } = await import('../workspace/resource-access.js');
+        await assertResourcePathAllowed(input.path, principal.allowedDirectories);
+      }
       const resolved = await documents.resolveWorkspace({ path: input.path });
       const registration = await documents.admitWorkspaceRegistration(resolved.workspaceId, signal);
       if (resolved.hostId !== options.hostId || registration.hostId !== options.hostId) throw new SourceAdmissionError('source_changed');
+      if (principal.allowedDirectories?.length) {
+        const { assertResourcePathAllowed } = await import('../workspace/resource-access.js');
+        await assertResourcePathAllowed(registration.canonicalPath, principal.allowedDirectories);
+      }
       return { workspaceId: resolved.workspaceId, canonicalRoot: registration.canonicalPath, hostId: options.hostId };
     },
     async workspace(principal, input, signal) {
@@ -601,6 +622,12 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       requireReadPrincipal(principal, input.coordinatorHostId);
       const source = selectedSource(input);
       if (input.purpose === 'external_harness' && (input.scope.kind !== 'external' || input.retention !== 'caller' || input.operationId !== input.scope.transportId)) throw new SourceAdmissionError('source_authority_denied');
+      const alternateRead = input.purpose === 'work_location_read';
+      if (alternateRead) {
+        if (input.scope.kind !== 'run' || input.retention !== 'caller' || !input.operationId
+          || !isDeepStrictEqual(input.source.tools, ['file_read']) || input.handoff || input.continuation) throw new SourceAdmissionError('source_authority_denied');
+        await admitLocationRoot(principal, source, signal);
+      }
       const resultOnly = input.purpose === 'result';
       if (input.purpose === 'mcp_owner' && (input.scope.kind !== 'run' || input.retention !== 'run' || input.operationId))
         throw new SourceAdmissionError('source_authority_denied');
@@ -626,7 +653,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         ...(input.scope.kind === 'external' ? {externalTransportId:input.scope.transportId} : {}),
         threadId: input.scope.kind === 'external' ? input.scope.conversationId : input.scope.threadId, ...(input.scope.kind === 'run' ? { runId: input.scope.runId } : {}),
         ...(input.operationId ? { operationId: input.operationId } : {}),
-        capabilities: [...new Set([...selected.grantCapabilities, ...(source.mode === 'live_root' && options.deviceFileAccess !== false && !principal.allowedDirectories?.length ? ['filesystem.device'] : []), ...(integration ? ['recovery'] : []),
+        capabilities: alternateRead ? ['storage.read'] : [...new Set([...selected.grantCapabilities, ...(source.mode === 'live_root' && options.deviceFileAccess !== false && !principal.allowedDirectories?.length ? ['filesystem.device'] : []), ...(integration ? ['recovery'] : []),
           ...(resultOnly ? ['storage.write'] : []), ...(['script_environment', 'mcp_owner', 'external_harness'].includes(input.purpose) ? ['process'] : [])])], pathScopes: [''] }, signal);
       let opened: SourceAuthorityResult | undefined;
       try {
@@ -646,7 +673,9 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
           || branch.view !== 'revision' || branch.revision !== source.revision)) throw new SourceAdmissionError('source_changed');
         if (source.mode === 'live_root' && !resultOnly) {
           const root = source.live_root!;
-          const registered = await actor.fileRootRegister({ workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id,
+          // Preparation already registered the root. Binding checks Storage's
+          // recorded physical identity without giving this read a write grant.
+          const registered = alternateRead ? root : await actor.fileRootRegister({ workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id,
             canonicalRoot: root.canonicalRoot }, signal);
           if (registered.rootId !== root.rootId || typeof registered.canonicalRoot !== 'string'
             || normalizePathIdentity(registered.canonicalRoot) !== normalizePathIdentity(root.canonicalRoot)) throw new SourceAdmissionError('source_changed');
@@ -685,7 +714,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
           ? undefined : await resolveSourceTextPolicy(kernel, actor, source, physicalRoot, signal));
         const toolBinding: SourceToolBinding | null = input.scope.kind !== 'run' ? null : {
           ...(textEncoding ? { textEncoding } : {}),
-          executionEnvironment: await (options.executionEnvironment?.() ?? defaultExecutionEnvironment.snapshot()),
+          ...(alternateRead ? {} : {executionEnvironment: await (options.executionEnvironment?.() ?? defaultExecutionEnvironment.snapshot())}),
           resourceOwner: source.resource_owner, grantId: opened.grantId, runId: input.scope.runId, threadId: input.scope.threadId,
           workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id, sourceMode: source.mode,
           enabledTools: selected.tools.map(tool => tool.name), ...(source.environment_run_id ? { environmentRunId: source.environment_run_id } : {}),
@@ -767,6 +796,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         }
         // Cleanup uses the original authenticated address even after read/trust withdrawal.
         const authority = mcpRelease || mcpContinuation ? await inspect(principal, input, controller.signal) : await admit(principal, input, controller.signal);
+        if (authority.purpose === 'work_location_read' && operation.kind !== 'validate') throw new SourceAdmissionError('source_authority_denied');
         if (authority.purpose === 'process_view' || authority.purpose === 'script_environment'
           && !(operation.kind === 'native_resource' && operation.action.kind === 'process_observation')) throw new SourceAdmissionError('source_authority_denied');
         if (authority.purpose === 'result' && !['validate', 'attachment_recover', 'attachment_describe', 'attachment_read', 'attachment_release', 'attachment_cleanup', 'attachment_discard', 'child_result_read', 'child_result_publish', 'child_release', 'native_resource'].includes(operation.kind))
@@ -979,7 +1009,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       const inspected = await kernel.sourceRequest<SourceAuthorityResult[]>('source.authority.inspect_scope', params, signal);
       // Match native retirement's original lifetime selection. A caller-owned
       // operation can outlive its Run; retirement must not close its Host work.
-      const authorities = inspected.filter(authority => input.mode === 'revoke' || authority.operationId === null);
+      const authorities = inspected.filter(authority => input.mode === 'revoke' || authority.operationId === null || authority.purpose === 'work_location_read');
       await Promise.all(authorities.map(async original => {
         // Seal in Storage before the Host snapshot: no late holder may race this drain.
         const authority = original.purpose === 'mcp_owner' ? await kernel.sourceRequest<SourceAuthorityResult>(
