@@ -473,24 +473,33 @@
 
   /* 会话示例独立于普通新会话的起始位置。 */
   ACTS['place-demo'] = el => {
-    K.set(placeKey('demo'), el.dataset.v);
+    const stage = el.dataset.v;
+    if (stage === 'start') K.set(placeKey('current'), '');
+    if (stage === 'move') K.set(placeKey('current'), 'build-logs');
+    K.set(placeKey('demo'), stage);
     App.render({ enter: true });
     document.querySelector('#canvas .scroll')?.scrollTo(0, 0);
   };
   function demoPlaces(places, stage) {
-    const origin = places.find(p => p.id === (local() ? 'project-launch-site' : 'home-work'));
     const logs = places.find(p => p.id === 'build-logs');
     const inspected = stage === 'inspect' || stage === 'move';
-    const current = stage === 'move' ? logs : origin;
     const message = text => `<div class="pv-user-wrap"><div class="pv-user">${text}</div></div>`;
-    const action = (title, v) => btn(title, { sm: true, act: 'place-demo', v, off: !!logs.status });
-    const body = message(`去 ${esc(nm(logs.device))} 看看最新的构建日志。`) + (inspected ?
+    const read = `去 ${esc(nm(logs.device))} 看看最新的构建日志。`;
+    const move = '接下来就在这里工作。';
+    const body = (inspected ? message(read) +
       `<div class="place-observation">${ic('file', 'sm')}<div><strong>读取 build.log</strong><small>${esc(nm(logs.device))} · ${esc(logs.path)}</small></div></div><p>最近一次构建已完成，退出码为 0。</p>` : '') +
-      (stage === 'move' ? message('接下来就在这里工作。') + '<p>后续命令会从构建日志目录开始。</p>' : '') +
-      (logs.status ? muted(`${esc(nm(logs.device))} · ${esc(logs.status)}`) : '') +
-      (stage === 'start' ? action('演示读取', 'inspect') : stage === 'inspect' ? action('接下来就在这里工作', 'move') : btn('重看示例', { sm: true, k: 'ghost', act: 'place-demo', v: 'start' }));
+      (stage === 'move' ? message(move) + '<p>后续命令会从构建日志目录开始。</p>' : '');
+    const start = places.find(p => p.id === K.get(placeKey('default'), ''));
+    const options = [{ v: '', l: '默认', icon: 'folder', d: start ? placeLabel(start) + ' · ' + start.path : svcId() + ' · ' + K.get('ws.dir.' + svcId(), WS[svcId()].dir) },
+      ...places.map(p => ({ v: p.id, l: nm(p.device) + ' - ' + p.name, icon: 'folder', d: p.path + (p.status ? ' · ' + p.status : '') }))];
+    const picker = dd(placeKey('current'), options, '', { plain: true, w: 'place-picker', label: '工作位置' });
+    const send = stage === 'move' ? btn('重看示例', { sm: true, k: 'ghost', act: 'place-demo', v: 'start' }) :
+      btn('发送', { sm: true, act: 'place-demo', k: 'primary', v: inspected ? 'move' : 'inspect', off: !!logs.status });
+    const draft = { start: read, inspect: move }[stage] || '';
+    const composer = `<div class="place-input"><div class="pv-composer"><textarea aria-label="示例消息" rows="2" readonly placeholder="描述你想做的事…">${draft}</textarea>
+      <div class="pv-cbar">${logs.status ? muted(esc(logs.status)) : ''}<span class="grow"></span>${send}</div></div><div class="place-current">${picker}</div></div>`;
     return header({ title: '会话示例', desc: '检查最近一次构建' }, { acts: btn('返回工作区', { sm: true, k: 'ghost', icon: 'back', act: 'place-demo', v: '' }) }) +
-      `<div class="place-conversation"><div class="place-dialogue">${body}</div><div class="place-current">${ic('folder','sm')}<span>当前工作位置</span><b>${esc(placeLabel(current))}</b></div></div>`;
+      `<div class="place-conversation">${body ? `<div class="place-dialogue">${body}</div>` : ''}${composer}</div>`;
   }
 
   page('workspaces', {
