@@ -220,7 +220,7 @@ it('discovers a saved live location and reads two same-named files in one model 
     const op = await f.runtime.operation(row.id);
     expect(op).toMatchObject({run_id:receipt.run_id,outcome:'succeeded',resource_source:{
       workspace_id:row.id.endsWith(':read-default') ? prepared.source.workspaceId : target.workspaceId,
-      live_root:{canonicalRoot:row.id.endsWith(':read-default') ? f.workspace : other}
+      live_root:{canonicalRoot:await fs.realpath(row.id.endsWith(':read-default') ? f.workspace : other)}
     }});
   }
   expect((await f.runtime.launch(receipt.run_id))?.selection.source?.workspace_id).toBe(prepared.source.workspaceId);
