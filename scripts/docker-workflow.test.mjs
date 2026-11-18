@@ -118,6 +118,22 @@ test('default local builds follow a published release base, not a retired main a
   }
 });
 
+test('node Compose is separate and its source or smoke changes require container checks', async () => {
+  const compose = parse(fs.readFileSync(new URL('../docker-compose.resource-node.yml', import.meta.url), 'utf8'));
+  assert.deepEqual(Object.keys(compose.services), ['varin-node']);
+  assert.deepEqual(Object.keys(compose.volumes), ['varin_node_state']);
+  const service = compose.services['varin-node'];
+  assert.equal(service.build.target, 'resource-node');
+  assert.equal(service.user, '1000:1000');
+  assert.ok(service.ports.every(bind => bind.startsWith('127.0.0.1:')));
+  assert.ok(service.volumes.some(mount => mount.startsWith('varin_node_state:')));
+  assert.equal(service.environment?.VARIN_UI_PASSWORD, undefined);
+  const { classifyChanges, requiredJobs } = await import('./ci-scope.mjs');
+  for (const file of ['docker-compose.resource-node.yml', 'scripts/smoke-container-resource-node.mjs', 'packages/web/application-host/resource-node.ts']) {
+    assert.equal(requiredJobs(classifyChanges([file]))['container-check'], true);
+  }
+});
+
 
 test('release callers preserve exact build identities, explicit overrides and immutable output routing', () => {
   const build = release.jobs['build-images'];

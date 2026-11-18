@@ -68,15 +68,21 @@ it('pairs offline, serves an actual original live file and process, and reopens 
     const prepared = await prepare(worker.token);
     expect(prepared.tools).toContain('process_spawn');
     expect(prepared.tools).not.toContain('code_retrieval');
-    const { authorityId, resourceEpoch } = await accepted<ManagedSourceBinding>(source('bind', worker.token, {
+    const binding = await accepted<ManagedSourceBinding>(source('bind', worker.token, {
       source: { ...prepared, tools: ['file_read', 'file_write', 'process_spawn'] }, scope, purpose: 'source', retention: 'run',
     }));
-    const address = { authorityId, resourceEpoch };
+    const address = { authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch };
     const execute = async (name: string, args: unknown) => {
+      const declaration = binding.capabilities.tools.find(tool => tool.name === name);
+      if (!declaration) throw new Error(`The node did not admit ${name}`);
       const callId = randomUUID(), origin = { kind: 'model_step' as const, request_id: 'request:node-native' };
-      const call = { runId, callId, origin, operationId: toolOperationId(origin, callId), name, arguments: args, schemaVersion: '1' };
+      const call = { runId, callId, origin, operationId: toolOperationId(origin, callId), name, arguments: args, schemaVersion: declaration.version };
       await accepted(source('authorize', worker.token, { ...address, call }));
-      return accepted<ManagedSourceReceipt>(source('execute', worker.token, { ...address, call }));
+      return accepted<ManagedSourceReceipt>(source('execute', worker.token, { ...address, call,
+        ...(name === 'file_write' || name === 'process_spawn' ? { journal: { executionId: 'execution:node-native', threadId,
+          branchId: 'main', runId, entryId: 'entry:node-native', epoch: scope.epoch } } : {}),
+        ...(name === 'process_spawn' && binding.executionEnvironment ? { executionEnvironment: binding.executionEnvironment } : {}),
+      }));
     };
     const { result } = await execute('file_read', { path: 'note.txt' });
     expect(result).toMatchObject({ completion: { outcome: 'succeeded', content: { data: { readVersion: expect.any(String) } } } });

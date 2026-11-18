@@ -20,9 +20,11 @@ observer does not report a process stopped or replay a job.
 A trusted launcher can start the paired kernel with `role: "resources"`. The role is negotiated before opening Storage.
 The kernel keeps the existing exclusive storage-root lock and persistent resource identity but starts no Agent worker
 and opens no conversation Catalog. Agent and model requests fail; the full installation still defaults to the Agent role.
-The profile is private, not an installable daemon: an independent launcher still has to assemble persistent Host identity
-and pairing, Documents root/trust/encoding policy, file recovery, enabled source services, and the host-wide admission
-and shutdown/drain barrier before exposing a listener. There is no standalone node image or Compose target yet.
+[resource-node.ts](../../resource-node.ts) assembles that role as an independent listener, with persistent Host identity,
+the existing client pairing store, a mandatory shared-directory boundary, and the original Documents/Storage/process
+owners. It advertises only installed live-source operations, stops new admission before draining, and has no app UI or
+conversation service. Node pairing is an offline local command, read-only by default. See the existing [container release
+and Compose entry](../../../../../docs/ops/cloud-deployment.md#把开发机或测试机作为资源节点) for packaging, network and state layout.
 
 ## Transport and authority
 
