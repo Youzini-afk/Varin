@@ -37,7 +37,7 @@ function device(target: ThreadSourceTarget) {
 
 /** Deliberately no path argument: only a still-saved registration can become a location. */
 export function createModelWorkLocations(options: {
-  runtime: Runtime; kernel: Pick<KernelClient, 'issueGrant' | 'scoped' | 'retireGrant' | 'textEncodingPolicy'>;
+  runtime: Runtime; kernel: Pick<KernelClient, 'isReady' | 'kernelEpoch' | 'issueGrant' | 'scoped' | 'retireGrant' | 'textEncodingPolicy'>;
   directory: Pick<SourceDirectory, 'list' | 'resolve'>;
   prepare(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
 }) {
@@ -97,7 +97,11 @@ export function createModelWorkLocations(options: {
     const grant = await kernel.issueGrant({grantId:`work-location-read:${randomUUID()}`, threadId:run.thread_id,
       runId:run.id, operationId, owningWorkspace:key.workspaceId, executionWorkspace:key.workspaceId,
       capabilities:['storage.read'], pathScopes:['']}, signal);
-    const release = async () => { await kernel.retireGrant(grant.grantId); };
+    const release = async () => {
+      // Old local grants cannot run in a new epoch. Cleanup must not restart
+      // the local kernel when its transport has just exited.
+      if (kernel.isReady && grant.kernelEpoch === kernel.kernelEpoch) await kernel.retireGrant(grant.grantId);
+    };
     try {
       const textEncoding = await resolveSourceTextPolicy(kernel, kernel.scoped(grant), resourceSource(source)!, source.liveRoot, signal);
       return {operationId, release, binding:{...base, grantId:grant.grantId, ...(textEncoding ? {textEncoding} : {})}};
