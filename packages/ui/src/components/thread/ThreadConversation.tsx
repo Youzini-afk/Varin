@@ -544,7 +544,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     refresh={async () => { await projection.current?.refresh(); }} act={act} openProcess={openProcessTerminal}
     details={{
       goals: !readOnly && snapshot ? <ThreadGoal api={api.goals} identity={identity} goals={snapshot.goals} sourceRunId={run?.id} refresh={async () => { await projection.current?.refresh(); }} /> : undefined,
-      sources: <>{!readOnly && !delegated && <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={draft.sourceSelection?.path ?? draft.workspacePath ?? initialWorkspacePath} draftSelection={draft.sourceSelection} chatOnly={draft.sourceDisabled}
+      sources: <>{!readOnly && !delegated && <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={draft.sourceSelection?.path ?? draft.workspacePath ?? initialWorkspacePath} draftSelection={draft.sourceSelection} chatOnly={draft.sourceDisabled} branchDefaultSource={branchDefault?.source}
       {...(api.sources.setDefault && branch && !snapshot?.thread.parent_thread_id && !active && !pending && !draft.pendingInput
         && (!launch?.selection.source || launch.selection.source.mode === 'live_root') ? { onSaveDefault: (source: import('@varin/application-client').ThreadSource | null) => act(async () => {
           await api.sources.setDefault!(identity, { expectedRevision: branch.workspace_default?.revision ?? 0, source });

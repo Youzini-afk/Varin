@@ -1,7 +1,7 @@
 import React from 'react';
 import { getRuntimeEndpointGeneration, registerRuntimeEndpointSwitchBlocker, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import type { ThreadIdentity, ThreadPreparedSource, ThreadPrepareSource, ThreadSnapshot, ThreadsAPI, ThreadSourceTargets, ThreadResolvedSource } from '@varin/application-client';
-import type { AgentInputContext, AgentInputSnapshotConsumer, SourceResourceOwner } from '@varin/protocol';
+import type { AgentInputContext, AgentInputSnapshotConsumer, LaunchSource, SourceResourceOwner } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -32,7 +32,7 @@ function releaseRequest(request: SourceRequest): Promise<void> {
   return request.releasing;
 }
 
-export function ThreadSourcePicker({ api, identity, initialPath, active, launch, prepared, onPrepared, onPreparingChange, onUseChatOnly, onUseDefault, onSaveDefault, chatOnly, draftSelection, onDraftSelection }: {
+export function ThreadSourcePicker({ api, identity, initialPath, active, launch, prepared, onPrepared, onPreparingChange, onUseChatOnly, onUseDefault, onSaveDefault, chatOnly, branchDefaultSource, draftSelection, onDraftSelection }: {
   api: Pick<ThreadsAPI, 'prepareSource' | 'sources'>;
   identity: ThreadIdentity | null;
   draftSelection?: DraftSourceSelection;
@@ -46,6 +46,8 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
   onUseChatOnly?(): void;
   onUseDefault?(): void;
   chatOnly?: boolean;
+  /** null is an explicit chat-only default; undefined means that no override exists. */
+  branchDefaultSource?: LaunchSource | null;
   /** Optional for a Host with branch CAS. Preparation alone never changes a branch. */
   onSaveDefault?(source: ThreadPreparedSource['source'] | null): Promise<void>;
 }) {
@@ -175,6 +177,7 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
     finally { switching.current = false; setSavingDefault(false); }
   };
   const source = launch?.selection.source;
+  const displaySource = branchDefaultSource === undefined ? source : branchDefaultSource;
   const isNativeProject = locator?.selection?.mode === 'native_workspace';
   const provenance = prepared?.provenance;
   const targetKey = (owner: SourceResourceOwner) => owner.kind === 'local' ? 'local' : JSON.stringify([owner.connectionId, owner.endpointIdentity, owner.hostId]);
@@ -183,10 +186,11 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
   const locations = targets.workspace?.locations ?? [];
   const startup = locations.find(row => row.id === targets.workspace?.defaultId);
   return <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
-    <summary className="cursor-pointer">Workspace · {prepared ? 'Prepared for next run' : source ? source.mode==='native_workspace'?'Versioned workspace':source.mode === 'live_root' ? 'Live workspace' : source.mode === 'materialized' ? 'Isolated editable copy' : 'Read-only snapshot' : chatOnly || launch ? 'Chat only' : 'Default'}</summary>
+    <summary className="cursor-pointer">Workspace · {prepared ? 'Prepared for next run' : displaySource ? displaySource.mode==='native_workspace'?'Versioned workspace':displaySource.mode === 'live_root' ? 'Live workspace' : displaySource.mode === 'materialized' ? 'Isolated editable copy' : 'Read-only snapshot' : chatOnly || branchDefaultSource === null || launch ? 'Chat only' : 'Default'}</summary>
     <div className="space-y-2 py-2">
-      {source && <p>Current source: {ownerLabel(source.resource_owner)} · workspace {source.workspace_id}{source.mode !== 'live_root'&&source.mode!=='native_workspace' && ` · revision ${source.revision}`}. {source.mode === 'live_root' ? 'Following runs use this same live workspace. Edits change its actual files.' : source.mode === 'materialized' ? 'Following runs keep this working copy.' : source.mode === 'native_workspace' ? 'Following runs use the same registered project view.' : 'Following runs read the same fixed snapshot.'}</p>}
-      {!source && !launch && targets.workspace && <p>Default for new conversations: {startup
+      {branchDefaultSource !== undefined && <p>Saved for the next run: {branchDefaultSource ? `${ownerLabel(branchDefaultSource.resource_owner)} · ${branchDefaultSource.live_root?.canonicalRoot ?? branchDefaultSource.workspace_id}` : 'Chat only'}.</p>}
+      {source && <p>{branchDefaultSource === undefined ? 'Current source' : 'Last run’s source'}: {ownerLabel(source.resource_owner)} · workspace {source.workspace_id}{source.mode !== 'live_root'&&source.mode!=='native_workspace' && ` · revision ${source.revision}`}.{branchDefaultSource === undefined && ` ${source.mode === 'live_root' ? 'Following runs use this same live workspace. Edits change its actual files.' : source.mode === 'materialized' ? 'Following runs keep this working copy.' : source.mode === 'native_workspace' ? 'Following runs use the same registered project view.' : 'Following runs read the same fixed snapshot.'}`}</p>}
+      {!source && !launch && branchDefaultSource === undefined && targets.workspace && <p>Default for new conversations: {startup
         ? 'unavailable' in startup ? startup.unavailable : `${ownerLabel(startup.resourceOwner)} · ${startup.path}`
         : targets.workspace.defaultId ? 'Saved location unavailable' : `${ownerLabel({ kind: 'local' })} · ${targets.workspace.servicePath}`}</p>}
       {locations.length > 0 && <label className="block">Saved work locations
