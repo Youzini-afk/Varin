@@ -3033,7 +3033,7 @@ export const settingsDict = {
   "settings.page.harness.localSemantic.stage.extracting": "解包中",
   "settings.page.harness.localSemantic.stage.verifying": "校验中",
   "settings.page.harness.localSemantic.progress": "已下载 {downloaded} / {total}",
-  "settings.page.harness.localSemantic.install": "安装",
+  "settings.page.harness.localSemantic.install": "下载并安装",
   "settings.page.harness.localSemantic.import": "导入本地包",
   "settings.page.harness.localSemantic.cancel": "取消",
   "settings.page.harness.localSemantic.retry": "重试安装",

@@ -1,6 +1,6 @@
 import React from 'react';
 import { SettingsDisclosure } from '../shared/SettingsDisclosure';
-import { Seg } from '../shared/kit';
+import { Note, Row, Section, Seg } from '../shared/kit';
 import { SettingsSection, SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useConfigurationModels } from './ConfigurationModels';
@@ -8,19 +8,24 @@ import { useI18n } from '@/lib/i18n';
 import { AutoSaveInput } from './AutoSaveInput';
 import { HarnessModelField } from './HarnessModelField';
 import { InferenceModelField } from './InferenceModelField';
+import { LocalSemanticSettings } from './LocalSemanticSettings';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 
-export function InferenceSettings({ harness, update, kind, embedded = false }: HarnessSettingsPageProps & { kind: 'embedding' | 'rerank'; embedded?: boolean }) {
+type InferenceSource = 'local' | 'remote' | 'off';
+
+export function InferenceSettings({ harness, update, kind, embedded = false, children }: React.PropsWithChildren<HarnessSettingsPageProps & {
+  kind: 'embedding' | 'rerank';
+  embedded?: boolean;
+}>) {
   const { t } = useI18n();
   const { providers, modelsFor } = useConfigurationModels();
   const binding = harness[kind];
-  const [local, setLocal] = React.useState(kind === 'embedding' && binding?.protocol === 'local');
-  const [remote, setRemote] = React.useState(Boolean(binding && binding.protocol !== 'local'));
-  const remoteRef = React.useRef(remote);
+  const [source, setSource] = React.useState<InferenceSource>(binding?.protocol === 'local' ? 'local' : binding ? 'remote' : 'off');
+  const sourceRef = React.useRef(source);
   const [fields, setFields] = React.useState({ providerId: binding?.protocol === 'local' ? '' : binding?.providerId ?? '', modelId: binding?.protocol === 'local' ? '' : binding?.modelId ?? '', endpoint: kind === 'rerank' ? harness.rerank?.endpoint ?? '' : '' });
   const current = React.useRef(fields);
   const commit = (patch: Partial<typeof fields>) => {
-    if (!remoteRef.current) return;
+    if (sourceRef.current !== 'remote') return;
     const next = { ...current.current, ...patch };
     current.current = next;
     setFields(next);
@@ -32,48 +37,55 @@ export function InferenceSettings({ harness, update, kind, embedded = false }: H
       ...(kind === 'rerank' ? { endpoint: next.endpoint.trim() || undefined } : {}),
     } });
   };
-  const defaultLabel = t(kind === 'embedding' ? 'settings.page.harness.embeddings.off' : 'settings.harness.retrieval.off');
-  const selectSource = (value: 'local' | 'remote' | 'default') => {
-    setLocal(value === 'local'); remoteRef.current = value === 'remote'; setRemote(value === 'remote');
+  const selectSource = (value: InferenceSource) => {
+    sourceRef.current = value;
+    setSource(value);
     if (value === 'local') update({ embedding: { protocol: 'local', providerId: 'local', modelId: 'installed', dimensions: undefined, maxTokens: undefined } });
-    else if (value === 'default') update({ [kind]: undefined });
+    else if (value === 'off') update({ [kind]: undefined });
     else commit({});
   };
+  const title = t(`settings.page.harness.section.${kind}`);
+  const description = t(`settings.page.harness.section.${kind}.description`);
+  const sourceLabel = t('settings.roles.inferenceSource');
+  const sources: { value: InferenceSource; label: string }[] = kind === 'embedding'
+    ? [{ value: 'local', label: t('settings.page.harness.localSemantic.source') }] : [];
+  sources.push({ value: 'remote', label: t('settings.harness.retrieval.remote') }, { value: 'off', label: t('settings.roles.off') });
+  const providerLabel = t(`settings.page.harness.${kind}.provider`);
+  const modelLabel = t(`settings.page.harness.${kind}.model`);
+  const endpointLabel = t('settings.page.harness.rerank.endpoint');
   const rows = <>
-    <SettingsFieldRow settingsItem={embedded ? `harness.${kind}` : undefined}
-      label={t(embedded ? `settings.page.harness.section.${kind}` : 'settings.harness.retrieval.source')}
-      description={kind === 'embedding' ? t('settings.page.harness.section.embedding.description') : undefined}>
-      {embedded && kind === 'embedding' ? <Seg label={t('settings.page.harness.section.embedding')} value={local ? 'local' : remote ? 'remote' : 'default'}
-        options={[{ value: 'local', label: t('settings.page.harness.localSemantic.source') }, { value: 'remote', label: t('settings.harness.retrieval.remote') }, { value: 'default', label: defaultLabel }]} onChange={selectSource} />
-      : <Select value={local ? 'local' : remote ? 'remote' : 'default'} onValueChange={value => { if (value === 'local' || value === 'remote' || value === 'default') selectSource(value); }}>
-        <SelectTrigger size="settings" className="w-64" aria-label={t('settings.harness.retrieval.source')}><SelectValue>{local ? t('settings.page.harness.localSemantic.source') : remote ? t('settings.harness.retrieval.remote') : defaultLabel}</SelectValue></SelectTrigger>
-        <SelectContent><SelectItem value="default">{defaultLabel}</SelectItem>{kind === 'embedding' ? <SelectItem value="local">{t('settings.page.harness.localSemantic.source')}</SelectItem> : null}<SelectItem value="remote">{t('settings.harness.retrieval.remote')}</SelectItem></SelectContent>
-      </Select>}
-    </SettingsFieldRow>
-    {remote ? <>
-      <SettingsFieldRow label={t(`settings.page.harness.${kind}.provider`)}>
+    <Row item={embedded ? `harness.${kind}` : undefined} label={sourceLabel} description={embedded ? description : undefined}>
+      <Seg label={title} value={source} options={sources} onChange={selectSource} />
+    </Row>
+    {source === 'local' ? <LocalSemanticSettings /> : null}
+    {source === 'remote' ? <>
+      <Row label={providerLabel}>
         <Select value={fields.providerId || '__none'} onValueChange={(providerId) => {
           if (providerId === '__none') return;
           const next = { ...current.current, providerId, modelId: '' };
           current.current = next; setFields(next);
         }}>
-          <SelectTrigger size="settings" className="w-64" aria-label={t(`settings.page.harness.${kind}.provider`)}><SelectValue /></SelectTrigger>
+          <SelectTrigger size="settings" className="w-64 max-w-full" aria-label={providerLabel}><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="__none" disabled>{t('settings.page.harness.models.notConfigured')}</SelectItem>{providers.filter(provider => modelsFor(provider.id, kind).length).map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.name || provider.id}</SelectItem>)}</SelectContent>
         </Select>
-      </SettingsFieldRow>
-      <SettingsFieldRow label={t(`settings.page.harness.${kind}.model`)} controlClassName="@xl:flex-1 @xl:max-w-80">
-        <InferenceModelField key={fields.providerId} value={fields.modelId} onCommit={(modelId) => { if (current.current.providerId === fields.providerId) commit({ modelId }); }}
-          models={modelsFor(fields.providerId, kind)}
-          label={t(`settings.page.harness.${kind}.model`)} placeholder={kind === 'embedding' ? 'text-embedding-3-small' : 'rerank-v3.5'} />
-      </SettingsFieldRow>
-      {kind === 'rerank' ? <SettingsFieldRow label={t('settings.page.harness.rerank.endpoint')} controlClassName="@xl:flex-1 @xl:max-w-80">
-        <AutoSaveInput value={fields.endpoint} onCommit={(endpoint) => commit({ endpoint })} placeholder="/rerank" aria-label={t('settings.page.harness.rerank.endpoint')}
+      </Row>
+      <Row label={modelLabel}>
+        <div className="w-64 max-w-full">
+          <InferenceModelField key={fields.providerId} value={fields.modelId} onCommit={(modelId) => { if (current.current.providerId === fields.providerId) commit({ modelId }); }}
+            models={modelsFor(fields.providerId, kind)} label={modelLabel}
+            placeholder={kind === 'embedding' ? 'text-embedding-3-small' : 'rerank-v3.5'} />
+        </div>
+      </Row>
+      {kind === 'rerank' ? <Row label={endpointLabel}>
+        <div className="w-64 max-w-full"><AutoSaveInput value={fields.endpoint} onCommit={(endpoint) => commit({ endpoint })} placeholder="/rerank" aria-label={endpointLabel}
           validate={(value) => !value || value.startsWith('/') ? null : t('settings.page.harness.rerank.endpoint.description')} />
-      </SettingsFieldRow> : null}
-      <p className="typography-meta text-muted-foreground">{t(!fields.providerId || !fields.modelId ? 'settings.harness.completeFields' : `settings.page.harness.${kind}.provider.description`)}</p>
+        </div>
+      </Row> : null}
+      {!fields.providerId || !fields.modelId ? <Note inPanel>{t('settings.harness.completeFields')}</Note> : null}
     </> : null}
+    {children}
   </>;
-  return embedded ? rows : <SettingsSection title={t(`settings.page.harness.section.${kind}`)} settingsItem={`harness.${kind}`}>{rows}</SettingsSection>;
+  return embedded ? rows : <Section title={title} description={description} item={`harness.${kind}`}>{rows}</Section>;
 }
 
 export function FastDecisionSettings({ harness, update, embedded = false }: HarnessSettingsPageProps & { embedded?: boolean }) {

@@ -2,14 +2,13 @@ import React from 'react';
 import { createEmbeddingRequestsHttpAPI, type EmbeddingRequestSettings } from '@varin/application-client';
 import { SettingsActionBar } from '../shared/SettingsActionBar';
 import { Btn, Disclosure, Loading, Note, Row, Section, Select } from '../shared/kit';
-import { LocalSemanticSettings } from './LocalSemanticSettings';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/lib/i18n';
 import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 import { InferenceSettings } from './RetrievalSettings';
 
-export function EmbeddingRequests({ model, localModel }: { model?: React.ReactNode; localModel?: React.ReactNode } = {}) {
+export function EmbeddingRequests({ model }: { model?: React.ReactNode } = {}) {
   const { t } = useI18n();
   const api = React.useMemo(() => createEmbeddingRequestsHttpAPI(), []);
   const [saved, setSaved] = React.useState<EmbeddingRequestSettings | null>(null);
@@ -60,7 +59,6 @@ export function EmbeddingRequests({ model, localModel }: { model?: React.ReactNo
     after={saved ? <Note icon="restart">{t(saved.restartRequired
       ? 'settings.page.harness.embeddings.requests.restartRequired' : 'settings.memoryx.restart')}</Note> : null}>
       {model}
-      {localModel ? <Disclosure label={t('settings.page.harness.localSemantic.title')} defaultOpen>{localModel}</Disclosure> : null}
       {!saved && busy ? <Loading /> : null}
       {saved && <>
         <Row label={concurrency}>
@@ -101,7 +99,6 @@ export function EmbeddingRequests({ model, localModel }: { model?: React.ReactNo
 export function EmbeddingSettings(props: HarnessSettingsPageProps) {
   return <>
     <InferenceSettings {...props} kind="embedding" />
-    {props.harness.embedding?.protocol === 'local' ? <LocalSemanticSettings /> : null}
     <EmbeddingRequests />
   </>;
 }

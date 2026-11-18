@@ -59,11 +59,12 @@ function MemoryRetrievalSettings() {
           {t('settings.roles.title')}
         </Btn>} />
     </Row>
+    {binding?.protocol === 'local' ? <LocalSemanticSettings /> : null}
     {error || catalogError ? <Note kind="err" inPanel actions={error ? <Btn kind="ghost" sm onClick={() => void retry()}>{t('assistant.reload')}</Btn> : undefined}>
       {error || catalogError}
     </Note> : null}
   </>;
-  return <EmbeddingRequests key={targetKey} model={model} localModel={binding?.protocol === 'local' ? <LocalSemanticSettings embedded /> : null} />;
+  return <EmbeddingRequests key={targetKey} model={model} />;
 }
 
 export function AgentMemoryPage({ initialScope, scopes, embedded = false, onContentChange }: {
