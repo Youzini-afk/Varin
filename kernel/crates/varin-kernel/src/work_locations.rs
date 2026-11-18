@@ -31,8 +31,9 @@ pub(crate) fn eligible(source: Option<&SourceSelection>) -> bool {
             && s.live_root.is_some()
     })
 }
+pub(crate) const NAME: &str = "work_locations";
 pub(crate) fn schema() -> ToolSchema {
-    ToolSchema { name:"work_locations".into(), version:"1".into(), description:
+    ToolSchema { name:NAME.into(), version:"1".into(), description:
         "Find saved work locations by name, device or path. Pass a returned location to file_read for one relative path. This does not change the conversation default.".into(),
         schema:json!({"type":"object","additionalProperties":false,"properties":{"query":{"type":"string"}}}),
         output_schema:None, requirements:None, metadata:None }
@@ -53,6 +54,15 @@ fn read_schema(mut original: ToolSchema) -> ToolSchema {
         .unwrap()
         .push(explicit);
     original
+}
+/// Only the exact routed declaration contains all of this native reader's ordinary forms.
+/// The location branch and its executor belong to the parent Run, never the child.
+pub(crate) fn wraps_reader(routed: &ToolSchema, native: &ToolSchema) -> bool {
+    native.name == ToolKind::FileRead.name()
+        && native.version == "2"
+        && routed.name == native.name
+        && routed.version == "3"
+        && *routed == read_schema(native.clone())
 }
 pub(crate) fn add_schemas(tools: &mut Vec<ToolSchema>) {
     let Some(read) = tools.iter_mut().find(|t| t.name == "file_read") else {
@@ -227,7 +237,7 @@ impl ToolExecutor for Owner {
         f: &FrozenToolContext,
         _: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
-        if c.name != "work_locations"
+        if c.name != NAME
             || c.schema_version != "1"
             || !f.tools.contains(&schema())
             || f.source.as_ref() != Some(&self.default)

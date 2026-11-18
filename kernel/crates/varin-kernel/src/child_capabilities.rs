@@ -39,6 +39,7 @@ pub(crate) fn descriptors() -> Vec<ChildCapabilityDescriptor> {
         })
         .collect()
 }
+#[cfg(test)]
 pub(crate) fn select(names: &[String]) -> Result<Vec<ToolSchema>, varin_runtime::RuntimeError> {
     let available = schemas();
     names
@@ -71,12 +72,7 @@ pub(crate) fn select_frozen(
 ) -> Result<Vec<ToolSchema>, varin_runtime::RuntimeError> {
     let has_host_binding = |name: &str| selected.extension_bindings.iter().any(|binding| binding.tool.name == name)
         || selected.mcp_binding.iter().any(|binding| binding.tools.iter().any(|tool| tool.name == name));
-    let native = names
-        .iter()
-        .filter(|name| !has_host_binding(name))
-        .cloned()
-        .collect::<Vec<_>>();
-    let available = select(&native)?;
+    let available = schemas();
     names
         .iter()
         .map(|name| {
@@ -86,22 +82,23 @@ pub(crate) fn select_frozen(
             if has_host_binding(name) {
                 return Err(varin_runtime::RuntimeError::Invalid(format!("frozen Host capability changed: {name}")));
             }
+            let unsupported = || varin_runtime::RuntimeError::Invalid(format!("unsupported child capability: {name}"));
+            let current = available.iter().find(|tool| &tool.name == name).ok_or_else(unsupported)?;
+            let catalogued = || selected.catalog.native_capabilities.iter()
+                .any(|capability| capability.name == current.name && capability.version == current.version);
             let original = selected.frozen.allowed_delegation.iter().find(|tool| &tool.name == name);
-            original.filter(|tool| available.iter().any(|current| supports_frozen_builtin(tool, current))
-                || *tool == &crate::memory::bot_schema(true) || *tool == &crate::memory::bot_schema(false))
-                .or_else(|| {
-                    // The resolved configured profile (or explicit isolated-write mode)
-                    // can select native capabilities beyond the parent's visible tools.
-                    // Its frozen catalog and the owning declaration must still agree.
-                    if original.is_some() { return None; }
-                    available.iter().find(|tool| &tool.name == name && selected.catalog.native_capabilities.iter()
-                        .any(|capability| capability.name == tool.name && capability.version == tool.version))
-                }).cloned()
-                .ok_or_else(|| {
-                    varin_runtime::RuntimeError::Invalid(format!(
-                        "unsupported child capability: {name}"
-                    ))
-                })
+            let granted = match original {
+                Some(tool) if supports_frozen_builtin(tool, current)
+                    || *tool == crate::memory::bot_schema(true) || *tool == crate::memory::bot_schema(false) => Some(tool),
+                // Keep the actual v3 declaration frozen in the parent. A child can inherit
+                // only the wrapped ordinary reader already present in its own frozen catalog.
+                Some(tool) if crate::work_locations::wraps_reader(tool, current) && catalogued() => Some(current),
+                // Configured profiles and explicit isolated writes can select a native
+                // capability absent from the parent's directory, never replace a stale one.
+                None if catalogued() => Some(current),
+                _ => None,
+            };
+            granted.cloned().ok_or_else(unsupported)
         })
         .collect()
 }
@@ -114,7 +111,7 @@ pub(crate) fn delegated(parent: &[ToolSchema]) -> Vec<ToolSchema> {
         .map(|definition| definition.schema.name).collect::<std::collections::BTreeSet<_>>();
     parent
         .iter()
-        .filter(|tool| !main_only.contains(&tool.name))
+        .filter(|tool| tool.name != crate::work_locations::NAME && !main_only.contains(&tool.name))
         .cloned()
         .collect()
 }
