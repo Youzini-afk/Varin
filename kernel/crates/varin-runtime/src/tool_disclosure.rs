@@ -92,6 +92,7 @@ pub fn is_always_declared(name: &str) -> bool {
         name,
         DESCRIBE
             | INVOKE
+            | "work_locations"
             | "file_read"
             | "file_list"
             | "file_search"
@@ -176,7 +177,7 @@ pub fn direct_tools(tools: &[ToolSchema], focus: &str) -> Option<Vec<String>> {
         match focus {
             "research" => matches!(name,
                 "websearch" | "webfetch" | "document_read" | "materials" | "resource_read" | "research_search"
-                | "file_list" | "file_search" | "file_read" | "file_write" | "file_edit" | "code_retrieval" | "retrieval_control"
+                | "work_locations" | "file_list" | "file_search" | "file_read" | "file_write" | "file_edit" | "code_retrieval" | "retrieval_control"
                 | "process_spawn" | "process_read" | "process_write" | "process_inspect" | "process_stop" | "wait_process"
                 | "script_open" | "script_run" | "script_close" | "dispatch" | "send" | "threads" | "read_thread"
                 | "child_status" | "child_report" | "wait_child" | "child_cancel" | "ask_user" | "question_status"
@@ -265,7 +266,7 @@ pub fn namespace(name: &str) -> Option<&'static str> {
     if matches!(name, DESCRIBE | INVOKE) { return None; }
     if name.starts_with("mcp_") { return Some("mcp"); }
     Some(match name {
-        "file_read" | "file_write" | "file_edit" | "file_search" | "file_list" | "file_restore" | "recovery_points" => "files",
+        "work_locations" | "file_read" | "file_write" | "file_edit" | "file_search" | "file_list" | "file_restore" | "recovery_points" => "files",
         "process_spawn" | "process_read" | "process_write" | "process_inspect" | "process_stop" | "process_resize" | "wait_process"
         | "script_open" | "script_run" | "script_close" => "execution",
         "dispatch" | "child_status" | "child_report" | "child_cancel" | "wait_child" | "threads" | "read_thread"

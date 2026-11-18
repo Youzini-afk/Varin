@@ -7078,7 +7078,7 @@ export interface SourceMcpDeliveryResult { receipt:SourceMcpDeliveryReceipt;disp
 
 export interface SourceMcpHolderParams extends SourceAuthorityAddress { binding:SourceMcpHolderBinding;action:'retain'|'inspect'|'release'|'release_unstarted'; }
 
-export interface SourceAuthorityOpenParams { principalId:string;coordinatorHostId:string;scope:SourceAuthorityScope;source:LaunchSource;grantId:string;enabledTools:string[];purpose:'source'|'read'|'integration'|'result'|'process_view'|'script_environment'|'external_harness'|'mcp_owner';operationId?:string; }
+export interface SourceAuthorityOpenParams { principalId:string;coordinatorHostId:string;scope:SourceAuthorityScope;source:LaunchSource;grantId:string;enabledTools:string[];purpose:'source'|'read'|'integration'|'result'|'process_view'|'script_environment'|'external_harness'|'mcp_owner'|'work_location_read';operationId?:string; }
 
 export interface SourceAuthorityBindParams { principalId:string;coordinatorHostId:string;authorityId:string;resourceEpoch:string;toolBinding:SourceToolBinding|null;physicalRoot:LiveRoot|null; }
 
@@ -7102,7 +7102,7 @@ export interface ExecutionEnvironment {searchPath?:string;platform:string;defaul
 
 export interface SourceToolBinding { textEncoding?:KernelTextPolicy; executionEnvironment?:ExecutionEnvironment; resourceOwner:SourceResourceOwner;grantId:string;runId:string;threadId:string;workspaceId:string;executionWorkspaceId:string;sourceMode:SourceMode;nativeWorkspace?:{branchId:string;generation?:string;sourcePath?:string};rootId?:string;fileSource?:{branchId:string;revision:number};materializedSource?:{branchId:string;revision:number};liveRoot?:LiveRoot;environmentRunId?:string;enabledTools:string[];remoteAuthority?:{authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner}; }
 
-export interface SourceAuthorityResult { authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner;source:LaunchSource;scope:SourceAuthorityScope;phase:'preparing'|'ready'|'retaining'|'draining'|'retired'|'revoked';purpose:'source'|'read'|'integration'|'result'|'process_view'|'script_environment'|'external_harness'|'mcp_owner';operationId:string|null;grantId:string;toolBinding:SourceToolBinding|null;physicalRoot:LiveRoot|null;firstPreparation:boolean;materializationOperationId:string;mcpHolders:SourceMcpHolder[];mcpDeliveries:SourceMcpDeliveryReceipt[];mcpChildren:SourceMcpChildReference[];mcpDerivation:SourceMcpDerivationReference|null; }
+export interface SourceAuthorityResult { authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner;source:LaunchSource;scope:SourceAuthorityScope;phase:'preparing'|'ready'|'retaining'|'draining'|'retired'|'revoked';purpose:'source'|'read'|'integration'|'result'|'process_view'|'script_environment'|'external_harness'|'mcp_owner'|'work_location_read';operationId:string|null;grantId:string;toolBinding:SourceToolBinding|null;physicalRoot:LiveRoot|null;firstPreparation:boolean;materializationOperationId:string;mcpHolders:SourceMcpHolder[];mcpDeliveries:SourceMcpDeliveryReceipt[];mcpChildren:SourceMcpChildReference[];mcpDerivation:SourceMcpDerivationReference|null; }
 
 export interface SourceAuthorityScopeReleaseParams {principalId:string;coordinatorHostId:string;threadId:string;runId:string;mode:'retire'|'revoke';}
 

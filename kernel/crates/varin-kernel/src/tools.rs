@@ -988,6 +988,7 @@ pub(crate) struct KernelResourceClient {
     admission_control: Option<Arc<AdmissionControl>>,
     journal_catalog: Option<Arc<std::sync::Mutex<varin_runtime::Catalog>>>,
     reference_catalog: Option<Arc<std::sync::Mutex<varin_runtime::Catalog>>>,
+    read_location: Option<String>,
     environment_stops: Arc<std::sync::Mutex<BTreeSet<String>>>,
     source_bridge: Option<crate::host_query::OwnerChannel>,
     source_journal: Option<varin_runtime::catalog::journal::JournalAnchor>,
@@ -1009,6 +1010,7 @@ impl KernelResourceClient {
             admission_control: None,
             journal_catalog: None,
             reference_catalog: None,
+            read_location: None,
             environment_stops: Default::default(),
             source_bridge: None,
             source_journal: None,
@@ -1050,6 +1052,7 @@ impl KernelResourceClient {
         }
         Ok(result["value"].clone())
     }
+    pub(crate) fn with_read_location(mut self, location:String)->Self {self.read_location=Some(location);self}
     pub(crate) fn with_reference_catalog(mut self, catalog: Arc<std::sync::Mutex<varin_runtime::Catalog>>) -> Self {
         self.reference_catalog = Some(catalog);
         self

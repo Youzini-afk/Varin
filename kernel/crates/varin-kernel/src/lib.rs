@@ -3,6 +3,7 @@ mod agent_goals;
 mod agent_resources;
 mod attachment_tools;
 mod attachment_reads;
+mod work_locations;
 mod agent_runtime;
 mod authority;
 mod child_capabilities;

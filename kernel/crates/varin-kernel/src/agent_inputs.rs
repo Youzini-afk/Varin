@@ -140,7 +140,8 @@ fn submit_input_with_original_source(
     // New user rounds inherit the selected names, resolved against today's owner
     // declarations. Old launches and already accepted requests stay immutable.
     let bot = preparation.scope().is_some_and(|scope| scope.mode == "bot");
-    let available = if host_authority { crate::run_tools::builtin_schemas(&crate::tools::ToolKind::all().collect(), plan_eligible, true, bot) } else { Vec::new() };
+    let mut available = if host_authority { crate::run_tools::builtin_schemas(&crate::tools::ToolKind::all().collect(), plan_eligible, true, bot) } else { Vec::new() };
+    if host_authority { available.push(crate::work_locations::schema()); }
     let prepared = preparation.with_tool_catalog(available).load(launch, inherit_source).map_err(domain)?;
     if cancelled.load(Ordering::Acquire) {
         return Err(KernelError::Cancelled);
@@ -225,6 +226,10 @@ pub(super) fn selected_launch(
             "selected tools require a source owner".into(),
         ));
     }
+    let mut tools = crate::run_tools::builtin_schemas(&kinds, plan_eligible, true, bot);
+    if kinds.contains(&crate::tools::ToolKind::FileRead) && crate::work_locations::eligible(source.as_ref()) {
+        crate::work_locations::add_schemas(&mut tools);
+    }
     Ok::<_, KernelError>(varin_runtime::catalog::launches::LaunchSelection {
             driver: varin_runtime::driver::DriverSelection::default(),
             driver_models: Vec::new(),
@@ -243,7 +248,7 @@ pub(super) fn selected_launch(
         } else {
             0
         },
-        tools: crate::run_tools::builtin_schemas(&kinds, plan_eligible, true, bot),
+        tools,
         policy: crate::observations::default_policy_identity(),
         source,
     })

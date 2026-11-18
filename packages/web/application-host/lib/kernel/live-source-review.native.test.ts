@@ -6,7 +6,9 @@ import { createMemoryOwner } from './memory-owner.js';
 import { createLiveSourceOwner } from './live-source.js';
 import { createThreadContext } from './thread-context.js';
 import { createAgentPersonalization } from '../memory/agent-personalization.js';
-import { createThreadSourcePreparer } from './thread-sources.js';
+import { createModelWorkLocations } from './model-work-locations.js';
+import { listWorkLocations } from './default-work-location.js';
+import { createThreadSourceDirectory, createThreadSourcePreparer } from './thread-sources.js';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { bindDocumentTextCodec } from '../documents/inspect.js';
 import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from './storage-adapter.js';
@@ -158,6 +160,71 @@ it('explicit live source reads current disk and shares actual root with list, se
   expect((await f.runtime.launch(receipt.run_id))?.selection.source).toMatchObject({ mode: 'live_root', live_root: prepared.source.mode === 'live_root' ? prepared.source.liveRoot : null, branch_id: null, revision: null, environment_run_id: null });
   await expect(fs.access(path.join(f.root, 'managed/runs'))).rejects.toMatchObject({ code: 'ENOENT' });
   expect(f.launchErrors).toEqual([]);
+}, 45_000);
+
+it('discovers a saved live location and reads two same-named files in one model request without switching the Run', async () => {
+  let location = '', alternateRef = '', turn = 0;
+  const results: Record<string,string> = {};
+  const f = await fixture((body, response) => {
+    for (const out of (body.input as Array<Record<string,unknown>>).filter(item => item.type === 'function_call_output')) {
+      results[String(out.call_id)] = responsesMetadataText(out.output);
+    }
+    switch (++turn) {
+      case 1: return tool(response, 'work_locations', { query: 'test machine' }, turn);
+      case 2: {
+        location = JSON.parse(results['work_locations-1']!).content.locations[0].location;
+        response.writeHead(200, { 'content-type':'text/event-stream' });
+        const output = [['alternate', {location, path:'same.txt'}], ['default', {path:'same.txt'}]].map(([id,args]) =>
+          ({type:'function_call', id:`item-${id}`, call_id:`read-${id}`, name:'file_read', arguments:JSON.stringify(args)}));
+        response.end(`data: ${JSON.stringify({type:'response.completed',response:{output}})}\n\n`);
+        return;
+      }
+      case 3:
+        alternateRef = JSON.parse(results['read-alternate']!).content.ref;
+        return tool(response, 'file_read', {ref:alternateRef}, turn);
+      case 4: return tool(response, 'file_read', {location, ref:alternateRef}, turn);
+      case 5: return tool(response, 'file_read', {location, path:'../workspace/same.txt'}, turn);
+      case 6: return tool(response, 'file_write', {ref:alternateRef, content:'must not be written'}, turn);
+      default: return done(response);
+    }
+  });
+  const other = path.join(f.root,'other'), local = {kind:'local' as const};
+  await fs.mkdir(other);
+  await fs.writeFile(path.join(f.workspace,'same.txt'),'ORIGINAL-DEV-CONTENT');
+  await fs.writeFile(path.join(other,'same.txt'),'ORIGINAL-TEST-CONTENT');
+  const target = await f.documents.resolveWorkspace({path:other});
+  const saved = { workspaceLocations: [{kind:'folder',id:'private-id',name:'Test machine logs',path:other,
+    resourceOwner:local,workspaceId:target.workspaceId}] };
+  const directory = createThreadSourceDirectory({documents:f.documents,localLabel:'Native device',
+    workspace:async()=>listWorkLocations(saved,[],f.workspace)});
+  f.runtime.principalCanUseHostResources = async principal => principal == null;
+  const owner = createModelWorkLocations({kernel:f.kernel,runtime:f.runtime,directory,prepare:f.prepare});
+  f.kernel.setModelWorkLocationOwner(owner.query);
+  const identity = await f.api.create('two-live-locations');
+  const prepared = await f.api.prepareSource({...identity,key:'default-dev',resourceOwner:local,
+    workspaceId:(await f.documents.resolveWorkspace({path:f.workspace})).workspaceId,
+    mode:'live_root',content:{mode:'saved-files'},captureScopes:[]});
+  const receipt = await f.api.submit({...identity,key:'read-both',expectedHead:null,text:'Compare both logs',model,source:prepared.source});
+  await expect.poll(async()=>(await f.api.run(receipt.run_id)).state,{timeout:15_000}).toBe('completed');
+  expect(location).toMatch(/^obs:/);
+  expect(results['work_locations-1']).not.toContain('private-id');
+  expect(results['read-alternate']).toContain('ORIGINAL-TEST-CONTENT');
+  expect(results['read-default']).toContain('ORIGINAL-DEV-CONTENT');
+  expect(results['file_read-3']).toContain('ORIGINAL-TEST-CONTENT');
+  expect(results['file_read-4']).toContain('work_location_conflict');
+  expect(results['file_read-5']).toContain('work_location_unavailable');
+  expect(results['file_write-6']).toContain('reference_source_changed');
+  const reads = (await f.api.snapshot(identity)).operations.filter(o=>o.id.endsWith(':read-alternate') || o.id.endsWith(':read-default'));
+  expect(reads).toHaveLength(2);
+  for (const row of reads) {
+    const op = await f.runtime.operation(row.id);
+    expect(op).toMatchObject({run_id:receipt.run_id,outcome:'succeeded',resource_source:{
+      workspace_id:row.id.endsWith(':read-default') ? prepared.source.workspaceId : target.workspaceId,
+      live_root:{canonicalRoot:row.id.endsWith(':read-default') ? f.workspace : other}
+    }});
+  }
+  expect((await f.runtime.launch(receipt.run_id))?.selection.source?.workspace_id).toBe(prepared.source.workspaceId);
+  expect(await fs.readFile(path.join(other,'same.txt'),'utf8')).toBe('ORIGINAL-TEST-CONTENT');
 }, 45_000);
 
 it('rejects forged host, root, path and execution owner before durable input or context admission', async () => {

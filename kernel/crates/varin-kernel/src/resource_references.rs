@@ -11,7 +11,9 @@ fn error(value: impl ToString) -> ExecutionError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", rename_all_fields = "camelCase", deny_unknown_fields)]
 pub(crate) enum FileTarget {
-    Observation { source: SourceSelection, path: String, read_version: String, format: Option<crate::text::Format> },
+    Observation { source: SourceSelection, path: String, read_version: String, format: Option<crate::text::Format>,
+        /// An original Run-scoped position observation, not a retained permit.
+        #[serde(default, skip_serializing_if="Option::is_none")] location: Option<String> },
     Attachment { reference: String },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
