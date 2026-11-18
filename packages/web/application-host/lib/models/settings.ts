@@ -16,9 +16,9 @@ const permissionMode = (document: Record<string, unknown>): unknown => {
 };
 const assertSupportedPermissionChange = (previous: unknown, document: Record<string, unknown>): void => {
   const next = permissionMode(document);
-  if (next !== previous && (next === 'smart' || next === 'accept-edits')) {
+  if (next !== previous && next === 'accept-edits') {
     throw new ModelConfigurationError('permission_mode_unavailable',
-      `${next} approval is not implemented by the Host permission owner. Choose normal or bypass; existing saved values are read as normal.`);
+      'Accept edits is unavailable. Choose normal, smart or bypass. Existing accept-edits settings are read as normal.');
   }
 };
 

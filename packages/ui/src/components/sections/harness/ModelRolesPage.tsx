@@ -1,9 +1,9 @@
 import React from 'react';
 import { getRuntimeEndpointGeneration, getRuntimeKey } from '@varin/application-client';
-import { parseHarnessWebSearchSettings } from '@varin/protocol';
+import { parseHarnessWebSearchSettings, resolveHarnessModelSlot } from '@varin/protocol';
 import { useI18n } from '@/lib/i18n';
 import { SettingsScopeLabel } from '../shared/SettingsScope';
-import { Btn, Disclosure, Dot, LinkRow, Loading, Note, Page, Row, Section, useSettingsShell } from '../shared/kit';
+import { Btn, Disclosure, Dot, LinkRow, Loading, Note, Page, Section, useSettingsShell } from '../shared/kit';
 import { Button } from '@/components/ui/button';
 import { beginAgentProfilesHost, selectAgentProfile, setAgentProfilesQuery, selectDelegationModelSelection } from '../agents/agent-profiles-store';
 import { DefaultsSettings } from '../varin/DefaultsSettings';
@@ -63,10 +63,9 @@ export function ModelRolesPage() {
         <AssistanceModel {...props} purpose="web-reading" slot="reader" item="harness.models.reader"
           status={status(props.harness.web?.readingAssistance === true, t('settings.page.harness.page.web.title'), () => shell.openPage('harness-web', { item: 'harness.web.assistance' }))} />
         <DelegationModelSelectionSettings {...props} status={status(props.harness.delegationModelSelection.enabled, t('settings.page.agents.title'), () => openAgent('delegation'))} />
-        <Row item="harness.models.permissionJudge" label={t('settings.harness.role.permissionJudge')} description={<>
-          {t('settings.harness.role.permissionJudge.description')}
-          {status(false, t('settings.page.harness.page.permissions.title'), () => shell.openPage('harness-permissions'))}
-        </>} />
+        <HarnessModelField {...props} slot="permissionJudge"
+          status={status(props.harness.permissions?.mode === 'smart' && Boolean(resolveHarnessModelSlot('permissionJudge', props.harness.models, null)),
+            t('settings.page.harness.page.permissions.title'), () => shell.openPage('harness-permissions', { item: 'harness.permissions.mode' }))} />
         <HarnessModelField {...props} slot="contextCompaction" enableControl={false} openModel={() => openAgent('context')} />
       </Section>
       <Section title={t('settings.roles.generation')}>

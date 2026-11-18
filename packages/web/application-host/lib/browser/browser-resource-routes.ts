@@ -53,7 +53,7 @@ export function registerBrowserResourceRoutes(app: Express, resources: BrowserRe
     response.once('close', () => controller.abort());
     return controller.signal;
   };
-  app.get(prefix, route(async (_req, res) => { res.json({ resources: await resources.list() }); }));
+  app.get(prefix, route(async (_req, res) => { res.json({ resources: await resources.list({ includeDevice: true }) }); }));
   if (management) {
     const device = (req: Request) => {
       if (req.query.device === undefined || req.query.device === 'local') return undefined;

@@ -8,15 +8,12 @@ vi.mock(import('@varin/application-client'), async importOriginal => ({ ...await
   getRuntimeEndpointGeneration: () => fixture.generation, getRuntimeApiBaseUrl: () => fixture.url(fixture.generation),
   subscribeRuntimeEndpointChanged: (listener: (detail: RuntimeEndpointChangedDetail) => void) => { fixture.listeners.add(listener); return () => fixture.listeners.delete(listener); } }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: fixture.translate }) }));
-vi.mock('@/components/ui/button', () => ({ Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => <button {...props} /> }));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={event => onChange?.(event as unknown as React.ChangeEvent<HTMLInputElement>)} /> }));
-vi.mock('@/components/sections/shared/SettingsSection', async importOriginal => ({ ...await importOriginal<typeof import('@/components/sections/shared/SettingsSection')>(), SettingsSection: ({ children }: React.PropsWithChildren) => <section>{children}</section>, SettingsFieldRow: ({ children, label }: React.PropsWithChildren<{ label: string }>) => <label data-field={label}>{children}</label> }));
-vi.mock('@/components/ui/select', () => ({ Select: ({ children }: React.PropsWithChildren) => <div>{children}</div>, SelectContent: ({ children }: React.PropsWithChildren) => <div>{children}</div>, SelectTrigger: ({ children }: React.PropsWithChildren) => <div>{children}</div>, SelectValue: () => null, SelectItem: ({ children }: React.PropsWithChildren) => <span>{children}</span> }));
 import { OutboundNetworkSettings } from './OutboundNetworkSettings';
 
 let root: Root, container: HTMLDivElement;
 const settings = () => ({ outboundNetwork: { mode: 'proxy', proxyUrl: `https://proxy-${fixture.generation}.example/`, noProxy: '', credentialRef: `ref-${fixture.generation}` } });
-const field = (name: string) => container.querySelector<HTMLInputElement>(`[data-field="settings.page.harness.network.${name}"] input`)!;
+const field = (name: string) => container.querySelector<HTMLInputElement>(`input[aria-label="settings.page.harness.network.${name}"]`)!;
 const button = (key: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === key)!;
 const input = (name: string, value: string) => act(async () => { field(name).value = value; field(name).dispatchEvent(new window.Event('input', { bubbles: true })); });
 const switchHost = () => act(async () => {
@@ -71,4 +68,19 @@ it('binds credentials to the acknowledged configuration and retains failed crede
   await act(async () => button('settings.kit.discard').click());
   expect(field('password').value).toBe(''); expect(field('username').value).toBe('');
   expect(button('settings.kit.save')).toBeUndefined();
+});
+
+it('tests the saved connection from the URL form and gives feedback there', async () => {
+  await render();
+  await input('noProxy', 'localhost');
+  const submit = () => act(async () => container.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })));
+  await submit();
+  expect(fixture.fetch.mock.calls.filter(([url]) => url.endsWith('/verify'))).toHaveLength(0);
+  await act(async () => button('settings.kit.discard').click());
+  fixture.fetch.mockResolvedValueOnce(Response.json({ ok: true, status: 200, policy: { mode: 'proxy', source: 'settings' } }));
+  await submit();
+  expect(fixture.fetch).toHaveBeenLastCalledWith('/api/harness/egress/verify', expect.objectContaining({
+    method: 'POST', body: JSON.stringify({ url: 'https://example.com/' }),
+  }));
+  expect(container.querySelector('form')?.closest('section')?.textContent).toContain('HTTP 200');
 });

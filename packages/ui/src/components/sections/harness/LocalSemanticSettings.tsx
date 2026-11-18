@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { SettingsSection, SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
+import { Pad } from '../shared/kit';
 import { useI18n } from '@/lib/i18n';
 import { cancelLocalSemantic, importLocalSemantic, installLocalSemantic } from './local-semantic';
 import { useLocalSemantic } from './useLocalSemantic';
@@ -19,7 +20,7 @@ function formatBytes(value: number | undefined): string {
   return `${amount >= 10 ? amount.toFixed(0) : amount.toFixed(1)} ${unit}`;
 }
 
-export function LocalSemanticSettings() {
+export function LocalSemanticSettings({ embedded = false }: { embedded?: boolean } = {}) {
   const state = useLocalSemantic();
   const { t } = useI18n();
   const fileInput = React.useRef<HTMLInputElement | null>(null);
@@ -48,8 +49,7 @@ export function LocalSemanticSettings() {
         ? t('settings.page.harness.localSemantic.stage.verifying')
         : null;
 
-  return <SettingsSection title={t('settings.page.harness.localSemantic.title')}
-    description={t('settings.page.harness.localSemantic.description')} settingsItem="harness.localSemantic">
+  const content = <>
     <SettingsFieldRow label={t('settings.page.harness.localSemantic.status.label')}>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span role="status" className="typography-meta text-muted-foreground">
@@ -63,7 +63,7 @@ export function LocalSemanticSettings() {
     {state.error ? <div role="alert" className="flex flex-wrap items-center gap-2 typography-meta text-destructive">
       <span>{state.error}</span><Button size="sm" variant="ghost" disabled={state.busy} onClick={state.refresh}>{t('settings.page.harness.localSemantic.retry')}</Button>
     </div> : null}
-    <div className="flex flex-wrap items-center gap-2">
+    <Pad className="flex flex-wrap items-center gap-2">
       {canInstall ? <Button size="sm" variant="outline" disabled={state.busy} onClick={() => state.run(installLocalSemantic, true)}>
         {status?.error ? t('settings.page.harness.localSemantic.retry') : t('settings.page.harness.localSemantic.install')}
       </Button> : null}
@@ -79,6 +79,9 @@ export function LocalSemanticSettings() {
           event.currentTarget.value = '';
           if (file) state.run(() => importLocalSemantic(file), true);
         }} />
-    </div>
-  </SettingsSection>;
+    </Pad>
+  </>;
+  return embedded ? <div data-settings-item="harness.localSemantic">{content}</div>
+    : <SettingsSection title={t('settings.page.harness.localSemantic.title')}
+      description={t('settings.page.harness.localSemantic.description')} settingsItem="harness.localSemantic">{content}</SettingsSection>;
 }

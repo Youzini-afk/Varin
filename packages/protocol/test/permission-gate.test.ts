@@ -42,10 +42,19 @@ describe('owner-declared permission subjects', () => {
     assert.equal(evaluateGate('settings_update', params, policy, 'settings:permissions').decision, 'deny');
     assert.equal(policy.rules.length, 2);
   });
-  it('reports the actual policy for retained, unsupported automation choices', () => {
-    for (const configured of ['smart', 'accept-edits'] as const) {
-      assert.deepEqual(resolvePermissionMode(configured), { configured, effective: 'normal', unavailable: configured });
-      assert.equal(evaluateGate('fixture', {}, { mode: configured, rules: [] }).decision, 'ask');
+  it('offers Smart judgment only for unmatched ordinary calls after explicit policy', () => {
+    const smart: PermissionPolicy = { mode: 'smart', rules: [] };
+    assert.deepEqual(resolvePermissionMode('accept-edits'), { configured: 'accept-edits', effective: 'normal', unavailable: 'accept-edits' });
+    assert.deepEqual(resolvePermissionMode('smart'), { configured: 'smart', effective: 'smart' });
+    assert.equal(evaluateGate('fixture', {}, smart).smartEligible, true);
+    assert.equal(evaluateGate('fixture', {}, smart, 'settings:permissions').smartEligible, undefined);
+    for (const decision of ['ask', 'deny', 'allow'] as const) {
+      const result = evaluateGate('fixture', {}, { ...smart, rules: [{ tool: 'fixture', decision }] });
+      assert.equal(result.decision, decision);
+      assert.equal(result.smartEligible, undefined);
     }
+    assert.equal(mergePolicies(smart, { mode: 'bypass' }).mode, 'smart');
+    assert.equal(mergePolicies(smart, { mode: 'normal' }).mode, 'normal');
+    assert.equal(mergePolicies({ mode: 'normal', rules: [] }, { mode: 'smart' }).mode, 'normal');
   });
 });

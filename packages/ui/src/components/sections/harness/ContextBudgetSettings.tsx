@@ -1,7 +1,7 @@
 import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import { AutoSaveInput } from './AutoSaveInput';
-import { SettingsDisclosure } from '../shared/SettingsDisclosure';
+import { Disclosure, Pad, Row } from '../shared/kit';
 import './context-budget.css';
 
 type Boundary = 'prepare' | 'replace';
@@ -87,24 +87,47 @@ export function ContextBudgetSettings(props: Props) {
     return text.trim() && Number.isFinite(value) && value > 0 && (kind === 'prepare' ? value < 100 : value <= 100)
       ? null : t(kind === 'prepare' ? 'settings.contextScale.prepareInvalid' : 'settings.contextScale.replaceInvalid');
   };
-  return <div className="context-budget" data-preparation={props.backgroundPreparation} data-dragging={Boolean(preview)} style={{ '--context-prepare': `${prepare * 100}%`, '--context-replace': `${replace * 100}%` } as React.CSSProperties}>
-    <div className="context-budget-axis"><span>0%</span><span>{t('settings.contextScale.window')}</span></div>
-    <div className="context-budget-track" ref={track}><div className="context-budget-ordinary" /><div className="context-budget-preparing" /><div className="context-budget-reserve" />
-      {marker('prepare')}<span className="context-budget-position context-budget-position-prepare">{t('settings.contextScale.preparePosition', { value: percent(prepare) })}</span>
-      {marker('replace')}<span className="context-budget-position context-budget-position-replace">{t('settings.contextScale.replacePosition', { value: percent(replace) })}</span>
-    </div>
-    <div className="context-budget-legend"><span>{t('settings.contextScale.continue')}</span>{props.backgroundPreparation && <span>{t('settings.contextScale.preparing')}</span>}<span>{t('settings.contextScale.reserve', { value: percent(values.reserve) })}</span></div>
-    <div className="context-budget-fields">
-      <div data-settings-item="harness.context.preparationWaterline"><label className="typography-settings-field-label" htmlFor="context-budget-prepare">{t('settings.contextScale.prepare')}</label>
-        <div className="mt-3 flex items-center gap-2"><div className="w-24"><AutoSaveInput id="context-budget-prepare" type="number" step="any" value={inputPercent(values.waterline)} disabled={!props.backgroundPreparation || Boolean(preview)} validate={value => validate('prepare', value)} onCommit={value => onPreparationWaterlineChange(Number(value) / 100)} /></div><span className="typography-meta text-muted-foreground">{t('settings.contextScale.inputBudget')}</span></div>
-        <p className="mt-2 typography-meta text-muted-foreground">{t('settings.contextScale.prepareHint', { value: percent(prepare) })}</p>
+  return <>
+    <Pad>
+      <div className="context-budget" data-preparation={props.backgroundPreparation} data-dragging={Boolean(preview)}
+        style={{ '--context-prepare': `${prepare * 100}%`, '--context-replace': `${replace * 100}%` } as React.CSSProperties}>
+        <div className="context-budget-axis"><span>0%</span><span>{t('settings.contextScale.window')}</span></div>
+        <div className="context-budget-track" ref={track}>
+          <div className="context-budget-segments" aria-hidden="true">
+            <span className="context-budget-ordinary" /><span className="context-budget-preparing" /><span className="context-budget-reserve" />
+          </div>
+          {marker('prepare')}<span className="context-budget-position context-budget-position-prepare">{t('settings.contextScale.preparePosition', { value: percent(prepare) })}</span>
+          {marker('replace')}<span className="context-budget-position context-budget-position-replace">{t('settings.contextScale.replacePosition', { value: percent(replace) })}</span>
+        </div>
+        <div className="context-budget-legend">
+          <span><i aria-hidden="true" className="context-budget-ordinary" />{t('settings.contextScale.continue')}</span>
+          {props.backgroundPreparation && <span><i aria-hidden="true" className="context-budget-preparing" />{t('settings.contextScale.preparing')}</span>}
+          <span><i aria-hidden="true" className="context-budget-reserve" />{t('settings.contextScale.reserve', { value: percent(values.reserve) })}</span>
+        </div>
       </div>
-      <div><label className="typography-settings-field-label" htmlFor="context-budget-replace">{t('settings.contextScale.replace')}</label>
-        <div className="mt-3 flex items-center gap-2"><div className="w-24"><AutoSaveInput id="context-budget-replace" type="number" step="any" value={inputPercent(replace)} disabled={Boolean(preview)} validate={value => validate('replace', value)} onCommit={value => onReserveRatioChange(1 - Number(value) / 100)} /></div><span className="typography-meta text-muted-foreground">{t('settings.contextScale.fullWindow')}</span></div>
-        <p className="mt-2 typography-meta text-muted-foreground">{t('settings.contextScale.replaceHint', { value: percent(values.reserve) })}</p>
+    </Pad>
+    <Row label={<label htmlFor="context-budget-replace">{t('settings.contextScale.replace')}</label>}
+      description={t('settings.contextScale.replaceHint', { value: percent(values.reserve) })}>
+      <div className="context-budget-input">
+        <AutoSaveInput id="context-budget-replace" type="number" step="any" value={inputPercent(replace)} disabled={Boolean(preview)}
+          validate={value => validate('replace', value)} onCommit={value => onReserveRatioChange(1 - Number(value) / 100)} />
+        <span className="context-budget-unit">{t('settings.contextScale.fullWindow')}</span>
       </div>
-    </div>
-    <p className="my-5 typography-micro text-muted-foreground">{t('settings.contextScale.dragHint')}</p>
-    <SettingsDisclosure title={t('settings.contextScale.calculation')}><p className="typography-meta leading-relaxed text-muted-foreground">{t('settings.contextScale.formula')}</p></SettingsDisclosure>
-  </div>;
+    </Row>
+    <Row item="harness.context.preparationWaterline" label={<label htmlFor="context-budget-prepare">{t('settings.contextScale.prepare')}</label>}
+      description={t('settings.contextScale.prepareHint', { value: percent(prepare) })}>
+      <div className="context-budget-input">
+        <AutoSaveInput id="context-budget-prepare" type="number" step="any" value={inputPercent(values.waterline)}
+          disabled={!props.backgroundPreparation || Boolean(preview)} validate={value => validate('prepare', value)}
+          onCommit={value => onPreparationWaterlineChange(Number(value) / 100)} />
+        <span className="context-budget-unit">{t('settings.contextScale.inputBudget')}</span>
+      </div>
+    </Row>
+    <Disclosure label={t('settings.contextScale.calculation')}>
+      <Pad><div className="context-budget-help">
+        <p>{t('settings.contextScale.formula')}</p>
+        <p>{t('settings.contextScale.dragHint')}</p>
+      </div></Pad>
+    </Disclosure>
+  </>;
 }

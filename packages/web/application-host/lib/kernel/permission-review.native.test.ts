@@ -21,6 +21,9 @@ import { createThreadsHttpAPI, configureRuntimeUrlResolver, setRuntimeExtraHeade
 import { createKernelClient } from './kernel-client.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
+import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
+import { createPermissionJudge, type PermissionJudge } from './permission-judge.js';
+import { createModelTextService } from '../model-text/service.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
 import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
@@ -75,6 +78,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
 
   const effects: Array<Record<string, unknown>> = [];
   let currentPolicy: PermissionPolicy = { mode: 'normal', rules: [] };
+  let judgePermission: PermissionJudge | undefined;
   let callable = true;
   const revocation = new AbortController();
   const runtime = new AgentRuntimeClient(kernel, async () => {
@@ -105,8 +109,24 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
       async callTool(_name, args, options) { options.signal.throwIfAborted(); await options.beforeDispatch?.(); effects.push(structuredClone(args)); return { content: [{ type: 'text', text: 'fixture accepted' }] }; },
       release() { released = true; },
     };
-    return createMcpLease({ lease, kernel, currentPolicy: async () => currentPolicy });
+    return createMcpLease({ lease, kernel, currentPolicy: async () => currentPolicy,
+      ...(judgePermission ? { judgePermission } : {}) });
   }, undefined, undefined, undefined, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal));
+  const enableJudge = () => {
+    const modelText = createModelTextService({ kernel, runtime, readSettings: async () => ({}),
+      models: { resolveModel: async ({ providerId, modelId }: { providerId: string; modelId: string }) => {
+        const binding = { ...configuration, providerId, model: modelId };
+        const credentialOwner = new ExistingHostCredentialOwner({ providerId, providerFamily: 'openai-responses', endpoint,
+          bindingIdentity: modelCredentialBindingIdentity(binding),
+          currentScope: async () => ({ reference: 'fixture-judge', authority: 'host', account: 'fixture-judge', generation: 1 }),
+          runtime: { getAuth: async () => ({ auth: { apiKey: secret } }) },
+        });
+        return { configuration: binding, credentialOwner, acceptsImages: false };
+      } } as unknown as Parameters<typeof createModelTextService>[0]['models'],
+    });
+    cleanups.push(() => modelText.close());
+    judgePermission = createPermissionJudge({ selectModel: async () => ({ providerId: 'judge-provider', modelId: 'judge-model' }), generate: modelText.generate });
+  };
   const adapter = new ThreadAdapter(runtime, {
     resolveModel: async selection => {
       if (selection.providerId !== 'fixture-provider' || selection.modelId !== 'fixture-model') throw new Error('unselected model');
@@ -123,7 +143,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const hostUrl = await listen(createServer(app));
   configureRuntimeUrlResolver({ apiBaseUrl: hostUrl, realtimeBaseUrl: hostUrl });
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'fixture-client' });
-  return { effects, setPolicy: (value: PermissionPolicy) => { currentPolicy = value; }, revokeOwner: () => { callable = false; revocation.abort(); }, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
+  return { effects, enableJudge, setPolicy: (value: PermissionPolicy) => { currentPolicy = value; }, revokeOwner: () => { callable = false; revocation.abort(); }, endpoint, personalization, workspace, documents, workingStates, close, kernel, api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: () => kernel.close() };
 }
 
 const model = { providerId: 'fixture-provider', modelId: 'fixture-model' };
@@ -131,9 +151,9 @@ function tool(response: ServerResponse) {
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `send-${crypto.randomUUID()}`, type: 'function_call', call_id: `call-${crypto.randomUUID()}`, name: 'tool_invoke', arguments: JSON.stringify({ name: 'fixture_send', arguments: { text: 'only this approved text' } }) }] } })}\n\n`);
 }
-function done(response: ServerResponse) {
+function done(response: ServerResponse, text = 'permission result received') {
   response.writeHead(200, { 'content-type': 'text/event-stream' });
-  response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `done-${crypto.randomUUID()}`, type: 'message', content: [{ type: 'output_text', text: 'permission result received' }] }] } })}\n\n`);
+  response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `done-${crypto.randomUUID()}`, type: 'message', content: [{ type: 'output_text', text }] }] } })}\n\n`);
 }
 async function pending(f: Awaited<ReturnType<typeof fixture>>, key: string) {
   const identity = await f.api.create(key);
@@ -213,6 +233,26 @@ it.each(['allow', 'deny', 'smart'] as const)('explicit %s policy controls unknow
   const opened = (await f.runtime.events(0, 256)).filter(event => event.kind === 'permission.opened');
   expect(opened).toHaveLength(selected === 'smart' ? 1 : 0);
 }, 45_000);
+
+it('dispatches a Smart decision through the configured model and the original MCP admission', async () => {
+  let calls = 0;
+  const f = await fixture((body, response) => {
+    if (body.model === 'judge-model') done(response, '{"decision":"allow"}');
+    else if (++calls === 1) tool(response);
+    else done(response);
+  });
+  f.setPolicy({ mode: 'smart', rules: [] });
+  f.enableJudge();
+  const identity = await f.api.create('smart-mcp');
+  const receipt = await f.api.submit({ ...identity, key: 'smart-mcp-input', expectedHead: null, text: 'apply Smart policy for this fixture call', model });
+  await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
+  expect(f.effects).toEqual([{ text: 'only this approved text' }]);
+  const requests = f.requests.filter(request => request.body.model === 'judge-model');
+  expect(requests).toHaveLength(1);
+  expect(JSON.stringify(requests[0]!.body)).toContain('fixture_send');
+  expect(JSON.stringify(requests[0]!.body)).not.toContain('only this approved text');
+  expect((await f.runtime.events(0, 256)).filter(event => event.kind === 'permission.opened')).toHaveLength(0);
+}, 30_000);
 
 function controlResult(result: import('./protocol.generated.js').OperationResult | null): unknown {
   if (result?.kind !== 'control') throw new Error('Expected original control result');

@@ -1,6 +1,7 @@
 import React from 'react';
-import { resolvePermissionMode, validatePermissionRule, type PermissionMode, type PermissionRule } from '@varin/protocol';
-import { SettingsSection, SettingsRadioGroup, SettingsRadioOption } from '../shared/SettingsSection';
+import { resolveHarnessModelSlot, resolvePermissionMode, SUPPORTED_PERMISSION_MODES, validatePermissionRule, type PermissionMode, type PermissionRule } from '@varin/protocol';
+import { SettingsSection } from '../shared/SettingsSection';
+import { Note, OptionCards, Section } from '../shared/kit';
 import { SettingsActionBar } from '../shared/SettingsActionBar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
+import { HarnessModelField } from './HarnessModelField';
 
 type RuleRow = { id: string; rule: PermissionRule };
 const toRows = (rules: readonly PermissionRule[]): RuleRow[] => rules.map(rule => ({ id: crypto.randomUUID(), rule: structuredClone(rule) }));
@@ -49,18 +51,21 @@ export function PermissionsSettings({ harness, update, onSaveRules, saving, erro
   };
   const busy = saving || submitting;
   const permissionMode = resolvePermissionMode(harness.permissions?.mode ?? 'normal');
+  const judge = resolveHarnessModelSlot('permissionJudge', harness.models, null);
+  const icons = { normal: 'question', smart: 'shield-user', bypass: 'shield-check' } as const;
   return <>
-    <SettingsSection title={t('settings.page.harness.permissions.mode.label')} settingsItem="harness.permissions.mode" divider={false}>
-      <SettingsRadioGroup aria-label={t('settings.page.harness.permissions.mode.label')} className="settings-permission-modes">
-        {(['normal', 'bypass'] as const).map((mode: PermissionMode) => <SettingsRadioOption key={mode}
-          label={t(`settings.page.harness.permissions.mode.${mode}`)} selected={(harness.permissions?.mode ?? 'normal') === mode}
-          onSelect={() => update({ permissions: { mode } })} />)}
-        {permissionMode.unavailable && <SettingsRadioOption label={t('settings.permissions.savedUnavailable', { mode: permissionMode.configured })}
-          selected disabled onSelect={() => {}} />}
-      </SettingsRadioGroup>
-      <p className="mt-4 typography-meta text-muted-foreground">{t('settings.permissions.ownerScope')}</p>
-      {permissionMode.unavailable && <p className="mt-2 typography-meta text-muted-foreground">{t('settings.permissions.modeUnavailable')}</p>}
-    </SettingsSection>
+    <Section title={t('settings.page.harness.permissions.mode.label')} item="harness.permissions.mode" className="settings-permission-modes" raw
+      after={<Note>{t('settings.permissions.ownerScope')}</Note>}>
+      <OptionCards<PermissionMode> label={t('settings.page.harness.permissions.mode.label')} value={permissionMode.configured}
+        options={SUPPORTED_PERMISSION_MODES.map(mode => ({ value: mode, icon: icons[mode],
+          label: t(`settings.page.harness.permissions.mode.${mode}`), description: t(`settings.permissionx.${mode}`) }))}
+        onChange={mode => update({ permissions: { mode } })} />
+      {permissionMode.unavailable ? <Note>{t('settings.permissions.modeUnavailable')}</Note> : null}
+    </Section>
+    {permissionMode.effective === 'smart' ? <Section>
+      <HarnessModelField harness={harness} update={update} slot="permissionJudge" enableControl={false}
+        status={!judge ? <span className="block">{t('settings.permissionx.noModel')}</span> : undefined} />
+    </Section> : null}
     <SettingsSection title={t('settings.harness.rules.title')} description={t('settings.experience.rulesHint')} settingsItem="harness.permissions.rules"
       headerAction={<Button size="sm" variant="outline" disabled={busy} onClick={() => {
         const id = crypto.randomUUID(); setRows(previous => [...previous, { id, rule: { tool: '', decision: 'ask' } }]); setEditing(id);

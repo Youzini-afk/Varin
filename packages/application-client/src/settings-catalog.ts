@@ -1,4 +1,4 @@
-import { DEFAULT_HARNESS_SETTINGS, DEFAULT_COMPACTION_RESERVE_RATIO } from '@varin/protocol';
+import { DEFAULT_HARNESS_SETTINGS, DEFAULT_COMPACTION_RESERVE_RATIO, SUPPORTED_PERMISSION_MODES } from '@varin/protocol';
 import { settingsValueSchema } from './settings-value-schemas.js';
 
 /**
@@ -226,9 +226,8 @@ const CATALOG_ENTRIES: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.permissions.mode', category: 'harness', owner: 'agent-settings', authority: 'permissions',
     field: { path: 'harness.permissions.mode', kind: 'enum', scope: 'user-or-project',
-      options: [
-        { value: 'normal' }, { value: 'bypass' },
-      ], default: 'normal', note: 'Controls Host extension/MCP permission admission; project mode can only narrow the global mode. Legacy smart/accept-edits values are preserved on read but currently use normal semantics; native Source and Storage authority is independent.' },
+      options: SUPPORTED_PERMISSION_MODES.map(value => ({ value })),
+      default: 'normal', note: 'Controls Host extension/MCP permission admission. Smart asks the configured judgment model only for unmatched ordinary calls. Project mode can only narrow global policy. Legacy accept-edits uses normal semantics.' },
     apply: 'immediate',
     ui: { page: 'harness-permissions', titleKey: 'settings.page.harness.permissions.mode.label',
       keywords: ['smart', 'approval', 'bypass', 'permission'] },
@@ -302,12 +301,11 @@ const CATALOG_ENTRIES: readonly SettingsCatalogEntry[] = [
     ui: { page: 'harness-bots', titleKey: 'settings.harness.role.memoryOrganizer', keywords: ["memoryOrganizer", "agent", "model", "enable", "disable"] },
   },
   {
-    id: 'harness.models.permissionJudge', category: 'harness', owner: 'agent-settings', writable: false,
+    id: 'harness.models.permissionJudge', category: 'harness', owner: 'agent-settings', authority: 'permissions',
     fields: [
-      { path: 'harness.models.permissionJudge', kind: 'json', scope: 'user', note: 'Legacy saved permission-judge binding. No running Smart permission consumer currently uses this model.' },
+      { path: 'harness.models.permissionJudge', kind: 'json', scope: 'user', note: '{enabled?, providerId, modelId, agent?: {modelSettings?: {thinkingLevel?, temperature?}}}. Without a configured judgment model Smart asks the user.' },
     ],
-    apply: 'unsupported',
-    helpRef: 'The saved binding is retained for inspection only. Smart permission judgment is not implemented; editing a model would not enable it.',
+    apply: 'immediate',
     ui: { page: 'harness-permissions', titleKey: 'settings.harness.role.permissionJudge', keywords: ["permissionJudge", "agent", "model", "enable", "disable"] },
   },
   {

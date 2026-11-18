@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { Btn, Chip, Dot, Info, LeadIcon, Loading, Note, ObjectRow, Pad, Section } from '@/components/sections/shared/kit';
 import { SettingsActionBar } from '@/components/sections/shared/SettingsActionBar';
 import { SettingsFooterContext } from '@/components/sections/shared/settings-context';
 import { requestSettingsNavigation } from '@/lib/settings/drafts';
@@ -1337,108 +1338,79 @@ const RemoteInstancesContent: React.FC<RemoteInstancesPageProps> = ({ view = 'ho
         {resources ? <p className="mb-5 typography-meta text-muted-foreground">{t('settings.connections.resourceManageDescription')}<span className="mt-1 block break-all font-mono">{redactSensitiveUrl(getRuntimeApiBaseUrl() || window.location.origin)}</span></p> : null}
         {intro}
         {view === 'access' && clientAuth ? (
-          <SettingsSection
+          <Section
             title={t('settings.remoteInstances.clientAuth.title')}
-            info={t('settings.remoteInstances.clientAuth.description')}
-            divider={false}
-            settingsItem="remote-instances.client-auth"
-            contentClassName="space-y-3"
+            titleAccessory={<Info>{t('settings.remoteInstances.clientAuth.description')}</Info>}
+            item="remote-instances.client-auth"
+            actions={<>
+              {revokedClientCount > 0 ? <Btn kind="ghost" sm onClick={() => void purgeRevokedRemoteClients()}>
+                {t('settings.remoteInstances.clientAuth.actions.clearRevoked')}
+              </Btn> : null}
+              <Btn sm icon="add" onClick={() => void openAddDevice()}>
+                {t('settings.remoteInstances.clientAuth.actions.addDevice')}
+              </Btn>
+            </>}
+            after={remoteClientError ? <Note kind="err">{remoteClientError}</Note> : null}
           >
-              <div>
-                <Button type="button" size="xs" className="!font-normal" onClick={() => void openAddDevice()}>
-                  <Icon name="add" className="h-3.5 w-3.5" />
-                  {t('settings.remoteInstances.clientAuth.actions.addDevice')}
-                </Button>
-              </div>
-              <div className="space-y-2.5">
-                {revokedClientCount > 0 ? (
-                  <div className="flex justify-end">
-                    <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => void purgeRevokedRemoteClients()}>
-                      {t('settings.remoteInstances.clientAuth.actions.clearRevoked')}
-                    </Button>
-                  </div>
-                ) : null}
-                {remoteClientsLoading && remoteClients.length === 0 && pendingPairings.length === 0 ? (
-                  <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.state.loading')}</p>
-                ) : remoteClients.length === 0 && pendingPairings.length === 0 ? (
-                  <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.state.empty')}</p>
-                ) : (
-                  <>
-                    {pendingPairings.map((pending) => (
-                      <div key={`pending-${pending.id}`} className="flex items-center justify-between gap-3 py-1.5">
-                        <div className="min-w-0 space-y-0.5">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--status-warning)] animate-pulse" />
-                            <p className="typography-ui-label text-foreground truncate">{pending.label || t('settings.remoteInstances.clientAuth.field.labelPlaceholder')}</p>
-                            {pending.usesRelay ? (
-                              <span className="typography-micro text-muted-foreground bg-muted px-1 rounded shrink-0 leading-none pb-px border border-border/50">{t('settings.remoteInstances.clientAuth.state.viaRelay')}</span>
-                            ) : null}
-                          </div>
-                          <p className="typography-micro text-muted-foreground truncate">{t('settings.remoteInstances.clientAuth.state.pending')}</p>
-                        </div>
-                        <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => void cancelPendingPairing(pending.id)}>
-                          {t('settings.common.actions.cancel')}
-                        </Button>
-                      </div>
-                    ))}
-                    {remoteClients.map((client) => {
-                      const isLocalDesktopClient = client.clientKind === 'desktop-local';
-                      // Live presence: the server refreshes lastUsedAt on every
-                      // authenticated request (writes throttled to 60s), so a
-                      // device with activity in the last 90s is connected NOW.
-                      // The list polls every 5s, keeping this fresh.
-                      const lastUsedMs = client.lastUsedAt ? Date.parse(client.lastUsedAt) : Number.NaN;
-                      const isOnline = !client.revokedAt
-                        && (isLocalDesktopClient || (Number.isFinite(lastUsedMs) && Date.now() - lastUsedMs < 90_000));
-                      const statusText = client.revokedAt
-                        ? t('settings.remoteInstances.clientAuth.state.revoked')
-                        : isOnline
-                          ? (client.lastTransport === 'relay' && !isLocalDesktopClient
-                            ? t('settings.remoteInstances.clientAuth.state.connectedRelay')
-                            : t('settings.remoteInstances.clientAuth.state.connectedDirect'))
-                          : Number.isFinite(lastUsedMs)
-                            ? t('settings.remoteInstances.clientAuth.lastUsed', {
-                                date: formatDateTimeForPreference(lastUsedMs, timeFormatPreference, {
-                                  month: 'short',
-                                  day: 'numeric',
-                                  hour: 'numeric',
-                                  minute: '2-digit',
-                                }),
-                              })
-                            : t('settings.remoteInstances.clientAuth.neverUsed');
-                      return (
-                        <div key={client.id} className="flex items-center justify-between gap-3 py-1.5">
-                          <div className="min-w-0">
-                            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-                              <span className={cn(
-                                'h-2 w-2 shrink-0 rounded-full',
-                                client.revokedAt ? 'bg-muted-foreground/20' : isOnline ? 'bg-[var(--status-success)]' : 'bg-muted-foreground/30',
-                              )} />
-                              <p className="typography-ui-label text-foreground truncate">{client.label}</p>
-                              {devicePlatformLabel(client.devicePlatform) ? (
-                                <span className="typography-micro text-muted-foreground bg-muted px-1 rounded shrink-0 leading-none pb-px border border-border/50">
-                                  {devicePlatformLabel(client.devicePlatform)}
-                                </span>
-                              ) : null}
-                              {isLocalDesktopClient ? (
-                                <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
-                                  {t('settings.remoteInstances.clientAuth.state.thisDevice')}
-                                </span>
-                              ) : null}
-                              <span className={cn('typography-micro truncate', isOnline && !client.revokedAt ? 'text-[var(--status-success)]' : 'text-muted-foreground')}>{statusText}</span>
-                            </div>
-                          </div>
-                          <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => void revokeRemoteClient(client)} disabled={Boolean(client.revokedAt)}>
-                            {t('settings.remoteInstances.clientAuth.actions.revoke')}
-                          </Button>
-                        </div>
-                      );
-                    })}
-                  </>
-                )}
-              </div>
-              {remoteClientError ? <p className="typography-meta text-[var(--status-error)]">{remoteClientError}</p> : null}
-          </SettingsSection>
+            {remoteClientsLoading && remoteClients.length === 0 && pendingPairings.length === 0 ? (
+              <Loading label={t('settings.remoteInstances.clientAuth.state.loading')} />
+            ) : remoteClients.length === 0 && pendingPairings.length === 0 ? (
+              remoteClientError ? null : <Pad><span className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.state.empty')}</span></Pad>
+            ) : (
+              <>
+                {pendingPairings.map(pending => <ObjectRow key={`pending-${pending.id}`} lead={<LeadIcon name="qr-code" />}
+                  title={pending.label || t('settings.remoteInstances.clientAuth.field.labelPlaceholder')}
+                  description={<span className="inline-flex flex-wrap items-center gap-x-2">
+                    <Dot state="warn" />
+                    {t('settings.remoteInstances.clientAuth.state.pending')}
+                    {pending.usesRelay ? <> · {t('settings.remoteInstances.clientAuth.state.viaRelay')}</> : null}
+                  </span>}
+                  end={<Btn kind="ghost" sm onClick={() => void cancelPendingPairing(pending.id)}>
+                      {t('settings.common.actions.cancel')}
+                    </Btn>} />)}
+                {remoteClients.map((client) => {
+                  const isLocalDesktopClient = client.clientKind === 'desktop-local';
+                  // Live presence: the server refreshes lastUsedAt on every
+                  // authenticated request (writes throttled to 60s), so a
+                  // device with activity in the last 90s is connected NOW.
+                  // The list polls every 5s, keeping this fresh.
+                  const lastUsedMs = client.lastUsedAt ? Date.parse(client.lastUsedAt) : Number.NaN;
+                  const isOnline = !client.revokedAt
+                    && (isLocalDesktopClient || (Number.isFinite(lastUsedMs) && Date.now() - lastUsedMs < 90_000));
+                  const statusText = client.revokedAt
+                    ? t('settings.remoteInstances.clientAuth.state.revoked')
+                    : isOnline
+                      ? (client.lastTransport === 'relay' && !isLocalDesktopClient
+                        ? t('settings.remoteInstances.clientAuth.state.connectedRelay')
+                        : t('settings.remoteInstances.clientAuth.state.connectedDirect'))
+                      : Number.isFinite(lastUsedMs)
+                        ? t('settings.remoteInstances.clientAuth.lastUsed', {
+                            date: formatDateTimeForPreference(lastUsedMs, timeFormatPreference, {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: 'numeric',
+                              minute: '2-digit',
+                            }),
+                          })
+                        : t('settings.remoteInstances.clientAuth.neverUsed');
+                  const platform = devicePlatformLabel(client.devicePlatform);
+                  const icon = client.clientKind === 'mobile' ? 'smartphone' : client.clientKind === 'browser' ? 'global' : 'computer';
+                  return <ObjectRow key={client.id} item={`client-access:${client.id}`} lead={<LeadIcon name={icon} />}
+                    title={<>
+                      <span className="min-w-0">{client.label}</span>
+                      {isLocalDesktopClient ? <Chip tiny>{t('settings.remoteInstances.clientAuth.state.thisDevice')}</Chip> : null}
+                    </>}
+                    description={<span className="inline-flex flex-wrap items-center gap-x-2">
+                      <Dot state={isOnline ? 'ok' : 'off'} />
+                      <span>{platform ? `${platform} · ${statusText}` : statusText}</span>
+                    </span>}
+                    end={client.revokedAt ? null : <Btn kind="ghost-danger" sm onClick={() => void revokeRemoteClient(client)}>
+                      {t('settings.remoteInstances.clientAuth.actions.revoke')}
+                    </Btn>} />;
+                })}
+              </>
+            )}
+          </Section>
         ) : null}
 
         {showInstanceManagement ? <SettingsSection

@@ -251,7 +251,7 @@ const buildLocalHost = (localOrigin?: string | null): DesktopHost => ({
   url: localOrigin || getLocalOrigin(),
 });
 
-const resolveCurrentHost = (hosts: DesktopHost[]) => {
+export const resolveCurrentHost = (hosts: DesktopHost[]) => {
   const currentHref = typeof window === 'undefined' ? '' : window.location.href;
   const localOrigin = hosts.find((host) => host.id === LOCAL_HOST_ID)?.url || getLocalOrigin();
   const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
@@ -311,6 +311,7 @@ type DesktopHostSwitcherDialogProps = {
   onOpenChange: (open: boolean) => void;
   embedded?: boolean;
   onHostSwitched?: () => void;
+  focusedHostId?: string;
 };
 
 export function DesktopHostSwitcherDialog({
@@ -318,6 +319,7 @@ export function DesktopHostSwitcherDialog({
   onOpenChange,
   embedded = false,
   onHostSwitched,
+  focusedHostId,
 }: DesktopHostSwitcherDialogProps) {
   const { t } = useI18n();
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
@@ -946,7 +948,7 @@ export function DesktopHostSwitcherDialog({
             {isLoading ? (
               <div className="px-2 py-2 text-muted-foreground text-sm">{t('desktopHostSwitcher.state.loading')}</div>
             ) : (
-              allHosts.map((host) => {
+              allHosts.filter(host => !focusedHostId || host.id === focusedHostId).map((host) => {
                 const isLocal = host.id === LOCAL_HOST_ID;
                 const isSsh = Boolean(sshHostIds[host.id]);
                 const isActive = host.id === current.id;

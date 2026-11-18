@@ -115,7 +115,7 @@ export function registerDeviceRoutes(app: Express, registry: ReturnType<typeof c
     const self = describeSelf();
     const remote = request.socket.remoteAddress ?? '';
     const local = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
-    response.json({ ...self, local });
+    response.json({ ...self, local, clientId: request.varinAuth?.clientId ?? null });
   });
   app.get('/api/devices/associations', requireAuth, async (request, response, next) => {
     try {

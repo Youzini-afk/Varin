@@ -2,7 +2,7 @@
 import React from 'react';
 import { getRuntimeApiBaseUrl, getRuntimeEndpointGeneration, runtimeFetch, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 
-export interface ServiceIdentity { name: string; machine: string | null; local: boolean; reachable: boolean }
+export interface ServiceIdentity { name: string; machine: string | null; local: boolean; reachable: boolean; clientId?: string | null }
 
 let cache: { generation: number; value: ServiceIdentity | null } = { generation: -1, value: null };
 const listeners = new Set<() => void>();
@@ -20,9 +20,9 @@ function load(generation: number) {
   cache = entry;
   void runtimeFetch('/api/devices/self').then(async response => {
     if (!response.ok) throw new Error(String(response.status));
-    const body = await response.json() as { name?: string; machine?: { hostname?: string }; local?: boolean };
+    const body = await response.json() as { name?: string; machine?: { hostname?: string }; local?: boolean; clientId?: string | null };
     if (cache !== entry) return;
-    cache.value = { name: body.name || fallbackName(), machine: body.machine?.hostname ?? null, local: body.local === true, reachable: true };
+    cache.value = { name: body.name || fallbackName(), machine: body.machine?.hostname ?? null, local: body.local === true, reachable: true, clientId: body.clientId ?? null };
     notify();
   }).catch(() => {
     if (cache !== entry) return;

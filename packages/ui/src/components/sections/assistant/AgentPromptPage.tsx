@@ -1,16 +1,14 @@
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useThreadStore } from '@/stores/useThreadStore';
 import React from 'react';
-import { SettingsTabs } from '../shared/SettingsTabs';
-import { SettingsDisclosure } from '../shared/SettingsDisclosure';
-import { SettingsActionBar } from '../shared/SettingsActionBar';
 import { requestSettingsNavigation } from '@/lib/settings/drafts';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { agentScopeKey, personalizeAgentSystemPrompt, renderAgentSystemPrompt, splitAgentSystemPrompt,
   type AgentMemoryScope, type AgentMemoryNote, type AgentSystemPromptSnapshot, type AgentSystemPromptPreview, type AgentToolPrompt } from '@varin/protocol';
 import { runtimeFetch, getRuntimeEndpointGeneration } from '@varin/application-client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { Button } from '@/components/ui/button';
+import { SettingsScopeLabel } from '../shared/SettingsScope';
+import { Btn, Disclosure, Ic, Loading, Note, Page, Row, SaveDock, Section, Seg, Select, Tabs } from '../shared/kit';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/lib/i18n';
 import { AgentScopePicker } from './AgentScopePicker';
@@ -23,7 +21,11 @@ const presetText = {
   autonomy: ['', 'For open-ended work, discuss the approach before beginning implementation.', 'Complete clearly authorized tasks autonomously; ask when a consequential decision needs the user.', 'Proactively advance authorized work, make reasonable implementation decisions and continue through verification.'],
 } as const;
 const generated = (name: string) => ['runtime_identity', 'child_profile', 'cwd', 'skills', 'project_context', 'workspace_instructions', 'append_system'].includes(name) || name.startsWith('agent_memory_');
-const editable = (sections: Record<string, string>) => Object.fromEntries(Object.entries(sections).filter(([name]) => !generated(name)));
+const supplemental = (kind: AgentMemoryScope['kind']) => `user_instructions_${kind}`;
+const managed = new Set([...Object.keys(presetText).map(key => `preference_${key}`),
+  ...(['global', 'project', 'thread'] as const).map(supplemental)]);
+const editable = (name: string) => !generated(name) && !managed.has(name);
+type PromptDraft = { sections: Record<string, string | null>; revision: number; advancedText?: string };
 interface PromptView extends AgentSystemPromptPreview { checkpoint?: AgentSystemPromptSnapshot }
 
 export function AgentPromptPage() {
@@ -34,11 +36,8 @@ export function AgentPromptPage() {
   const [loaded, setLoaded] = React.useState<{ owner: string; view: PromptView | null } | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const [draft, setDraft] = React.useState('');
-  const [dirty, setDirty] = React.useState(false);
-  const revision = React.useRef(0);
-  const editOriginal = React.useRef<Record<string, string>>({});
-  const [saved, setSaved] = React.useState(false);
+  const [draft, setDraft] = React.useState<PromptDraft | null>(null);
+  const [copyStatus, setCopyStatus] = React.useState<'copied' | 'failed'>();
   const [previewPart, setPreviewPart] = React.useState<'system' | 'tools'>('system');
   const [toolCatalog, setToolCatalog] = React.useState<{ owner: string; tools: AgentToolPrompt[] } | null>(null);
   const [toolsLoading, setToolsLoading] = React.useState(false);
@@ -63,12 +62,12 @@ export function AgentPromptPage() {
   const owner = React.useRef(targetKey);
   React.useLayoutEffect(() => {
     owner.current = targetKey;
-    setLoaded(null); setDirty(false); setDraft(''); setSaved(false); setError(null);
+    setLoaded(null); setDraft(null); setCopyStatus(undefined); setError(null);
     setToolCatalog(null); setToolsLoading(false); setToolsError(null);
   }, [targetKey]);
   const projectTarget = scope.kind === 'project' ? scope.id : undefined;
   React.useEffect(() => {
-    if (!view || scope.kind === 'thread' || previewPart !== 'tools') return;
+    if (!view || scope.kind === 'thread' || pageTab !== 'preview' || previewPart !== 'tools') return;
     const controller = new AbortController();
     setToolsLoading(true); setToolsError(null);
     const query = projectTarget ? `?projectId=${encodeURIComponent(projectTarget)}${projectSource ? `&expectedSource=${encodeURIComponent(JSON.stringify(projectSource))}` : ''}` : '';
@@ -80,7 +79,7 @@ export function AgentPromptPage() {
       if (!controller.signal.aborted && owner.current === targetKey) setToolsError(failure instanceof Error ? failure.message : String(failure));
     }).finally(() => { if (!controller.signal.aborted && owner.current === targetKey) setToolsLoading(false); });
     return () => controller.abort();
-  }, [scope.kind, previewPart, projectTarget, projectSource, targetKey, settings.runtime, view]);
+  }, [scope.kind, pageTab, previewPart, projectTarget, projectSource, targetKey, settings.runtime, view]);
   const reload = React.useCallback(async (signal?: AbortSignal): Promise<PromptView | null> => {
     if (!threadId) {
       if (scope.kind === 'thread') return null;
@@ -127,87 +126,162 @@ export function AgentPromptPage() {
     if (event.type === 'stream-ready' || event.type === 'settings-changed' && event.owner === 'agent-settings') void refresh();
   }), [refresh]);
   const profile = settings.catalog?.prompts[agentScopeKey(scope)];
-  const scopes = React.useMemo<AgentMemoryScope[]>(() => [{ kind: 'global' }, ...(projectId ? [{ kind: 'project', id: projectId } as const] : []),
-    ...(threadId ? [{ kind: 'thread', id: threadId } as const] : [])], [projectId, threadId]);
-  const original = React.useMemo(() => {
-    const index = scopes.findIndex(value => agentScopeKey(value) === agentScopeKey(scope));
-    return editable(personalizeAgentSystemPrompt(view?.original ?? {}, { mode: 'agent', revision: 0, memories: [],
-      profiles: scopes.slice(0, index).map(owner => ({ scope: owner, profile: settings.catalog?.prompts[agentScopeKey(owner)] ?? { sections: {} } })) }));
-  }, [view, scopes, scope, settings.catalog]);
-  const stored = React.useMemo(() => {
-    const value = { ...original };
-    for (const [key, text] of Object.entries(profile?.sections ?? {})) { if (text === null) delete value[key]; else value[key] = text; }
-    return renderAgentSystemPrompt(value);
-  }, [original, profile]);
-  React.useEffect(() => { if (!dirty) { setDraft(stored); editOriginal.current = original; revision.current = settings.catalog?.revision ?? 0; } }, [stored, dirty, original, settings.catalog?.revision]);
-  const draftSections = splitAgentSystemPrompt(draft);
-  const overrides: Record<string, string | null> = {};
-  for (const name of new Set([...Object.keys(editOriginal.current), ...Object.keys(draftSections)])) {
-    if (draftSections[name] !== editOriginal.current[name]) overrides[name] = draftSections[name] ?? null;
-  }
+  const profilesFor = (scope: AgentMemoryScope) => settings.catalog?.prompts[agentScopeKey(scope)] ?? { sections: {} };
+  const scopes: AgentMemoryScope[] = [{ kind: 'global' }, ...(projectId ? [{ kind: 'project', id: projectId } as const] : []),
+    ...(threadId ? [{ kind: 'thread', id: threadId } as const] : [])];
+  const currentScopeKey = agentScopeKey(scope);
+  const inherited = personalizeAgentSystemPrompt(view?.original ?? {}, { mode: 'agent', revision: 0, memories: [],
+    profiles: scopes.filter(owner => agentScopeKey(owner) !== currentScopeKey).map(scope => ({ scope, profile: profilesFor(scope) })) });
+  const stored = profile?.sections ?? {};
+  const overrides = draft?.sections ?? stored;
+  const dirty = Object.keys(stored).length !== Object.keys(overrides).length
+    || Object.entries(overrides).some(([name, text]) => stored[name] !== text);
+  const canEdit = Boolean(view && settings.catalog && !settings.busy);
+  const noteSection = supplemental(scope.kind);
+  const effective = { ...inherited, ...overrides };
   const activeKeys = new Set(scopes.map(agentScopeKey));
-  const preview = view ? renderAgentSystemPrompt(personalizeAgentSystemPrompt(view.original, {
-    mode: 'agent', revision: snapshot?.memorySnapshot?.revision ?? settings.catalog?.revision ?? 0,
-    profiles: scopes.map(owner => ({ scope: owner, profile: agentScopeKey(owner) === agentScopeKey(scope)
-      ? dirty ? { sections: overrides } : profile ?? { sections: {} } : settings.catalog?.prompts[agentScopeKey(owner)] ?? { sections: {} } })),
+  const activeProfiles = scopes.map(scope => ({ scope, profile: agentScopeKey(scope) === currentScopeKey ? { sections: overrides } : profilesFor(scope) }));
+  const previewSections = view ? personalizeAgentSystemPrompt(view.original, {
+    mode: 'agent', revision: snapshot?.memorySnapshot?.revision ?? settings.catalog?.revision ?? 0, profiles: activeProfiles,
     memories: snapshot?.memorySnapshot?.memories ?? settings.catalog?.memories.filter(note => activeKeys.has(agentScopeKey(note.scope))) ?? [],
-  })) : '';
-  const save = async (reset = false) => {
-    if (!settings.catalog || !view) return false;
-    if (await settings.update('prompt', { scope, profile: reset ? null : { sections: overrides }, revision: reset ? settings.catalog.revision : revision.current })) {
-      setDirty(false); setSaved(true);
-      await refresh();
-      return true;
-    }
-    return false;
+  }) : {};
+  const preview = renderAgentSystemPrompt(previewSections);
+  const advanced = Object.fromEntries(Object.entries(effective).filter((entry): entry is [string, string] => editable(entry[0]) && entry[1] !== null));
+  const advancedText = draft?.advancedText ?? renderAgentSystemPrompt(advanced);
+  const changeDraft = (change: (sections: PromptDraft['sections']) => void, advancedText?: string | null) => {
+    if (!canEdit || !settings.catalog) return;
+    const revision = settings.catalog.revision;
+    setDraft(previous => {
+      const sections = { ...(previous?.sections ?? stored) };
+      change(sections);
+      return { sections, revision: previous?.revision ?? revision,
+        advancedText: advancedText === undefined ? previous?.advancedText : advancedText ?? undefined };
+    });
   };
-  return <SettingsPageLayout title={t('assistant.prompt.title')} description={t('assistant.prompt.description')} showSaveStatus={false}>
-    <div className="space-y-6">
-      <div className="max-w-72">
-      <AgentScopePicker scope={scope} disabled={settings.busy} onChange={next => {
-        requestSettingsNavigation(() => { setDirty(false); setSaved(false); setScope(next); });
-      }} /></div>
-      <SettingsTabs value={pageTab} onChange={setPageTab} label={t('assistant.prompt.title')} items={[{ value: 'custom', label: t('settings.experience.customInstructions') }, { value: 'preview', label: t('assistant.prompt.effective') }]} />
-      <div className="min-w-0 space-y-4">
-        {error || settings.error ? <div role="alert" className="text-destructive typography-meta">{error || settings.error}</div> : null}
-        {!view && !error && !settings.error ? <p role="status">{t(loading ? 'assistant.prompt.loading' : 'assistant.prompt.noContext')}</p> : null}
-        <div hidden={pageTab !== 'custom'} className="space-y-4">
-        <Textarea value={draft} onChange={event => { setDraft(event.target.value); setDirty(true); setSaved(false); }}
-          aria-label={t('assistant.prompt.editor')} rows={16} disabled={settings.busy || !view || !settings.catalog}
-          className="min-h-80 resize-y font-mono text-sm leading-6" />
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span role="status" className="typography-meta text-muted-foreground">{dirty ? t('assistant.unsaved') : saved ? t('assistant.saved') : t('assistant.prompt.nextRequest')}</span>
-          <Button variant="ghost" disabled={!profile || settings.busy} onClick={() => void save(true)}>{t('assistant.prompt.reset')}</Button>
-        </div>
-        <div className="grid gap-3 border-t pt-4 sm:grid-cols-3">{(['density', 'style', 'autonomy'] as const).map(key => <label key={key} className="space-y-1.5 typography-meta">
-          <span>{t(`assistant.preset.${key}`)}</span>
-          <select className="w-full rounded-md border bg-background p-2" disabled={settings.busy || !view || !settings.catalog}
-            value={presetText[key].findIndex(value => value === (draftSections[`preference_${key}`] ?? ''))}
-            onChange={event => {
-              const next = { ...draftSections }; const value = presetText[key][Number(event.target.value)];
-              if (value) next[`preference_${key}`] = value; else delete next[`preference_${key}`];
-              setDraft(renderAgentSystemPrompt(next)); setDirty(true); setSaved(false);
-            }}>
-            <option value={-1} disabled>{t('assistant.preset.custom')}</option>
-            {presetText[key].map((_, index) => <option key={index} value={index}>{t(index === 0 ? 'assistant.preset.default' : `assistant.preset.${key}.${index}` as 'assistant.preset.density.1')}</option>)}
-          </select>
-        </label>)}</div>
-        </div>
-        <section hidden={pageTab !== 'preview'} className="space-y-2"><div className="flex items-center justify-between gap-2">
-          <h3 className="typography-ui-label">{t('assistant.prompt.effective')}</h3>
-          <Button variant="ghost" size="sm" disabled={loading} onClick={() => void refresh()}>{t('assistant.reload')}</Button>
-        </div><p className="typography-micro text-muted-foreground">{t(previewPart === 'tools' ? scope.kind === 'thread' ? 'assistant.prompt.toolSources' : 'assistant.prompt.toolCatalogSources' : scope.kind === 'thread' ? 'assistant.prompt.sources' : 'assistant.prompt.currentSources')}</p>
-          <div className="flex gap-1">
-            <Button variant="ghost" size="sm" aria-pressed={previewPart === 'system'} className={previewPart === 'system' ? 'bg-muted' : ''} onClick={() => setPreviewPart('system')}>{t('assistant.prompt.systemText')}</Button>
-            <Button variant="ghost" size="sm" aria-pressed={previewPart === 'tools'} className={previewPart === 'tools' ? 'bg-muted' : ''} onClick={() => setPreviewPart('tools')}>{t('assistant.prompt.tools')}{tools ? ` · ${tools.length}` : ''}</Button>
-          </div>
-          {previewPart === 'tools' && toolsError && !threadId ? <p role="alert" className="typography-meta text-destructive">{toolsError}</p> : <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/20 p-3 text-xs leading-6">{previewPart === 'system' ? preview : toolsLoading && !threadId ? t('common.loading') : toolPreview || t('assistant.prompt.noTools')}</pre>}
-        </section>
-        {snapshot?.lastRequest ? <SettingsDisclosure title={t('assistant.prompt.lastRequest')} summary={new Date(snapshot.lastRequest.timestamp).toLocaleTimeString()}>
-          <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs leading-6">{snapshot.lastRequest.content}</pre>
-        </SettingsDisclosure> : null}
-      </div>
+  const setSection = (name: string, text: string) => changeDraft(sections => {
+    if (text === (inherited[name] ?? '')) delete sections[name];
+    else sections[name] = text || null;
+  });
+  const changeAdvanced = (text: string) => {
+    const next = splitAgentSystemPrompt(text);
+    changeDraft(sections => {
+      for (const name of new Set([...Object.keys(advanced), ...Object.keys(next)])) {
+        if (!editable(name)) continue;
+        const value = next[name] || undefined;
+        if (value === (advanced[name] || undefined)) continue;
+        if (value === (inherited[name] || undefined)) delete sections[name];
+        else sections[name] = value ?? null;
+      }
+    }, text);
+  };
+  const save = async () => {
+    if (!draft || !canEdit || !dirty) return false;
+    const saved = await settings.update('prompt', { scope, profile: Object.keys(overrides).length ? { sections: overrides } : null, revision: draft.revision });
+    if (saved && owner.current === targetKey) setDraft(null);
+    return saved;
+  };
+  const resetCopy = () => setCopyStatus(undefined);
+  const displayedPreview = previewPart === 'system' ? preview : toolPreview;
+  const handleCopy = async () => {
+    try { setCopyStatus((await copyTextToClipboard(displayedPreview)).ok ? 'copied' : 'failed'); }
+    catch { setCopyStatus('failed'); }
+  };
+  const hasSection = (name: string) => Boolean(previewSections[name]);
+  const densityLabel = t('assistant.preset.density');
+  const toneLabel = t('assistant.preset.style');
+  const autonomyLabel = t('assistant.preset.autonomy');
+  const presetOptions = (key: keyof typeof presetText) => {
+    const name = `preference_${key}`;
+    const selected = String(presetText[key].findIndex(value => value === (effective[name] ?? '')));
+    const options = presetText[key].map((_, index) => ({ value: String(index),
+      label: t(index === 0 ? 'assistant.preset.default' : `assistant.preset.${key}.${index}` as 'assistant.preset.density.1') }));
+    if (selected === '-1') options.unshift({ value: '-1', label: t('assistant.preset.custom') });
+    return { value: selected, onChange: (index: string) => {
+      const text = presetText[key][Number(index)];
+      if (text !== undefined) setSection(name, text);
+    }, options: options.map(option => ({ ...option, disabled: option.value === '-1' })), disabled: !canEdit };
+  };
+  const parts = [
+    t('settings.promptx.base'),
+    ...(activeProfiles.some(({ profile }) => Object.keys(profile.sections).length) ? [t('settings.promptx.mine')] : []),
+    ...(hasSection('project_context') || hasSection('workspace_instructions') ? [t('settings.promptx.projectFiles')] : []),
+    ...(hasSection('skills') ? [t('settings.page.skills.title')] : []),
+    ...(hasSection('agent_memory_snapshot') ? [t('settings.promptx.memorySnapshot')] : []),
+  ];
+  const previewHint = previewPart === 'tools' ? scope.kind === 'thread' ? 'assistant.prompt.toolSources' : 'assistant.prompt.toolCatalogSources'
+    : scope.kind === 'thread' ? 'assistant.prompt.sources' : 'assistant.prompt.currentSources';
+  const failure = error || settings.error;
+
+  return <Page title={t('assistant.prompt.title')} description={t('assistant.prompt.description')} scope={<SettingsScopeLabel kind="host" />} saved={false}
+    dock={<SaveDock saveLabel={t('assistant.save')} dirty={dirty} saving={settings.busy} saveDisabled={!view || !settings.catalog}
+      onSave={save} onCancel={() => setDraft(null)} message={t('settings.promptx.unsaved')} />}>
+    <Tabs value={pageTab} onChange={value => { setPageTab(value); resetCopy(); }} label={t('assistant.prompt.title')}
+      tabs={[{ value: 'custom', label: t('settings.promptx.mine') }, { value: 'preview', label: t('assistant.prompt.effective') }]} />
+    <div className="-mt-2 mb-8">
+      <AgentScopePicker prompt scope={scope} disabled={settings.busy} onChange={setNextScope => {
+        if (agentScopeKey(setNextScope) !== currentScopeKey) requestSettingsNavigation(() => setScope(setNextScope));
+      }} />
     </div>
-    <SettingsActionBar saveLabel={t('assistant.save')} dirty={dirty} saving={settings.busy} saveDisabled={!view || !settings.catalog} onSave={() => save()} onCancel={() => { setDraft(stored); setDirty(false); setError(null); }} error={error || settings.error} />
-  </SettingsPageLayout>;
+    {failure ? <Note kind="err" actions={<Btn kind="ghost" sm disabled={loading} onClick={() => { void settings.load(); void refresh(); }}>{t('assistant.reload')}</Btn>}>{failure}</Note> : null}
+    {!view && !failure ? loading ? <Loading label={t('assistant.prompt.loading')} /> : <Note>{t('assistant.prompt.noContext')}</Note> : null}
+    <div hidden={pageTab !== 'custom'}>
+      <Section title={t('settings.promptx.style')} description={t('settings.promptx.styleHint')}>
+        <Row label={densityLabel}><Seg label={densityLabel} {...presetOptions('density')} /></Row>
+        <Row label={toneLabel}><Seg label={toneLabel} {...presetOptions('style')} /></Row>
+        <Row label={autonomyLabel}><Select label={autonomyLabel} {...presetOptions('autonomy')} /></Row>
+      </Section>
+      <Section title={t('settings.promptx.additional')} description={t('settings.promptx.additionalHint')} raw>
+        <div className="sk-doc">
+          <div className="sk-bar"><span className="sk-grow">Markdown</span>
+            <Btn kind="ghost" sm disabled={!canEdit || !overrides[noteSection]} onClick={() => setSection(noteSection, '')}>{t('assistant.prompt.reset')}</Btn>
+          </div>
+          <Textarea value={overrides[noteSection] ?? ''} onChange={event => setSection(noteSection, event.target.value)}
+            aria-label={t('settings.promptx.additional')} placeholder={t('settings.promptx.placeholder')} rows={10} disabled={!canEdit} className="sk-area" />
+        </div>
+      </Section>
+      <Section>
+        <Disclosure label={t('settings.promptx.advanced')}>
+          <div className="sk-hstack wrap mb-3">
+            <p className="sk-grow sk-muted text-xs">{t('settings.promptx.advancedHint')}</p>
+            <Btn kind="ghost" sm disabled={!canEdit || !Object.keys(overrides).some(editable)}
+              onClick={() => changeDraft(sections => {
+                for (const name of Object.keys(sections)) if (editable(name)) delete sections[name];
+              }, null)}>{t('assistant.prompt.reset')}</Btn>
+          </div>
+          <Textarea value={advancedText} onChange={event => changeAdvanced(event.target.value)}
+            aria-label={t('assistant.prompt.editor')} rows={12} disabled={!canEdit} className="sk-area" />
+        </Disclosure>
+      </Section>
+    </div>
+    <div hidden={pageTab !== 'preview'}>
+      {view ? <>
+        <Section title={t('settings.promptx.parts')} description={t(previewHint)}
+          actions={<Btn kind="ghost" sm icon="refresh" tip={t('assistant.reload')} disabled={loading} onClick={() => void refresh()} />}>
+          {parts.map(part => <Row key={part} label={part} />)}
+        </Section>
+        <Section title={t('settings.promptx.preview')} raw>
+          <div className="sk-doc">
+            <div className="sk-bar flex-wrap">
+              <span className="sk-hstack"><Ic name="eye" size="sm" />{t('settings.promptx.readOnly')}</span>
+              <Seg value={previewPart} onChange={value => { setPreviewPart(value); resetCopy(); }} label={t('settings.promptx.preview')}
+                options={[{ value: 'system', label: t('assistant.prompt.systemText') }, { value: 'tools', label: t('assistant.prompt.tools') }]} />
+              <span className="sk-grow" />
+              <span role="status">{copyStatus ? t(`settings.promptx.${copyStatus}`) : null}</span>
+              <Btn kind="ghost" sm icon="file-copy" disabled={!displayedPreview} onClick={() => void handleCopy()}>{t('settings.promptx.copy')}</Btn>
+            </div>
+            {previewPart === 'tools' && toolsError && !threadId ? <Note kind="err">{toolsError}</Note>
+              : previewPart === 'tools' && toolsLoading && !threadId ? <Loading />
+              : <pre className="m-0 max-h-[32rem] min-h-40 overflow-auto whitespace-pre-wrap break-words px-4 py-3 text-xs leading-6">
+                {previewPart === 'system' ? preview : toolPreview || t('assistant.prompt.noTools')}
+              </pre>}
+          </div>
+        </Section>
+        {snapshot?.lastRequest ? <Section>
+          <Disclosure label={t('assistant.prompt.lastRequest')} summary={new Date(snapshot.lastRequest.timestamp).toLocaleTimeString()}>
+            <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs leading-6">{snapshot.lastRequest.content}</pre>
+          </Disclosure>
+        </Section> : null}
+      </> : null}
+    </div>
+  </Page>;
 }

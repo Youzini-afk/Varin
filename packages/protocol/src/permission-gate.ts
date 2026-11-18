@@ -29,13 +29,16 @@ export interface PermissionPolicy {
 export interface GateResult {
   decision: PermissionDecision;
   reason?: string;
+  /** Only an unmatched, ordinary invocation in Smart mode reaches the Host judge. */
+  smartEligible?: true;
 }
 
-/** Retain older saved choices without pretending their unimplemented automation is active. */
+export const SUPPORTED_PERMISSION_MODES = ['normal', 'smart', 'bypass'] as const;
+
 export function resolvePermissionMode(configured: PermissionMode): {
-  configured: PermissionMode; effective: 'normal' | 'bypass'; unavailable?: 'accept-edits' | 'smart';
+  configured: PermissionMode; effective: typeof SUPPORTED_PERMISSION_MODES[number]; unavailable?: 'accept-edits';
 } {
-  return configured === 'accept-edits' || configured === 'smart'
+  return configured === 'accept-edits'
     ? { configured, effective: 'normal', unavailable: configured }
     : { configured, effective: configured };
 }
@@ -214,10 +217,9 @@ export function evaluateGate(
     return { decision: "allow", reason: "bypass mode" };
   }
 
-  // There is no second permission authority to delegate to. Unknown tools and
-  // tools not covered by explicit/generated rules ask rather than pass through.
   return {
     decision: "ask",
+    ...(policy.mode === 'smart' && authority === undefined ? { smartEligible: true as const } : {}),
     reason: authority === undefined
       ? "no matching permission rule; tool requires confirmation"
       : `explicit management authority required: ${authority}`,
@@ -250,18 +252,13 @@ export function mergePolicies(user: PermissionPolicy, workspace: Partial<Permiss
   const requestedMode = workspace.mode === undefined
     ? undefined
     : validatePermissionMode(workspace.mode, "workspace permission");
-  const ranks: Record<Exclude<PermissionMode, "smart">, number> = {
+  const ranks: Record<PermissionMode, number> = {
     bypass: 0,
-    "accept-edits": 1,
-    normal: 2,
+    smart: 1,
+    "accept-edits": 2,
+    normal: 3,
   };
-  const mode = requestedMode === undefined
-    ? userMode
-    : requestedMode === "smart"
-      ? userMode
-      : userMode === "smart"
-        ? requestedMode === "normal" ? "normal" : "smart"
-        : ranks[requestedMode] > ranks[userMode] ? requestedMode : userMode;
+  const mode = requestedMode !== undefined && ranks[requestedMode] > ranks[userMode] ? requestedMode : userMode;
   const userRules = user.rules.map((rule, index) => (
     validatePermissionRule(rule, `user permission[${index}]`)
   ));

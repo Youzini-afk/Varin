@@ -1,6 +1,6 @@
 import React from 'react';
 import { formatMessageTime, isTimeZone } from '@varin/protocol';
-import { SettingsSection, SettingsCheckboxRow, SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
+import { Disclosure, Note, Row, Sw } from '../shared/kit';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
 import { canonicalizeTimezone } from '@/lib/timezones';
@@ -14,12 +14,13 @@ export function MessageTimeSettings({ harness, update }: HarnessSettingsPageProp
   const zones = React.useMemo(() => [...new Set(['UTC', deviceZone, ...Intl.supportedValuesOf('timeZone')])].sort(), [deviceZone]);
   const zoneList = React.useId();
   const set = (patch: Partial<typeof settings>) => update({ context: { messageTime: patch } });
-  return <SettingsSection title={t('settings.page.harness.context.messageTime.title')} settingsItem="harness.context.messageTime">
-    <SettingsCheckboxRow checked={settings.enabled} onChange={enabled => set({ enabled })}
-      label={t('settings.page.harness.context.messageTime.enabled')}
-      description={t('settings.page.harness.context.messageTime.description')} />
-    <SettingsFieldRow label={t('settings.page.harness.context.messageTime.timeZone')}>
-      <div className="w-full space-y-2 @xl:w-80">
+  const enabledLabel = t('settings.page.harness.context.messageTime.enabled');
+  return <Disclosure label={t('settings.experience.messageTime')} item="harness.context.messageTime">
+    <Row label={enabledLabel} description={t('settings.page.harness.context.messageTime.description')}>
+      <Sw label={enabledLabel} checked={settings.enabled} onChange={enabled => set({ enabled })} />
+    </Row>
+    <Row label={t('settings.page.harness.context.messageTime.timeZone')}>
+      <div className="w-72 max-w-full space-y-2">
         <Select value={settings.timeZone === null ? 'device' : 'custom'} disabled={!settings.enabled}
           onValueChange={mode => set({ timeZone: mode === 'device' ? null : deviceZone })}>
           <SelectTrigger size="settings" className="w-full" aria-label={t('settings.page.harness.context.messageTime.timeZone')}>
@@ -41,9 +42,9 @@ export function MessageTimeSettings({ harness, update }: HarnessSettingsPageProp
           <datalist id={zoneList}>{[...new Set([...zones, settings.timeZone])].map(zone => <option key={zone} value={zone} />)}</datalist>
         </>}
       </div>
-    </SettingsFieldRow>
-    {settings.enabled && <p className="typography-meta text-muted-foreground" aria-label={t('settings.page.harness.context.messageTime.preview')}>
+    </Row>
+    {settings.enabled && <Note inPanel>
       {t('settings.page.harness.context.messageTime.preview')}: <span className="break-all font-mono">Message sent at: {formatMessageTime(Date.now(), settings.timeZone ?? deviceZone)}</span>
-    </p>}
-  </SettingsSection>;
+    </Note>}
+  </Disclosure>;
 }
