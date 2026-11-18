@@ -44,7 +44,7 @@ import { openExternalUrl } from '@/lib/url';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { PendingPairingRecord, RemoteClientRecord } from '@varin/application-client';
-import { buildPairingConnectionPayload, encodePairingConnectionPayload, parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
+import { buildPairingConnectionPayload, encodePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
 import {
   desktopSshLogsClear,
   desktopSshLogs,
@@ -56,18 +56,15 @@ import {
   desktopHostProbe,
   desktopHostsGet,
   desktopHostsSet,
-  desktopInstallIdGet,
+  importDesktopHostPairing,
   getDesktopHostApiUrl,
   normalizeHostUrl,
   probeRelayDesktopHost,
   redactSensitiveUrl,
   resolveDesktopHostUrl,
-  relayHostDisplayUrl,
   type DesktopHost,
-  type DesktopHostRelay,
   type HostProbeResult,
 } from '@/lib/desktopHosts';
-import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { createHostConnectionsHttpAPI, getRuntimeEndpointGeneration, runtimeFetch, type DesktopHostsConfig } from '@varin/application-client';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
@@ -81,17 +78,6 @@ const randomPort = (): number => {
 const isPortInUseError = (error: unknown): boolean => {
   const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
   return message.includes('address already in use') || message.includes('eaddrinuse') || message.includes('port already in use');
-};
-
-// Platform this desktop reports about itself when redeeming a pairing link —
-// display-only metadata for the issuing server's device list.
-const desktopPlatformName = (): string | undefined => {
-  if (typeof navigator === 'undefined') return undefined;
-  const ua = (navigator.userAgent || '').toLowerCase();
-  if (ua.includes('mac')) return 'macos';
-  if (ua.includes('win')) return 'windows';
-  if (ua.includes('linux')) return 'linux';
-  return undefined;
 };
 
 // Friendly label for a device's self-reported platform in the device list.
@@ -586,151 +572,15 @@ const RemoteInstancesContent: React.FC<RemoteInstancesPageProps> = ({ view = 'ho
     if (resources || directImporting || !directConfig.current || directLoading) return false;
     setDirectImporting(true);
     try {
-    const payload = parsePairingConnectionPayload(directConnectLink);
-    if (!payload) {
-      setDirectError(t('settings.remoteInstances.direct.error.invalidConnectLink'));
-      return false;
-    }
-    // The redeem body is identical across every transport (the desktop is the
-    // same device however it reaches the server). The install-id dedupe key
-    // collapses re-pairing / re-auth of this desktop into one device record.
-    const installId = await desktopInstallIdGet().catch(() => '');
-    const redeemBody = JSON.stringify({
-      pairingId: payload.pairingId,
-      secret: payload.secret,
-      clientLabel: payload.label || 'Varin Desktop',
-      clientKind: 'desktop',
-      deviceName: 'Varin Desktop',
-      devicePlatform: desktopPlatformName(),
-      ...(installId ? { dedupeKey: `desktop:${installId}` } : {}),
-    });
-    const redeemInit: RequestInit = {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: redeemBody,
-    };
-    const tokenFromResponse = async (response: Response): Promise<string | null> => {
-      if (!response.ok) return null;
-      const body = (await response.json().catch(() => null)) as { clientToken?: unknown } | null;
-      const token = typeof body?.clientToken === 'string' ? body.clientToken.trim() : '';
-      return token || null;
-    };
-
-    // Try direct (LAN/tunnel) candidates first — they're cheaper and don't need
-    // relay infrastructure — then fall back to relay. Ordered by payload priority.
-    const ordered = [...payload.candidates].sort(
-      (a, b) => (a.type === 'relay' ? 1 : 0) - (b.type === 'relay' ? 1 : 0),
-    );
-
-    let redeemed:
-      | { kind: 'direct'; url: string; token: string }
-      | { kind: 'relay'; relay: DesktopHostRelay; token: string }
-      | null = null;
-
-    for (const candidate of ordered) {
-      if (candidate.type === 'relay') {
-        // Open a throwaway E2EE tunnel just to redeem the one-time secret; the
-        // grant (if any) authorizes admission to the relay for this serverId.
-        const tunnel = createRelayTunnelClient({
-          relayUrl: candidate.relayUrl,
-          serverId: candidate.serverId,
-          hostEncPubJwk: candidate.hostEncPubJwk,
-          ...(candidate.grant ? { grant: candidate.grant } : {}),
-        });
-        try {
-          const response = await tunnel.fetch('/api/client-auth/pairing/redeem', redeemInit);
-          const token = await tokenFromResponse(response);
-          if (token) {
-            redeemed = {
-              kind: 'relay',
-              // grant is intentionally not persisted (one-time pairing artifact).
-              relay: { relayUrl: candidate.relayUrl, serverId: candidate.serverId, hostEncPubJwk: candidate.hostEncPubJwk },
-              token,
-            };
-            break;
-          }
-        } catch {
-          // Relay unreachable / handshake failed — try the next candidate.
-        } finally {
-          tunnel.close();
-        }
-        continue;
-      }
-      // Direct: the remote instance is a user-provided URL, so a plain
-      // cross-origin fetch is correct here (not the active runtime).
-      const candidateUrl = normalizeHostUrl(candidate.url);
-      if (!candidateUrl) continue;
-      try {
-        const response = await fetch(`${candidateUrl}/api/client-auth/pairing/redeem`, redeemInit);
-        const token = await tokenFromResponse(response);
-        if (token) {
-          redeemed = { kind: 'direct', url: candidateUrl, token };
-          break;
-        }
-      } catch {
-        // Unreachable candidate — try the next one.
-      }
-    }
-
-    if (!redeemed) {
-      setDirectError(t('desktopHostSwitcher.error.invalidUrl'));
-      return false;
-    }
-
-    const makeId = (): string => (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `host-${Date.now()}-${Math.random().toString(16).slice(2)}`);
-
-    // Persist EVERY transport the link carried, not just the one that answered
-    // the redeem — a multi-transport host connects directly on the home network
-    // and falls back to the relay away from it (same model as mobile devices).
-    // The single token works over both transports.
-    const linkRelayCandidate = payload.candidates.find(
-      (candidate): candidate is Extract<PairingEndpointCandidate, { type: 'relay' }> => candidate.type === 'relay',
-    );
-    const relay: DesktopHostRelay | undefined = redeemed.kind === 'relay'
-      ? redeemed.relay
-      : linkRelayCandidate
-        ? { relayUrl: linkRelayCandidate.relayUrl, serverId: linkRelayCandidate.serverId, hostEncPubJwk: linkRelayCandidate.hostEncPubJwk }
-        : undefined;
-    const firstDirectUrl = payload.candidates
-      .filter((candidate): candidate is Extract<PairingEndpointCandidate, { type: 'lan' | 'tunnel' }> => candidate.type !== 'relay')
-      .map((candidate) => normalizeHostUrl(candidate.url))
-      .find((value): value is string => Boolean(value));
-    const directUrl = redeemed.kind === 'direct' ? redeemed.url : firstDirectUrl;
-    const { token } = redeemed;
-
-    const url = directUrl || (relay ? relayHostDisplayUrl(relay.serverId) : null);
-    if (!url) {
-      setDirectError(t('desktopHostSwitcher.error.invalidUrl'));
-      return false;
-    }
-    const transportFields = {
-      url,
-      apiUrl: directUrl || undefined,
-      clientToken: token,
-      ...(relay ? { relay } : {}),
-    };
-    // One host per server: match by relay serverId when the link has a relay
-    // leg, else by direct URL — re-importing updates the record in place.
-    const existing = directHosts.find((host) => (
-      relay ? host.relay?.serverId === relay.serverId : (!host.relay && normalizeHostUrl(host.apiUrl || host.url) === url)
-    ));
-    if (existing) {
-      const nextHosts = directHosts.map((host) => host.id === existing.id
-        ? { ...host, label: payload.label || host.label, ...transportFields }
-        : host);
-      if (!await persistDirectHosts(nextHosts, directDefaultHostId)) return false;
-    } else {
-      // payload.label is normally the issuing server's hostname.
-      if (!await persistDirectHosts([{ id: makeId(), label: payload.label || redactSensitiveUrl(url), ...transportFields }, ...directHosts], directDefaultHostId)) return false;
-    }
-    setDirectConnectLink('');
-    setDirectError(null);
-    setDirectImportDialogOpen(false);
-    return true;
+      const imported = await importDesktopHostPairing(directConnectLink, directHosts);
+      if (!await persistDirectHosts(imported.hosts, directDefaultHostId)) return false;
+      setDirectConnectLink('');
+      setDirectError(null);
+      setDirectImportDialogOpen(false);
+      return true;
     } catch (error) {
-      setDirectError(error instanceof Error ? error.message : String(error));
+      setDirectError(error instanceof Error && error.message === 'invalid-connect-link'
+        ? t('settings.remoteInstances.direct.error.invalidConnectLink') : t('desktopHostSwitcher.error.invalidUrl'));
       return false;
     } finally { setDirectImporting(false); }
   }, [resources, directImporting, directLoading, directConnectLink, directDefaultHostId, directHosts, persistDirectHosts, t]);

@@ -3,6 +3,7 @@ import type { HostedSurface } from '@varin/ui/lib/runtimeSurface';
 
 export type HostedSurfaceDetectionInput = {
   search: string;
+  desktopShell?: boolean;
   innerWidth: number;
   screenWidth: number;
   maxTouchPoints: number;
@@ -14,6 +15,7 @@ const EMBEDDED_SESSION_CHAT_PANEL = 'session-chat';
 
 export const detectHostedSurface = ({
   search,
+  desktopShell,
   innerWidth,
   screenWidth,
   maxTouchPoints,
@@ -22,7 +24,7 @@ export const detectHostedSurface = ({
 }: HostedSurfaceDetectionInput): HostedSurface => {
   const params = new URLSearchParams(search);
 
-  if (params.get('panel') === EMBEDDED_SESSION_CHAT_PANEL) {
+  if (desktopShell || params.get('panel') === EMBEDDED_SESSION_CHAT_PANEL) {
     return 'desktop';
   }
 

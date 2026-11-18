@@ -198,8 +198,11 @@ set of role/architecture receipts. A new build definition does not imply assets 
 
 The role is compiled into the main shell, and `package.json` records the role, platform and architecture.
 No embedded Host, Rust kernel, ripgrep, VM guest, Puppeteer or native resource drivers are installed.
-The light shell always opens the bundled UI, including the first-launch chooser and lost-connection
-recovery screen. For a saved relay profile, the renderer restores the original transport and checks
+Both roles load the same `packages/web` frontend build at `varin-ui://app/index.html`.
+The shared React startup router renders the existing onboarding/recovery screens *before*
+Host authentication when no usable endpoint is selected. Only the normal session auth
+gate can mount the workbench. The static asset origin does not implement any Host API.
+The remote Host supplies data, not a replacement renderer. For a saved relay profile, the renderer restores the original transport and checks
 the authenticated session once before entering the workbench. A timeout keeps the connection and
 shows recovery instead of probing a relay identifier as HTTP. Native background SSE is direct-only;
 relay traffic belongs to the open renderer. The light app cannot enable a local Host with a saved preference or environment flag. Client

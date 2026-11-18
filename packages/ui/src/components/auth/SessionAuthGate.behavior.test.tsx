@@ -9,7 +9,7 @@ const state = vi.hoisted(() => ({
   endpointChanged: null as (() => void) | null,
   fetch: vi.fn<(path: string, init?: RequestInit) => Promise<Response>>(),
   restore: vi.fn<() => Promise<void>>(),
-  login: vi.fn<() => Promise<unknown>>(),
+  login: vi.fn<() => Promise<unknown>>(), restart: vi.fn(async () => true),
   hostsGet: vi.fn(), hostsSet: vi.fn(), switchRuntime: vi.fn(), dismissSplash: vi.fn(),
 }));
 vi.mock('@/components/ui', () => ({ toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() } }));
@@ -18,7 +18,7 @@ vi.mock('@/components/ui/ApplicationLoadingScreen', () => ({ ApplicationLoadingS
 vi.mock('@/components/desktop/DesktopHostSwitcher', () => ({ DesktopHostSwitcherInline: () => null }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/lib/splash', () => ({ dismissInitialSplash: state.dismissSplash }));
-vi.mock('@/lib/desktop', () => ({ invokeDesktop: state.login, isDesktopShell: () => state.desktop }));
+vi.mock('@/lib/desktop', () => ({ invokeDesktop: state.login, isDesktopShell: () => state.desktop, restartDesktopApp: state.restart }));
 vi.mock('@/lib/persistence', () => ({ initializeAppearancePreferences: async () => {}, syncDesktopSettings: async () => {} }));
 vi.mock('@/lib/directoryPersistence', () => ({ applyPersistedDirectoryPreferences: state.restore }));
 vi.mock('@varin/application-client', () => ({
@@ -34,7 +34,8 @@ vi.mock('@varin/application-client', () => ({
 }));
 vi.mock('@/lib/desktopHosts', () => ({
   desktopHostsGet: state.hostsGet, desktopHostsSet: state.hostsSet,
-  getDesktopHostApiUrl: () => '', normalizeHostUrl: (url: string) => url,
+  getDesktopHostApiUrl: () => '', normalizeHostUrl: (url: string) => url, redactSensitiveUrl: (url: string) => url,
+  resolveDesktopHostUrl: (url: string) => url ? { persistedUrl: url, redeemUrl: null } : null,
 }));
 vi.mock('@/lib/passkeys-api', () => {
   const status = { enabled: false, hasPasskeys: false, passkeyCount: 0, rpID: null };
@@ -51,6 +52,7 @@ dom.window.HTMLInputElement.prototype.select = () => {};
 Object.defineProperty(dom.window, 'localStorage', { configurable: true, value: { getItem: () => null, setItem: () => {} } });
 vi.stubGlobal('window', dom.window);
 vi.stubGlobal('document', dom.document);
+vi.stubGlobal('Event', dom.window.Event);
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
 const { createRoot } = await import('react-dom/client');
 const { SessionAuthGate } = await import('./SessionAuthGate');
@@ -312,3 +314,63 @@ it('aborts pending auth reads and removes foreground listeners when unmounted', 
   expect(state.fetch).toHaveBeenCalledTimes(1);
   expect(container.textContent).toBe('');
 });
+
+// Exercise the actual startup router, auth gate and chooser controls on one React root.
+vi.mock('@/apps/VarinApplication', () => ({ VarinApplication: () => <span>authenticated workbench</span> }));
+vi.mock('@/components/sections/connections/DesktopLocalHostSettings', () => ({ LocalHostRecovery: () => <span>light client</span> }));
+const { ApplicationStartup } = await import('@/apps/ApplicationStartup');
+const { setVerifiedRelayBootHost } = await import('@/lib/desktopBoot');
+const mountStartup = async (outcome: import('@/lib/desktopBoot').DesktopBootOutcome) => {
+  vi.useRealTimers();
+  state.desktop = true;
+  window.__VARIN_DESKTOP_BOOT_OUTCOME__ = outcome;
+  await act(async () => root.render(<ApplicationStartup apis={{} as RuntimeAPIs} />));
+  await act(() => vi.dynamicImportSettled());
+};
+it('mounts the shared offline chooser without fetching a session or the catalog; a saved choice retains its credentials', async () => {
+  const host = { id: 'saved', label: 'Cloud', url: 'https://example.invalid', clientToken: 'fixture', requestHeaders: { 'X-Client': 'fixture' } };
+  state.hostsGet.mockResolvedValue({ hosts: [host] });
+  await mountStartup({ target: null, status: 'not-configured', localAvailable: false });
+  expect(container.textContent).toContain('onboarding.chooser.title');
+  expect(container.textContent).not.toContain('onboarding.chooser.tabs.localInstall');
+  const pick = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'Cloud')!;
+  await act(async () => pick.click());
+  expect(state.hostsSet).toHaveBeenCalledWith({ hosts: [host], defaultHostId: 'saved', initialHostChoiceCompleted: true });
+  expect(state.restart).toHaveBeenCalledTimes(1);
+  expect(state.fetch).not.toHaveBeenCalled();
+  expect(state.restore).not.toHaveBeenCalled();
+});
+
+it.each(['unreachable', 'relay-pending'] as const)('shows recovery for %s and can retry without probing a nonexistent local Host', async status => {
+  setVerifiedRelayBootHost(null);
+  state.hostsGet.mockResolvedValue({ hosts: [] });
+  await mountStartup({ target: 'remote', status, hostId: 'r', url: status === 'relay-pending' ? 'relay://pinned' : 'https://r.invalid', localAvailable: false });
+  expect(container.textContent).toContain('onboarding.desktopRecovery.remoteUnreachable.title');
+  const retry = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.includes('onboarding.desktopRecovery.remoteUnreachable.retry'))!;
+  await act(async () => retry.click());
+  expect(state.restart).toHaveBeenCalledTimes(1);
+  expect(state.fetch).not.toHaveBeenCalled();
+  expect(state.restore).not.toHaveBeenCalled();
+});
+
+it.each(['direct', 'verified-relay', 'full'] as const)('requires actual session auth before entering the %s workbench', async target => {
+  state.offline = false;
+  if (target === 'verified-relay') setVerifiedRelayBootHost({ id: 'r', stillSelected: () => true });
+  await mountStartup(target === 'full' ? { target: 'local', status: 'ok' }
+    : { target: 'remote', status: target === 'direct' ? 'ok' : 'relay-pending', hostId: 'r', url: target === 'direct' ? 'https://r.invalid' : 'relay://pinned', localAvailable: false });
+  expect(container.querySelector('input[type="password"]')).not.toBeNull();
+  expect(container.textContent).not.toContain('authenticated workbench');
+  state.status = 200;
+  await act(async () => state.endpointChanged?.());
+  expect(container.textContent).toContain('authenticated workbench');
+  setVerifiedRelayBootHost(null);
+});
+
+
+it.each([new Response('<html>static document</html>'), Response.json({ authenticated: false })])(
+  'does not mount authenticated content on an unrelated HTTP 200', async response => {
+    state.fetch.mockImplementation(async () => response.clone());
+    await render();
+    expect(state.restore).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('sessionAuth.error.networkTitle');
+  });

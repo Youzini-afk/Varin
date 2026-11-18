@@ -76,21 +76,22 @@ export const createConfiguredWebAPIs = (bootstrap?: EmbeddedSessionRuntimeBootst
       relay,
     });
   }
-  if (!relayHostId && !relay) void refreshRuntimeUrlAuthToken(apiBaseUrl || undefined).catch(() => {});
+  const bundledWithoutHost = !apiBaseUrl && window.location.protocol === 'varin-ui:';
+  if (!bundledWithoutHost && !relayHostId && !relay) void refreshRuntimeUrlAuthToken(apiBaseUrl || undefined).catch(() => {});
   if (localOrigin && !sameOrigin(apiBaseUrl, localOrigin) && Object.keys(getRuntimeExtraHeadersSync()).length > 0) {
     void refreshLocalRuntimeUrlAuthToken(localOrigin).catch(() => {});
   }
   installRuntimeFetchBridge();
-  // Desktop only: reconnect a relay-capable host now that the fetch bridge is
-  // installed — either the host this window was opened for (injected id) or the
-  // default host on relaunch. No-op elsewhere; resolves in milliseconds when no
-  // relay host is involved. main.tsx holds the app render on this promise so
-  // the user sees the splash instead of a transient auth screen against an
-  // endpoint that is still being selected.
+  // The shell chose this window's profile. Looking up the default here would
+  // redirect other windows (or an explicit direct URL) to an unrelated relay.
   setVerifiedRelayBootHost(null);
+  if (!relayHostId || relay) {
+    desktopRelayRestoreReady = Promise.resolve();
+    return createWebAPIs({ urls });
+  }
   const restore = async () => {
-    await restoreDesktopRelayRuntime(relayHostId || undefined);
-    if (!relayHostId || getRuntimeKey() !== `host:${relayHostId}`) return null;
+    await restoreDesktopRelayRuntime(relayHostId);
+    if (getRuntimeKey() !== `host:${relayHostId}`) return null;
     const generation = getRuntimeEndpointGeneration();
     // Selecting the transport is not proof that the tunnel reached its Host.
     // Use the active pinned transport; never make an HTTP request to relay://.
@@ -99,7 +100,7 @@ export const createConfiguredWebAPIs = (bootstrap?: EmbeddedSessionRuntimeBootst
     const stillSelected = () => getRuntimeEndpointGeneration() === generation && getRuntimeKey() === `host:${relayHostId}`;
     return authenticated && stillSelected() ? { id: relayHostId, stillSelected } : null;
   };
-  desktopRelayRestoreReady = relay ? Promise.resolve() : Promise.race([
+  desktopRelayRestoreReady = Promise.race([
     restore().catch(() => null),
     // A late result must not resurrect a timed-out/unavailable startup selection.
     new Promise<null>((resolve) => { window.setTimeout(() => resolve(null), 10_000); }),

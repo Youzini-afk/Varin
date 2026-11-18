@@ -1,13 +1,13 @@
 /**
  * Authoritative desktop boot outcome types and UI-facing resolver.
  *
- * The Rust backend computes a `DesktopBootOutcome` at startup and injects
+ * The Electron shell computes a `DesktopBootOutcome` at startup and injects
  * it as `window.__VARIN_DESKTOP_BOOT_OUTCOME__`. This module provides
  * pure functions to read that outcome and derive the minimal UI state
  * needed for the loading/chooser/recovery/main decision.
  */
 
-// ── Boot outcome (must match Rust injection) ──
+// ── Boot outcome (must match Electron injection) ──
 
 /**
  * Structured boot outcome type.
@@ -219,58 +219,6 @@ export type BootInjectionStatus =
   | 'not-injected'
   | 'malformed'
   | 'valid';
-
-export type InitialLoadingState = {
-  isDesktopShell: boolean;
-  runtimeReady: boolean;
-  bootOutcomeKnown: boolean;
-  /**
-   * Whether the resolved boot view is 'main'.
-   * When false (chooser/recovery), splash dismisses on bootOutcomeKnown alone.
-   * When true or absent, splash also requires the selected runtime to be ready.
-   */
-  bootViewIsMain?: boolean;
-};
-
-export type DesktopBootFlowRestartInput = {
-  isDesktopShell: boolean;
-  isDesktopLocalOriginActive: boolean;
-};
-
-/**
- * Whether the initial loading screen can be dismissed.
- *
- * Desktop shells must wait until a valid boot outcome is injected by the native host.
- * For non-main views (chooser, recovery), the splash can dismiss as soon as
- * the outcome is known — runtime readiness is not required in those flows.
- * For main views, both runtime readiness and `bootOutcomeKnown` are required.
- * Non-desktop shells only need the app to be initialized.
- */
-export function canDismissInitialLoading(state: InitialLoadingState): boolean {
-  if (!state.isDesktopShell) {
-    return state.runtimeReady;
-  }
-
-  if (!state.bootOutcomeKnown) {
-    return false;
-  }
-
-  // Non-main boot views (chooser, recovery) can dismiss without waiting for init.
-  if (state.bootViewIsMain === false) {
-    return true;
-  }
-
-  return state.runtimeReady;
-}
-
-/**
- * Boot/recovery UI can render in the desktop startup window before the local
- * desktop HTTP origin is active. In that state, same-origin reloads and
- * `/api/*` requests cannot recover the app, so callers must restart desktop.
- */
-export function shouldRestartDesktopBootFlow(input: DesktopBootFlowRestartInput): boolean {
-  return input.isDesktopShell && !input.isDesktopLocalOriginActive;
-}
 
 /**
  * Read the boot outcome injected by the native desktop host.

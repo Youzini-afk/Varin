@@ -32,6 +32,7 @@ const isCoarsePointer = (): boolean => {
 
 const hostedSurface = detectHostedSurface({
   search: window.location.search,
+  desktopShell: window.__VARIN_ELECTRON__?.runtime === 'electron',
   innerWidth: window.innerWidth || 0,
   screenWidth: window.screen?.width || window.innerWidth || 0,
   maxTouchPoints: navigator.maxTouchPoints || 0,
@@ -128,8 +129,8 @@ const start = async (): Promise<void> => {
   // restored. Rendering still waits for the selected transport, so the auth
   // gate never probes a transient endpoint, but network/JS work no longer runs
   // serially behind a direct-address probe or relay handshake.
-  const applicationModule = import('@varin/ui/main');
-  await Promise.all([getDesktopRelayRestoreReady(), applicationModule]);
+  const [, { renderApplication }] = await Promise.all([getDesktopRelayRestoreReady(), import('@varin/ui/main')]);
+  renderApplication(window.__VARIN_RUNTIME_APIS__);
 };
 
 void start().catch(error => {

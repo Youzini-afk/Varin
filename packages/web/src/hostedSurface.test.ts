@@ -25,6 +25,9 @@ describe('detectHostedSurface', () => {
     })).toBe('desktop');
   });
 
+  test('keeps the desktop connection and recovery flow on touch-only desktop hardware', () => {
+    expect(detectHostedSurface({ ...mobileIframeInput, desktopShell: true, search: '' })).toBe('desktop');
+  });
   test('keeps normal mobile detection for non-embedded pages', () => {
     expect(detectHostedSurface({
       ...mobileIframeInput,

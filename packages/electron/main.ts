@@ -39,7 +39,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn, spawnSync } from 'node:child_process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import type { UpdateCheckResult } from 'electron-updater';
@@ -59,6 +59,7 @@ import { createDesktopNetworkFetch } from './harness-network-fetch.js';
 import { createTray, createTrayController, type TrayAction } from './tray.js';
 import { NotificationListener } from './notification-listener.js';
 import { routeThreadWindow, runtimeTargetKey, threadMiniChatUrl, threadWindowKey as buildThreadWindowKey } from './thread-window-target.js';
+import { servePackagedUi } from './packaged-ui.js';
 import { rendererRelayStartup, resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.js';
 import { createStartupSplashHtml } from './startup-splash.js';
 import { createQuitLifecycle } from './quit-lifecycle.js';
@@ -387,7 +388,6 @@ interface DesktopState {
   trayController: ReturnType<typeof createTrayController> | null;
   trayEnabled: boolean;
   trayFocusListener: WindowFocusListener | null;
-  unreachableHosts: Set<string>;
   windowCounter: number;
   windowGeometryRevisions: Map<string, number>;
   windowGeometryTimers: Map<string, ReturnType<typeof setTimeout>>;
@@ -415,7 +415,6 @@ const state: DesktopState = {
   sshShutdownPromise: null,
   installingUpdate: false,
   pendingUpdate: null,
-  unreachableHosts: new Set<string>(),
   windowCounter: 1,
   focusedWindowIds: new Set<number>(),
   windowGeometryRevisions: new Map<string, number>(),
@@ -1255,57 +1254,9 @@ const shouldUsePackagedUi = () => {
 const packagedUiOrigin = () => `${UI_PROTOCOL}://app`;
 const buildPackagedUiUrl = (pathname = '/index.html') => new URL(pathname, `${packagedUiOrigin()}/`).toString();
 
-const injectRuntimeConfigIntoHtml = (html: string): string => {
-  const apiBaseUrl = state.apiBaseUrl || state.sidecarUrl || '';
-  const localOrigin = state.localOrigin || state.sidecarUrl || '';
-  const initScript = `<script>if(window.__VARIN_LOCAL_ORIGIN__===undefined){window.__VARIN_LOCAL_ORIGIN__=${JSON.stringify(localOrigin)};}if(window.__VARIN_API_BASE_URL__===undefined){window.__VARIN_API_BASE_URL__=${JSON.stringify(apiBaseUrl)};}if(window.__VARIN_CLIENT_TOKEN__===undefined&&${JSON.stringify(state.clientToken || '')}){window.__VARIN_CLIENT_TOKEN__=${JSON.stringify(state.clientToken || '')};}</script>`;
-  if (html.includes('<head>')) return html.replace('<head>', `<head>${initScript}`);
-  if (html.includes('</head>')) return html.replace('</head>', `${initScript}</head>`);
-  return `${initScript}${html}`;
-};
-
 const registerPackagedUiProtocol = () => {
-  protocol.handle(UI_PROTOCOL, async (request) => {
-    const distPath = resolveWebDistDir();
-    let requestedPath = '/index.html';
-    try {
-      const url = new URL(request.url);
-      requestedPath = decodeURIComponent(url.pathname || '/index.html');
-    } catch {
-      requestedPath = '/index.html';
-    }
-    if (requestedPath.startsWith('/companion-assets/')) {
-      const assets = await ensureCompanionAssets();
-      const file = await assets.resolve(requestedPath.slice('/companion-assets/'.length));
-      if (!file) return new Response('Companion artwork is not installed', { status: 404 });
-      const response = await electronNet.fetch(pathToFileURL(file).toString());
-      const headers = new Headers(response.headers);
-      headers.set('Access-Control-Allow-Origin', '*');
-      return new Response(response.body, { status: response.status, headers });
-    }
-    const normalized = path.normalize(requestedPath).replace(/^([/\\])+/, '');
-    const candidate = path.join(distPath, normalized || 'index.html');
-    const relative = path.relative(distPath, candidate);
-    const isInsideDist = relative && !relative.startsWith('..') && !path.isAbsolute(relative);
-    const filePath = isInsideDist ? candidate : path.join(distPath, 'index.html');
-    try {
-      const info = await fsp.stat(filePath);
-      if (info.isFile()) {
-        if (filePath.endsWith('.html')) {
-          const html = await fsp.readFile(filePath, 'utf8');
-          const body = injectRuntimeConfigIntoHtml(html);
-          return new Response(body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
-        }
-        return electronNet.fetch(pathToFileURL(filePath).toString());
-      }
-    } catch {
-      /* file missing or not a regular file; fall through to index.html fallback */
-    }
-    const indexPath = path.join(distPath, 'index.html');
-    const html = await fsp.readFile(indexPath, 'utf8');
-    const body = injectRuntimeConfigIntoHtml(html);
-    return new Response(body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
-  });
+  protocol.handle(UI_PROTOCOL, request => servePackagedUi(request, resolveWebDistDir(),
+    url => electronNet.fetch(url), async name => (await ensureCompanionAssets()).resolve(name)));
 };
 
 const normalizeNotificationInput = (raw: unknown): Record<string, unknown> => {
@@ -2160,36 +2111,8 @@ const redeemConnectPairingDeepLink = async (
 const switchToHostById = async (rawId: unknown): Promise<void> => {
   const id = typeof rawId === 'string' ? rawId.trim() : '';
   if (!id) return;
-  const config = readDesktopHostsConfig();
-  let targetUrl = null;
-  let apiBaseUrl = null;
-  let clientToken = '';
-  let requestHeaders = {};
-  if (id === LOCAL_HOST_ID) {
-    targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
-    apiBaseUrl = state.sidecarUrl;
-    clientToken = readDesktopLocalClientToken();
-    requestHeaders = {};
-  } else {
-    const host = config.hosts.find((entry) => entry.id === id);
-    if (!host) {
-      log.warn('[electron] deep-link host not found:', id);
-      return;
-    }
-    targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : host.url;
-    apiBaseUrl = host.apiUrl || host.url;
-    clientToken = host.clientToken || '';
-    requestHeaders = sanitizeRuntimeRequestHeaders(host.requestHeaders || {});
-  }
-  if (!targetUrl || !apiBaseUrl) {
-    log.warn('[electron] deep-link host has no target URL:', id);
-    return;
-  }
-  const bootOutcome: BootOutcome = id === LOCAL_HOST_ID
-    ? { target: 'local', status: 'ok' }
-    : { target: 'remote', status: 'ok', hostId: id, url: apiBaseUrl };
-  log.info('[electron] switching to host', { id, bootOutcome });
-  await activateMainWindow(targetUrl, state.localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+  const selected = await resolveInitialUrl({ hostId: id, reuseServer: true });
+  await activateMainWindow(selected.initialUrl, selected.localOrigin, selected.bootOutcome, selected);
 };
 
 const confirmConnectDeepLink = async (payload: ConnectImportPayload): Promise<boolean> => {
@@ -2404,6 +2327,7 @@ const canUseTitleBarOverlay = (browserWindow: BrowserWindow | null | undefined):
 };
 
 interface BrowserWindowCreationInput {
+  bootOutcome?: BootOutcome | null;
   presentation?: 'companion' | 'companion-stool' | 'companion-scene';
   fixedBounds?: Electron.Rectangle;
   label?: string | undefined;
@@ -2413,6 +2337,7 @@ interface BrowserWindowCreationInput {
 }
 
 const createBrowserWindow = ({
+  bootOutcome = state.bootOutcome,
   presentation,
   fixedBounds,
   label,
@@ -2495,7 +2420,7 @@ const createBrowserWindow = ({
     log.info('[electron] window responsive', { label: browserWindow.__varinLabel });
   });
   browserWindow.__varinRuntimeConfig = rendererRuntimeConfig;
-  browserWindow.__varinInitScript = decorative ? '' : buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
+  browserWindow.__varinInitScript = decorative ? '' : buildInitScript(desktopLocalOrigin, bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
   browserWindow.__varinTitleBarOverlayEnabled = titleBarOverlayEnabled;
 
   if (useSaved && saved?.maximized) {
@@ -2795,35 +2720,16 @@ const activateMainWindow = async (
 };
 
 const openMainWindow = async () => {
-  if (!state.startupResolved) {
-    const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders, relayHostId } = await resolveInitialUrl();
-    return activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders, relayHostId });
-  }
-
-  const config = readDesktopHostsConfig();
-  const localUiUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
-  if (!localUiUrl) throw new Error('Local UI is not available');
-  const host = config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID
-    ? config.hosts.find((entry) => entry.id === config.defaultHostId)
-    : null;
-  const relayHost = host && host.relay && typeof host.relay === 'object' ? host : null;
-  if (relayHost) {
-    // The bundled UI owns authenticated direct-or-relay selection for this profile.
-    const relay = rendererRelayStartup(relayHost, localUiUrl, Boolean(state.sidecarUrl))!;
-    return activateMainWindow(localUiUrl, state.localOrigin, relay.bootOutcome, relay);
-  }
-  const apiBaseUrl = host?.apiUrl || host?.url || state.sidecarUrl || state.apiBaseUrl || '';
-  const clientToken = host?.clientToken || resolveStoredClientTokenForUrl(apiBaseUrl, config) || state.clientToken || '';
-  const requestHeaders = sanitizeRuntimeRequestHeaders(host?.requestHeaders || {});
-  const targetUrl = host?.url && apiBaseUrl && !state.unreachableHosts.has(apiBaseUrl)
-    ? (shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : host.url)
-    : localUiUrl;
-  return activateMainWindow(targetUrl, state.localOrigin, state.bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+  // Reopening uses the same target resolution as cold startup. In particular,
+  // a stale offline result or an earlier window's credentials cannot be reused.
+  const selected = await resolveInitialUrl({ reuseServer: startedLocalHostEnabled !== null });
+  return activateMainWindow(selected.initialUrl, selected.localOrigin, selected.bootOutcome, selected);
 };
 
 const createAdditionalWindow = async (
   url: string | null,
-  runtimeConfig: Partial<RendererRuntimeConfig> = {},
+  runtimeConfig: Partial<RendererRuntimeConfig>,
+  bootOutcome: BootOutcome,
 ): Promise<BrowserWindow | null> => {
   if (!state.startupResolved || !url) {
     return null;
@@ -2833,6 +2739,7 @@ const createAdditionalWindow = async (
     restoreGeometry: false,
     url,
     runtimeConfig,
+    bootOutcome,
   });
   return browserWindow;
 };
@@ -3200,20 +3107,20 @@ const setMiniChatPinned = (browserWindow: BrowserWindow | null | undefined, pinn
   return { pinned: nextPinned };
 };
 
-const resolveInitialUrl = async () => {
+const resolveInitialUrl = async ({ hostId, reuseServer = false }: { hostId?: string; reuseServer?: boolean } = {}) => {
   const hmrApiPort = process.env.VARIN_HMR_API_PORT || '3901';
   const hmrUiPort = process.env.VARIN_HMR_UI_PORT || '5173';
   const hmrApiUrl = `http://127.0.0.1:${hmrApiPort}`;
   const hmrUiUrl = `http://127.0.0.1:${hmrUiPort}`;
   const usePackagedUi = shouldUsePackagedUi();
   const skipLocalServer = shouldSkipLocalServer();
-  startedLocalHostEnabled = !skipLocalServer;
+  if (!reuseServer) startedLocalHostEnabled = !skipLocalServer;
   const startupProbePlan = resolveStartupUrlProbePlan({
     development: isDev,
     packagedUi: usePackagedUi,
     skipLocalServer,
   });
-  const localUrl = skipLocalServer
+  const localUrl = reuseServer ? state.sidecarUrl : skipLocalServer
     ? null
     : startupProbePlan.probeHmrApi && await waitForHealth(hmrApiUrl, 5_000, 100)
       ? hmrApiUrl
@@ -3237,8 +3144,9 @@ const resolveInitialUrl = async () => {
   let requestHeaders: Record<string, string> = {};
   let remoteProbe: HostProbeResult | null = null;
 
-  const envTarget = normalizeHostUrl(process.env.VARIN_SERVER_URL || '');
-  const config = readDesktopHostsConfig();
+  const envTarget = hostId ? null : normalizeHostUrl(process.env.VARIN_SERVER_URL || '');
+  const saved = readDesktopHostsConfig();
+  const config = hostId ? { ...saved, defaultHostId: hostId } : saved;
   if (envTarget) {
     apiBaseUrl = envTarget;
     clientToken = '';
@@ -3262,7 +3170,6 @@ const resolveInitialUrl = async () => {
       remoteProbe = await probeHostWithTimeout(apiBaseUrl, 10_000, clientToken, requestHeaders);
     }
     if (remoteProbe.status === 'unreachable') {
-      state.unreachableHosts.add(apiBaseUrl);
       apiBaseUrl = localUrl || '';
       clientToken = localUrl ? readDesktopLocalClientToken() : '';
       requestHeaders = {};
@@ -4916,58 +4823,12 @@ const handleInvoke = async (
     case 'desktop_get_lan_address':
       return await detectLanIPv4Address();
 
-    case 'desktop_new_window': {
-      const config = readDesktopHostsConfig();
-      const localUiUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
-      let targetUrl = localUiUrl;
-      let runtimeConfig = {
-        apiBaseUrl: state.sidecarUrl || state.localOrigin || '',
-        clientToken: readDesktopLocalClientToken(),
-        requestHeaders: {},
-      };
-      if (config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID) {
-        const host = config.hosts.find((entry) => entry.id === config.defaultHostId);
-        const apiUrl = host?.apiUrl || host?.url;
-        if (host?.url && apiUrl && !state.unreachableHosts.has(apiUrl)) {
-          targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : host.url;
-          runtimeConfig = {
-            apiBaseUrl: normalizeHostUrl(apiUrl) || '',
-            clientToken: sanitizeClientTokenForStorage(host.clientToken) || '',
-            requestHeaders: sanitizeRuntimeRequestHeaders(host.requestHeaders),
-          };
-        }
-      }
-      await createAdditionalWindow(targetUrl, runtimeConfig);
-      return null;
-    }
-
+    case 'desktop_new_window':
     case 'desktop_new_window_for_host': {
-      // Open a saved host in a new window. Hosts with a relay leg boot the
-      // LOCAL UI and let the renderer pick the transport (direct first, E2EE
-      // tunnel fallback) via the injected relay host id — a fixed apiBaseUrl
-      // would strand the window when the direct leg is unreachable.
-      const hostId = typeof args.hostId === 'string' ? args.hostId.trim() : '';
-      const config = readDesktopHostsConfig();
-      const host = config.hosts.find((entry) => entry.id === hostId);
-      if (!host) throw new Error('Host not found');
-      if (host.relay) {
-        const windowUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
-        await createAdditionalWindow(windowUrl, {
-          apiBaseUrl: '',
-          clientToken: host.clientToken || '',
-          requestHeaders: sanitizeRuntimeRequestHeaders(host.requestHeaders || {}),
-          relayHostId: host.id,
-        });
-        return null;
-      }
-      const targetUrl = normalizeHostUrl(host.apiUrl || host.url);
-      if (!targetUrl) throw new Error('Invalid URL');
-      const windowUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : targetUrl;
-      await createAdditionalWindow(windowUrl, {
-        apiBaseUrl: targetUrl,
-        clientToken: host.clientToken || '',
-        requestHeaders: sanitizeRuntimeRequestHeaders(host.requestHeaders || {}),
-      });
+      const hostId = command === 'desktop_new_window_for_host' && typeof args.hostId === 'string' ? args.hostId.trim() : '';
+      if (command === 'desktop_new_window_for_host' && !hostId) throw new Error('Host is required');
+      const selected = await resolveInitialUrl({ ...(hostId ? { hostId } : {}), reuseServer: true });
+      await createAdditionalWindow(selected.initialUrl, selected, selected.bootOutcome);
       return null;
     }
 
@@ -4985,7 +4846,10 @@ const handleInvoke = async (
       if (shouldUsePackagedUi()) {
         windowUrl = buildPackagedUiUrl('/index.html');
       }
-      await createAdditionalWindow(windowUrl, runtimeConfig);
+      await createAdditionalWindow(windowUrl, runtimeConfig, {
+        target: 'remote', hostId: config.hosts.find(host => normalizeHostUrl(host.apiUrl || host.url) === targetUrl)?.id || ENV_OVERRIDE_HOST_ID,
+        status: 'ok', url: targetUrl, localAvailable: Boolean(state.sidecarUrl),
+      });
       return null;
     }
 

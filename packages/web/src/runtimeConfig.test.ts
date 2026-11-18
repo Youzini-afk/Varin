@@ -182,3 +182,13 @@ test('only a confirmed session on the selected restored relay profile dismisses 
   expect(runtimeFetch).toHaveBeenCalledWith('/auth/session', expect.objectContaining({ signal: expect.any(AbortSignal) }));
   expect(restoreDesktopRelayRuntime).toHaveBeenCalledTimes(4); // no startup retry loop
 });
+
+test('the bundled chooser without a selected Host cannot start session auth or restore an unrelated default relay', async () => {
+  installWindow({ ...makeWindow(), location: { origin: 'varin-ui://app', protocol: 'varin-ui:' } });
+  createConfiguredWebAPIs();
+  await getDesktopRelayRestoreReady();
+  const client = await import('@varin/application-client');
+  expect(client.refreshRuntimeUrlAuthToken).not.toHaveBeenCalled();
+  expect(restoreDesktopRelayRuntime).not.toHaveBeenCalled();
+  expect(runtimeFetch).not.toHaveBeenCalled();
+});

@@ -108,17 +108,12 @@ export const scheduleDesktopHostCandidateRefresh = (hostId: string): void => {
  * Direct-only hosts never reach this path (the shell injects their
  * apiBaseUrl/token as window globals before render).
  *
- * Safe to call unconditionally; it is a no-op outside the Electron shell and when
- * the default host is local or already active.
+ * Only the explicitly selected window profile can claim its transport.
  */
-export const restoreDesktopRelayRuntime = async (targetHostId?: string): Promise<void> => {
+export const restoreDesktopRelayRuntime = async (hostId: string): Promise<void> => {
   if (!isElectronShell()) return;
   const config = await desktopHostsGet().catch(() => null);
   if (!config) return;
-  // An explicit target (a "new window for host X") wins over the default-host
-  // relaunch logic.
-  const hostId = targetHostId || (config.defaultHostId !== 'local' ? config.defaultHostId : null);
-  if (!hostId) return;
   const host = config.hosts.find((entry) => entry.id === hostId);
   if (!host?.relay) return;
   // Must match runtimeKeyForHost() in DesktopHostSwitcher so switch/resolve agree.
