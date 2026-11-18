@@ -37,6 +37,9 @@ export function classifyChanges(files, { full = false, called = false, qualifica
     if (['scripts/smoke-container-budget.mjs', 'scripts/smoke-container-stop.mjs', 'scripts/smoke-container-resource-node.mjs'].includes(file)) {
       enable('container', 'toolbelt'); continue;
     }
+    if (file === 'packages/web/application-host/resource-node.ts') {
+      enable('native', 'windows', 'macos', 'production', 'container'); continue;
+    }
     if (/^packages\/(?:ui\/|web\/(?:src\/|public\/|(?:index|mobile|mini-chat|companion)\.html$|vite\.config\.ts$|postcss\.config\.js$))/u.test(file)) {
       enable('frontend'); continue;
     }
