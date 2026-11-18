@@ -1,4 +1,5 @@
 import { originalToolOutput } from './model-reference.test-helper.js';
+import { toolOperationId } from './protocol.generated.js';
 import { guardProviderReply } from './provider-response.test-helper.js';
 import { responsesMetadataText } from './responses-wire.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
@@ -214,14 +215,25 @@ it('discovers a saved live location and reads two same-named files in one model 
   expect(results['file_read-4']).toContain('work_location_conflict');
   expect(results['file_read-5']).toContain('work_location_unavailable');
   expect(results['file_write-6']).toContain('reference_source_changed');
-  const reads = (await f.api.snapshot(identity)).operations.filter(o=>o.id.endsWith(':read-alternate') || o.id.endsWith(':read-default'));
-  expect(reads).toHaveLength(2);
-  for (const row of reads) {
-    const op = await f.runtime.operation(row.id);
-    expect(op).toMatchObject({run_id:receipt.run_id,outcome:'succeeded',resource_source:{
-      workspace_id:row.id.endsWith(':read-default') ? prepared.source.workspaceId : target.workspaceId,
-      live_root:{canonicalRoot:await fs.realpath(row.id.endsWith(':read-default') ? f.workspace : other)}
-    }});
+  // The Thread view doesn't list completed reads. Address each durable Operation
+  // by the request and call identity retained in its original tool result.
+  const reads = (await f.runtime.history(identity.branchId)).flatMap(item => {
+    if (item.run_id !== receipt.run_id || item.source !== 'tool') return [];
+    const { result } = (item.content as { content: { result?: { request_id: string; call_id: string } } }).content;
+    return result && (result.call_id === 'read-alternate' || result.call_id === 'read-default') ? [result] : [];
+  });
+  expect(reads.map(read => read.call_id).sort()).toEqual(['read-alternate', 'read-default']);
+  expect(new Set(reads.map(read => read.request_id)).size).toBe(1);
+  for (const { request_id, call_id } of reads) {
+    const op = await f.runtime.operation(toolOperationId({ kind: 'model_step', request_id }, call_id));
+    const isDefault = call_id === 'read-default';
+    expect(op).toMatchObject({
+      run_id: receipt.run_id, phase: 'terminal', outcome: 'succeeded',
+      resource_source: {
+        resource_owner: local, workspace_id: isDefault ? prepared.source.workspaceId : target.workspaceId,
+        live_root: { canonicalRoot: await fs.realpath(isDefault ? f.workspace : other) },
+      },
+    });
   }
   expect((await f.runtime.launch(receipt.run_id))?.selection.source?.workspace_id).toBe(prepared.source.workspaceId);
   expect(await fs.readFile(path.join(other,'same.txt'),'utf8')).toBe('ORIGINAL-TEST-CONTENT');
