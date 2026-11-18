@@ -3,7 +3,7 @@
   const { ic, esc, sw, dd, seg, num, txt, area, sec, row, link, disc, note, empty, header, chip, btn, roleRef, tabs, dock } = K;
 
   page('instructions', {
-    title: '指令', icon: 'file', scope: 'host', keywords: '系统提示词 自定义指令 风格 信息密度 自主 语言风格',
+    title: '系统提示词', icon: 'file', scope: 'host', keywords: '系统提示词 自定义指令 风格 信息密度 自主 语言风格',
     desc: '告诉 Agent 你希望它怎样说话、怎样做事。保存后从下一次请求开始生效。',
     render() {
       const [tb, t] = tabs('instr', [{ v: 'mine', l: '我的指令' }, { v: 'full', l: '完整系统提示词' }]);

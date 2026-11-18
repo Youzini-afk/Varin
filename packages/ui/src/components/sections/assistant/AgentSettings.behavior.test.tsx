@@ -17,6 +17,7 @@ vi.mock('./agentSettings', () => ({ useAgentSettings: () => ({ catalog: fixture.
   runtime: 1, load: fixture.load, update: fixture.update }) }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/lib/settings/service-identity', () => ({ useServiceIdentity: () => null }));
 vi.mock('@/hooks/useRuntimeAPIs', () => { const apis = { threads: { snapshot: async () => ({ context: { checkpoint: {
   proposal: { effective_system_prompt: fixture.snapshot.content }, personalization: {
     mode: fixture.snapshot.mode, threadId: fixture.snapshot.threadId, threadRole: 'main', projectId: 'project-a', revision: fixture.snapshot.personalization.revision,
@@ -55,17 +56,21 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); vi.unstubAllGlobals(); });
 const click = (label: string) => act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')]
   .find(button => button.textContent === label || button.getAttribute('aria-label') === label)!.click());
-const type = (text: string) => act(async () => {
-  const field = container.querySelector('textarea')!; field.value = text; field.dispatchEvent(new Event('input', { bubbles: true }));
+const type = (text: string, label?: string) => act(async () => {
+  const field = container.querySelector<HTMLTextAreaElement>(label ? `textarea[aria-label="${label}"]` : 'textarea')!;
+  field.value = text; field.dispatchEvent(new Event('input', { bubbles: true }));
 });
+const extra = () => container.querySelector<HTMLTextAreaElement>('textarea[aria-label="settings.promptx.additional"]');
+const base = () => container.querySelector<HTMLTextAreaElement>('textarea[aria-label="assistant.prompt.editor"]');
 
 test('edits official prompt text, previews generated context and saves only edits against the revision opened', async () => {
   fixture.hasThreads = false;
   await act(async () => root.render(<AgentPromptPage />));
-  expect(container.querySelector('textarea')?.value).toContain('Official rules');
+  expect(extra()?.value).toBe('');
+  expect(base()?.value).toContain('Official rules');
   expect(container.querySelector('pre')?.textContent).toContain('Project instructions');
   expect(container.querySelector('pre')?.textContent).toContain('Global note');
-  await type('My identity\n\n<rules>\nOfficial rules\n</rules>');
+  await type('My identity\n\n<rules>\nOfficial rules\n</rules>', 'assistant.prompt.editor');
   expect(container.querySelector('pre')?.textContent).toContain('My identity');
   // An incoming change must not silently turn this draft into a current-revision overwrite.
   fixture.catalog = { ...fixture.catalog, revision: 5 };
@@ -74,17 +79,23 @@ test('edits official prompt text, previews generated context and saves only edit
   expect(fixture.update).toHaveBeenCalledWith('prompt', { scope: { kind: 'global' }, revision: 4, profile: { sections: { preamble: 'My identity' } } });
 });
 
-test('inherits global instructions in a project and saves only its own changes', async () => {
+test('saves project additions and style while preserving earlier section overrides', async () => {
   fixture.hasThreads = false;
   fixture.catalog.prompts.global = { sections: { rules: 'Shared user rules' } };
+  fixture.catalog.prompts['project:project-a'] = { sections: { preamble: 'Project identity' } };
   await act(async () => root.render(<AgentPromptPage />));
-  await click('assistant.scope.project');
+  await click('settings.promptx.projectNamed');
   expect(fixture.fetch).toHaveBeenLastCalledWith('/api/agent-personalization/prompt?projectId=project-a', expect.anything());
-  expect(container.querySelector('textarea')?.value).toContain('Shared user rules');
-  await type('Project identity\n\n<rules>\nShared user rules\n</rules>');
+  expect(base()?.value).toContain('Shared user rules');
+  expect(extra()?.value).toBe('');
+  await type('Start with the conclusion.', 'settings.promptx.additional');
+  await click('assistant.preset.density.1');
+  expect(container.querySelector('pre')?.textContent).toContain('Start with the conclusion.');
+  expect(container.querySelector('pre')?.textContent).toContain('Shared user rules');
   await click('assistant.save');
   expect(fixture.update).toHaveBeenLastCalledWith('prompt', { scope: { kind: 'project', id: 'project-a' }, revision: 4,
-    profile: { sections: { preamble: 'Project identity' } } });
+    profile: { sections: { preamble: 'Project identity', user_instructions_project: 'Start with the conclusion.',
+      preference_density: 'Keep explanations concise while preserving facts needed for decisions.' } } });
 });
 
 test('shows scope-specific notes and keeps an edit on its selected project', async () => {
@@ -102,7 +113,7 @@ test('shows scope-specific notes and keeps an edit on its selected project', asy
 test('previews the conversation memory checkpoint while newly saved notes remain in the catalog', async () => {
   fixture.snapshot.memorySnapshot = { revision: 2, threadId: 'thread:chat', memories: [{ id: 1, scope: { kind: 'global' }, content: 'Checkpoint note', updatedAt: '' }] };
   await act(async () => root.render(<AgentPromptPage />));
-  await click('assistant.scope.thread');
+  await click('settings.promptx.currentThread');
   expect(container.querySelector('pre')?.textContent).toContain('Checkpoint note');
   expect(container.querySelector('pre')?.textContent).not.toContain('Global note');
   fixture.catalog = { ...fixture.catalog, revision: 5, memories: [{ ...fixture.catalog.memories[0]!, content: 'Newly saved note' }] };
