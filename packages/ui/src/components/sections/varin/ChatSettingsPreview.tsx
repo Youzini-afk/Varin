@@ -7,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { cn } from '@/lib/utils';
 import { Icon } from '@/components/icon/Icon';
+import { Btn, Seg } from '@/components/sections/shared/kit';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
@@ -46,31 +47,24 @@ export function ChatSettingsPreview({ scene, onSceneChange }: { scene: ChatPrevi
   const item = projection.items[0];
   const turn = item?.kind === 'turn' ? item.turn : undefined;
   const bodyId = React.useId();
-  const tabs = React.useRef<Partial<Record<ChatPreviewScene, HTMLButtonElement>>>({});
-  const resetExample = () => { setReset(value => value + 1); setActivityStep(0); setDraft(''); setSent(undefined); setBusy(true); setFileOpen(false); onSceneChange('conversation'); viewport.current?.scrollTo({ top: 0 }); };
+    const resetExample = () => { setReset(value => value + 1); setActivityStep(0); setDraft(''); setSent(undefined); setBusy(true); setFileOpen(false); onSceneChange('conversation'); viewport.current?.scrollTo({ top: 0 }); };
   const diagram = `\`\`\`mermaid\nflowchart LR\n  A["${t('settings.chat.preview.diagram')}"] --> B["${t('settings.chat.preview.diagramCheck')}"] --> C["${t('settings.chat.preview.diagramValid')}"]\n\`\`\``;
 
-  return <aside className="settings-chat-preview" aria-label={t('settings.chat.preview.title')}>
-    <header className="flex min-h-12 items-center gap-2 border-b border-border/60 px-4">
-      <span className="size-1.5 rounded-full bg-foreground" aria-hidden="true" />
-      <strong className="typography-meta font-medium">{t('settings.chat.preview.title')}</strong>
-      <span className="hidden typography-micro text-muted-foreground @sm:inline">{t('settings.chat.preview.subtitle')}</span>
-      <Button type="button" variant="ghost" size="icon" className="ml-auto size-7" aria-label={t('settings.chat.preview.disclosure')} aria-controls={bodyId} aria-expanded={!folded} onClick={() => setFolded(value => !value)}>
-        <Icon name={folded ? 'arrow-down-s' : 'arrow-up-s'} className="size-4" />
-      </Button>
+  return <aside className="settings-chat-preview sk-pv" aria-label={t('settings.chat.preview.title')}>
+    <header className="sk-pv-head">
+      <span className="sk-pv-dot" aria-hidden="true" />
+      <b>{t('settings.chat.preview.title')}</b>
+      <span className="sk-faint">{t('settings.chat.preview.subtitle')}</span>
+      <span className="sk-grow" />
+      <Btn kind="ghost" sm icon={folded ? 'arrow-down-s' : 'arrow-up-s'} tip={t('settings.chat.preview.disclosure')} aria-controls={bodyId} aria-expanded={!folded} onClick={() => setFolded(value => !value)} />
     </header>
     <div id={bodyId} hidden={folded}>
-      <div className="flex flex-wrap items-center gap-1 border-b border-border/50 bg-muted/20 p-2" role="tablist" aria-label={t('settings.chat.preview.title')}>
-        {(['conversation', 'files', 'input'] as const).map(value => <button key={value} type="button" role="tab" id={`${bodyId}-${value}`} aria-controls={`${bodyId}-scene`} aria-selected={scene === value} tabIndex={scene === value ? 0 : -1}
-          ref={node => { if (node) tabs.current[value] = node; }}
-          onKeyDown={event => {
-            const scenes: ChatPreviewScene[] = ['conversation', 'files', 'input'];
-            const next = event.key === 'Home' ? scenes[0] : event.key === 'End' ? scenes[2] : event.key === 'ArrowRight' ? scenes[(scenes.indexOf(value) + 1) % 3] : event.key === 'ArrowLeft' ? scenes[(scenes.indexOf(value) + 2) % 3] : undefined;
-            if (next) { event.preventDefault(); onSceneChange(next); tabs.current[next]?.focus(); }
-          }}
-          className={cn('rounded-md px-2.5 py-1.5 typography-meta', scene === value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}
-          onClick={() => { onSceneChange(value); viewport.current?.scrollTo({ top: 0 }); }}>{t(`settings.chat.preview.${value}`)}</button>)}
-        {scene === 'conversation' && <span className="ml-auto px-1 typography-micro tabular-nums text-muted-foreground">{state.width ? `${state.width} px` : t('settings.chat.width.full')}</span>}
+      <div className="sk-pv-tabs">
+        <Seg value={scene} label={t('settings.chat.preview.title')} onChange={value => { onSceneChange(value); viewport.current?.scrollTo({ top: 0 }); }}
+          options={(['conversation', 'files', 'input'] as const).map(value => ({ value, label: t(`settings.chat.preview.${value}`) }))} />
+        <span className="sk-grow" />
+        {scene === 'conversation' && <span className="sk-faint sk-num" style={{ fontSize: 11.5 }}>{state.width ? `${state.width} px` : t('settings.chat.width.full')}</span>}
+        <Btn kind="ghost" sm tip={t('settings.chatx.resetExampleHint')} onClick={resetExample}>{t('settings.chat.preview.reset')}</Btn>
       </div>
       <div ref={viewport} className="settings-chat-preview-viewport" id={`${bodyId}-scene`} role="tabpanel" aria-labelledby={`${bodyId}-${scene}`}>
         {/* Explicitly shadow any enclosing live owner. No extension renderer or real file action runs here. */}
@@ -114,7 +108,7 @@ export function ChatSettingsPreview({ scene, onSceneChange }: { scene: ChatPrevi
           </div>}
         </ConversationPreviewContext.Provider></ConversationContext.Provider>
       </div>
-      <footer className="flex items-start gap-3 border-t border-border/50 px-3 py-2.5 typography-micro text-muted-foreground"><p className="flex-1">{t('settings.chat.preview.description')}</p><button type="button" className="shrink-0 hover:text-foreground" onClick={resetExample}>{t('settings.chat.preview.reset')}</button></footer>
+      <footer className="sk-pv-foot">{t('settings.chat.preview.description')}</footer>
     </div>
   </aside>;
 }

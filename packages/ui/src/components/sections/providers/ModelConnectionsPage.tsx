@@ -1,8 +1,11 @@
+import { SettingsScopeLabel } from '../shared/SettingsScope';
 import React from 'react';
 import { applyModelDirectoryDefaults, createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, registerRuntimeEndpointSwitchBlocker, type AgentSettingsSnapshot, type ChannelModel, type ModelChannel, type ModelConnectionOptions, type DiscoveredModel, type ConnectionAuthentication, type AuthorizationState, type ModelConnectionTestResult } from '@varin/application-client';
-import { SettingsPageLayout } from '../shared/SettingsPageLayout';
 import { SettingsActionBar } from '../shared/SettingsActionBar';
-import { SettingsPageLink } from '../shared/SettingsPageLink';
+import { Av, Catalog, CatalogGroup, CatalogItem, Empty, Loading, Note, ObjectHeader, Section, useSettingsShell } from '../shared/kit';
+import { useSettingsSearchTarget } from '@/lib/settings/search-target';
+import { RetrySettings } from '../varin/RetrySettings';
+import { parseModelRetrySettings } from '@varin/protocol';
 import { ConnectionSettings } from './ConnectionSettings';
 import { accountSignInProviders } from './account-sign-in';
 import { ModelConfigurationDrawer } from './ModelConfiguration';
@@ -33,14 +36,16 @@ export function ModelConnectionsPage() {
 
 function ModelConnectionsEditor({ host }: { host: number }) {
   const { t } = useI18n();
+  const shell = useSettingsShell();
+  const searchTarget = useSettingsSearchTarget();
   const api = React.useMemo(() => createModelConnectionsHttpAPI(host), [host]);
   const read = React.useCallback(() => api.read(), [api]);
   const { snapshot, saving, error, setError, reset, refresh, enqueue } = useModelConnectionWrites(read);
   const [settings, setSettings] = React.useState<AgentSettingsSnapshot | null>(null);
+  const [retrySelected, setRetrySelected] = React.useState(false);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState<ConnectionDraft | null>(null);
   const [baseDraft, setBaseDraft] = React.useState('');
-  const [showDetail, setShowDetail] = React.useState(false);
   const [newChannel, setNewChannel] = React.useState<ModelChannel | null>(null);
   const [step, setStep] = React.useState<0 | 1 | 2 | null>(null);
   const [query, setQuery] = React.useState('');
@@ -85,9 +90,19 @@ function ModelConnectionsEditor({ host }: { host: number }) {
     ++actionGeneration.current; setWorking(false);
     cancelAuthorization(); invalidateConnection(); setSelectedId(value.id); setStep(null); setNewChannel(null);
     const next = connectionDraft(value); setDraft(next); setBaseDraft(JSON.stringify(next)); setSecret('');
-    setSelectedModelId(null); setInvalidFields(new Set()); setEditorGeneration(value => value + 1); setShowDetail(details); setError(null);
+    setSelectedModelId(null); setInvalidFields(new Set()); setEditorGeneration(value => value + 1); setRetrySelected(false); setError(null);
+    if (details) shell.setCatalogStage('detail');
   };
-  const close = () => { ++actionGeneration.current; setWorking(false); cancelAuthorization(); invalidateConnection(); setDraft(null); setSelectedId(null); setSelectedModelId(null); setSecret(''); setStep(null); setNewChannel(null); setShowDetail(false); };
+  const close = () => {
+    ++actionGeneration.current; setWorking(false); cancelAuthorization(); invalidateConnection();
+    setDraft(null); setSelectedId(null); setSelectedModelId(null); setDrawerOpen(false); setSecret(''); setStep(null); setNewChannel(null);
+  };
+  const selectRetry = () => { close(); setRetrySelected(true); shell.setCatalogStage('detail'); };
+  React.useEffect(() => {
+    if (searchTarget === 'sessions.retry') selectRetry();
+  // This is a one-shot navigation intent from settings search.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTarget]);
   React.useEffect(() => {
     alive.current = true; const controller = new AbortController();
     void refresh();
@@ -120,7 +135,7 @@ function ModelConnectionsEditor({ host }: { host: number }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot, focus]);
   React.useEffect(() => {
-    if (!snapshot || focus || draft || step !== null || !snapshot.channels.length) return;
+    if (!snapshot || focus || draft || retrySelected || searchTarget === 'sessions.retry' || step !== null || !snapshot.channels.length) return;
     choose(snapshot.channels[0]!, false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot]);
@@ -217,7 +232,7 @@ function ModelConnectionsEditor({ host }: { host: number }) {
     }
     setPassed(previous => ({ ...previous, [preview.id]: discoveryConfiguration(preview) }));
   });
-  const begin = () => requestSettingsNavigation(() => { close(); setStep(0); setShowDetail(true); setProviderQuery(''); });
+  const begin = () => requestSettingsNavigation(() => { close(); setRetrySelected(false); setStep(0); shell.setCatalogStage('detail'); setProviderQuery(''); });
   const selectType = (id: string) => {
     const selected = snapshot!.types.find(type => type.id === id)!;
     cancelAuthorization(); invalidateConnection(); const kind = selected.authentication[0]!;
@@ -231,19 +246,32 @@ function ModelConnectionsEditor({ host }: { host: number }) {
     const id = savedChannel.id;
     void enqueue(current => api.remove(id, current.revision)).then(ok => { if (ok && alive.current) close(); });
   };
-  const usages: Record<string, string[]> = {};
-  const addUsage = (provider: unknown, model: unknown, label: string) => { if (provider === channel?.id && typeof model === 'string') (usages[model] ??= []).push(label); };
+  const usages: Record<string, {label: string; page: string; item: string}[]> = Object.create(null);
+  const addUsage = (binding: {providerId?: string; modelId?: string} | null | undefined, label: string, item: string, page = 'model-roles') => {
+    if (binding?.providerId && binding.providerId === channel?.id && binding.modelId) (usages[binding.modelId] ??= []).push({ label, page, item });
+  };
   const global = settings?.global;
   if (global) {
-    addUsage(global.defaultProvider, global.defaultModel, t('settings.models.usageDefault'));
-    const utility = global.utilityModel as { providerId?: string; modelId?: string } | undefined;
-    addUsage(utility?.providerId, utility?.modelId, t('settings.models.usageUtility'));
-    const harness = global.harness as { models?: Record<string, { providerId?: string; modelId?: string }>; delegationModelSelection?: { model?: { providerId?: string; modelId?: string } } } | undefined;
+    addUsage({providerId: typeof global.defaultProvider === 'string' ? global.defaultProvider : undefined, modelId: typeof global.defaultModel === 'string' ? global.defaultModel : undefined}, t('settings.models.usageDefault'), 'sessions.default-model');
+    type Binding = {providerId?: string; modelId?: string};
+    addUsage(global.utilityModel as Binding | undefined, t('settings.models.usageUtility'), 'sessions.small-model');
+    const harness = global.harness as { models?: Record<string, Binding>; images?: {generation?: Binding; editing?: Binding}; embedding?: Binding; rerank?: Binding; delegationModelSelection?: {model?: Binding}; fastDecision?: {default?: Binding; purposes?: Record<string, Binding | 'off'>} } | undefined;
+    const central = ['contextCompaction', 'agentPlanning', 'explore', 'nextStep', 'reader', 'webSelection', 'permissionJudge'];
     for (const [slot, binding] of Object.entries(harness?.models ?? {})) {
-      const key = `settings.harness.role.${slot}`;
-      addUsage(binding.providerId, binding.modelId, t(key as Parameters<typeof t>[0]));
+      addUsage(binding, t(`settings.harness.role.${slot}` as Parameters<typeof t>[0]),
+        'harness.models.' + slot, central.includes(slot) ? 'model-roles' : 'agents');
     }
-    addUsage(harness?.delegationModelSelection?.model?.providerId, harness?.delegationModelSelection?.model?.modelId, t('settings.models.usageDelegation'));
+    addUsage(harness?.delegationModelSelection?.model, t('settings.models.usageDelegation'), 'harness.delegationModelSelection');
+    addUsage(harness?.embedding, t('settings.page.harness.section.embedding'), 'harness.embedding');
+    addUsage(harness?.rerank, t('settings.page.harness.section.rerank'), 'harness.rerank');
+    for (const purpose of ['generation','editing'] as const) addUsage(harness?.images?.[purpose], t(`settings.harness.images.${purpose}`), 'harness.images');
+    addUsage(harness?.fastDecision?.default, t('settings.page.harness.section.fastDecision'), 'harness.fastDecision');
+    for (const [purpose, binding] of Object.entries(harness?.fastDecision?.purposes ?? {})) {
+      if (binding === 'off') continue;
+      const web = purpose === 'web-reading' || purpose === 'web-selection';
+      addUsage(binding, web ? t(purpose === 'web-reading' ? 'settings.page.harness.web.assistance.reading' : 'settings.page.harness.web.assistance.selection') : t('settings.page.harness.section.fastDecision') + ' · ' + purpose,
+        purpose === 'web-reading' ? 'harness.models.reader' : purpose === 'web-selection' ? 'harness.models.webSelection' : 'harness.fastDecision');
+    }
   }
   const selectedModel = models.find(model => model.id === selectedModelId);
   const connectionValid = !invalidFields.size && Boolean(draft?.name.trim()) && authorization?.status !== 'pending';
@@ -251,59 +279,93 @@ function ModelConnectionsEditor({ host }: { host: number }) {
     setSecret={value => { invalidateConnection(); setSecret(value); }} cancelAuthorization={cancelAuthorization} onSignIn={signIn}
     onSignOut={() => { void run(async () => { if (preview.authentication.kind === 'credential') await api.removeCredential(preview.authentication.reference); if (alive.current) edit({ authentication: { kind: 'credential', reference: '' } }); }); }}
     onAuthorizationReply={value => api.replyAuthorization(authorization!.id, value)} onAuthorizationCancel={async () => { await api.cancelAuthorization(authorization!.id); if (alive.current) { activeAuthorization.current = undefined; setAuthorization(null); } }} />;
-  return <SettingsPageLayout title={t('settings.models.title')} description={t('settings.models.description')} className="max-w-[1320px] @container/model-connections">
-    {error ? <div role="alert" className="mb-4 flex items-center gap-3 typography-meta text-destructive">{error}<Button variant="ghost" size="sm" onClick={() => { void refresh(); }}>{t('settings.harness.retry')}</Button></div> : null}
-    {!snapshot ? <p role="status" className="py-6 typography-meta text-muted-foreground">{t('common.loading')}</p> : <div className="mt-6 min-w-0 @3xl/model-connections:grid @3xl/model-connections:grid-cols-[240px_minmax(0,1fr)] @3xl/model-connections:gap-7">
-      <aside className={cn('min-w-0 self-start @3xl/model-connections:sticky @3xl/model-connections:top-0 @3xl/model-connections:border-r @3xl/model-connections:border-border/60 @3xl/model-connections:pr-5', showDetail ? 'hidden @3xl/model-connections:block' : 'block')}>
-        <div className="mb-3 flex items-center gap-1"><Input aria-label={t('settings.models.filterServices')} placeholder={t('settings.models.filterServices')} value={query} onChange={event => setQuery(event.target.value)} className="h-9 min-w-0" /><Button variant="ghost" size="icon" aria-label={t('settings.models.addChannel')} onClick={begin}><Icon name="add" className="size-4" /></Button><DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label={t('settings.models.serviceActions')} />}><Icon name="more" className="size-4" /></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={snapshot.directory?.refreshing} onClick={() => { void run(async () => { await api.refreshDirectory(); await refresh(); }); }}>{t('settings.models.refreshDirectory')}</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
-        <div className="space-y-1">{snapshot.channels.filter(channel => `${channel.name} ${channel.type} ${channel.baseUrl}`.toLowerCase().includes(query.toLowerCase())).map(item => {
-          const issues = snapshot.issues?.filter(issue => issue.channelId === item.id) ?? [];
+  const channels = snapshot?.channels ?? [];
+  const filter = query.trim().toLowerCase();
+  const visibleChannels = channels.filter(channel => [channel.name, channel.type, channel.baseUrl,
+    ...channel.models.flatMap(model => [model.id, model.name, model.requestModelId])]
+    .some(value => value?.toLowerCase().includes(filter)));
+  const retry = settings ? parseModelRetrySettings(settings.global.retry) : null;
+  const saveRetry = async (set: Parameters<typeof api.updateSettings>[0]['set']) => {
+    if (!settings) return false;
+    try {
+      const saved = await api.updateSettings({ scope: 'global', set, remove: [], expectedRevision: settings.globalRevision });
+      if (!alive.current) return false;
+      setSettings(saved); setError(null);
+      return true;
+    } catch (cause) {
+      if (alive.current) setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
+    }
+  };
+  return <Catalog title={t('settings.models.title')} description={t('settings.models.description')} scope={<SettingsScopeLabel kind="host" />}
+    filter={{ value: query, onChange: setQuery, placeholder: t('settings.models.filterServices') }}
+    headActions={snapshot && <>
+      <Button variant="ghost" size="icon" aria-label={t('settings.models.addChannel')} onClick={begin}><Icon name="add" className="size-4" /></Button>
+      <DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label={t('settings.models.serviceActions')} />}><Icon name="more" className="size-4" /></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={snapshot.directory?.refreshing} onClick={() => { void run(async () => { await api.refreshDirectory(); await refresh(); }); }}>{t('settings.models.refreshDirectory')}</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+    </>}
+    items={<>
+      <CatalogItem pinned selected={retrySelected} opensDetail={false} onSelect={() => requestSettingsNavigation(selectRetry)}
+        lead={<Av><Icon name="refresh" className="size-4" /></Av>} name={t('settings.retry.title')}
+        ariaLabel={t('settings.retry.title')} meta={retry && t(retry.enabled ? 'settings.kit.on' : 'settings.kit.off')} />
+      <CatalogGroup label={t('settings.models.services')} count={filter ? visibleChannels.length : channels.length} />
+      {!snapshot && !error ? <Loading /> : null}
+      {visibleChannels.map(item => {
+          const issues = snapshot?.issues?.filter(issue => issue.channelId === item.id) ?? [];
           const healthy = passed[item.id] === discoveryConfiguration(item);
-          return <button key={item.id} type="button" aria-label={item.name} aria-current={step === null && selectedId === item.id ? 'true' : undefined} onClick={() => requestSettingsNavigation(() => choose(item))} className={cn('flex w-full items-center gap-2.5 rounded-lg px-2.5 py-3 text-left transition-colors hover:bg-interactive-hover', step === null && selectedId === item.id && 'bg-foreground/5')}>
-            <ProviderLogo providerId={item.type} className="size-5 shrink-0" /><span className="min-w-0 flex-1 truncate typography-meta">{item.name}</span><span className="typography-micro tabular-nums text-muted-foreground">{item.models.filter(model => model.enabled).length}</span>
-            {issues.length || !item.enabled || healthy ? <span role="img" aria-label={issues.length ? issues.map(issue => issue.message).join('\n') : t(!item.enabled ? 'settings.models.disabled' : 'settings.models.sessionHealthy')} title={issues.length ? issues.map(issue => issue.message).join('\n') : t(!item.enabled ? 'settings.models.disabled' : 'settings.models.sessionHealthy')} className={cn('size-1.5 shrink-0 rounded-full', issues.length ? 'bg-destructive' : !item.enabled ? 'border border-muted-foreground' : 'bg-[var(--status-success)]')} /> : null}
-          </button>;
-        })}</div>
-        {!snapshot.channels.length ? <p className="py-5 typography-meta text-muted-foreground">{t('settings.models.emptyHint')}</p> : null}
-        {snapshot.directory?.issue ? <p className="mt-5 typography-micro text-muted-foreground">{t(`settings.models.directoryIssue.${snapshot.directory.issue}`)}</p> : null}
-        {snapshot.issues?.filter(issue => !issue.channelId).map((issue, index) => <p key={index} role="alert" className="mt-3 typography-micro text-destructive">{issue.message}</p>)}
-      </aside>
-      <div className={cn('min-w-0 @container', showDetail ? 'block' : 'hidden @3xl/model-connections:block')}>
-        <Button variant="ghost" size="sm" className="mb-4 @3xl/model-connections:hidden" disabled={working} onClick={() => requestSettingsNavigation(() => { if (step !== null) close(); else setShowDetail(false); })}><Icon name="arrow-left-s" className="size-4" />{t('settings.models.back')}</Button>
+          const state = issues.length ? issues.map(issue => issue.message).join('\n')
+            : !item.enabled ? t('settings.models.disabled') : healthy ? t('settings.models.sessionHealthy') : undefined;
+          return <CatalogItem key={item.id} selected={step === null && selectedId === item.id} opensDetail={false}
+            ariaLabel={item.name} name={item.name} dim={!item.enabled} title={state}
+            lead={<Av><ProviderLogo providerId={item.type} className="size-5" /></Av>}
+            meta={t('settings.roles.serviceModelCount', { count: item.models.length })}
+            end={state ? <span role="img" aria-label={state} className={cn('sk-dot', issues.length ? 'err' : !item.enabled ? 'off' : 'ok')} /> : undefined}
+            onSelect={() => requestSettingsNavigation(() => choose(item))} />;
+      })}
+      {snapshot && !visibleChannels.length ? <p className="sk-muted sk-small sk-pad">{filter ? t('settings.shell.noResults', { query: query.trim() }) : t('settings.models.emptyHint')}</p> : null}
+      {snapshot?.directory?.issue ? <p className="sk-muted sk-small sk-pad">{t(`settings.models.directoryIssue.${snapshot.directory.issue}`)}</p> : null}
+      {snapshot?.issues?.filter(issue => !issue.channelId).map((issue, index) => <Note key={index} kind="warn">{issue.message}</Note>)}
+    </>}
+    detailKey={retrySelected ? 'retry' : step !== null ? 'new' : selectedId ?? 'empty'}
+    detail={<>
+      {error ? <Note kind="err" actions={<Button variant="ghost" size="sm" onClick={() => void refresh()}>{t('settings.harness.retry')}</Button>}>{error}</Note> : null}
+      {retrySelected ? <><ObjectHeader avatar={<Av><Icon name="refresh" className="size-4" /></Av>} title={t('settings.retry.title')} sub={t('settings.retry.description')} />
+        {settings ? <RetrySettings value={settings.global.retry} disabled={false} api={api} onSave={saveRetry} standalone /> : !error ? <Loading /> : null}
+      </> : snapshot && <>
         {step !== null ? <div className="mb-6 flex items-center gap-3 typography-micro text-muted-foreground">{(['settings.models.chooseProvider', 'settings.models.connection', 'settings.models.chooseModels'] as const).map((key, index) => <React.Fragment key={key}>{index ? <Icon name="arrow-right-s" className="size-3" /> : null}<span aria-current={step === index ? 'step' : undefined} className={step === index ? 'text-foreground' : undefined}>{index + 1} · {t(key)}</span></React.Fragment>)}</div> : null}
         {step === 0 ? <>
           <Input aria-label={t('settings.models.filterProviders')} placeholder={t('settings.models.filterProviders')} value={providerQuery} onChange={event => setProviderQuery(event.target.value)} className="mb-5" />
           <div className="grid gap-3 @xl:grid-cols-2">{snapshot.types.filter(type => `${type.name} ${type.id}`.toLowerCase().includes(providerQuery.toLowerCase())).map(type => <button key={type.id} type="button" onClick={() => selectType(type.id)} className="flex items-center gap-3 rounded-xl border border-border/60 p-4 text-left transition-colors hover:bg-interactive-hover"><ProviderLogo providerId={type.id} className="size-6 shrink-0" /><span className="min-w-0 flex-1"><span className="block typography-ui-label">{type.name}</span><span className="mt-1 block truncate typography-micro text-muted-foreground" title={type.defaultBaseUrl}>{type.defaultBaseUrl ? providerEndpoint(type.defaultBaseUrl) : t('settings.models.customEndpoint')}</span>{accountSignInProviders(type).length ? <span className="mt-2 inline-block rounded bg-muted px-1.5 py-0.5 typography-micro text-muted-foreground">{t('settings.models.accountSignIn')}</span> : null}</span></button>)}</div>
         </> : null}
         {preview && type && step !== 0 ? <div key={`${preview.id}:${editorGeneration}`}>
-          <header className="mb-6 flex items-center gap-3"><ProviderLogo providerId={type.id} className="size-7 shrink-0" /><div className="min-w-0 flex-1"><h2 className="truncate typography-ui-label">{preview.name || type.name}</h2><p className="mt-1 typography-micro text-muted-foreground">{type.name}</p></div>{step === null ? <><Switch aria-label={t('settings.models.enabled')} checked={channel!.enabled} onCheckedChange={enabled => { void mutateChannel(channel => ({ ...channel, enabled })); }} /><DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label={t('settings.models.serviceActions')} />}><Icon name="more" className="size-4" /></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={remove}>{t('settings.models.removeService')}</DropdownMenuItem></DropdownMenuContent></DropdownMenu></> : null}</header>
-          <div hidden={step === 2}>
-            <p className="mb-4 typography-micro text-muted-foreground">{t('settings.models.connectionDraft')}</p>
-            {connectionControls}
-            <div className="mt-5 flex flex-wrap items-center gap-3"><Button variant="outline" disabled={working || !connectionValid} onClick={() => { if (step === 1 && !type.discovery) setStep(2); else void discover().then(ok => { if (ok && step === 1) setStep(2); }); }}><Icon name={working ? 'loader-4' : 'play'} className={cn('size-3.5', working && 'animate-spin')} />{t(step === 1 ? type.discovery ? 'settings.models.connectAndDiscover' : 'settings.models.chooseModels' : 'settings.models.testConnection')}</Button>
+          <ObjectHeader avatar={<Av><ProviderLogo providerId={type.id} className="size-6" /></Av>} title={preview.name || type.name} sub={type.name}
+            actions={step === null ? <><Switch aria-label={t('settings.models.enabled')} checked={channel!.enabled} onCheckedChange={enabled => { void mutateChannel(channel => ({ ...channel, enabled })); }} /><DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label={t('settings.models.serviceActions')} />}><Icon name="more" className="size-4" /></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={remove}>{t('settings.models.removeService')}</DropdownMenuItem></DropdownMenuContent></DropdownMenu></> : null} />
+          <div hidden={step === 2}><Section title={t('settings.models.connection')} description={t('settings.models.connectionDraft')}>
+            <div className="sk-pad">{connectionControls}</div>
+            <div className="sk-pad flex flex-wrap items-center gap-3"><Button variant="outline" disabled={working || !connectionValid} onClick={() => { if (step === 1 && !type.discovery) setStep(2); else void discover().then(ok => { if (ok && step === 1) setStep(2); }); }}><Icon name={working ? 'loader-4' : 'play'} className={cn('size-3.5', working && 'animate-spin')} />{t(step === 1 ? type.discovery ? 'settings.models.connectAndDiscover' : 'settings.models.chooseModels' : 'settings.models.testConnection')}</Button>
               {step === 1 ? <Button variant="ghost" disabled={working || !connectionValid} onClick={() => setStep(2)}>{t('settings.models.skipValidation')}</Button> : null}
               {connectionResult ? <span role="status" className="typography-micro text-muted-foreground">{connectionResult}</span> : null}
             </div>
-          </div>
-          {connectionFailure ? <p role="alert" className="mt-3 break-words typography-meta text-destructive">{connectionFailure}</p> : null}
+            {connectionFailure ? <Note kind="err" inPanel>{connectionFailure}</Note> : null}
+            <SettingsActionBar placement="inline" dirty={dirty} saving={working && !authorization} onSave={step === null ? () => save() : undefined} onCancel={() => { if (savedChannel && step === null) choose(savedChannel); else { close(); shell.setCatalogStage('list'); } }} saveDisabled={!connectionValid || step !== null} saveLabel={t('settings.models.save')} />
+          </Section></div>
+          {step === 2 && connectionFailure ? <Note kind="err">{connectionFailure}</Note> : null}
           {step === 2 ? <><Button variant="ghost" size="sm" className="mb-4" disabled={working} onClick={() => setStep(1)}><Icon name="arrow-left-s" className="size-4" />{t('settings.models.connection')}</Button><ModelPicker available={modelCandidates(type, candidates)} initialIds={type.defaultModelIds} busy={working || saving} confirmLabel={t('settings.models.addChannel')} onConfirm={entries => { void save(entries); }} /></> : null}
           {step === null ? <>
             <ModelSelection models={models} type={type} candidates={candidates} busy={working || saving} usages={usages} onConfigure={id => { setSelectedModelId(id); setDrawerOpen(true); }}
               onToggle={(id, enabled) => { void mutateModels(models => models.map(model => model.id === id ? { ...model, enabled } : model)); }}
               onAdd={entries => mutateModels(models => addModels(models, entries, type))} onDiscover={discover} />
-            <div className="mt-7 border-t border-border/60 pt-4"><Button variant="ghost" size="sm" className="text-destructive" disabled={saving || working} onClick={remove}>{t('settings.models.removeService')}</Button></div>
+            <Button variant="ghost" size="sm" className="text-destructive" disabled={saving || working} onClick={remove}>{t('settings.models.removeService')}</Button>
           </> : null}
-          <SettingsActionBar dirty={dirty} saving={working && !authorization} onSave={step === null ? () => save() : undefined} onCancel={() => { if (savedChannel && step === null) choose(savedChannel); else close(); }} saveDisabled={!connectionValid || step !== null} saveLabel={t('settings.models.save')} />
         </div> : null}
-        {!preview && step === null ? <div className="py-16 text-center"><Icon name="cloud" className="mx-auto mb-3 size-7 text-muted-foreground" /><p className="typography-meta text-muted-foreground">{t('settings.models.emptyTitle')}</p><Button variant="outline" className="mt-4" onClick={begin}>{t('settings.models.addChannel')}</Button></div> : null}
-      </div>
-    </div>}
-    <div className="mt-8 border-t border-border/60 pt-3"><SettingsPageLink page="sessions">{t('settings.page.sessions.title')}</SettingsPageLink><SettingsPageLink page="agents">{t('settings.experience.agentModels')}</SettingsPageLink></div>
-    {selectedModel && type && savedChannel ? <ModelConfigurationDrawer key={`${savedChannel.id}:${selectedModel.id}`} reset={reset} open={drawerOpen} onOpenChange={setDrawerOpen} model={selectedModel} type={type} defaults={type.catalog?.find(model => model.id === selectedModel.id)}
+        {!preview && step === null ? <Empty icon="cloud" title={t('settings.models.emptyTitle')}
+          action={<Button variant="outline" onClick={begin}>{t('settings.models.addChannel')}</Button>} /> : null}
+      </>}
+    </>}
+    dock={selectedModel && type && savedChannel ? <ModelConfigurationDrawer key={`${savedChannel.id}:${selectedModel.id}`} reset={reset} open={drawerOpen} onOpenChange={setDrawerOpen} model={selectedModel} type={type} defaults={type.catalog?.find(model => model.id === selectedModel.id)}
       inheritedImageApi={typeof savedChannel.parameters.imageApi === 'string' ? savedChannel.parameters.imageApi : undefined} inheritedDecisionApi={typeof savedChannel.parameters.decisionApi === 'string' ? savedChannel.parameters.decisionApi : undefined} inheritedPaths={savedChannel.connection?.paths}
       onChange={patch => { void mutateModels(models => models.map(model => model.id === selectedModel.id ? editModel(model, patch, type.catalog?.find(value => value.id === model.id)) : model)); }}
       onFollow={field => { void mutateModels(models => models.map(model => { const defaults = type.catalog?.find(value => value.id === model.id); return model.id === selectedModel.id && defaults ? followModel(model, defaults, field) : model; })); }}
       onRemove={() => { void mutateModels(models => models.filter(model => model.id !== selectedModel.id)).then(ok => { if (ok) setSelectedModelId(null); }); }}
       onTest={(thinkingLevel, signal): Promise<ModelConnectionTestResult> => api.test({ key: crypto.randomUUID(), channel: { ...savedChannel, models }, modelId: selectedModel.id, thinkingLevel }, signal)} /> : null}
-  </SettingsPageLayout>;
+  />;
 }

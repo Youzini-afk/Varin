@@ -3,8 +3,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { SettingsPayload } from '@varin/application-client';
-const f = vi.hoisted(() => ({ endpoint: 1, listeners: new Set<() => void>(), load: vi.fn(), save: vi.fn(), list: vi.fn(), fetch: vi.fn() }));
-vi.mock('@varin/application-client', () => ({ getRuntimeApiBaseUrl: () => 'https://service.example', getRuntimeEndpointGeneration: () => f.endpoint,
+const f = vi.hoisted(() => ({ endpoint: 1, listeners: new Set<() => void>(), load: vi.fn(), save: vi.fn(), list: vi.fn(), fetch: vi.fn(), projects: vi.fn() }));
+vi.mock('@varin/application-client', async (importOriginal) => ({ ...(await importOriginal<typeof import('@varin/application-client')>()),
+  getRuntimeApiBaseUrl: () => 'https://service.example', getRuntimeEndpointGeneration: () => f.endpoint,
   subscribeRuntimeEndpointChanged: (listener: () => void) => { f.listeners.add(listener); return () => f.listeners.delete(listener); },
   registerRuntimeEndpointSwitchBlocker: vi.fn(), runtimeFetch: f.fetch }));
 vi.mock('@/hooks/useRuntimeAPIs', () => {
@@ -16,9 +17,15 @@ vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ locale: 'en', t: (key: string) 
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui/button', () => ({ Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => <button {...props} /> }));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={onChange as React.FormEventHandler<HTMLInputElement>} /> }));
-vi.mock('@/components/sections/shared/SettingsPageLayout', () => ({ SettingsPageLayout: ({ children, headerEnd }: React.PropsWithChildren<{ headerEnd: React.ReactNode }>) => <main>{headerEnd}{children}</main> }));
 vi.mock('@/components/sections/shared/SettingsSection', () => ({ SettingsSection: ({ children }: React.PropsWithChildren) => <section>{children}</section> }));
-import { WorkspaceLocationsPage } from './WorkspaceLocationsPage';
+import { WorkspaceLocationControls } from './WorkspaceLocationsPage';
+
+function WorkspacesFixture() {
+  const [revision, refresh] = React.useReducer(value => value + 1, 0);
+  return <main><button type="button" onClick={refresh}>Refresh</button>
+    <WorkspaceLocationControls refreshRevision={revision} renderRegisteredProjects={f.projects} />
+  </main>;
+}
 
 const resourceOwner = { kind: 'managed_host' as const, hostId: 'test-machine', connectionId: 'peer', endpointIdentity: 'pinned-peer' };
 let root: Root, view: HTMLElement, state: SettingsPayload;
@@ -45,9 +52,14 @@ beforeEach(async () => {
   const { document, window } = parseHTML('<html><body></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   view = document.createElement('div'); document.body.append(view); root = createRoot(view);
-  await act(async () => root.render(<WorkspaceLocationsPage />));
+  await act(async () => root.render(<WorkspacesFixture />));
 });
 afterEach(async () => { await act(async () => root.unmount()); vi.unstubAllGlobals(); });
+it('reuses one service snapshot for the registered projects and the location controls', () => {
+  expect(f.load).toHaveBeenCalledTimes(1);
+  expect(f.list).toHaveBeenCalledTimes(1);
+  expect(f.projects).toHaveBeenLastCalledWith(state.projects, expect.objectContaining({ targets: [expect.objectContaining({ resourceOwner })] }));
+});
 it('resolves a folder on the selected device, preserves other saved locations, and clears only its own starting preference on removal', async () => {
   await openFolder();
   // Another device saves a bookmark before the user confirms. It must not disappear.

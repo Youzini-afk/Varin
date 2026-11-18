@@ -390,8 +390,8 @@ for (const file of allSrcFiles) {
     }
   }
 
-  // Also scan for <Icon name="..." /> patterns (already-migrated icons)
-  const iconNameRegex = /<Icon\b[^>]*\bname=(?:["']([^"']+)["']|{\s*["']([^"']+)["']\s*})/g
+  // Also scan for <Icon name="..." /> and the settings kit's <Ic name="..." /> patterns
+  const iconNameRegex = /<Ic(?:on)?\b[^>]*\bname=(?:["']([^"']+)["']|{\s*["']([^"']+)["']\s*})/g
   let nm
   while ((nm = iconNameRegex.exec(content)) !== null) {
     addKebabIcon(nm[1] || nm[2])
@@ -404,8 +404,8 @@ for (const file of allSrcFiles) {
     addKebabIcon(ip[1])
   }
 
-  // Also scan JSX props named icon/Icon with a string literal value.
-  const iconJsxPropRegex = /\b[Ii]con=(?:["']([^"']+)["']|{\s*["']([^"']+)["']\s*})/g
+  // Also scan JSX props named icon/Icon (and the settings kit's lead=) with a string literal value.
+  const iconJsxPropRegex = /\b(?:[Ii]con|lead)=(?:["']([^"']+)["']|{\s*["']([^"']+)["']\s*})/g
   let jp
   while ((jp = iconJsxPropRegex.exec(content)) !== null) {
     addKebabIcon(jp[1] || jp[2])

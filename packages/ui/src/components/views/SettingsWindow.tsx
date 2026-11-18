@@ -1,71 +1,20 @@
 import React from 'react';
-import { requestSettingsNavigation } from '@/lib/settings/drafts';
-import { Dialog } from '@base-ui/react/dialog';
-import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { SettingsView } from './SettingsView';
 
-interface SettingsWindowProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}
-
-/**
- * Settings settles in place above the retained conversation. The portal stays
- * mounted until its CSS exit completes, including when closing is interrupted.
- * Used for desktop and web (non-mobile) environments.
- */
-export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChange }) => {
+/** A workspace surface, not a dialog: chrome remains usable and the retained
+ * conversation/editor stays mounted in its original shell. */
+export function SettingsWindow({ onClose }: { onClose(): void }) {
   const { t } = useI18n();
-  const descriptionId = React.useId();
-
-  const hasOpenFloatingMenu = React.useCallback(() => {
-    if (typeof document === 'undefined') {
-      return false;
-    }
-
-    return Boolean(
-      document.querySelector('[data-slot="dropdown-menu-content"][data-open], [data-slot="select-content"][data-open]')
-    );
+  const main = React.useRef<HTMLElement>(null);
+  React.useLayoutEffect(() => {
+    const trigger = document.activeElement;
+    main.current?.focus({ preventScroll: true });
+    return () => {
+      if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus({ preventScroll: true });
+    };
   }, []);
-
-  return (
-    <Dialog.Root
-      open={open}
-      onOpenChange={(next) => {
-        if (!next && hasOpenFloatingMenu()) return;
-        if (next) onOpenChange(true);
-        else requestSettingsNavigation(() => onOpenChange(false));
-      }}
-    >
-      <Dialog.Portal>
-        <Dialog.Backdrop
-          className={cn(
-            'fixed inset-0 z-50 bg-black/50 dark:bg-black/75',
-            'motion-settings-backdrop',
-          )}
-        />
-        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
-          <Dialog.Popup
-            aria-describedby={descriptionId}
-            className={cn(
-              'relative pointer-events-auto',
-              'w-[94vw] max-w-[1440px] h-[90vh] max-h-[1000px]',
-              'corner-continuous rounded-dialog border shadow-none overflow-hidden',
-              'bg-background',
-              'motion-settings-window',
-              // Dim this window when a nested dialog (e.g. "Add a device") opens
-              // on top of it, mirroring how the page behind a dialog is dimmed.
-              'data-[nested-dialog-open]:brightness-[0.55] dark:data-[nested-dialog-open]:brightness-[0.4]',
-            )}
-          >
-            <Dialog.Description id={descriptionId} className="sr-only">
-              {t('settings.window.description')}
-            </Dialog.Description>
-            <SettingsView onClose={() => onOpenChange(false)} isWindowed />
-          </Dialog.Popup>
-        </div>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
-};
+  return <main ref={main} tabIndex={-1} aria-label={t('settings.view.home.title')} className="min-h-0 min-w-0 flex-1 overflow-hidden outline-none">
+    <SettingsView onClose={onClose} />
+  </main>;
+}

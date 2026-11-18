@@ -1,4 +1,6 @@
 import React from 'react';
+import { SettingsItemScope } from '../shared/SettingsScope';
+import { NextStepSettings } from '../harness/NextStepSettings';
 import { BotInactivitySettings } from './BotInactivitySettings';
 import { useShallow } from 'zustand/react/shallow';
 import { useUIStore } from '@/stores/useUIStore';
@@ -21,6 +23,7 @@ const Toggle: React.FC<{
   const id = React.useId();
   return <div data-settings-item={item} className="flex min-h-11 items-center gap-3 py-2">
     <label htmlFor={id} className="flex-1 cursor-pointer typography-ui-label">{label}</label>
+    <SettingsItemScope item={item} />
     {info ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
     <Switch id={id} checked={checked} onCheckedChange={onChange} />
   </div>;
@@ -121,6 +124,7 @@ export const ChatSettings: React.FC = () => {
     <div data-preview-scene="input">
     <SettingsDisclosure title={t('settings.chat.input')} settingsItem="chat.composer">
       <BotInactivitySettings />
+      <NextStepSettings />
       <SettingsFieldRow settingsItem="chat.bot-follow-up-behavior" label={t('settings.varin.visual.section.botFollowUpBehavior')}
         info={t('settings.varin.visual.field.botFollowUpBehaviorDescription')}>
         <SettingsChipGroup aria-label={t('settings.varin.visual.section.botFollowUpBehavior')} value={botFollowUpBehavior} onChange={setBotFollowUpBehavior}

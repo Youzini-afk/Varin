@@ -3,7 +3,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const fixture = vi.hoisted(() => ({ select: vi.fn() }));
-vi.mock('@varin/application-client', () => ({ registerRuntimeEndpointSwitchBlocker: vi.fn() }));
+vi.mock('@varin/application-client', async importOriginal => ({
+  ...await importOriginal<typeof import('@varin/application-client')>(),
+  registerRuntimeEndpointSwitchBlocker: vi.fn(),
+}));
 vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (select: (state: unknown) => unknown) => select({
   projects: [{ id: 'one', path: '/one' }, { id: 'two', path: '/two' }], activeProjectId: 'one', setActiveProject: fixture.select,
 }) }));

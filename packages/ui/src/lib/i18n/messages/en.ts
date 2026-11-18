@@ -1,3 +1,4 @@
+import { settingsRedesignEn } from '@varin/application-client/settings-locales/settings-redesign';
 import { browserResourcesEn } from './browser-resources';
 import { conversationOrganizationEn } from './conversation-organization';
 import { companionAttentionEn } from './companion-attention';
@@ -4813,6 +4814,7 @@ export const dict = {
   "chat.context.userSource": "User message",
   'chat.model.useImagesAsFiles': "Use images as readable files",
   'chat.model.imagesAsFilesNotice': "This model cannot view images. Image files will be attached for file access, without direct visual input.",
+  ...settingsRedesignEn,
 } as const;
 
 export type I18nKey = keyof typeof dict;

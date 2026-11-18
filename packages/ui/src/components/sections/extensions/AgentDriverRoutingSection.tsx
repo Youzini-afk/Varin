@@ -14,6 +14,8 @@ import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { readAgentDriverDescription } from '@/lib/extensions/agent-driver-description';
 
+import { PlanningModelSettings } from '../harness/ModelRolesPage';
+
 /** Selection is the existing service-routing document. This is a projection for its native
  * consumer: default is not the only installed extension, and inheritance is not explicit builtin. */
 export function AgentDriverRoutingSection() {
@@ -97,6 +99,7 @@ export function AgentDriverRoutingSection() {
         ? t('settings.varin.extensions.driver.checkpoint', { schema: currentDescription.value.checkpointSchema! })
         : t('settings.varin.extensions.driver.noRecovery')
       : currentDescription?.error ?? t('settings.varin.extensions.driver.inspect')}</p> : null}
+    {currentDescription?.value?.modelRoles.includes('agentPlanning') ? <PlanningModelSettings /> : null}
     {resolution.routing.diagnostics.map(diagnostic => <p key={diagnostic.code} role="status" className="typography-micro text-[var(--status-warning)]">{diagnostic.message}</p>)}
     {error ? <p role="alert" className="typography-micro text-[var(--status-warning)]">{error}</p> : null}
   </SettingsSection>;

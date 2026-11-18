@@ -1,28 +1,34 @@
-import { WorkspaceLocationsPage } from '@/components/sections/workspaces/WorkspaceLocationsPage';
-import { WorkConnectionsPage } from '@/components/sections/connections/WorkConnectionsPage';
+import type React from 'react';
+import { GeneralPage } from '@/components/sections/preferences/GeneralPage';
+import { AppearancePage } from '@/components/sections/preferences/AppearancePage';
+import { ChatPage } from '@/components/sections/preferences/ChatPage';
+import { EditorPage, TerminalPage } from '@/components/sections/preferences/EditorTerminalPages';
+import { NotificationsPage, ShortcutsPage, VoicePage } from '@/components/sections/preferences/PreferenceWrappers';
+import { DevicesPage } from '@/components/sections/devices/DevicesPage';
+import { RemoteAccessPage } from '@/components/sections/devices/RemoteAccessPage';
+import { ProxyPage } from '@/components/sections/devices/ProxyPage';
+import { WorkspacesPage } from '@/components/sections/devices/WorkspacesPage';
+import { CodeIntelPage } from '@/components/sections/language-support/CodeIntelPage';
 import { BrowserSettingsPage } from '@/components/sections/browsers/BrowserSettingsPage';
 import { ExternalAgentsPage } from '@/components/sections/external-agents/ExternalAgentsPage';
-import { AccessSettingsPage, HistorySettingsPage, NetworkSettingsPage } from '@/components/sections/connections/SettingsUtilityPages';
+import { HistorySettingsPage } from '@/components/sections/connections/SettingsUtilityPages';
 import { StorageSettingsPage } from '@/components/sections/storage/StorageSettingsPage';
 import { UsageSettingsPage } from '@/components/sections/usage/UsageSettingsPage';
 import { HarnessSettingsPage } from '@/components/sections/harness/HarnessSettingsPage';
 import type { SurfaceActivationContext } from '@varin/extension-surface';
 import { AgentMemoryPage } from '@/components/sections/assistant/AgentMemoryPage';
 import { AgentPromptPage } from '@/components/sections/assistant/AgentPromptPage';
-import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { ExtensionsPage } from '@/components/sections/extensions/ExtensionsPage';
 import { GitPage } from '@/components/sections/git-identities/GitPage';
-import { LanguageSupportPage } from '@/components/sections/language-support/LanguageSupportPage';
 import { VarinSettingsPage } from '@/components/sections/varin/VarinSettingsPage';
 import { CompanionSettings } from '@/components/sections/varin/CompanionSettings';
 import type { VarinSettingsSection } from '@/components/sections/varin/types';
 import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
+import { ModelRolesPage } from '@/components/sections/harness/ModelRolesPage';
 import { ModelConnectionsPage } from '@/components/sections/providers/ModelConnectionsPage';
 import { McpConnectionsPage } from '@/components/sections/mcp/McpConnectionsPage';
-import { RemoteInstancesPage } from '@/components/sections/remote-instances/RemoteInstancesPage';
 import { SkillsPage } from '@/components/sections/skills/SkillsPage';
-import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
 import {
   BUILTIN_SETTINGS_PAGE_SPECS,
   BUILTIN_SETTINGS_EXTENSION_ID,
@@ -32,8 +38,18 @@ import {
 import type { SettingsPageImplementation } from '@/lib/settings/page-types';
 import { BuiltinAboutSettingsPage } from './BuiltinAboutSettingsPage';
 
+const PREFERENCE_PAGES: Partial<Record<VarinSettingsSection, () => React.ReactNode>> = {
+  general: () => <GeneralPage />,
+  visual: () => <AppearancePage />,
+  chat: () => <ChatPage />,
+  notifications: () => <NotificationsPage />,
+  voice: () => <VoicePage />,
+  shortcuts: () => <ShortcutsPage />,
+  editor: () => <EditorPage />,
+  terminal: () => <TerminalPage />,
+};
 const varinPage = (section: VarinSettingsSection): SettingsPageImplementation => ({
-  renderContent: () => <VarinSettingsPage section={section} />,
+  renderContent: PREFERENCE_PAGES[section] ?? (() => <VarinSettingsPage section={section} />),
 });
 
 const implementationFor = (spec: BuiltinSettingsPageSpec): SettingsPageImplementation => {
@@ -47,25 +63,23 @@ const implementationFor = (spec: BuiltinSettingsPageSpec): SettingsPageImplement
       case 'history': implementation = { renderContent: () => <HistorySettingsPage /> }; break;
       case 'storage': implementation = { renderContent: () => <StorageSettingsPage /> }; break;
       case 'usage': implementation = { renderContent: () => <UsageSettingsPage /> }; break;
-      case 'workspaces': implementation = { renderContent: () => <WorkspaceLocationsPage /> }; break;
-      case 'work-connections': implementation = { renderContent: () => <WorkConnectionsPage /> }; break;
+      case 'devices': implementation = { renderContent: () => <DevicesPage /> }; break;
+      case 'remote-access': implementation = { renderContent: () => <RemoteAccessPage /> }; break;
+      case 'proxy': implementation = { renderContent: () => <ProxyPage /> }; break;
+      case 'workspaces': implementation = { renderContent: () => <WorkspacesPage /> }; break;
+      case 'code-intel': implementation = { renderContent: () => <CodeIntelPage /> }; break;
       case 'browsers': implementation = { renderContent: () => <BrowserSettingsPage /> }; break;
-      case 'network': implementation = { renderContent: () => <NetworkSettingsPage /> }; break;
-      case 'access': implementation = { renderContent: () => <AccessSettingsPage /> }; break;
-      case 'images': implementation = { renderContent: () => <HarnessSettingsPage section="images" /> }; break;
       case 'agent-memory': implementation = { renderContent: () => <AgentMemoryPage /> }; break;
       case 'agent-prompt': implementation = { renderContent: () => <AgentPromptPage /> }; break;
       case 'empty': implementation = { renderContent: () => null }; break;
       case 'about': implementation = { renderContent: () => <BuiltinAboutSettingsPage /> }; break;
-      case 'commands': implementation = { renderContent: () => <CommandsPage /> }; break;
       case 'extensions': implementation = { renderContent: () => <ExtensionsPage /> }; break;
       case 'git': implementation = { renderContent: () => <GitPage /> }; break;
-      case 'language-support': implementation = { renderContent: () => <LanguageSupportPage /> }; break;
       case 'projects': implementation = { renderContent: () => <ProjectsPage />, renderSidebar: (options) => <ProjectsSidebar onItemSelect={options.onItemSelect} /> }; break;
+      case 'model-roles': implementation = { renderContent: () => <ModelRolesPage /> }; break;
       case 'model-connections': implementation = { renderContent: () => <ModelConnectionsPage /> }; break;
       case 'mcp-connections': implementation = { renderContent: () => <McpConnectionsPage /> }; break;
-      case 'remote-instances': implementation = { renderContent: () => <RemoteInstancesPage /> }; break;
-      case 'skills': implementation = { renderContent: () => <SkillsPage />, renderSidebar: (options) => <SkillsSidebar onItemSelect={options.onItemSelect} /> }; break;
+      case 'skills': implementation = { renderContent: () => <SkillsPage /> }; break;
     }
   }
   if (!implementation) throw new Error(`Unknown built-in Settings renderer: ${spec.renderer}`);

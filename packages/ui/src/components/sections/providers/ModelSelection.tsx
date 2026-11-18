@@ -1,3 +1,4 @@
+import { SettingsItemNavigationContext } from '@/lib/settings/search-target';
 import React from 'react';
 import type { ChannelModel, ChannelTypeInfo, DiscoveredModel } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
@@ -46,10 +47,11 @@ export function ModelPicker({ available, initialIds = [], busy, onConfirm, confi
 
 export function ModelSelection({ models, type, candidates, busy, usages, onToggle, onAdd, onConfigure, onDiscover }: {
   models: ChannelModel[]; type: ChannelTypeInfo; candidates: DiscoveredModel[]; busy: boolean;
-  usages: Record<string, string[]>;
+  usages: Record<string, {label: string; page: string; item: string}[]>;
   onToggle(id: string, enabled: boolean): void; onAdd(entries: DiscoveredModel[]): Promise<boolean>;
   onConfigure(id: string): void; onDiscover(): Promise<boolean>;
 }) {
+  const navigate = React.useContext(SettingsItemNavigationContext);
   const { t } = useI18n();
   const [picking, setPicking] = React.useState(false);
   const available = modelCandidates(type, candidates).filter(candidate => !models.some(model => model.id === candidate.id));
@@ -68,25 +70,25 @@ export function ModelSelection({ models, type, candidates, busy, usages, onToggl
         const hasCapabilities = Boolean(model.input?.includes('image') || model.reasoning || operations.length);
         const roles = usages[model.id] ?? [];
         return <div key={model.id} data-enabled={model.enabled} className="model-service-row flex items-start gap-3">
-          <button type="button" aria-label={model.name || model.id} onClick={() => onConfigure(model.id)} className="model-service-row-main group flex min-w-0 flex-1 items-start gap-3 rounded-lg py-5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <div className="min-w-0 flex-1"><button type="button" aria-label={model.name || model.id} onClick={() => onConfigure(model.id)} className="model-service-row-main group flex w-full min-w-0 items-start gap-3 rounded-lg py-5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <ModelLogo modelId={model.id} requestModelId={model.requestModelId} displayName={model.name} className="mt-0.5 shrink-0" />
             <span className="min-w-0 flex-1">
               <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1"><span className="model-service-row-name break-all typography-ui-label font-semibold">{model.name || model.id}</span>{model.name !== model.id ? <span className="min-w-0 truncate typography-micro text-muted-foreground">{model.id}</span> : null}</span>
               {description || model.enabled && model.operations.includes('chat') ? <span data-empty={!description} className="model-service-row-description mt-1.5 block truncate typography-meta">{description || t('settings.models.missingDescription')}</span> : null}
-              {hasCapabilities || roles.length ? <span className="model-service-row-meta mt-3 flex flex-wrap items-center gap-x-4 gap-y-2.5 typography-micro">
+              {hasCapabilities ? <span className="model-service-row-meta mt-3 flex flex-wrap items-center gap-x-4 gap-y-2.5 typography-micro">
                 {hasCapabilities ? <span className="flex flex-wrap items-center gap-1.5">
                   {model.input?.includes('image') ? <span className="model-capability" data-capability="vision"><Icon name="eye" className="size-3" />{t('settings.models.imageInput')}</span> : null}
                   {model.reasoning ? <span className="model-capability" data-capability="reasoning"><Icon name="brain" className="size-3" />{t('settings.models.reasoning')}</span> : null}
                   {operations.map(operation => <span key={operation} className="model-capability" data-capability="operation">{t(`settings.models.operation.${operation}`)}</span>)}
                 </span> : null}
-                {roles.length ? <span className="model-service-row-usage flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1.5">
-                  <span className="model-service-row-usage-label shrink-0">{t('settings.models.usedFor')}</span>
-                  {roles.map((role, index) => <span key={`${role}:${index}`} className="model-service-row-role">{role}</span>)}
-                </span> : null}
               </span> : null}
             </span>
             <Icon name="arrow-right-s" className="model-service-row-arrow mt-0.5 size-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
           </button>
+          {roles.length ? <div className="-mt-2 mb-4 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 pl-7 typography-micro">
+            <span className="text-muted-foreground">{t('settings.models.usedFor')}</span>
+            {roles.map((role,index) => <button type="button" key={role.item + index} disabled={!navigate} className="rounded-sm underline decoration-border underline-offset-2 hover:decoration-current" onClick={() => navigate?.(role.page, role.item)}>{role.label}</button>)}
+          </div> : null}</div>
           <Switch className="mt-5 shrink-0" aria-label={`${t('settings.models.enabled')}: ${model.name || model.id}`} checked={model.enabled} onCheckedChange={enabled => onToggle(model.id, enabled)} />
         </div>;
       })}

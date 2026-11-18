@@ -37,6 +37,6 @@ it('tests draft rule order without saving and saves that order explicitly', asyn
     const saveButton = () => [...container.querySelectorAll('button')].find(button => button.textContent === 'settings.retry.save')!;
     expect(saveButton().disabled).toBe(false);
     await click('settings.retry.save');
-    expect(saveButton().disabled).toBe(true);
+    expect(saveButton()).toBeUndefined();
   } finally { await act(async () => root.unmount()); vi.unstubAllGlobals(); }
 });

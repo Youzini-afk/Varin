@@ -1,4 +1,5 @@
 import React from 'react';
+import { SettingsMixedScopeContext } from '../shared/settings-context';
 import { ChatSettingsPreview } from './ChatSettingsPreview';
 import { SettingsReadingPreview } from './SettingsReadingPreview';
 import { VarinVisualSettings } from './VarinVisualSettings';
@@ -129,15 +130,17 @@ export const VarinSettingsPage: React.FC<VarinSettingsPageProps> = ({ section })
         about: undefined,
     }[section];
 
+    const mixedScope = ['general','visual','chat','sessions'].includes(section);
     return (
-        <SettingsPageLayout
+        <SettingsMixedScopeContext.Provider value={mixedScope}><SettingsPageLayout
+            scope={mixedScope ? t('settings.scope.mixed') : undefined}
             title={pageTitle}
             description={pageDescription}
             showSaveStatus
-            className={section === 'chat' ? 'varin-settings-page-body settings-chat-page' : ['visual', 'editor', 'terminal', 'notifications'].includes(section) ? 'varin-settings-page-body settings-wide-page' : 'varin-settings-page-body'}
+            className={section === 'chat' || section === 'visual' ? 'varin-settings-page-body settings-chat-page' : ['editor', 'terminal', 'notifications'].includes(section) ? 'varin-settings-page-body settings-wide-page' : 'varin-settings-page-body'}
         >
             {renderSectionContent()}
-        </SettingsPageLayout>
+        </SettingsPageLayout></SettingsMixedScopeContext.Provider>
     );
 };
 
@@ -165,14 +168,14 @@ const GeneralSectionContent: React.FC = () => {
 // Visual section: Theme Mode, Font Size, Spacing, Input Bar Offset (mobile), Nav Rail
 const VisualSectionContent: React.FC = () => {
     const [scene, setScene] = React.useState<import('./ChatSettingsPreview').ChatPreviewScene>('conversation');
-    return <div className="settings-preview-layout"><div className="@container min-w-0"><VarinVisualSettings visibleSettings={[
+    return <div className="settings-chat-layout"><div className="settings-chat-controls @container min-w-0"><VarinVisualSettings visibleSettings={[
         'theme',
         'windowControlsPosition',
         'motion',
         'fontSize',
         'spacing',
         'inputBarOffset',
-    ]} /></div><div className="settings-preview-pane"><ChatSettingsPreview scene={scene} onSceneChange={setScene} /></div></div>;
+    ]} /></div><ChatSettingsPreview scene={scene} onSceneChange={setScene} /></div>;
 };
 
 const ChatSectionContent: React.FC = () => <ChatSettings />;

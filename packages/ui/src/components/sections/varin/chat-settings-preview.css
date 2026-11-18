@@ -1,12 +1,17 @@
-.settings-chat-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.75rem; align-items: start; }
-.settings-chat-controls { min-width: 0; }
-.settings-chat-preview { min-width: 0; position: sticky; top: 0; z-index: 15; order: -1; overflow: hidden; border: 1px solid var(--interactive-border); border-radius: 0.8rem; background: var(--surface-background); box-shadow: 0 6px 24px #00000005; }
-.settings-chat-preview-viewport { position: relative; height: 220px; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
-@container (min-width: 900px) {
-  .settings-chat-layout { grid-template-columns: minmax(0, 0.98fr) minmax(0, 1.12fr); gap: 2rem; }
-  .settings-chat-preview { order: initial; }
-  .settings-chat-preview-viewport { height: clamp(380px, calc(100dvh - 315px), 660px); }
+/* Live example beside chat and appearance settings. */
+.sk-pv-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; align-items: start; }
+.sk-pv-form { min-width: 0; }
+.sk-pv-side { min-width: 0; order: -1; position: sticky; top: 0; z-index: 15; }
+@container sk-form (min-width: 940px) {
+  .sk-pv-layout { grid-template-columns: minmax(0, 1fr) 400px; gap: 36px; }
+  .sk-pv-side { order: 0; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .settings-chat-preview * { transition: none !important; }
-}
+.sk-pv { border-radius: 12px; background: var(--sk-panel); box-shadow: var(--sk-shadow-panel); overflow: hidden; }
+.sk-pv-head { display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 8px 0 14px; font-size: var(--sk-fs-micro); border-bottom: 1px solid var(--sk-line-soft); }
+.sk-pv-head b { font-weight: 500; }
+.sk-pv-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--sk-fg); }
+.sk-pv-tabs { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--sk-line-soft); background: color-mix(in srgb, var(--foreground) 2%, transparent); }
+.settings-chat-preview-viewport { position: relative; height: 240px; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; background: var(--sk-canvas); }
+@container sk-form (min-width: 940px) { .settings-chat-preview-viewport { height: clamp(380px, calc(100dvh - 330px), 600px); } }
+.sk-pv-foot { padding: 8px 14px; font-size: 11.5px; color: var(--sk-faint); border-top: 1px solid var(--sk-line-soft); }
+@media (prefers-reduced-motion: reduce) { .settings-chat-preview * { transition: none !important; } }

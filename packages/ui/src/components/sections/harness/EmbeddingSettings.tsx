@@ -10,7 +10,7 @@ import { useI18n } from '@/lib/i18n';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 import { InferenceSettings } from './RetrievalSettings';
 
-function EmbeddingRequests() {
+export function EmbeddingRequests() {
   const { t } = useI18n();
   const api = React.useMemo(() => createEmbeddingRequestsHttpAPI(), []);
   const [saved, setSaved] = React.useState<EmbeddingRequestSettings | null>(null);

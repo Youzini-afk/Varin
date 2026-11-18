@@ -27,8 +27,6 @@ const HARNESS_SECTION_BY_SLUG: Record<string, HarnessSettingsSection> = {
   'harness-tools': 'tools',
   'harness-permissions': 'permissions',
   'harness-context': 'context',
-  'harness-retrieval': 'retrieval',
-  'harness-embeddings': 'embeddings',
   'harness-web': 'web',
   'harness-computers': 'computers',
   'harness-bots': 'bots',

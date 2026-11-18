@@ -10,6 +10,25 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { AgentScopePicker } from './AgentScopePicker';
 import { useAgentSettings } from './agentSettings';
+import { EmbeddingRequests } from '../harness/EmbeddingSettings';
+import { LocalSemanticSettings } from '../harness/LocalSemanticSettings';
+import { useHarnessSettings } from '../harness/useHarnessSettings';
+import { LinkRow, Section, useSettingsShell } from '../shared/kit';
+import { SettingsScopeLabel } from '../shared/SettingsScope';
+
+function MemoryRetrievalSettings() {
+  const { t } = useI18n();
+  const shell = useSettingsShell();
+  const { harness, targetKey } = useHarnessSettings();
+  return <>
+    <Section title={t('settings.roles.retrieval')}>
+      <LinkRow label={t('settings.page.harness.section.embedding')} description={t('settings.page.harness.section.embedding.description')}
+        onClick={() => shell.openPage('model-roles', { item: 'harness.embedding' })} />
+    </Section>
+    {harness?.embedding?.protocol === 'local' ? <LocalSemanticSettings key={targetKey} /> : null}
+    <EmbeddingRequests key={targetKey} />
+  </>;
+}
 
 export function AgentMemoryPage({ initialScope, scopes, embedded = false, onContentChange }: {
   initialScope?: AgentMemoryScope;
@@ -89,5 +108,9 @@ export function AgentMemoryPage({ initialScope, scopes, embedded = false, onCont
       </div>
     </div>
   </>;
-  return embedded ? content : <SettingsPageLayout title={t('assistant.memory.title')} description={t('assistant.memory.description')} showSaveStatus={false}>{content}</SettingsPageLayout>;
+  return embedded ? content : <SettingsPageLayout title={t('assistant.memory.title')} description={t('assistant.memory.description')}
+    scope={<SettingsScopeLabel kind="host" />} showSaveStatus={false}>
+    {content}
+    <MemoryRetrievalSettings />
+  </SettingsPageLayout>;
 }

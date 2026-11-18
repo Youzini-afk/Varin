@@ -1,3 +1,4 @@
+import { HostSettingsScope } from '../shared/SettingsScope';
 import React from 'react';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
@@ -18,7 +19,7 @@ export function HistorySettingsPage() {
 }
 export function NetworkSettingsPage() {
   const { t } = useI18n();
-  return <SettingsPageLayout title={t('settings.page.network.title')} description={t('settings.page.network.description')}><OutboundNetworkSettings /></SettingsPageLayout>;
+  return <SettingsPageLayout scope={<HostSettingsScope />} title={t('settings.page.network.title')} description={t('settings.page.network.description')}><OutboundNetworkSettings /></SettingsPageLayout>;
 }
 export function AccessSettingsIntro() {
   const { t } = useI18n();

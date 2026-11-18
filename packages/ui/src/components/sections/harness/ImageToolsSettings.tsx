@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useI18n } from '@/lib/i18n';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 const modelKey = (model: { providerId: string; modelId: string }) => JSON.stringify([model.providerId, model.modelId]);
-export function ImageToolsSettings({ harness, update }: HarnessSettingsPageProps) {
+export function ImageToolsSettings({ harness, update, embedded = false }: HarnessSettingsPageProps & { embedded?: boolean }) {
   const { t } = useI18n();
   const catalog = useConfigurationModels();
   const providerName = (id: string) => catalog.providers.find(provider => provider.id === id)?.name || id;
@@ -23,14 +23,14 @@ export function ImageToolsSettings({ harness, update }: HarnessSettingsPageProps
     }).catch(() => { if (!controller.signal.aborted) setError(t('settings.harness.images.unavailable')); });
     return () => controller.abort();
   }, [t]);
-  return <SettingsSection title={t('settings.harness.images.title')} description={t('settings.harness.images.description')} settingsItem="harness.images" contentClassName="space-y-4">
+  const rows = <>
     {error ? <p role="alert" className="typography-meta text-destructive">{error}</p> : null}
     {(['generation', 'editing'] as const).map(purpose => {
       const selected = harness.images?.[purpose];
       const available = models?.filter(model => purpose === 'generation' ? model.supportsGeneration : model.supportsEditing) ?? [];
       const configured = (providerId: string, modelId: string) => catalog.modelsFor(providerId, `image-${purpose}`).find(model => model.id === modelId);
       const current = selected ? available.find(model => modelKey(model) === modelKey(selected)) : undefined;
-      return <SettingsFieldRow key={purpose} label={t(`settings.harness.images.${purpose}`)}>
+      return <SettingsFieldRow key={purpose} label={t(`settings.harness.images.${purpose}`)} settingsItem={embedded && purpose === 'generation' ? 'harness.images' : undefined}>
         <div className="space-y-1.5">
           <Select value={selected ? modelKey(selected) : '__none__'} onValueChange={key => {
             const model = available.find(candidate => modelKey(candidate) === key);
@@ -49,5 +49,6 @@ export function ImageToolsSettings({ harness, update }: HarnessSettingsPageProps
         </div>
       </SettingsFieldRow>;
     })}
-  </SettingsSection>;
+  </>;
+  return embedded ? rows : <SettingsSection title={t('settings.harness.images.title')} description={t('settings.harness.images.description')} settingsItem="harness.images">{rows}</SettingsSection>;
 }

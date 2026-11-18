@@ -51,6 +51,7 @@ export const ProjectsPage: React.FC = () => {
   return (
     <SettingsPageLayout
       title={headerLabel}
+      scope={t('composer.workflow.scope.project') + ' · ' + headerLabel}
       description={selectedProject.path}
       showSaveStatus
       outerClassName="bg-background"

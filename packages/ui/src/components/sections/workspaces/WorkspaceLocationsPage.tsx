@@ -8,7 +8,6 @@ import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SettingsActionBar } from '@/components/sections/shared/SettingsActionBar';
-import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { workspaceCopy } from './location-copy';
 
@@ -22,12 +21,17 @@ const labelClass = 'grid min-w-0 gap-1.5 typography-ui-label';
 const reason = (error: unknown) => error instanceof Error ? error.message : String(error);
 type Patch = Pick<SettingsPayload, 'workspaceLocations' | 'defaultWorkspaceLocationId'>;
 
-export function WorkspaceLocationsPage() {
+type LocationControlsProps = {
+  refreshRevision: number;
+  renderRegisteredProjects(projects: SettingsPayload['projects'] | undefined, directory: ThreadSourceTargets | undefined): React.ReactNode;
+};
+
+export function WorkspaceLocationControls(props: LocationControlsProps) {
   const endpoint = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
-  return <ServiceLocations key={endpoint} endpoint={endpoint} />;
+  return <ServiceLocations key={endpoint} endpoint={endpoint} {...props} />;
 }
 
-function ServiceLocations({ endpoint }: { endpoint: number }) {
+function ServiceLocations({ endpoint, refreshRevision, renderRegisteredProjects }: LocationControlsProps & { endpoint: number }) {
   const { settings, threads } = useRuntimeAPIs();
   const { locale } = useI18n();
   const c = workspaceCopy(locale);
@@ -44,7 +48,6 @@ function ServiceLocations({ endpoint }: { endpoint: number }) {
   const [form, setForm] = React.useState<'folder' | 'project' | null>(null);
   const [name, setName] = React.useState(''), [path, setPath] = React.useState('');
   const [owner, setOwner] = React.useState(''), [projectId, setProjectId] = React.useState('');
-  const [refreshKey, refresh] = React.useReducer((value: number) => value + 1, 0);
   const mounted = React.useRef(false), busy = React.useRef(false), serial = React.useRef(0);
   const registration = React.useRef<AbortController | null>(null);
   const active = React.useCallback(() => mounted.current && getRuntimeEndpointGeneration() === endpoint, [endpoint]);
@@ -67,7 +70,7 @@ function ServiceLocations({ endpoint }: { endpoint: number }) {
       if (event.type === 'settings-changed' && event.owner === 'app') void load();
     });
     return () => { stopped = true; unsubscribe(); };
-  }, [settings, active, refreshKey]);
+  }, [settings, active, refreshRevision]);
   React.useEffect(() => {
     const abort = new AbortController();
     setSourceError(''); setDirectory(undefined);
@@ -77,7 +80,7 @@ function ServiceLocations({ endpoint }: { endpoint: number }) {
     );
     else setSourceError(c.discovery);
     return () => abort.abort();
-  }, [threads, refreshKey, active, c.discovery]);
+  }, [threads, refreshRevision, active, c.discovery]);
 
   const places = snapshot?.workspaceLocations ?? [], projects = snapshot?.projects ?? [];
   const availableProjects = projects.filter(p => !places.some(v => v.kind === 'project' && v.projectId === p.id));
@@ -167,8 +170,7 @@ function ServiceLocations({ endpoint }: { endpoint: number }) {
   });
   const saving = status === 'saving', disabled = saving || !snapshot;
   const formReady = form === 'folder' ? Boolean(target && path.trim() && name.trim()) : availableProjects.some(p => p.id === projectId);
-  return <SettingsPageLayout title={c.title} description={c.description} scope={serviceName ? c.service + ' · ' + serviceName : c.service}
-    headerEnd={<Button variant="ghost" size="sm" disabled={saving} onClick={() => { setStatus(null); refresh(); }}>{c.refresh}</Button>}>
+  return <>
     {!snapshot && !error && <p role="status">{c.loading}</p>}
     {error && <p role="alert" className="typography-meta text-destructive">{error}</p>}
     {status && <p role="status" className="typography-meta text-muted-foreground">{saving ? c.saving : c.done}</p>}
@@ -205,6 +207,7 @@ function ServiceLocations({ endpoint }: { endpoint: number }) {
         {sourceError && <p className="typography-meta text-destructive" role="status">{sourceError}</p>}
         {directory?.unavailable.map(t => <p key={t.connectionId} className="typography-meta text-muted-foreground">{t.label}: {t.message}</p>)}
       </SettingsSection>
+      {renderRegisteredProjects(snapshot.projects ?? [], directory)}
     </>}
-  </SettingsPageLayout>;
+  </>;
 }

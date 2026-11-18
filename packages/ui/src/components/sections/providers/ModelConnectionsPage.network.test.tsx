@@ -1,3 +1,4 @@
+import { SettingsItemNavigationContext } from '@/lib/settings/search-target';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
@@ -5,7 +6,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { ModelChannel, ModelConnectionsSnapshot } from '@varin/application-client';
 import { ModelConnectionsPage } from './ModelConnectionsPage';
 
-const fixtures = vi.hoisted(() => ({ generation: 1, focus: null as { channelId: string; modelId: string } | null, listeners: new Set<() => void>(), blockers: new Set<() => Promise<void>>(), api: { read: vi.fn(), directory: vi.fn(), save: vi.fn(), cancelAuthorization: vi.fn(), storeCredential: vi.fn(), readSettings: vi.fn(), discoverDraft: vi.fn(), test: vi.fn(), signIn: vi.fn(), authorization: vi.fn() } }));
+const fixtures = vi.hoisted(() => ({ generation: 1, focus: null as { channelId: string; modelId: string } | null, listeners: new Set<() => void>(), blockers: new Set<() => Promise<void>>(), api: { read: vi.fn(), directory: vi.fn(), save: vi.fn(), cancelAuthorization: vi.fn(), storeCredential: vi.fn(), readSettings: vi.fn(), updateSettings: vi.fn(), discoverDraft: vi.fn(), test: vi.fn(), testRetry: vi.fn(), signIn: vi.fn(), authorization: vi.fn() } }));
 vi.mock('@varin/application-client', async importOriginal => ({
   ...await importOriginal<typeof import('@varin/application-client')>(),
   registerRuntimeEndpointSwitchBlocker: (listener: () => Promise<void>) => { fixtures.blockers.add(listener); return () => fixtures.blockers.delete(listener); },
@@ -21,7 +22,7 @@ vi.mock('@/lib/i18n', () => ({ getCurrentIntlLocale: () => 'en-US', useI18n: () 
 vi.mock('@/lib/settings/drafts', () => ({ requestSettingsNavigation: (proceed: () => void) => proceed(), notifySettingsDraftChanged() {} }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('../shared/SettingsPageLayout', () => ({ SettingsPageLayout: ({ children, headerEnd, titleLeading }: React.PropsWithChildren<{ headerEnd?: React.ReactNode; titleLeading?: React.ReactNode }>) => <div>{titleLeading}{headerEnd}{children}</div> }));
-vi.mock('../shared/SettingsSection', () => ({ SettingsSection: ({ children, title }: React.PropsWithChildren<{ title?: React.ReactNode }>) => <section><h2>{title}</h2>{children}</section>, SettingsFieldRow: ({ label, children }: React.PropsWithChildren<{ label: string }>) => <label>{label}{children}</label>, SettingsStackedField: ({ label, children }: React.PropsWithChildren<{ label: string }>) => <label>{label}{children}</label> }));
+vi.mock('../shared/SettingsSection', () => ({ SettingsSection: ({ children, title }: React.PropsWithChildren<{ title?: React.ReactNode }>) => <section><h2>{title}</h2>{children}</section>, SettingsFieldRow: ({ label, children }: React.PropsWithChildren<{ label: string }>) => <label>{label}{children}</label>, SettingsStackedField: ({ label, children }: React.PropsWithChildren<{ label: string }>) => <label>{label}{children}</label>, SettingsCheckboxRow: () => null }));
 vi.mock('../shared/AuthorizationPanel', () => ({ AuthorizationPanel: () => null }));
 vi.mock('@/components/ui/button', () => ({ Button: ({ children, disabled, onClick, ...props }: React.ComponentProps<'button'>) => <button {...props} disabled={disabled} onClick={onClick}>{children}</button> }));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.ComponentProps<'input'>) => <input {...props} onInput={onChange as React.FormEventHandler<HTMLInputElement>} /> }));
@@ -98,6 +99,22 @@ const select = async (current: string, next: string) => {
 };
 const open = async () => { await act(async () => root.render(<ModelConnectionsPage />)); await click('Connection'); };
 
+test('edits retry rules from the directory using the current global settings revision', async () => {
+  fixtures.api.testRetry.mockResolvedValue({ retry: false, reason: 'unmatched', ruleIndex: null, delayMs: 0 });
+  fixtures.api.updateSettings.mockImplementation(async ({ set }) => ({ global: set, globalRevision: 'g+1' }));
+  await act(async () => root.render(<ModelConnectionsPage />));
+  await click('settings.retry.title');
+  await click('settings.retry.add');
+  await edit('settings.retry.pattern', 'provider busy');
+  await click('settings.retry.save');
+  expect(fixtures.api.updateSettings).toHaveBeenCalledExactlyOnceWith({
+    scope: 'global', expectedRevision: 'g', remove: [], set: {
+      retry: expect.objectContaining({ rules: [expect.objectContaining({ pattern: 'provider busy' })] }),
+    },
+  });
+  expect(fixtures.api.save).not.toHaveBeenCalled();
+});
+
 const embeddingLabel = 'settings.models.path: settings.models.operation.embedding';
 const field = (label: string) => container.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${label}"]`)!;
 const commit = async (label: string, value: string) => {
@@ -128,7 +145,7 @@ test('changing authentication discards an unsaved key', async () => {
 test('workload identity saves separately and Cancel restores the connection draft', async () => {
   snapshot.channels[0]!.authentication = { kind: 'anthropic-federation', identityTokenFile: '/identity.jwt', organizationId: 'org', federationRuleId: 'rule' }; snapshot.types[0]!.authentication = ['anthropic-federation'];
   await open(); await edit('settings.models.federation.organizationId', 'changed'); await edit('settings.models.federation.workspaceId', 'workspace'); await click('settings.models.save'); expect(lastSaved().authentication).toMatchObject({ organizationId: 'changed', workspaceId: 'workspace' });
-  await edit('settings.models.federation.organizationId', 'discard'); await click('settings.common.actions.cancel'); expect(field('settings.models.federation.organizationId').value).toBe('changed');
+  await edit('settings.models.federation.organizationId', 'discard'); await click('settings.kit.discard'); expect(field('settings.models.federation.organizationId').value).toBe('changed');
 });
 const suspendedSignIns = ['openai-codex', 'anthropic', 'github-copilot', 'opencode', 'kimi-coding', 'xai', 'meta'];
 test.each(suspendedSignIns)('%s keeps existing credentials editable without offering suspended login', async provider => {
@@ -266,4 +283,14 @@ test('restoring a field replaces an unfinished invalid edit and clears its error
   await open(); await click('Model'); await commit('settings.models.context', '-1');
   expect(field('settings.models.context').getAttribute('aria-invalid')).toBe('true'); await click('settings.models.fieldRestore');
   expect(field('settings.models.context').value).toBe('128000'); expect(field('settings.models.context').getAttribute('aria-invalid')).toBe('false');
+});
+
+test('a role link for the exact model channel reveals its shared field without editing credentials or connecting', async () => {
+  snapshot.channels[0]!.models = [model()];
+  fixtures.api.readSettings.mockResolvedValue({global:{harness:{embedding:{providerId:'channel',modelId:'model'},rerank:{providerId:'different',modelId:'model'}}}});
+  const navigate=vi.fn(); await act(async()=>root.render(<SettingsItemNavigationContext.Provider value={navigate}><ModelConnectionsPage /></SettingsItemNavigationContext.Provider>));
+  await click('Connection'); await click('settings.page.harness.section.embedding');
+  expect(navigate).toHaveBeenCalledWith('model-roles','harness.embedding');
+  expect(container.textContent).not.toContain('settings.page.harness.section.rerank');
+  expect(fixtures.api.save).not.toHaveBeenCalled(); expect(fixtures.api.test).not.toHaveBeenCalled();
 });

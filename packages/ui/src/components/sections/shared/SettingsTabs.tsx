@@ -5,11 +5,11 @@ import { cn } from '@/lib/utils';
 export function SettingsTabs<T extends string>({ value, onChange, items, label, className }: {
   value: T;
   onChange(value: NoInfer<T>): void;
-  items: readonly { value: NoInfer<T>; label: React.ReactNode; controls?: string }[];
+  items: readonly { value: NoInfer<T>; label: React.ReactNode; controls?: string; count?: number | null }[];
   label: string;
   className?: string;
 }) {
-  return <div role="tablist" aria-label={label} className={cn('settings-tabs', className)}>
+  return <div role="tablist" aria-label={label} className={cn('sk-tabs', className)}>
     {items.map((item, index) => <button key={item.value} type="button" role="tab" aria-selected={value === item.value}
       aria-controls={item.controls} tabIndex={value === item.value ? 0 : -1} onClick={() => onChange(item.value)}
       onKeyDown={event => {
@@ -17,6 +17,6 @@ export function SettingsTabs<T extends string>({ value, onChange, items, label, 
         if (next === null) return;
         event.preventDefault(); onChange(items[next]!.value);
         event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role=tab]')[next]?.focus();
-      }}>{item.label}</button>)}
+      }}>{item.label}{item.count != null ? <span className="sk-count">{item.count}</span> : null}</button>)}
   </div>;
 }

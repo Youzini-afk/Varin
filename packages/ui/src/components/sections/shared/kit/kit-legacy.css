@@ -1,0 +1,125 @@
+/* Settings kit · the app's shared controls rendered inside settings follow the kit's control language.
+ * Scoped to .sk so the rest of the app is untouched. */
+
+/* Select / dropdown triggers */
+.sk :is([data-slot="select-trigger"], .sk-trigger) {
+  height: 30px; min-height: 30px; padding: 0 9px 0 10px; border: 0; border-radius: 8px;
+  background: var(--sk-field); box-shadow: inset 0 0 0 1px var(--sk-line);
+  font-size: var(--sk-fs-meta); color: var(--sk-fg); gap: 7px;
+  transition: box-shadow var(--sk-snap) var(--sk-ease);
+}
+.sk :is([data-slot="select-trigger"], .sk-trigger):hover { background: var(--sk-field); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 100%, var(--foreground) 14%); }
+.sk :is([data-slot="select-trigger"], .sk-trigger)[data-popup-open] { background: var(--sk-field); box-shadow: inset 0 0 0 1px var(--primary), 0 0 0 3px var(--sk-ring); }
+.sk :is([data-slot="select-trigger"], .sk-trigger):focus-visible { box-shadow: inset 0 0 0 1px var(--primary), 0 0 0 3px var(--sk-ring); border: 0; }
+.sk [data-slot="select-trigger"] svg { color: var(--sk-faint); }
+
+/* Text inputs and text areas */
+.sk :is([data-slot="input"], .sk-legacy-input) {
+  height: 30px; padding: 0 10px; border: 0; border-radius: 8px;
+  background: var(--sk-field); box-shadow: inset 0 0 0 1px var(--sk-line);
+  font-size: var(--sk-fs-meta); color: var(--sk-fg);
+  transition: box-shadow var(--sk-snap) var(--sk-ease);
+}
+.sk :is([data-slot="input"], .sk-legacy-input):hover { border: 0; }
+.sk :is([data-slot="input"], .sk-legacy-input):focus { border: 0; box-shadow: inset 0 0 0 1px var(--primary), 0 0 0 3px var(--sk-ring); --tw-ring-shadow: 0 0 #0000; }
+.sk :is([data-slot="input"], .sk-legacy-input)[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--sk-err); }
+.sk :is([data-slot="input"], .sk-legacy-input)::placeholder { color: var(--sk-faint); }
+.sk textarea[data-slot="textarea"], .sk textarea.sk-legacy-area {
+  border: 0; border-radius: 10px; background: var(--sk-field); box-shadow: inset 0 0 0 1px var(--sk-line);
+  font-size: var(--sk-fs-meta); color: var(--sk-fg); padding: 10px 12px; line-height: 1.65;
+}
+.sk textarea[data-slot="textarea"]:focus, .sk textarea.sk-legacy-area:focus { box-shadow: inset 0 0 0 1px var(--primary), 0 0 0 3px var(--sk-ring); border: 0; --tw-ring-shadow: 0 0 #0000; }
+
+/* Switch (base-ui root exposes data-checked / data-unchecked) */
+.sk .sk-legacy-switch, .sk button[role="switch"]:not(.sk-sw) {
+  width: 32px !important; height: 18px !important; min-width: 32px !important; min-height: 18px !important;
+  border: 0 !important; padding: 0; border-radius: 99px;
+  background: color-mix(in srgb, var(--foreground) 16%, transparent);
+  transition: background-color var(--sk-snap) var(--sk-ease);
+}
+.sk button[role="switch"]:not(.sk-sw)[data-checked], .sk button[role="switch"]:not(.sk-sw)[aria-checked="true"] { background: var(--primary); }
+.sk button[role="switch"]:not(.sk-sw) > span {
+  width: 14px !important; height: 14px !important; min-width: 14px !important; min-height: 14px !important;
+  background: white; box-shadow: 0 1px 2px #0003; margin-left: 2px;
+  transition: transform var(--sk-glide) var(--sk-ease);
+}
+.sk button[role="switch"]:not(.sk-sw) > span[data-checked] { transform: translateX(14px); }
+
+/* Buttons */
+.sk button[data-slot="button"] { border-radius: 8px; font-weight: 400; font-size: var(--sk-fs-meta); }
+.sk button[data-slot="button"].h-8, .sk button[data-slot="button"]:where(.h-9) { height: 30px; }
+.sk button[data-slot="button"].h-6 { height: 26px; border-radius: 7px; font-size: var(--sk-fs-micro); }
+.sk button[data-slot="button"]:where(.border-border) { border: 0; background: var(--sk-field); box-shadow: inset 0 0 0 1px var(--sk-line); }
+.sk button[data-slot="button"]:where(.border-border):hover { background: color-mix(in srgb, var(--sk-field) 80%, var(--foreground) 4%); }
+
+/* Radio dots inside settings */
+.sk [role="radio"] > span[aria-hidden].rounded-full { box-shadow: none; }
+
+/* Legacy section wrappers: a panel padded for non-row content. */
+.sk-panel > :not(.sk-row, .sk-orow, .sk-disc, .sk-unitbar, .sk-note, .sk-pad, .sk-rule, .sk-mem, .sk-place, .sk-toolgrid, .sk-legend, .sk-orow-detail, .sk-free, .sk-pair, .sk-acc, table, pre, .sk-doc-inline) { padding: 12px 16px; }
+.sk-panel > .sk-unitbar + *, .sk-panel > :not(.sk-unitbar) + :not(.sk-unitbar, .sk-row, .sk-orow, .sk-disc, .sk-rule, .sk-mem, .sk-place) { border-top: 1px solid var(--sk-line-soft); }
+.sk-panel > .sk-row-group { padding: 0; }
+.sk-panel > .sk-row-group > * + :is(.sk-row, .sk-disc) { border-top: 1px solid var(--sk-line-soft); }
+.sk-stack-field { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; }
+.sk-stack-field .sk-sfl { display: flex; align-items: center; gap: 7px; font-size: var(--sk-fs); }
+.sk-stack-field .sk-sfd { font-size: var(--sk-fs-micro); color: var(--sk-muted); }
+.sk-group-title { font-size: var(--sk-fs-meta); font-weight: 500; color: var(--sk-fg); }
+
+/* Pair panel and access rows (remote access) */
+.sk-pair { display: flex; gap: 20px; align-items: flex-start; padding: 18px; border-radius: 12px; background: var(--sk-panel); box-shadow: var(--sk-shadow-panel); }
+.sk-pair .sk-qr { width: 132px; height: 132px; flex: none; padding: 8px; border-radius: 10px; background: #fff; color: #1b1b1b; box-shadow: inset 0 0 0 1px var(--sk-line-soft); display: grid; place-items: center; }
+.sk-pair .sk-qr > :is(svg, canvas, img) { display: block; width: 100%; height: 100%; }
+.sk-pair b { font-weight: 500; }
+.sk-pair p { margin: 4px 0 12px; font-size: var(--sk-fs-micro); color: var(--sk-muted); }
+.sk-pair.inpanel { margin: 4px 16px 14px; padding: 14px; background: var(--sk-canvas); box-shadow: inset 0 0 0 1px var(--sk-line-soft); }
+@container sk-form (max-width: 520px) { .sk-pair { flex-direction: column; align-items: center; text-align: center; } }
+.sk-acc { border-radius: 12px; background: var(--sk-panel); box-shadow: var(--sk-shadow-panel); overflow: hidden; transition: box-shadow var(--sk-snap) var(--sk-ease); }
+.sk-acc + .sk-acc { margin-top: 8px; }
+.sk-acc-h { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px 12px 16px; text-align: left; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
+.sk-acc-h:hover { background: var(--sk-hover); }
+.sk-acc-i { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; flex: none; background: color-mix(in srgb, var(--foreground) 5%, transparent); color: var(--sk-muted); }
+.sk-acc-h b { display: flex; align-items: center; gap: 6px; font-weight: 500; font-size: var(--sk-fs); }
+.sk-acc-h small { display: block; font-size: var(--sk-fs-micro); color: var(--sk-muted); margin-top: 1px; }
+.sk-acc-h .sk-chev { color: var(--sk-faint); transition: transform var(--sk-snap) var(--sk-ease); margin-left: 4px; }
+.sk-acc.open .sk-acc-h .sk-chev { transform: rotate(90deg); }
+.sk-acc-b { border-top: 1px solid var(--sk-line-soft); }
+.sk-acc-b > * + :is(.sk-row, .sk-orow, .sk-disc) { border-top: 1px solid var(--sk-line-soft); }
+.sk-acc.open { box-shadow: 0 0 0 1px var(--sk-line), 0 2px 8px -4px #0000001a; }
+
+/* Rules, memory entries */
+.sk-rule { display: grid; grid-template-columns: 18px 90px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 16px; font-size: var(--sk-fs-meta); }
+.sk-rule .sk-grip { color: var(--sk-faint); cursor: grab; }
+.sk-mem { padding: 12px 16px; }
+.sk-mem p { margin: 0; font-size: var(--sk-fs); line-height: 1.65; white-space: pre-wrap; }
+.sk-mem .sk-meta { margin-top: 6px; display: flex; gap: 10px; align-items: center; font-size: var(--sk-fs-micro); color: var(--sk-faint); flex-wrap: wrap; }
+
+/* Plugin cards */
+.sk-pgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.sk-pcard { padding: 14px; border-radius: 12px; background: var(--sk-panel); box-shadow: var(--sk-shadow-panel); display: flex; gap: 12px; min-width: 0; }
+.sk-pcard .sk-pi { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; flex: none; background: color-mix(in srgb, var(--foreground) 6%, transparent); color: var(--sk-muted); overflow: hidden; }
+.sk-pcard b { font-weight: 500; }
+.sk-pcard p { margin: 2px 0 8px; font-size: var(--sk-fs-micro); color: var(--sk-muted); }
+@container sk-form (max-width: 560px) { .sk-pgrid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Role status line under a model role */
+.sk-rs { display: block; margin-top: 3px; }
+.sk-rs .sk-dot { margin-right: 5px; vertical-align: 1px; }
+
+/* Color swatch that opens the native picker */
+.sk-swatch { position: relative; width: 26px; height: 26px; border-radius: 7px; box-shadow: inset 0 0 0 1px #0002; cursor: pointer; flex: none; overflow: hidden; }
+.sk-swatch input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; border: 0; padding: 0; }
+.sk-swatch:focus-within { box-shadow: inset 0 0 0 1px #0002, 0 0 0 3px var(--sk-ring); }
+
+/* Legacy wrappers that only group rows stay transparent; rows inside them keep their own padding and separators. */
+.sk-panel > :not(.sk-row, .sk-orow, .sk-disc, .sk-unitbar, .sk-note, .sk-pad, .sk-rule, .sk-mem, .sk-place, .sk-toolgrid, .sk-legend, .sk-orow-detail, .sk-free, .sk-pair, .sk-acc, table, pre):has(> :is(.sk-row, .sk-disc, .sk-stack-field, div > .sk-row)) { padding: 0; }
+.sk-panel :not(.sk-rc, .sk-rl) > :is(.sk-row, .sk-disc, .sk-stack-field, .sk-unitbar) + :is(.sk-row, .sk-disc, .sk-stack-field),
+.sk-panel :not(.sk-rc, .sk-rl) > div:has(> .sk-row) + :is(.sk-row, .sk-disc, .sk-stack-field, div:has(> .sk-row)) { border-top: 1px solid var(--sk-line-soft); }
+.sk-panel :not(.sk-rc, .sk-rl, .sk-panel) > :is(p, .typography-meta, .typography-micro):not(.sk-row *, .sk-stack-field *, .sk-pad *, .sk-free *) { padding: 0 16px 12px; margin: 0; }
+.sk-panel > :not(.sk-unitbar) + .sk-unitbar { border-top: 0; }
+.sk-free > .sk-row { padding-left: 0; padding-right: 0; }
+.sk-free > .sk-row + .sk-row { border-top: 1px solid var(--sk-line-soft); }
+
+/* Notification template editor: fields beside a system-notification sample */
+.sk .settings-notification-editor { display: grid; gap: 16px; align-items: start; padding: 4px 0 6px; }
+@container sk-form (min-width: 640px) { .sk .settings-notification-editor { grid-template-columns: minmax(0, 1fr) minmax(240px, .9fr); } }
+.sk .settings-notification-preview { padding: 12px 14px; border-radius: 14px; border: 0; background: var(--sk-panel); box-shadow: var(--sk-shadow-pop); }

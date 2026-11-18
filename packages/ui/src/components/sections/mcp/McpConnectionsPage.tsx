@@ -5,12 +5,12 @@ import { SettingsActionBar } from '../shared/SettingsActionBar';
 import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { Input } from '@/components/ui/input';
 import { Icon } from '@/components/icon/Icon';
-import { cn } from '@/lib/utils';
 import { getProjectTrustGeneration, subscribeProjectTrustChanges } from '@/lib/projectTrust';
 import { json } from '@codemirror/lang-json';
 import { parse, type ParseError } from 'jsonc-parser';
 import { createMcpConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, registerRuntimeEndpointSwitchBlocker, type McpConfigurationSnapshot, type McpConfigurationDocument, type AuthorizationState } from '@varin/application-client';
-import { SettingsPageLayout } from '../shared/SettingsPageLayout';
+import { Av, Catalog, CatalogGroup, CatalogItem, Dot, Loading, Note, ObjectHeader, useSettingsShell } from '../shared/kit';
+import { SettingsScopeLabel } from '../shared/SettingsScope';
 import { SettingsSection, SettingsFieldRow } from '../shared/SettingsSection';
 import { AuthorizationPanel } from '../shared/AuthorizationPanel';
 import { McpStructuredConfigEditor } from './McpStructuredConfigEditor';
@@ -24,6 +24,7 @@ import { useMcpSettingsTarget } from '@/components/mcp/mcp-settings-navigation';
 
 export function McpConnectionsPage() {
   const { t } = useI18n();
+  const { setCatalogStage } = useSettingsShell();
   const text = (key: string) => t(key as never);
   const cwd = useDirectoryStore(state => state.currentDirectory);
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
@@ -41,7 +42,6 @@ export function McpConnectionsPage() {
   const [query, setQuery] = React.useState('');
   const [toolQuery, setToolQuery] = React.useState('');
   const [tab, setTab] = React.useState<'tools' | 'configuration' | 'diagnostics'>('tools');
-  const [showDetail, setShowDetail] = React.useState(false);
   const active = React.useRef<{ view: string; signal: AbortSignal } | null>(null);
   const authId = React.useRef<string | undefined>(undefined);
   const revision = React.useRef(0);
@@ -105,8 +105,8 @@ export function McpConnectionsPage() {
     if (active.current === current && authId.current === state.id) setAuthorization(next);
   }, [api]);
   const select = (next: typeof selection, nextPath = path) => requestSettingsNavigation(() => {
-    if (nextPath !== path) preservedDraft.current = false;
-    setSelection(next); setPath(nextPath); setShowDetail(true); setRaw(false); setTab(next.mode === 'server' ? 'tools' : 'configuration'); setToolQuery('');
+    if (nextPath !== path) { preservedDraft.current = false; revision.current += 1; setDocument(null); setDraft(''); }
+    setSelection(next); setPath(nextPath); setCatalogStage('detail'); setRaw(false); setTab(next.mode === 'server' ? 'tools' : 'configuration'); setToolQuery('');
   });
   const selectedServer = selection.mode === 'server' ? snapshot?.servers.find(server => server.name === selection.name) : undefined;
   const navigation = useMcpSettingsTarget(state => state.target);
@@ -118,13 +118,13 @@ export function McpConnectionsPage() {
     const nextPath = server?.source ?? snapshot.sources[0]?.path ?? '';
     setSelection(previous => previous.mode === navigation.selection.mode && previous.name === navigation.selection.name ? previous : navigation.selection);
     setPath(nextPath);
-    setShowDetail(true); setRaw(false); setTab(navigation.selection.mode === 'server' ? 'tools' : 'configuration');
+    setCatalogStage('detail'); setRaw(false); setTab(navigation.selection.mode === 'server' ? 'tools' : 'configuration');
     if (navigation.selection.signIn && server) {
       if (busy || document?.path !== nextPath) return;
       useMcpSettingsTarget.setState({ target: undefined });
       if (server.canSignIn && server.enabled) void run(current => signIn(current, server.name));
     } else useMcpSettingsTarget.setState({ target: undefined });
-  }, [navigation, snapshot, host, cwd, busy, document?.path, run, signIn]);
+  }, [navigation, snapshot, host, cwd, busy, document?.path, run, signIn, setCatalogStage]);
   const save = () => !document ? Promise.resolve(false) : run(async current => {
     const saved = await api.saveDocument(current.view, document.path, draft, document.revision, current.signal);
     if (active.current === current) {
@@ -133,29 +133,37 @@ export function McpConnectionsPage() {
       if (active.current === current) setSnapshot(next);
     }
   });
-  return <SettingsPageLayout title={t('settings.mcp.title')} description={t('settings.mcp.managementHint')}>
-    {error ? <p role="alert" className="mb-4 typography-meta text-destructive">{error}</p> : null}
-    {snapshot?.issues.map((issue, index) => <p key={index} role="alert" className="typography-meta text-destructive">{issue}</p>)}
-    {!snapshot && !error ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
-    {snapshot ? <div className="grid min-w-0 gap-6 @3xl:grid-cols-[210px_minmax(0,1fr)]">
-      <aside className={cn('min-w-0 space-y-3 @3xl:block', showDetail && 'hidden')}>
-        <div className="flex items-center justify-between gap-2"><h2 className="typography-ui-label">{t('settings.mcp.servers')} <span className="ml-1 text-muted-foreground">{snapshot.servers.length}</span></h2>
-          <Button variant="ghost" size="sm" aria-label={t('settings.mcp.add')} disabled={busy} onClick={() => select({ mode: 'new' })}><Icon name="add" className="size-4" /></Button>
-        </div>
-        <Input value={query} onChange={event => setQuery(event.target.value)} placeholder={t('settings.mcp.search')} aria-label={t('settings.mcp.search')} />
-        <div className="space-y-1">{snapshot.servers.filter(server => server.name.toLowerCase().includes(query.toLowerCase())).map(server => <button type="button" key={server.name}
-          className={cn('w-full rounded-lg border border-transparent px-3 py-3 text-left hover:bg-interactive-hover', selection.name === server.name && 'border-border/60 bg-muted/50')}
-          onClick={() => select({ mode: 'server', name: server.name }, server.source)}>
-          <span className="flex items-center gap-2"><Icon name="plug-2" className="size-4 shrink-0 text-muted-foreground" /><span className="truncate typography-ui-label">{server.name}</span></span>
-          <span className="mt-1 block typography-meta text-muted-foreground">{text(`settings.mcp.status.${server.status}`)}</span>
-        </button>)}</div>
+  const avatar = (icon: 'file-text' | 'plug-2') => <Av><Icon name={icon} className="size-4" /></Av>;
+  return <Catalog title={t('settings.mcp.title')} description={t('settings.mcp.managementHint')}
+    scope={<SettingsScopeLabel kind="hostProject" />}
+    filter={{ value: query, onChange: setQuery, placeholder: t('settings.mcp.search') }}
+    headActions={snapshot ? <Button variant="ghost" size="sm" aria-label={t('settings.mcp.add')} disabled={busy} onClick={() => select({ mode: 'new' })}><Icon name="add" className="size-4" /></Button> : null}
+    detailKey={selection.mode === 'server' ? selection.name : selection.mode}
+    items={snapshot ? <>
+        <CatalogItem pinned selected={selection.mode === 'settings'} name={t('settings.mcp.files')} lead={avatar('file-text')}
+          opensDetail={false} onSelect={() => select({ mode: 'settings' }, snapshot.sources[0]?.path ?? '')} />
+        {(['global', 'project', 'unknown'] as const).map(scope => {
+          // The Host resolves precedence. Group the effective server by its actual source, not its name or directory prefix.
+          const servers = snapshot.servers.filter(server => (snapshot.sources.find(source => source.path === server.source)?.scope ?? 'unknown') === scope && server.name.toLowerCase().includes(query.trim().toLowerCase()));
+          return servers.length ? <section key={scope} aria-label={t(`settings.mcp.scope.${scope}`)}>
+            <CatalogGroup label={t(`settings.mcp.scope.${scope}`)} count={servers.length} />
+            {servers.map(server => <CatalogItem key={server.name} name={server.name} lead={avatar('plug-2')}
+              meta={<><Dot state={server.status === 'connected' ? 'ok' : server.signInRequired ? 'warn' : 'off'} />{text(`settings.mcp.status.${server.status}`)}</>}
+              selected={selection.mode === 'server' && selection.name === server.name} dim={!server.enabled} opensDetail={false}
+              onSelect={() => select({ mode: 'server', name: server.name }, server.source)} />)}
+          </section> : null;
+        })}
         {!snapshot.servers.length ? <p className="py-4 typography-meta text-muted-foreground">{t('settings.mcp.empty')}</p> : null}
-        <Button variant="ghost" className="w-full justify-start" onClick={() => select({ mode: 'settings' })}>{t('settings.mcp.configuration')}</Button>
-      </aside>
-      <div className={cn('min-w-0 @3xl:block', !showDetail && 'hidden')}>
-        <Button variant="ghost" size="sm" className="mb-4 @3xl:hidden" onClick={() => setShowDetail(false)}><Icon name="arrow-left-s" className="size-4" />{t('settings.mcp.servers')}</Button>
-        {selectedServer ? <SettingsSection title={selectedServer.name} description={t('settings.mcp.toolCounts', { cached: selectedServer.cachedToolCount, connected: selectedServer.connectedToolCount })} divider={false}>
-          <div className="mb-3 flex flex-wrap items-center gap-2"><span className="mr-auto rounded-full bg-muted px-2.5 py-1 typography-meta">{text(`settings.mcp.status.${selectedServer.status}`)}</span>
+      </> : !error ? <Loading /> : <Note kind="err">{error}</Note>}
+    detail={<>
+      {error ? <Note kind="err">{error}</Note> : null}
+      {snapshot?.issues.map((issue, index) => <Note key={index} kind="warn">{issue}</Note>)}
+      {snapshot ? <>
+        <ObjectHeader avatar={avatar(selectedServer ? 'plug-2' : 'file-text')}
+          title={selectedServer?.name ?? t(selection.mode === 'new' ? 'settings.mcp.add' : 'settings.mcp.files')}
+          sub={selectedServer ? <><Dot state={selectedServer.status === 'connected' ? 'ok' : selectedServer.signInRequired ? 'warn' : 'off'} />{text(`settings.mcp.status.${selectedServer.status}`)} · {t('settings.mcp.toolCounts', { cached: selectedServer.cachedToolCount, connected: selectedServer.connectedToolCount })}</> : undefined} />
+        {selectedServer ? <SettingsSection>
+          <div className="sk-pad flex flex-wrap items-center gap-2">
             <Button size="sm" disabled={busy || !selectedServer.canConnect || selectedServer.status === 'connecting'} onClick={() => { void run(async current => { const next = await api.command(current.view, selectedServer.name, selectedServer.holdsConnection ? 'reconnect' : 'connect', current.signal); if (active.current === current) setSnapshot(next); }); }}>{t(selectedServer.status === 'connecting' ? 'settings.mcp.status.connecting' : selectedServer.holdsConnection ? 'settings.mcp.reconnect' : selectedServer.status === 'connected' ? 'settings.mcp.useConnection' : 'settings.mcp.connect')}</Button>
             {selectedServer.holdsConnection ? <Button size="sm" variant="outline" disabled={busy} onClick={() => { void run(async current => { const next = await api.command(current.view, selectedServer.name, 'disconnect', current.signal); if (active.current === current) setSnapshot(next); }); }}>{t('settings.mcp.disconnect')}</Button> : null}
             {selectedServer.canSignIn ? <Button size="sm" variant="outline" disabled={busy || !selectedServer.enabled || selectedServer.status === 'connecting' || authorization?.status === 'pending'} onClick={() => { void run(current => signIn(current, selectedServer.name)); }}>{t(selectedServer.signInRequired ? 'settings.mcp.signIn' : 'settings.mcp.trySignIn')}</Button> : null}
@@ -197,11 +205,11 @@ export function McpConnectionsPage() {
             <div className="mt-5 border-t border-border/60 pt-3"><Button variant="ghost" onClick={() => setRaw(value => !value)}>{text(raw ? 'settings.varin.mcp.config.raw.hide' : 'settings.varin.mcp.config.raw.show')}</Button></div>
             {raw || !valid ? <div className="mt-3 h-80 overflow-hidden rounded-md border border-border/60"><CodeMirrorEditor value={draft} onChange={setDraft} extensions={extensions} readOnly={busy || !documentAllowed} className="h-full" /></div> : null}
             <Button className="mt-3" size="sm" variant="ghost" disabled={busy} onClick={() => requestSettingsNavigation(() => { void load(); })}>{text('settings.varin.mcp.config.actions.reload')}</Button>
+            <SettingsActionBar placement="inline" dirty={dirty} saving={busy} saveDisabled={!valid || !documentAllowed} onSave={save} onCancel={() => { setDraft(document.content); setError(''); }} error={error} />
           </> : null}
         </SettingsSection>
         </div>
-      </div>
-      {document ? <SettingsActionBar dirty={dirty} saving={busy} saveDisabled={!valid || !documentAllowed} onSave={save} onCancel={() => { setDraft(document.content); setError(''); }} error={error} /> : null}
-    </div> : null}
-  </SettingsPageLayout>;
+      </> : !error ? <Loading /> : null}
+    </>}
+  />;
 }

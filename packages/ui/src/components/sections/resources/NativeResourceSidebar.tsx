@@ -28,6 +28,8 @@ import { useResourceManagementTarget } from './useResourceManagementTarget';
 interface NativeResourceSidebarProps {
   kind: NativeResourceKind;
   onItemSelect?: () => void;
+  pinned?: React.ReactNode;
+  showPinned?: boolean;
 }
 
 const NAME_ERROR_KEYS = {
@@ -36,7 +38,7 @@ const NAME_ERROR_KEYS = {
   separator: 'settings.varin.resources.nameError.separator',
 } satisfies Record<'empty' | 'reserved' | 'separator', I18nKey>;
 
-export const NativeResourceSidebar: React.FC<NativeResourceSidebarProps> = ({ kind, onItemSelect }) => {
+export const NativeResourceSidebar: React.FC<NativeResourceSidebarProps> = ({ kind, onItemSelect, pinned, showPinned }) => {
   const { t } = useI18n();
   const { resourceTarget, targetKey, trustVersion } = useResourceManagementTarget();
   const pane = useResourceLibraryStore((state) => state.panes[kind]);
@@ -185,6 +187,7 @@ export const NativeResourceSidebar: React.FC<NativeResourceSidebarProps> = ({ ki
       </div>
 
       <ScrollableOverlay outerClassName="min-h-0 flex-1" className="space-y-1 overflow-x-hidden px-3 py-2">
+        {pinned}
         {!pane.loadingCatalog && resources.length === 0 ? (
           <div className="px-3 py-10 text-center text-muted-foreground">
             <Icon name={'sparkling'} className="mx-auto size-9 opacity-50" />
@@ -192,13 +195,14 @@ export const NativeResourceSidebar: React.FC<NativeResourceSidebarProps> = ({ ki
             <p className="mt-1 typography-meta opacity-75">{t('settings.varin.resources.empty.description')}</p>
           </div>
         ) : resources.map((resource) => {
-          const selected = resource.id === pane.selectedId;
+          const selected = !showPinned && resource.id === pane.selectedId;
           return (
             <button
               key={resource.id}
               type="button"
               onClick={() => {
-                if (selected || !confirmDiscard()) return;
+                if (resource.id === pane.selectedId) { onItemSelect?.(); return; }
+                if (!confirmDiscard()) return;
                 resetDraft(kind);
                 void selectResource(kind, resourceTarget, targetKey, resource.id);
                 onItemSelect?.();

@@ -1,4 +1,9 @@
 export const settingsDict = {
+  "settings.view.nav.group.models": "Modelos",
+  "settings.view.nav.group.capabilities": "Recursos",
+  "settings.view.nav.group.data": "Dados",
+  "settings.shell.return": "Voltar à área de trabalho",
+  "settings.roles.title": "Funções dos modelos",
   'settings.varin.visual.field.themeTransfer': 'Import a theme',
   'settings.varin.visual.field.copyTheme': 'Copy current theme',
   'settings.varin.visual.field.pasteTheme': 'Paste theme JSON here',

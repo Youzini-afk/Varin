@@ -1,5 +1,6 @@
 import React from 'react';
 import { SettingsDisclosure } from '../shared/SettingsDisclosure';
+import { Seg } from '../shared/kit';
 import { SettingsSection, SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useConfigurationModels } from './ConfigurationModels';
@@ -32,17 +33,22 @@ export function InferenceSettings({ harness, update, kind, embedded = false }: H
     } });
   };
   const defaultLabel = t(kind === 'embedding' ? 'settings.page.harness.embeddings.off' : 'settings.harness.retrieval.off');
-  return <SettingsSection title={embedded ? undefined : t(`settings.page.harness.section.${kind}`)} divider={!embedded} settingsItem={`harness.${kind}`} contentClassName="space-y-5">
-    <SettingsFieldRow label={t('settings.harness.retrieval.source')} description={kind === 'embedding' ? t('settings.page.harness.section.embedding.description') : undefined}>
-      <Select value={local ? 'local' : remote ? 'remote' : 'default'} onValueChange={(value) => {
-        setLocal(value === 'local'); remoteRef.current = value === 'remote'; setRemote(value === 'remote');
-        if (value === 'local') update({ embedding: { protocol: 'local', providerId: 'local', modelId: 'installed', dimensions: undefined, maxTokens: undefined } });
-        else if (value === 'default') update({ [kind]: undefined });
-        else { update({ [kind]: undefined }); commit({}); }
-      }}>
+  const selectSource = (value: 'local' | 'remote' | 'default') => {
+    setLocal(value === 'local'); remoteRef.current = value === 'remote'; setRemote(value === 'remote');
+    if (value === 'local') update({ embedding: { protocol: 'local', providerId: 'local', modelId: 'installed', dimensions: undefined, maxTokens: undefined } });
+    else if (value === 'default') update({ [kind]: undefined });
+    else commit({});
+  };
+  const rows = <>
+    <SettingsFieldRow settingsItem={embedded ? `harness.${kind}` : undefined}
+      label={t(embedded ? `settings.page.harness.section.${kind}` : 'settings.harness.retrieval.source')}
+      description={kind === 'embedding' ? t('settings.page.harness.section.embedding.description') : undefined}>
+      {embedded && kind === 'embedding' ? <Seg label={t('settings.page.harness.section.embedding')} value={local ? 'local' : remote ? 'remote' : 'default'}
+        options={[{ value: 'local', label: t('settings.page.harness.localSemantic.source') }, { value: 'remote', label: t('settings.harness.retrieval.remote') }, { value: 'default', label: defaultLabel }]} onChange={selectSource} />
+      : <Select value={local ? 'local' : remote ? 'remote' : 'default'} onValueChange={value => { if (value === 'local' || value === 'remote' || value === 'default') selectSource(value); }}>
         <SelectTrigger size="settings" className="w-64" aria-label={t('settings.harness.retrieval.source')}><SelectValue>{local ? t('settings.page.harness.localSemantic.source') : remote ? t('settings.harness.retrieval.remote') : defaultLabel}</SelectValue></SelectTrigger>
         <SelectContent><SelectItem value="default">{defaultLabel}</SelectItem>{kind === 'embedding' ? <SelectItem value="local">{t('settings.page.harness.localSemantic.source')}</SelectItem> : null}<SelectItem value="remote">{t('settings.harness.retrieval.remote')}</SelectItem></SelectContent>
-      </Select>
+      </Select>}
     </SettingsFieldRow>
     {remote ? <>
       <SettingsFieldRow label={t(`settings.page.harness.${kind}.provider`)}>
@@ -66,10 +72,11 @@ export function InferenceSettings({ harness, update, kind, embedded = false }: H
       </SettingsFieldRow> : null}
       <p className="typography-meta text-muted-foreground">{t(!fields.providerId || !fields.modelId ? 'settings.harness.completeFields' : `settings.page.harness.${kind}.provider.description`)}</p>
     </> : null}
-  </SettingsSection>;
+  </>;
+  return embedded ? rows : <SettingsSection title={t(`settings.page.harness.section.${kind}`)} settingsItem={`harness.${kind}`}>{rows}</SettingsSection>;
 }
 
-function FastDecisionSettings({ harness, update, embedded = false }: HarnessSettingsPageProps & { embedded?: boolean }) {
+export function FastDecisionSettings({ harness, update, embedded = false }: HarnessSettingsPageProps & { embedded?: boolean }) {
   const { t } = useI18n();
   const { providers, modelsFor } = useConfigurationModels();
   const settings = harness.fastDecision;

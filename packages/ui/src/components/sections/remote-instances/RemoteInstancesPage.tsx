@@ -1333,7 +1333,7 @@ const RemoteInstancesContent: React.FC<RemoteInstancesPageProps> = ({ view = 'ho
 
   if (!draft) {
     return (
-      <SettingsPageLayout title={t(resources ? 'settings.connections.resourceManage' : view === 'access' ? 'settings.page.access.title' : 'settings.page.remoteInstances.title')}>
+      <SettingsPageLayout title={t(resources ? 'settings.connections.resourceManage' : view === 'access' ? 'settings.page.remoteAccess.title' : 'settings.page.remoteInstances.title')}>
         {resources ? <p className="mb-5 typography-meta text-muted-foreground">{t('settings.connections.resourceManageDescription')}<span className="mt-1 block break-all font-mono">{redactSensitiveUrl(getRuntimeApiBaseUrl() || window.location.origin)}</span></p> : null}
         {intro}
         {view === 'access' && clientAuth ? (

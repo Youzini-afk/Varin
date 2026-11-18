@@ -7,6 +7,7 @@ import { I18nProvider } from '@/lib/i18n';
 
 const f = vi.hoisted(() => ({ snapshot: null as VarinExtensionHostStateSnapshot | null, workspaceId: 'native-workspace-id',
   select: vi.fn(), inspect: vi.fn(), api: {} }));
+vi.mock('../harness/ModelRolesPage', () => ({ PlanningModelSettings: () => <span>Real planning slot editor</span> }));
 vi.mock('@/lib/extensions/catalog-store', () => ({ useVarinExtensionCatalog: () => ({ snapshot: f.snapshot }), setVarinExtensionServiceRoute: (...args: unknown[]) => f.select(...args) }));
 vi.mock('@/lib/extensions/workbench-workspace', () => ({ useWorkbenchWorkspaceId: () => f.workspaceId }));
 vi.mock('@/lib/extensions/agent-driver-description', () => ({ readAgentDriverDescription: (...args: unknown[]) => f.inspect(...args) }));
@@ -80,4 +81,11 @@ test('an unavailable selected provider remains unavailable rather than silently 
   expect(container.textContent).not.toContain('Effective selection: Varin default loop (Rust)');
   expect(container.textContent).toContain('missing:host:varin.agent.driver@1');
   expect(f.inspect).not.toHaveBeenCalled();
+});
+
+test('only renders planning for the effective extension that explicitly declares the role', async () => {
+  f.inspect.mockResolvedValue({identity:{name:'planning',version:'1'},configuration:null,modelRoles:['agentPlanning'],recovery:'none',checkpointSchema:null});
+  await render(); expect(container.textContent).not.toContain('Real planning slot editor');
+  await click('Parallel Driver'); expect(container.textContent).toContain('Real planning slot editor');
+  await click('Varin default loop (Rust)'); expect(container.textContent).not.toContain('Real planning slot editor');
 });

@@ -38,7 +38,7 @@ vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: 
 let root: Root, container: HTMLDivElement;
 beforeEach(() => {
   const { window, document } = parseHTML('<html><body></body></html>');
-  vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('Event', window.Event);
+  vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('Event', window.Event); vi.stubGlobal('CustomEvent', window.CustomEvent);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   fixture.catalog = { revision: 4, prompts: {}, memories: [
     { id: 1, scope: { kind: 'global' }, content: 'Global note', updatedAt: '' },

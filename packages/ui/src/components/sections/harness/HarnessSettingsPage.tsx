@@ -1,3 +1,4 @@
+import { HostSettingsScope } from '../shared/SettingsScope';
 import React from 'react';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { Button } from '@/components/ui/button';
@@ -46,7 +47,7 @@ export function HarnessSettingsPage({ section }: { section: HarnessSettingsSecti
   </>;
   return <SettingsPageLayout title={t(section === 'images' ? 'settings.page.images.title' : `settings.page.harness.page.${section}.title`)}
     description={t(section === 'images' ? 'settings.harness.images.description' : `settings.page.harness.page.${section}.description`)} showSaveStatus={showSaveStatus}
-    scope={!selfFetching ? t('settings.scope.hostGlobalHint') : undefined}
+    scope={!selfFetching ? <HostSettingsScope /> : undefined}
     className="[&>section]:py-5 [&>section]:space-y-4">
     {content}
   </SettingsPageLayout>;

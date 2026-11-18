@@ -10,11 +10,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SettingsSection, SettingsFieldRow, SettingsCheckboxRow } from '../shared/SettingsSection';
 
-export function RetrySettings({ value, disabled, api, onSave }: {
+export function RetrySettings({ value, disabled, api, onSave, standalone = false }: {
   value: JsonValue | undefined;
   disabled: boolean;
   api: ReturnType<typeof createModelConnectionsHttpAPI>;
   onSave(value: Record<string, JsonValue>): Promise<boolean>;
+  standalone?: boolean;
 }) {
   const { t } = useI18n();
   const [draft, setDraft] = React.useState<ModelRetrySettings>(() => parseModelRetrySettings(value));
@@ -59,7 +60,7 @@ export function RetrySettings({ value, disabled, api, onSave }: {
   const select = <T extends ModelRetryRule['field'] | ModelRetryRule['match'] | ModelRetryRule['action']>(selected: T, values: readonly T[], label: string, onChange: (value: T) => void) => <Select value={selected} disabled={disabled || busy} onValueChange={value => onChange(value as T)}>
     <SelectTrigger aria-label={label} className="w-full"><SelectValue /></SelectTrigger><SelectContent>{values.map(value => <SelectItem key={value} value={value}>{t(`settings.retry.${value}`)}</SelectItem>)}</SelectContent>
   </Select>;
-  return <SettingsSection title={t('settings.retry.title')} description={t('settings.retry.description')} settingsItem="sessions.retry">
+  return <SettingsSection title={standalone ? undefined : t('settings.retry.title')} description={standalone ? undefined : t('settings.retry.description')} settingsItem="sessions.retry">
     <SettingsCheckboxRow checked={draft.enabled} onChange={enabled => change({ enabled })} disabled={disabled || busy} label={t('settings.retry.enabled')} />
     {(['maxRetries', 'initialDelayMs', 'maxDelayMs'] as const).map(field => <SettingsFieldRow key={field} label={t(`settings.retry.${field}`)}>
       <Input type="number" min={0} step={1} value={draft[field]} aria-label={t(`settings.retry.${field}`)} disabled={disabled || busy} className="max-w-48 tabular-nums"

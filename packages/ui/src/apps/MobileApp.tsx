@@ -87,13 +87,12 @@ import { useEdgeSwipeSessionChat } from './useEdgeSwipeSessionSwitch';
 import { useNativePushRegistration } from './useNativePushRegistration';
 
 const MOBILE_SETTINGS_PAGES = [
-  'general', 'appearance', 'chat', 'sessions', 'notifications', 'voice', 'storage', 'history',
-  'model-connections', 'usage', 'agents', 'harness-bots', 'agent-prompt', 'agent-memory',
-  'harness-tools', 'harness-web', 'images', 'harness-computers', 'harness-permissions', 'harness-context',
-  'projects', 'editor', 'terminal', 'git', 'harness-retrieval', 'harness-embeddings', 'language-support',
-  'work-connections', 'remote-instances', 'network', 'access', 'tunnel', 'mcp-connections',
-  'skills', 'commands', 'extensions', 'about',
-  'workspaces',
+  'general', 'appearance', 'chat', 'notifications', 'voice', 'storage', 'history',
+  'model-connections', 'model-roles', 'usage', 'agents', 'harness-bots', 'agent-prompt', 'agent-memory',
+  'harness-tools', 'harness-web', 'harness-computers', 'harness-permissions', 'harness-context',
+  'projects', 'editor', 'terminal', 'git', 'code-intel',
+  'devices', 'remote-access', 'proxy', 'workspaces', 'browsers', 'mcp-connections',
+  'skills', 'extensions', 'about',
 ] as const;
 
 type MobileAppProps = {
@@ -1767,6 +1766,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const [mcpOpen, setMcpOpen] = React.useState(false);
   const [instancesOpen, setInstancesOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const settingsBackRef = React.useRef<(() => void) | null>(null);
   const [updateOpen, setUpdateOpen] = React.useState(false);
   const [settingsInitialMobileStage, setSettingsInitialMobileStage] = React.useState<'nav' | 'page-content'>('nav');
   const [overflowOpen, setOverflowOpen] = React.useState(false);
@@ -1935,7 +1935,8 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       return true;
     }
     if (settingsOpen) {
-      setSettingsOpen(false);
+      if (settingsBackRef.current) settingsBackRef.current();
+      else requestSettingsNavigation(() => setSettingsOpen(false));
       return true;
     }
     if (updateOpen) {
@@ -2025,6 +2026,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       <div
         className="varin-mobile-app-shell main-content-safe-area flex h-[100dvh] flex-row bg-background text-foreground"
         data-page-scroll-lock="true"
+        inert={settingsOpen} style={settingsOpen ? { display: 'none' } : undefined}
         data-mobile-layout-tier={mobileLayout.tier}
         data-mobile-layout-kind={mobileLayout.kind}
       >
@@ -2315,33 +2317,6 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           </MobileSurfaceShell>
         ) : null}
 
-        {settingsOpen ? (
-          <MobileSurfaceShell
-            open
-            onClose={() => requestSettingsNavigation(() => setSettingsOpen(false))}
-            ariaLabel={t('mobile.menu.settings')}
-            headerless
-            variant={surfaceVariant}
-            side="right"
-            sideWidth={mobileLayout.isTabletLandscape ? sidePanelWidth : undefined}
-          >
-            <ErrorBoundary>
-              <WorkbenchReplacement
-                target={WORKBENCH_REPLACEMENT_TARGETS.settings}
-                fallback={(
-                  <SettingsView
-                    forceMobile={!mobileLayout.isTabletLandscape}
-                    isWindowed
-                    initialMobileStage={settingsInitialMobileStage}
-                    visiblePageSlugs={[...MOBILE_SETTINGS_PAGES]}
-                    onClose={() => setSettingsOpen(false)}
-                  />
-                )}
-              />
-            </ErrorBoundary>
-          </MobileSurfaceShell>
-        ) : null}
-
         {updateOpen ? (
           <MobileSurfaceShell
             open
@@ -2360,6 +2335,12 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           </MobileSurfaceShell>
         ) : null}
       </div>
+      {settingsOpen ? <div className="main-content-safe-area h-[100dvh] overflow-hidden bg-background">
+        <ErrorBoundary><WorkbenchReplacement target={WORKBENCH_REPLACEMENT_TARGETS.settings} fallback={(
+          <SettingsView forceMobile={!mobileLayout.isTabletLandscape} initialMobileStage={settingsInitialMobileStage}
+            backActionRef={settingsBackRef} visiblePageSlugs={[...MOBILE_SETTINGS_PAGES]} onClose={() => setSettingsOpen(false)} />
+        )} /></ErrorBoundary>
+      </div> : null}
     </DedicatedMobileAppProvider>
   );
 };

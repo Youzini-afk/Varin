@@ -4,7 +4,7 @@ import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { McpConfigurationSnapshot, McpConfigurationServer } from '@varin/application-client';
 const fixture = vi.hoisted(() => ({ version: 0, host: 1, trust: true, multisource: false, hostListeners: new Set<() => void>(), listeners: new Set<() => void>(), blockers: new Set<() => Promise<void>>(), api: { open: vi.fn(), close: vi.fn(), read: vi.fn(), readDocument: vi.fn(), saveDocument: vi.fn(), command: vi.fn(), signIn: vi.fn(), authorization: vi.fn() } }));
-vi.mock('@varin/application-client', () => ({ createMcpConnectionsHttpAPI: () => fixture.api, registerRuntimeEndpointSwitchBlocker: (listener: () => Promise<void>) => { fixture.blockers.add(listener); return () => fixture.blockers.delete(listener); }, getRuntimeEndpointGeneration: () => fixture.host, subscribeRuntimeEndpointChanged: (listener: () => void) => { fixture.hostListeners.add(listener); return () => fixture.hostListeners.delete(listener); } }));
+vi.mock('@varin/application-client', async importOriginal => ({ ...await importOriginal<typeof import('@varin/application-client')>(), createMcpConnectionsHttpAPI: () => fixture.api, registerRuntimeEndpointSwitchBlocker: (listener: () => Promise<void>) => { fixture.blockers.add(listener); return () => fixture.blockers.delete(listener); }, getRuntimeEndpointGeneration: () => fixture.host, subscribeRuntimeEndpointChanged: (listener: () => void) => { fixture.hostListeners.add(listener); return () => fixture.hostListeners.delete(listener); } }));
 vi.mock('@/lib/projectTrust', () => ({ getProjectTrustGeneration: () => fixture.version,
   subscribeProjectTrustChanges: (listener: () => void) => { fixture.listeners.add(listener); return () => fixture.listeners.delete(listener); } }));
 vi.mock('@/components/sections/shared/ProjectTrustSettings', () => ({ ProjectTrustSettings: () => <div>Trust controls</div> }));
@@ -43,7 +43,7 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); stayInSettings(); container.remove(); vi.unstubAllGlobals(); });
 const editor = () => container.querySelector<HTMLTextAreaElement>('[aria-label="Configuration draft"]')!;
-const button = (text: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === text)!;
+const button = (text: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === text || value.getAttribute('aria-label') === text)!;
 const changeTrust = (trusted: boolean) => act(async () => { fixture.trust = trusted; fixture.version += 1; for (const listener of fixture.listeners) listener(); });
 
 it('retains an unsaved project draft read-only after revocation, then saves it only through the fresh trusted view', async () => {
@@ -53,10 +53,10 @@ it('retains an unsaved project draft read-only after revocation, then saves it o
   await changeTrust(false);
   expect(fixture.api.close).toHaveBeenCalledWith('view:1');
   expect(editor().value).toBe(draft); expect(editor().hasAttribute('readOnly')).toBe(true);
-  expect(button('settings.common.actions.saveChanges').disabled).toBe(true); expect(fixture.api.readDocument).toHaveBeenCalledOnce();
+  expect(button('settings.kit.save').disabled).toBe(true); expect(fixture.api.readDocument).toHaveBeenCalledOnce();
   await changeTrust(true);
   expect(editor().value).toBe(draft); expect(editor().hasAttribute('readOnly')).toBe(false);
-  await act(async () => button('settings.common.actions.saveChanges').click());
+  await act(async () => button('settings.kit.save').click());
   expect(fixture.api.saveDocument).toHaveBeenCalledWith('view:3', '/project/.mcp.json', draft, 'original', expect.any(AbortSignal));
 });
 
@@ -81,7 +81,7 @@ it('loads the selected source after discarding a draft retained across a trust r
   expect(fixture.api.readDocument).toHaveBeenLastCalledWith('view:3', '/user/mcp.json', expect.any(AbortSignal));
   expect(editor().getAttribute('data-content')).toBe('{"source":"/user/mcp.json"}');
   await act(async () => { editor().value = '{"global":true}'; editor().dispatchEvent(new window.Event('input', { bubbles: true })); });
-  await act(async () => button('settings.common.actions.saveChanges').click());
+  await act(async () => button('settings.kit.save').click());
   expect(fixture.api.saveDocument).toHaveBeenLastCalledWith('view:3', '/user/mcp.json', '{"global":true}', '/user/mcp.json', expect.any(AbortSignal));
 });
 
@@ -93,7 +93,7 @@ it('rejects a late old-Host document response and saves only the new Host docume
   await act(async () => complete({ path: '/old-host/config.json', content: '{"oldHost":true}', revision: 'old', exists: true }));
   expect(editor().getAttribute('data-content')).toBe('{}');
   await act(async () => { editor().value = '{"newHost":true}'; editor().dispatchEvent(new window.Event('input', { bubbles: true })); });
-  await act(async () => button('settings.common.actions.saveChanges').click());
+  await act(async () => button('settings.kit.save').click());
   expect(fixture.api.saveDocument).toHaveBeenLastCalledWith('view:2', '/project/.mcp.json', '{"newHost":true}', 'original', expect.any(AbortSignal));
 });
 
@@ -169,4 +169,16 @@ it('opens the requested connection and starts its sign-in through the settings o
   expect(fixture.api.signIn).toHaveBeenCalledExactlyOnceWith('view:1', 'notion', expect.any(AbortSignal));
   expect(fixture.api.authorization).toHaveBeenCalledWith('view:1', 'auth:notion', expect.any(AbortSignal));
   expect(useMcpSettingsTarget.getState().target).toBeUndefined();
+});
+
+it('groups effective servers by the exact configuration source without changing a connection or revealing other files', async () => {
+  fixture.multisource = true;
+  servers = [server({ name: 'global-tool' }), server({ name: 'project-tool', source: '/project/.mcp.json', override: '/user/mcp.json' })];
+  await act(async () => root.render(<McpConnectionsPage />));
+  expect(container.querySelector('[aria-label="settings.mcp.scope.global"]')?.textContent).toContain('global-tool');
+  expect(container.querySelector('[aria-label="settings.mcp.scope.project"]')?.textContent).toContain('project-tool');
+  expect(container.querySelector('[aria-label="settings.mcp.scope.global"]')?.textContent).not.toContain('project-tool');
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="settings.mcp.scope.project"] button')!.click());
+  expect(fixture.api.readDocument).toHaveBeenLastCalledWith('view:1','/project/.mcp.json',expect.any(AbortSignal));
+  expect(fixture.api.command).not.toHaveBeenCalled(); expect(fixture.api.signIn).not.toHaveBeenCalled();
 });
