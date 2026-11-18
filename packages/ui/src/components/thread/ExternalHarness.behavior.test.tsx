@@ -112,7 +112,10 @@ function fixture() {
   return { api, views, emit: async () => { await act(async () => listener?.({ epoch: 'epoch', revision: 99, kind: 'refresh' })); } };
 }
 let root: Root, container: HTMLDivElement, handoff: MessageHandoff;
-const nativeApi = { listModels: async () => [] } as unknown as ThreadsAPI;
+const nativeApi = {
+  listModels: async () => [],
+  sources: { list: async () => ({ targets: [], unavailable: [] }) },
+} as unknown as ThreadsAPI;
 beforeEach(() => {
   vi.clearAllMocks(); f.host++; useThreadDraftStore.setState({ drafts: {} });
   useMessageQueueStore.setState({ followUpBehavior: 'queue' });

@@ -111,7 +111,7 @@ pub(crate) fn delegated(parent: &[ToolSchema]) -> Vec<ToolSchema> {
         .map(|definition| definition.schema.name).collect::<std::collections::BTreeSet<_>>();
     parent
         .iter()
-        .filter(|tool| tool.name != crate::work_locations::NAME && !main_only.contains(&tool.name))
+        .filter(|tool| !crate::work_locations::is_control(&tool.name) && !main_only.contains(&tool.name))
         .cloned()
         .collect()
 }

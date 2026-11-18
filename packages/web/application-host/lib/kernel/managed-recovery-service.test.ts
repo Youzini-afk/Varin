@@ -29,7 +29,8 @@ const request = (): ManagedRecoveryRequest => ({ coordinatorHostId: 'coordinator
 function fixture() {
   const events: string[] = [];
   const state = { trusted: true, rootId: root.rootId, originals: [{ authorityId: 'retired-authority',
-    resourceEpoch: 'old-target-epoch', phase: 'retired', grantId: 'gone-grant', source, physicalRoot: root,
+    resourceEpoch: 'old-target-epoch', phase: 'retired', purpose: 'source', operationId: null,
+    grantId: 'gone-grant', source, physicalRoot: root,
     scope: { kind: 'run', threadId: 'thread', runId: 'run', epoch: 1 } }] as SourceAuthorityResult[] };
   const sourceRequest = vi.fn(async (method: string, input: { principalId: string; coordinatorHostId: string }) => {
     events.push(method);

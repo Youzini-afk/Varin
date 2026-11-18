@@ -163,7 +163,7 @@ it('explicit live source reads current disk and shares actual root with list, se
   expect(f.launchErrors).toEqual([]);
 }, 45_000);
 
-it('discovers a saved live location and reads two same-named files in one model request without switching the Run', async () => {
+it('reads same-named files in one request and writes through the original location reference without switching the Run', async () => {
   let location = '', alternateRef = '', turn = 0;
   const results: Record<string,string> = {};
   const f = await fixture((body, response) => {
@@ -185,7 +185,7 @@ it('discovers a saved live location and reads two same-named files in one model 
         return tool(response, 'file_read', {ref:alternateRef}, turn);
       case 4: return tool(response, 'file_read', {location, ref:alternateRef}, turn);
       case 5: return tool(response, 'file_read', {location, path:'../workspace/same.txt'}, turn);
-      case 6: return tool(response, 'file_write', {ref:alternateRef, content:'must not be written'}, turn);
+      case 6: return tool(response, 'file_write', {ref:alternateRef, content:'UPDATED-TEST-CONTENT'}, turn);
       default: return done(response);
     }
   });
@@ -214,7 +214,7 @@ it('discovers a saved live location and reads two same-named files in one model 
   expect(results['file_read-3']).toContain('ORIGINAL-TEST-CONTENT');
   expect(results['file_read-4']).toContain('work_location_conflict');
   expect(results['file_read-5']).toContain('work_location_unavailable');
-  expect(results['file_write-6']).toContain('reference_source_changed');
+  expect(JSON.parse(results['file_write-6']!)).toMatchObject({ outcome: 'succeeded', content: { status: 'applied' } });
   // The Thread view doesn't list completed reads. Address each durable Operation
   // by the request and call identity retained in its original tool result.
   const reads = (await f.runtime.history(identity.branchId)).flatMap(item => {
@@ -236,7 +236,8 @@ it('discovers a saved live location and reads two same-named files in one model 
     });
   }
   expect((await f.runtime.launch(receipt.run_id))?.selection.source?.workspace_id).toBe(prepared.source.workspaceId);
-  expect(await fs.readFile(path.join(other,'same.txt'),'utf8')).toBe('ORIGINAL-TEST-CONTENT');
+  expect(await fs.readFile(path.join(other,'same.txt'),'utf8')).toBe('UPDATED-TEST-CONTENT');
+  expect(await fs.readFile(path.join(f.workspace,'same.txt'),'utf8')).toBe('ORIGINAL-DEV-CONTENT');
 }, 45_000);
 
 it('rejects forged host, root, path and execution owner before durable input or context admission', async () => {

@@ -60,6 +60,10 @@ pub(crate) fn eligible(source: Option<&SourceSelection>) -> bool {
 pub(crate) const NAME: &str = "work_locations";
 const SWITCH: &str = "work_location_switch";
 const TRANSFER: &str = "work_location_transfer";
+pub(crate) fn is_control(name: &str) -> bool {
+    matches!(name, NAME | SWITCH | TRANSFER)
+}
+
 pub(crate) fn schema() -> ToolSchema {
     ToolSchema { name:NAME.into(), version:"1".into(), description:
         "Find work locations by name, device or path. To resolve an unsaved directory, pass a returned device reference and a path on that device. Pass a location to a resource tool for this request or to work_location_switch for the next run.".into(),
