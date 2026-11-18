@@ -49,7 +49,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, imageReferences, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls, backendControls, api, identity, source, references, commandActions, onReferenceSelect, backendCommands, referenceScope, pendingSource, attachmentCandidates, backendIdentity, external, connectionStatus }: {
   editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string, references?: readonly ComposerReference[], interactions?: readonly InteractionRange[]): void;
   interactions?: readonly InteractionRange[];
-  referenceScope?: string; references?: readonly ComposerReference[]; api?: ThreadsAPI; identity?: ThreadIdentity; source?: ThreadSource; pendingSource?: ThreadDraftSkillOptions['source'];
+  referenceScope?: string; references?: readonly ComposerReference[]; api?: ThreadsAPI; identity?: ThreadIdentity; source?: ThreadSource | null; pendingSource?: ThreadDraftSkillOptions['source'];
   external?: ExternalComposerOptions; connectionStatus?: React.ReactNode;
   backendIdentity?: string; attachmentCandidates?: readonly ComposerAttachmentCandidate[];
   backendCommands?: Array<{ name: string; description: string; inputHint?: string }>;
@@ -199,7 +199,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
     ...commandActions,
   };
   const commandContext: WorkbenchCommandExecutionContext = { currentDirectory: workspacePath ?? null, isMobile,
-    composer: { host: getRuntimeEndpointGeneration(), identity, source, actions } };
+    composer: { host: getRuntimeEndpointGeneration(), identity, source: source ?? undefined, actions } };
   const knownCommands: CommandInfo[] = registrations.filter(item => item.meta.composer)
     .map(item => { const meta = item.meta.composer!; const builtin = item.contributionId.startsWith('varin.builtin.'); const action = builtin ? actions[meta.name] : undefined; return { id: item.contributionId, name: builtin ? meta.name : `ext:${encodeURIComponent(item.contributionId)}:${meta.name}`, sourceLabel: builtin ? undefined : item.contributionId, label: builtin && meta.name === 'schedule' && botWorkbench ? t('arrangements.title') : item.meta.titleKey ? t(item.meta.titleKey) : item.meta.title,
       searchAliases: [meta.name, ...item.meta.keywords], source: item.contributionId.startsWith('varin.builtin.') ? 'varin' : 'extension',

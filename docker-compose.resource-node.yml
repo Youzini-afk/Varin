@@ -1,0 +1,21 @@
+services:
+  varin-node:
+    image: ${VARIN_NODE_IMAGE:-ghcr.io/astrmira/varin-node:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: resource-node
+      args:
+        RUNTIME_BASE_IMAGE: ${VARIN_NODE_BASE_IMAGE:-ghcr.io/astrmira/varin-runtime-slim:latest}
+    init: true
+    user: "1000:1000"
+    ports:
+      - "127.0.0.1:${VARIN_NODE_PORT:-3001}:3000"
+    stop_grace_period: 15s
+    volumes:
+      - varin_node_state:/home/varin/.config/varin
+      - ${VARIN_NODE_WORKSPACE:-./node-workspaces}:/home/varin/workspaces
+    restart: unless-stopped
+
+volumes:
+  varin_node_state:

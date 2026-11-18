@@ -78,6 +78,7 @@ export interface PlatformRouteDependencies {
   os: typeof osModule;
   path: typeof pathModule;
   persistSettings: SettingsRuntime['persistSettings'];
+  changeWorkspaceLocation: SettingsRuntime['changeWorkspaceLocation'];
   varinDataDir: string;
   varinUserConfigRoot: string;
   varinVersion: string;
@@ -137,6 +138,7 @@ export const createPlatformRoutesRuntime = ({
       formatSettingsResponse,
       readSettingsFromDisk,
       persistSettings,
+      changeWorkspaceLocation,
       sanitizeProjects,
       buildAugmentedPath,
       projectConfigRuntime,
@@ -209,6 +211,15 @@ export const createPlatformRoutesRuntime = ({
       } catch (error) {
         console.error('Failed to save Varin settings:', error);
         res.status(500).json({ error: 'Failed to save settings' });
+      }
+    });
+
+    app.post('/api/config/settings/workspace-location', async (req, res) => {
+      try {
+        const result = await changeWorkspaceLocation(req.body);
+        res.status(result.conflict ? 409 : 200).json(result);
+      } catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to save workspace location' });
       }
     });
 

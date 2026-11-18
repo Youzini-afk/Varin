@@ -1,13 +1,13 @@
 /**
  * Authoritative desktop boot outcome types and UI-facing resolver.
  *
- * The Rust backend computes a `DesktopBootOutcome` at startup and injects
+ * The Electron shell computes a `DesktopBootOutcome` at startup and injects
  * it as `window.__VARIN_DESKTOP_BOOT_OUTCOME__`. This module provides
  * pure functions to read that outcome and derive the minimal UI state
  * needed for the loading/chooser/recovery/main decision.
  */
 
-// ── Boot outcome (must match Rust injection) ──
+// ── Boot outcome (must match Electron injection) ──
 
 /**
  * Structured boot outcome type.
@@ -24,6 +24,7 @@ export type DesktopBootOutcome =
   // Main screens - CLI or remote connection is working
   | ({ target: 'local'; status: 'ok' } & DesktopBootAvailability)
   | ({ target: 'remote'; status: 'ok'; hostId: string; url: string } & DesktopBootAvailability)
+  | ({ target: 'remote'; status: 'relay-pending'; hostId: string; url: string } & DesktopBootAvailability)
 
   // First launch - user hasn't made a choice yet
   | ({ target: null; status: 'not-configured' } & DesktopBootAvailability)
@@ -56,11 +57,17 @@ export type DesktopBootViewInput = {
 
 // ── Public API ──
 
+// Window-scoped evidence for the initial render only. It is not a credential
+// or authorization and never changes the saved connection or native outcome.
+type VerifiedRelayBoot = { id: string; stillSelected(): boolean };
+let verifiedRelayBootHost: VerifiedRelayBoot | null = null;
+export const setVerifiedRelayBootHost = (host: VerifiedRelayBoot | null): void => { verifiedRelayBootHost = host; };
+
 /** Valid target values */
 const VALID_TARGETS = ['local', 'remote', null] as const;
 
 /** Valid status values */
-const VALID_STATUSES = ['ok', 'not-configured', 'unreachable', 'incompatible', 'wrong-service', 'missing'] as const;
+const VALID_STATUSES = ['ok', 'relay-pending', 'not-configured', 'unreachable', 'incompatible', 'wrong-service', 'missing'] as const;
 
 /** Return type for `validateBootOutcome`. */
 type ValidationResult =
@@ -99,12 +106,12 @@ function validateBootOutcome(raw: unknown): ValidationResult {
       return { valid: true, outcome: { target: 'local', status: 'ok', ...availability } };
     }
 
-    if (status === 'ok' && target === 'remote') {
+    if ((status === 'ok' || status === 'relay-pending') && target === 'remote') {
       // { target: 'remote'; status: 'ok' } requires hostId and url
       if (typeof record.hostId !== 'string' || typeof record.url !== 'string') {
         return { valid: false };
       }
-      return { valid: true, outcome: { target: 'remote', status: 'ok', hostId: record.hostId, url: record.url, ...availability } };
+      return { valid: true, outcome: { target: 'remote', status, hostId: record.hostId, url: record.url, ...availability } };
     }
 
     if (status === 'unreachable') {
@@ -191,7 +198,7 @@ export function resolveDesktopBootView(
   }
 
   if (outcome.target === 'remote') {
-    if (outcome.status === 'unreachable') {
+    if (outcome.status === 'unreachable' || outcome.status === 'relay-pending') {
       return { screen: 'recovery', variant: 'remote-unreachable', hostId: outcome.hostId, url: outcome.url, ...availability };
     } else if (outcome.status === 'incompatible') {
       return { screen: 'recovery', variant: 'remote-incompatible', hostId: outcome.hostId, url: outcome.url, ...availability };
@@ -213,58 +220,6 @@ export type BootInjectionStatus =
   | 'malformed'
   | 'valid';
 
-export type InitialLoadingState = {
-  isDesktopShell: boolean;
-  runtimeReady: boolean;
-  bootOutcomeKnown: boolean;
-  /**
-   * Whether the resolved boot view is 'main'.
-   * When false (chooser/recovery), splash dismisses on bootOutcomeKnown alone.
-   * When true or absent, splash also requires the selected runtime to be ready.
-   */
-  bootViewIsMain?: boolean;
-};
-
-export type DesktopBootFlowRestartInput = {
-  isDesktopShell: boolean;
-  isDesktopLocalOriginActive: boolean;
-};
-
-/**
- * Whether the initial loading screen can be dismissed.
- *
- * Desktop shells must wait until a valid boot outcome is injected by the native host.
- * For non-main views (chooser, recovery), the splash can dismiss as soon as
- * the outcome is known — runtime readiness is not required in those flows.
- * For main views, both runtime readiness and `bootOutcomeKnown` are required.
- * Non-desktop shells only need the app to be initialized.
- */
-export function canDismissInitialLoading(state: InitialLoadingState): boolean {
-  if (!state.isDesktopShell) {
-    return state.runtimeReady;
-  }
-
-  if (!state.bootOutcomeKnown) {
-    return false;
-  }
-
-  // Non-main boot views (chooser, recovery) can dismiss without waiting for init.
-  if (state.bootViewIsMain === false) {
-    return true;
-  }
-
-  return state.runtimeReady;
-}
-
-/**
- * Boot/recovery UI can render in the desktop startup window before the local
- * desktop HTTP origin is active. In that state, same-origin reloads and
- * `/api/*` requests cannot recover the app, so callers must restart desktop.
- */
-export function shouldRestartDesktopBootFlow(input: DesktopBootFlowRestartInput): boolean {
-  return input.isDesktopShell && !input.isDesktopLocalOriginActive;
-}
-
 /**
  * Read the boot outcome injected by the native desktop host.
  * Returns `null` when not in desktop, when the outcome has not been set yet,
@@ -280,7 +235,11 @@ export function getInjectedBootOutcome(): DesktopBootOutcome | null {
     .__VARIN_DESKTOP_BOOT_OUTCOME__;
 
   const result = validateBootOutcome(raw);
-  return result.valid ? result.outcome : null;
+  if (!result.valid) return null;
+  const outcome = result.outcome;
+  if (outcome.status !== 'relay-pending') return outcome;
+  const confirmed = verifiedRelayBootHost?.id === outcome.hostId && verifiedRelayBootHost.stillSelected();
+  return { ...outcome, status: confirmed ? 'ok' : 'unreachable' };
 }
 
 /**

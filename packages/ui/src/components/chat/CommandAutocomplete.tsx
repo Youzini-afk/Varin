@@ -15,7 +15,7 @@ export interface CommandInfo {
 export type CommandAutocompleteHandle = ComposerMenuHandle;
 export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, {
   additionalCommands?: readonly CommandInfo[]; cwd?: string | null; sessionId?: string | null;
-  api?: ThreadsAPI; identity?: ThreadIdentity; source?: ThreadSource; pendingSource?: ThreadDraftSkillOptions['source']; native?: boolean;
+  api?: ThreadsAPI; identity?: ThreadIdentity; source?: ThreadSource | null; pendingSource?: ThreadDraftSkillOptions['source']; native?: boolean;
   searchQuery: string; onCommandSelect(command: CommandInfo, mode: 'confirm' | 'complete'): void; onClose(): void;
   menuId?: string; onActive?(id?: string): void; children?: React.ReactNode; title?: string; onBack?(): void;
 }>(({ additionalCommands = [], cwd, sessionId, api, identity, source, pendingSource, native = true, searchQuery, onCommandSelect, onClose, menuId = 'composer-commands', onActive, children, title, onBack }, ref) => {

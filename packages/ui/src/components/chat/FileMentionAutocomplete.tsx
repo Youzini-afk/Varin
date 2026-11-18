@@ -18,7 +18,7 @@ export type FileMentionHandle = ComposerMenuHandle;
 export interface ComposerAttachmentCandidate { id: string; name: string; attachment?: Attachment; fileId?: string }
 type FileInfo = { path: string; relativePath: string; name: string; directory?: boolean };
 export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, {
-  source?: ThreadSource; pendingSource?: ThreadDraftSkillOptions['source']; searchQuery: string; workspacePath?: string; api?: ThreadsAPI; identity?: ThreadIdentity;
+  source?: ThreadSource | null; pendingSource?: ThreadDraftSkillOptions['source']; searchQuery: string; workspacePath?: string; api?: ThreadsAPI; identity?: ThreadIdentity;
   attachments?: readonly ComposerAttachmentCandidate[]; fileSelectionDisabled?: string;
   onFileSelect(file: FileInfo): void; onThreadSelect?(identity: ThreadIdentity, name: string): void;
   onAttachmentSelect?(attachment: ComposerAttachmentCandidate): void;

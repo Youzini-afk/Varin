@@ -5,7 +5,6 @@ import { LocalHostRecovery } from '@/components/sections/connections/DesktopLoca
 import { RemoteConnectionForm } from './RemoteConnectionForm';
 import { resolveRecoveryNextStep } from './desktopRecoveryRouting';
 import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
-import { useThreadStore } from '@/stores/useThreadStore';
 
 type RecoveryScreenProps = {
   /** Recovery variant */
@@ -63,7 +62,6 @@ export function RecoveryScreen({
       return;
     }
 
-    await useThreadStore.getState().loadCatalog();
     onRetry?.();
   }, [onRetry]);
 

@@ -36,18 +36,19 @@ export function resolveImageRelease(env, cwd = process.cwd()) {
   assertAncestor(source, env.GITHUB_SHA, cwd);
   const candidate = acceptImageRelease({ eventName: env.GITHUB_EVENT_NAME, ref, sha: source, version: sourceVersion(source, cwd) });
   assertImageReleaseTag(candidate, cwd);
-  return candidate;
+  return { ...candidate, resourceNode: git(['ls-tree', '--name-only', source, '--', 'packages/web/application-host/resource-node.ts'], cwd) !== '' };
 }
 
 export function validateReleaseBuild(result, candidate, toolingSha) {
+  const expectedImages = { ...imageNames, ...(candidate.resourceNode ? { resource_node: 'varin-node' } : {}) };
   if (result?.sourceSha !== candidate.sha || result.toolingSha !== toolingSha
     || !Array.isArray(result.platforms) || [...result.platforms].sort().join() !== 'linux/amd64,linux/arm64'
-    || Object.keys(result.images ?? {}).sort().join() !== Object.keys(imageNames).sort().join()) {
+    || Object.keys(result.images ?? {}).sort().join() !== Object.keys(expectedImages).sort().join()) {
     throw new Error('Saved image build does not match this release and both Linux architectures');
   }
   for (const [key, reference] of Object.entries(result.images)) {
     if (!/^[a-z0-9][a-z0-9._:/-]*@sha256:[a-f0-9]{64}$/.test(reference)) throw new Error(`Missing immutable ${key} digest`);
-    if (key.endsWith('_app') && !reference.startsWith(`${imageRegistry}/${imageNames[key]}@`)) throw new Error(`Unexpected ${key} repository`);
+    if ((key.endsWith('_app') || key === 'resource_node') && !reference.startsWith(`${imageRegistry}/${expectedImages[key]}@`)) throw new Error(`Unexpected ${key} repository`);
   }
   return result.images;
 }
@@ -128,7 +129,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const restored = env.INPUT_RESUME_RUN_ID ? loadReleaseBuild({ runId: env.INPUT_RESUME_RUN_ID,
       runAttempt: env.INPUT_RESUME_RUN_ATTEMPT, candidate, toolingSha: env.GITHUB_SHA },
     { json: endpoint => JSON.parse(gh(endpoint)), zip: endpoint => gh(endpoint, true) }) : null;
-    const outputs = { source_sha: candidate.sha, version: candidate.version, release_ref: candidate.ref,
+    const outputs = { source_sha: candidate.sha, version: candidate.version, release_ref: candidate.ref, expects_resource_node: String(candidate.resourceNode),
       mode: restored ? 'resume' : 'build', ...restored?.images,
       build_run_id: restored?.runId ?? '', build_run_attempt: restored?.runAttempt ?? '', build_tooling_sha: restored?.toolingSha ?? '' };
     fs.appendFileSync(env.GITHUB_OUTPUT, Object.entries(outputs).map(([key, value]) => `${key}=${value}\n`).join(''));

@@ -103,7 +103,7 @@ fn existing(db: &Connection, command: &NavigationCommand) -> Result<Option<Navig
     }
     Ok(None)
 }
-fn idle(db: &Connection, thread: &str, branch: &str) -> Result<Option<String>> {
+pub(super) fn idle(db: &Connection, thread: &str, branch: &str) -> Result<Option<String>> {
     context_jobs::require_regular_branch(db, branch)?;
     let (owner, head, active): (String, Option<String>, Option<String>) = db
         .query_row(
@@ -293,6 +293,7 @@ impl Catalog {
             });
             if let Some(capture) = &command.preserved_plan { creation["planCapture"] = serde_json::to_value(capture)?; }
             event(&tx, &target, 1, "branch.created", creation)?;
+            branch_workspace::inherit_at(&tx, &command.branch_id, &target, command.expected_head_id.as_deref())?;
         }
         if let Some((checkpoint, reference)) = checkpoint {
             context::publish_metadata(&tx, &checkpoint, &reference)?;
@@ -318,6 +319,9 @@ impl Catalog {
         )?;
         if changed != 1 {
             return Err(RuntimeError::Conflict("navigation branch changed".into()));
+        }
+        if command.expected_head_id != command.target_head_id {
+            branch_workspace::inherit_at(&tx, &command.branch_id, &command.branch_id, command.target_head_id.as_deref())?;
         }
         let result = NavigationReceipt {
             key: command.key.clone(),

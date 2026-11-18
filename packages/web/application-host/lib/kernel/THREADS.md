@@ -296,3 +296,27 @@ HTTP client, authenticated registered routes and actual launch-consumer logic wi
 facts. UI behavior tests cover retained drafts, conflicts, uncertain writes and late views. Native
 Goal authority is separately exercised in Rust; these checks do not claim an unexecuted product
 Host/kernel transport round trip. Historical assets are preserved without an automatic migration.
+
+### Confirmed branch workspace
+
+`sources.setDefault(identity, {expectedRevision, source})` selects an admitted live
+root or explicit chat-only for an idle, owner-controlled native root branch. Read
+`branch.workspace_default` from the Thread projection; a missing record (revision
+zero) still follows the established creation/launch inheritance path. An object
+with `source: null` is a confirmed chat-only selection. The command stores a
+source identity, not the caller's tool list or a live grant. A competing selection,
+active foreground Run, activating input, or isolated execution view is not
+retargeted. Refresh on a revision conflict; do not auto-repeat a switch.
+
+For an idle branch, the composer looks up files, directory references and
+skills using the confirmed selection. The Host re-admits that source for the
+next user submission and prepares the active project's instructions and notes.
+The Catalog checks the branch revision, head and prepared context in the same
+transaction that admits the next Run. The user can still choose a different
+source or chat-only for one send. The selected source belongs to that Run and
+the durable branch preference applies to later sends that inherit it.
+
+An automatic activation whose previous launch uses a different source waits
+until a foreground submission prepares a matching launch or the user restores
+the previous default. The branch preference applies between Runs. Each
+admitted request and Operation retains its original execution source.

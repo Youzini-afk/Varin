@@ -1035,6 +1035,9 @@ export class AgentRuntimeClient {
   threadCatalog(query: import('./protocol.generated.js').ThreadCatalogQuery = {}, signal?: AbortSignal): Promise<ThreadSummary[]> {
     return this.kernel.agentRuntimeRequest('runtime.thread.catalog.list', query, signal);
   }
+  setBranchWorkspace(input: import('./protocol.generated.js').SetBranchWorkspace, signal?: AbortSignal): Promise<import('./protocol.generated.js').BranchWorkspace> {
+    return this.kernel.agentRuntimeRequest('runtime.branch.workspace.set', input, signal);
+  }
   updateThread(input: import('./protocol.generated.js').ThreadMetadataUpdateParams, signal?: AbortSignal): Promise<ThreadSummary> {
     return this.kernel.agentRuntimeRequest('runtime.thread.update', input, signal);
   }

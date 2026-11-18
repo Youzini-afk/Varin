@@ -3,16 +3,22 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { BuildCache } from '../../../scripts/build-cache.mjs';
 import { repository, productRoot, prepareRuntime, prepareFrontend, prepareHost, prepareKernel, runBuild, resolveBunExecutable } from '../../../scripts/build-products.mjs';
+import { assertDesktopTarget } from './desktop-distribution.mjs';
 import { stageRuntime } from './stage-runtime.mjs';
 import { stageDesktopUi } from './build-web-assets.mjs';
 
 /** One product preparation owner shared by local packaging and release jobs. */
-export async function prepareDesktopProduct({ platform, architecture }) {
-  const target = `${platform}-${architecture}`;
+export async function prepareDesktopProduct({ platform, architecture, role = 'full' }) {
+  assertDesktopTarget(role, platform, architecture);
+  const full = role === 'full';
+  const target = `${full ? '' : 'light-'}${platform}-${architecture}`;
+  const directory = path.join(productRoot, `desktop-${target}`, 'app');
+  const bundleDirectory = full ? path.join(repository, 'packages/electron/dist-bundle') : path.join(productRoot, 'desktop-light-bundle');
+
   const cache = new BuildCache(repository);
   const runtime = await prepareRuntime();
   const frontend = await prepareFrontend();
-  if (platform === 'linux' && architecture === 'x64') {
+  if (full && platform === 'linux' && architecture === 'x64') {
     const guest = path.join(repository, 'packages/computer-driver/linux/guest-bundle-x64');
     const revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8', windowsHide: true }).trim();
     let manifest;
@@ -31,24 +37,29 @@ export async function prepareDesktopProduct({ platform, architecture }) {
       build() { runBuild('scripts/build-vm-guest-bundle.mjs'); },
     });
   }
-  const host = await prepareHost(platform, architecture);
-  const kernel = await prepareKernel(platform, architecture);
-  runBuild('packages/electron/scripts/prepare-native-runtime.mjs', [], { VARIN_TARGET_PLATFORM: platform, VARIN_TARGET_ARCH: architecture });
+  const host = full ? await prepareHost(platform, architecture) : null;
+  const kernel = full ? await prepareKernel(platform, architecture) : null;
+  if (full) runBuild('packages/electron/scripts/prepare-native-runtime.mjs', [], { VARIN_TARGET_PLATFORM: platform, VARIN_TARGET_ARCH: architecture });
   const bundle = await cache.task(`desktop-bundle-${target}`, {
-    inputs: ['package.json', 'bun.lock', 'tsconfig.base.json', 'packages/electron', 'packages/application-client/src', 'packages/ui/src', 'scripts/build-products.mjs', 'scripts/build-cache.mjs'],
-    values: { runtime: runtime.digest, tools: runtime.values, updaterFixture: process.env.VARIN_UPDATER_E2E_BUILD ?? '' },
-    outputs: [path.join(repository, 'packages/electron/dist-bundle')],
-    build() { execFileSync(resolveBunExecutable(), ['run', '--cwd', 'packages/electron', 'bundle:main'], { cwd: repository, stdio: 'inherit', windowsHide: true }); },
+    inputs: ['package.json', 'bun.lock', 'tsconfig.base.json', 'packages/electron', 'packages/application-client/src', 'packages/ui/src', 'packages/web/application-host/lib/connections/hosts.ts',
+      'packages/web/application-host/lib/platform', 'scripts/build-products.mjs', 'scripts/build-cache.mjs'],
+    values: { role, runtime: runtime.digest, tools: runtime.values, updaterFixture: process.env.VARIN_UPDATER_E2E_BUILD ?? '' },
+    outputs: [bundleDirectory],
+    build() { execFileSync(resolveBunExecutable(), ['run', '--cwd', 'packages/electron', 'bundle:main', `--role=${role}`], { cwd: repository, stdio: 'inherit', windowsHide: true }); },
   });
-  const directory = path.join(productRoot, `desktop-${target}`, 'app');
   await cache.task(`desktop-runtime-${target}`, {
     inputs: ['package.json', 'bun.lock', 'bun-patches', 'packages/electron/package.json', 'packages/electron/bootstrap.mjs',
       'packages/electron/scripts/stage-runtime.mjs', 'packages/electron/scripts/node-module-file-policy.cjs',
       'packages/electron/scripts/prepare-trivium-runtime.mjs', 'packages/electron/scripts/patch-trivium-arm64-loader.mjs'],
-    values: { platform, architecture, host: host.digest, bundle: bundle.digest, runtime: runtime.digest }, outputs: [directory],
-    build() { return stageRuntime({ repository, destination: directory, hostDirectory: host.directory, platform, architecture }); },
+    values: { role, platform, architecture, host: host?.digest, bundle: bundle.digest, runtime: runtime.digest }, outputs: [directory],
+    build() { return stageRuntime({ repository, destination: directory, bundleDirectory, hostDirectory: host?.directory, platform, architecture, role }); },
   });
   const layout = JSON.parse(await fs.readFile(path.join(directory, 'runtime-layout.json'), 'utf8'));
+  if (!full) {
+    const resources = path.join(path.dirname(directory), 'resources');
+    await stageDesktopUi(frontend.directory, resources);
+    return { directory, unpackPatterns: layout.unpackPatterns, webDist: path.join(resources, 'web-dist') };
+  }
   await stageDesktopUi(frontend.directory);
   const stagedKernel = path.join(repository, 'packages/electron/resources/kernel');
   await fs.rm(stagedKernel, { recursive: true, force: true });

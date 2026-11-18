@@ -17,21 +17,12 @@ import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
-import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp } from '@/lib/desktop';
-import {
-  getInjectedBootOutcome,
-  getBootInjectionStatus,
-  resolveDesktopBootView,
-  canDismissInitialLoading,
-  shouldRestartDesktopBootFlow,
-  type BootInjectionStatus,
-  type DesktopBootView,
-} from '@/lib/desktopBoot';
+import { isDesktopShell } from '@/lib/desktop';
+import type { DesktopBootView } from '@/lib/desktopBoot';
 import {
   desktopWorkspaceIsOperable,
   resolveDesktopWorkspaceView,
 } from '@/lib/desktopWorkspaceView';
-import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { subscribeRuntimeEndpointChanged } from '@varin/application-client';
@@ -50,7 +41,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import type { RuntimeAPIs } from '@varin/application-client';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { isMobileAppRuntime, useMobileAppViewport } from '@/lib/mobileAppRuntime';
@@ -73,11 +63,6 @@ import {
   WorkbenchProfileBridge,
 } from '@/lib/extensions/workbench-registry';
 import { WorkbenchShellHost } from '@/lib/extensions/workbench-shell-host';
-
-// Lazy-loaded heavy views — loaded on demand to reduce initial bundle size.
-const OnboardingScreen = lazyWithChunkRecovery(() =>
-  import('@/components/onboarding/OnboardingScreen').then((m) => ({ default: m.OnboardingScreen })),
-);
 
 const AboutDialogWrapper: React.FC = () => {
   const isAboutDialogOpen = useUIStore((s) => s.isAboutDialogOpen);
@@ -114,6 +99,7 @@ const RuntimeInitializationRecovery: React.FC<{
 };
 
 type AppProps = {
+  bootView: Extract<DesktopBootView, { screen: 'main' }> | null;
   apis: RuntimeAPIs;
 };
 
@@ -200,7 +186,7 @@ const EmbeddedSessionChatContent: React.FC<{
   );
 };
 
-function App({ apis }: AppProps) {
+function App({ apis, bootView }: AppProps) {
   const { t } = useI18n();
 
   React.useEffect(() => {
@@ -223,15 +209,6 @@ function App({ apis }: AppProps) {
   const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
   const enableMobileAppViewport = React.useMemo(() => isMobileAppRuntime(), []);
-  const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
-    return getBootInjectionStatus();
-  });
-  const [bootView, setBootView] = React.useState<DesktopBootView | null>(() => {
-    const outcome = getInjectedBootOutcome();
-    return outcome !== null
-      ? resolveDesktopBootView({ isDesktopShell: true, bootOutcome: outcome })
-      : null;
-  });
   const appReadyDispatchedRef = React.useRef(false);
   const embeddedSessionChat = React.useMemo<EmbeddedSessionChatConfig | null>(() => readEmbeddedSessionChatConfig(), []);
   usePluginInstallLinks(!embeddedSessionChat);
@@ -282,8 +259,6 @@ function App({ apis }: AppProps) {
 
   useAppFontEffects();
 
-  const bootOutcomeKnown = bootInjectionStatus === 'valid';
-  const bootViewIsMain = bootView?.screen === 'main';
   const desktopWorkspaceView = React.useMemo(
     () =>
       isDesktopRuntime
@@ -299,52 +274,28 @@ function App({ apis }: AppProps) {
     ? desktopWorkspaceIsOperable(desktopWorkspaceView ?? 'loading', isSwitchingDirectory)
     : catalogLoaded;
   const needsWorkbench = !embeddedSessionChat
-    && !(isDesktopRuntime && bootView && bootView.screen !== 'main')
     && desktopWorkspaceView !== 'catalog-recovery'
     && !(!isDesktopRuntime && !catalogLoaded && catalogError);
 
-  // Splash dismissal: use the authoritative loading gate from desktopBoot.
-  // Desktop shells strictly require a valid boot outcome before dismissing.
-  // Non-main outcomes (chooser/recovery) can dismiss without waiting for init.
   React.useEffect(() => {
     if (needsWorkbench && !workbenchReady) return;
-    if (!canDismissInitialLoading({
-      isDesktopShell: isDesktopRuntime,
-      runtimeReady: runtimeReady || desktopWorkspaceView === 'catalog-recovery' || (!isDesktopRuntime && Boolean(catalogError)),
-      bootOutcomeKnown,
-      bootViewIsMain,
-    })) {
-      return;
-    }
+    if (!runtimeReady && desktopWorkspaceView !== 'catalog-recovery' && (isDesktopRuntime || !catalogError)) return;
 
     // Held briefly so the mark's entrance is seen rather than skipped. A start fast enough to
     // dismiss instantly reads as a flicker, which looks worse than a moment of waiting.
     const timer = setTimeout(dismissInitialSplash, 150);
 
     return () => clearTimeout(timer);
-  }, [bootOutcomeKnown, bootViewIsMain, desktopWorkspaceView, isDesktopRuntime, runtimeReady, catalogError, needsWorkbench, workbenchReady]);
-
-  // Deterministic malformed handling: name the failure on the splash so the user sees something
-  // specific, but do NOT dismiss it. Only a valid boot outcome dismisses.
-  React.useEffect(() => {
-    if (!isDesktopRuntime || bootInjectionStatus !== 'malformed') {
-      return;
-    }
-    setInitialSplashStatus(t('splash.status.desktopFailed'));
-  }, [isDesktopRuntime, bootInjectionStatus, t]);
+  }, [desktopWorkspaceView, isDesktopRuntime, runtimeReady, catalogError, needsWorkbench, workbenchReady]);
 
   // The splash has no measurable progress, only a sequence of gates, so it names the gate it is
   // waiting on instead of inventing a percentage.
   React.useEffect(() => {
     if (runtimeReady && (!needsWorkbench || workbenchReady)) return;
-    if (isDesktopRuntime && !bootOutcomeKnown) {
-      setInitialSplashStatus(t('splash.status.startingDesktop'));
-      return;
-    }
     setInitialSplashStatus(
       catalogLoaded ? t('splash.status.preparingWorkspace') : t('splash.status.connectingRuntime'),
     );
-  }, [bootOutcomeKnown, isDesktopRuntime, catalogLoaded, runtimeReady, needsWorkbench, workbenchReady, t]);
+  }, [catalogLoaded, runtimeReady, needsWorkbench, workbenchReady, t]);
 
   React.useEffect(() => {
     if (!embeddedSessionChat || typeof window === 'undefined') {
@@ -481,17 +432,14 @@ function App({ apis }: AppProps) {
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (isDesktopRuntime && !bootView) return;
-    const bootSurfaceReady =
-      bootView?.screen === 'chooser' || bootView?.screen === 'recovery';
-    if (!runtimeReady && !bootSurfaceReady) return;
+    if (!runtimeReady) return;
     if (needsWorkbench && !workbenchReady) return;
     if (isSwitchingDirectory) return;
     if (appReadyDispatchedRef.current) return;
     appReadyDispatchedRef.current = true;
     (window as unknown as { __varinAppReady?: boolean }).__varinAppReady = true;
     window.dispatchEvent(new Event('varin:app-ready'));
-  }, [bootView, desktopWorkspaceView, isDesktopRuntime, isSwitchingDirectory, runtimeReady, needsWorkbench, workbenchReady]);
+  }, [isSwitchingDirectory, runtimeReady, needsWorkbench, workbenchReady]);
 
   // Session attention now handled by notification-store via SSE events (session.idle/session.error)
 
@@ -506,134 +454,6 @@ function App({ apis }: AppProps) {
   useMenuActions({ enabled: !embeddedSessionChat });
 
   useTraySync({ enabled: !embeddedSessionChat && catalogLoaded });
-
-  // Poll for the injected boot outcome until it becomes available (desktop only).
-  // The Rust backend sets window.__VARIN_DESKTOP_BOOT_OUTCOME__ once the
-  // sidecar reaches a stable state. We poll with exponential backoff to handle
-  // potential race conditions during startup and config writes.
-  React.useEffect(() => {
-    if (!isDesktopRuntime || bootInjectionStatus !== 'not-injected') {
-      return;
-    }
-
-    let cancelled = false;
-    let attempts = 0;
-    const BASE_INTERVAL = 200;
-    const MAX_INTERVAL = 2000;
-    const MAX_ATTEMPTS = 50; // 10 seconds total (200ms * 50 with exponential backoff cap)
-
-    const pollWithBackoff = () => {
-      if (cancelled) return;
-
-      attempts++;
-      const status = getBootInjectionStatus();
-
-      if (status !== 'not-injected') {
-        cancelled = true;
-        setBootInjectionStatus(status);
-
-        if (status === 'valid') {
-          const outcome = getInjectedBootOutcome();
-          if (outcome) {
-            setBootView(resolveDesktopBootView({ isDesktopShell: true, bootOutcome: outcome }));
-          }
-        }
-        // If status is 'malformed', we keep the splash visible with error text
-        // handled by the separate useEffect below
-        return;
-      }
-
-      // Exponential backoff with cap
-      const nextInterval = Math.min(BASE_INTERVAL * Math.pow(1.1, attempts), MAX_INTERVAL);
-
-      if (attempts >= MAX_ATTEMPTS) {
-        // Max attempts reached: keep polling, but say so on the splash rather than leaving the user
-        // in front of a cover with no explanation.
-        setInitialSplashStatus(t('splash.status.desktopSlow'));
-      }
-
-      window.setTimeout(pollWithBackoff, nextInterval);
-    };
-
-    // Start polling
-    window.setTimeout(pollWithBackoff, BASE_INTERVAL);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isDesktopRuntime, bootInjectionStatus, t]);
-
-  const handleDesktopBootDismiss = React.useCallback(async () => {
-    if (shouldRestartDesktopBootFlow({
-      isDesktopShell: isDesktopShell(),
-      isDesktopLocalOriginActive: isDesktopLocalOriginActive(),
-    })) {
-      await restartDesktopApp();
-      return;
-    }
-
-    window.location.reload();
-  }, []);
-
-  const handleRuntimeAvailable = React.useCallback(async () => {
-    try {
-      await useThreadStore.getState().loadCatalog();
-    } catch (catalogError) {
-      console.warn('[Varin] failed to load the Thread catalog after connecting to a Host:', catalogError);
-    }
-    setBootView((current) => current?.screen === 'main' ? current : { screen: 'main' });
-  }, []);
-
-  const renderDesktopOnboarding = (screen: React.ReactNode) => (
-    <ErrorBoundary onError={dismissInitialSplash}>
-      <RuntimeAPIProvider apis={apis}>
-        <div className="h-full text-foreground bg-background">
-          <React.Suspense fallback={<div className="h-full" />}>
-            {screen}
-          </React.Suspense>
-        </div>
-      </RuntimeAPIProvider>
-    </ErrorBoundary>
-  );
-
-  // Map boot outcome kind to recovery variant
-  const mapBootViewToRecoveryVariant = (view: DesktopBootView): RecoveryVariant | undefined => {
-    if (view.screen === 'recovery') {
-      return view.variant;
-    }
-    return undefined;
-  };
-
-  // Desktop boot view routing.
-  // When the boot outcome resolves to a non-main screen (chooser, recovery),
-  // render OnboardingScreen with appropriate mode/variant.
-  if (isDesktopRuntime && bootView && bootView.screen !== 'main') {
-    // First-launch chooser
-    if (bootView.screen === 'chooser') {
-      return renderDesktopOnboarding(
-        <OnboardingScreen
-          mode="first-launch"
-          localAvailable={bootView.localAvailable !== false}
-          onRuntimeAvailable={handleRuntimeAvailable}
-        />,
-      );
-    }
-
-    // Recovery screens
-    const recoveryVariant = mapBootViewToRecoveryVariant(bootView);
-    const hostUrl = bootView.screen === 'recovery' && 'url' in bootView ? bootView.url : undefined;
-
-    return renderDesktopOnboarding(
-      <OnboardingScreen
-        mode="recovery"
-        recoveryVariant={recoveryVariant}
-        recoveryHostUrl={hostUrl}
-        recoveryHostLabel={undefined}
-        localAvailable={bootView.localAvailable !== false}
-        onRuntimeAvailable={handleDesktopBootDismiss}
-      />,
-    );
-  }
 
   if (embeddedSessionChat) {
     return (

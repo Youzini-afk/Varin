@@ -34,7 +34,7 @@ test('candidate computation overlaps quality but final release promotion require
     if (id === 'promote') assert.ok(dependencies.includes('source-quality'), 'Final tags require qualification');
     else assert.ok(!dependencies.includes('source-quality'), 'Candidate computation must overlap qualification');
   }
-  for (const name of ['build-images', 'source-quality', 'smoke-toolbelt', 'smoke-standard']) {
+  for (const name of ['build-images', 'source-quality', 'smoke-toolbelt', 'smoke-standard', 'smoke-resource-node']) {
     assert.ok(release.jobs.promote.needs.includes(name), `Promotion lacks ${name} evidence`);
   }
 });
@@ -118,6 +118,22 @@ test('default local builds follow a published release base, not a retired main a
   }
 });
 
+test('node Compose is separate and its source or smoke changes require container checks', async () => {
+  const compose = parse(fs.readFileSync(new URL('../docker-compose.resource-node.yml', import.meta.url), 'utf8'));
+  assert.deepEqual(Object.keys(compose.services), ['varin-node']);
+  assert.deepEqual(Object.keys(compose.volumes), ['varin_node_state']);
+  const service = compose.services['varin-node'];
+  assert.equal(service.build.target, 'resource-node');
+  assert.equal(service.user, '1000:1000');
+  assert.ok(service.ports.every(bind => bind.startsWith('127.0.0.1:')));
+  assert.ok(service.volumes.some(mount => mount.startsWith('varin_node_state:')));
+  assert.equal(service.environment?.VARIN_UI_PASSWORD, undefined);
+  const { classifyChanges, requiredJobs } = await import('./ci-scope.mjs');
+  for (const file of ['docker-compose.resource-node.yml', 'scripts/smoke-container-resource-node.mjs', 'packages/web/application-host/resource-node.ts']) {
+    assert.equal(requiredJobs(classifyChanges([file]))['container-check'], true);
+  }
+});
+
 
 test('release callers preserve exact build identities, explicit overrides and immutable output routing', () => {
   const build = release.jobs['build-images'];
@@ -136,6 +152,8 @@ test('release callers preserve exact build identities, explicit overrides and im
   }
   assert.equal(promotion.env.VARIN_SLIM_BASE_IMAGE, "${{ needs.candidate.outputs.mode == 'resume' && needs.candidate.outputs.slim_base || needs.build-images.outputs.slim_base }}");
   assert.equal(promotion.env.VARIN_TOOLBELT_BASE_IMAGE, "${{ needs.candidate.outputs.mode == 'resume' && needs.candidate.outputs.toolbelt_base || needs.build-images.outputs.toolbelt_base }}");
+  assert.equal(promotion.env.VARIN_RESOURCE_NODE_IMAGE, release.jobs['smoke-resource-node'].env.IMAGE_REF);
+  assert.equal(release.jobs['smoke-resource-node'].permissions.packages, 'read');
   assert.equal(promotion.env.VARIN_RELEASE_SOURCE_SHA, build.with.source_sha);
   assert.equal(build.if, "needs.candidate.outputs.mode == 'build'");
   assert.equal(release.jobs.candidate.permissions.actions, 'read');
@@ -146,16 +164,18 @@ test('failed, cancelled or skipped qualification cannot promote already-built re
   const expression = release.jobs.promote.if.slice(3, -2).replace(/needs\.([\w-]+)/g, 'results["$1"]').replace('!cancelled()', 'true');
   const evaluate = results => Function('results', `return (${expression});`)(results);
   const success = Object.fromEntries(release.jobs.promote.needs.map(name => [name, { result: 'success' }]));
-  success.candidate.outputs = { mode: 'build' };
+  success.candidate.outputs = { mode: 'build', expects_resource_node: 'true' };
   assert.equal(evaluate(success), true);
   for (const name of release.jobs.promote.needs) for (const result of ['failure', 'cancelled', 'skipped', undefined]) {
     assert.equal(evaluate({ ...success, [name]: { result } }), false, `${name}: ${result}`);
   }
-  const resume = { ...success, candidate: { result: 'success', outputs: { mode: 'resume' } }, 'build-images': { result: 'skipped' } };
+  const resume = { ...success, candidate: { result: 'success', outputs: { mode: 'resume', expects_resource_node: 'true' } }, 'build-images': { result: 'skipped' } };
   assert.equal(evaluate(resume), true);
-  for (const name of ['candidate', 'source-quality', 'smoke-standard', 'smoke-toolbelt']) {
+  for (const name of ['candidate', 'source-quality', 'smoke-standard', 'smoke-toolbelt', 'smoke-resource-node']) {
     assert.equal(evaluate({ ...resume, [name]: { ...resume[name], result: 'failure' } }), false);
   }
+  const historic = { ...resume, candidate: { result: 'success', outputs: { mode: 'resume', expects_resource_node: 'false' } }, 'smoke-resource-node': { result: 'skipped' } };
+  assert.equal(evaluate(historic), true, 'An older exact release has no resource-node candidate');
 });
 
 

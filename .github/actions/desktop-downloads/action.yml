@@ -1,6 +1,9 @@
 name: Varin desktop dependencies
 description: Restore verified binary downloads before installing dependencies and preparing desktop tooling
 inputs:
+  desktop-role:
+    description: Desktop product (Light does not use the full Windows installer tools or drivers)
+    default: 'full'
   electron:
     description: Prepare the native Electron runtime
     default: 'true'
@@ -24,7 +27,7 @@ runs:
           ~/Library/Caches/electron-builder
           ~/AppData/Local/electron-builder/Cache
           packages/electron/resources/workspace-component
-        key: desktop-downloads-${{ runner.os }}-${{ runner.arch }}-${{ inputs.electron }}-${{ inputs.tools }}-${{ inputs.package }}-${{ hashFiles('bun.lock', 'packages/electron/resources/workspace-component.json') }}
+        key: desktop-downloads-${{ runner.os }}-${{ runner.arch }}-${{ inputs.electron }}-${{ inputs.tools }}-${{ inputs.package }}-${{ inputs.desktop-role }}-${{ hashFiles('bun.lock', 'packages/electron/resources/workspace-component.json') }}
         restore-keys: desktop-downloads-${{ runner.os }}-${{ runner.arch }}-
     - shell: bash
       run: bun install --frozen-lockfile
@@ -32,6 +35,7 @@ runs:
         ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     - shell: bash
       env:
+        VARIN_DESKTOP_ROLE: ${{ inputs.desktop-role }}
         PREPARE_ELECTRON: ${{ inputs.electron }}
         PREPARE_TOOLS: ${{ inputs.tools }}
         PREPARE_PACKAGE: ${{ inputs.package }}

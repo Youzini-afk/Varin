@@ -71,6 +71,7 @@ interface ClientAuthController {
 }
 
 interface UiAuthOptions {
+  dataDir?: string;
   clientAuthController?: ClientAuthController | null;
   cookieName?: string;
   getServerId?: () => Promise<string | null>;
@@ -473,18 +474,16 @@ const normalizePassword = (candidate: unknown): string => {
 
 const isTrustedDeviceRequest = (value: unknown): boolean => value === true;
 
-const VARIN_DATA_DIR = resolveVarinDataDir(process);
-const JWT_SECRET_FILE = path.join(VARIN_DATA_DIR, 'jwt-secret');
-
-function getOrCreateJwtSecret(): Uint8Array {
+function getOrCreateJwtSecret(dataDir: string): Uint8Array {
+  const secretFile = path.join(dataDir, 'jwt-secret');
   const envSecret = process.env.VARIN_JWT_SECRET;
   if (envSecret) {
     return new TextEncoder().encode(envSecret);
   }
 
   try {
-    if (fs.existsSync(JWT_SECRET_FILE)) {
-      return new TextEncoder().encode(fs.readFileSync(JWT_SECRET_FILE, 'utf8').trim());
+    if (fs.existsSync(secretFile)) {
+      return new TextEncoder().encode(fs.readFileSync(secretFile, 'utf8').trim());
     }
   } catch (e) {
     console.warn('[JWT] Failed to read secret file:', errorMessage(e));
@@ -492,9 +491,9 @@ function getOrCreateJwtSecret(): Uint8Array {
 
   const secret = crypto.randomBytes(32).toString('hex');
   try {
-    fs.mkdirSync(VARIN_DATA_DIR, { recursive: true });
-    fs.writeFileSync(JWT_SECRET_FILE, secret, { mode: 0o600 });
-    console.log('[JWT] Generated and persisted new secret to', JWT_SECRET_FILE);
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(secretFile, secret, { mode: 0o600 });
+    console.log('[JWT] Generated and persisted new secret to', secretFile);
   } catch (e) {
     console.warn('[JWT] Failed to persist secret:', errorMessage(e));
   }
@@ -502,18 +501,20 @@ function getOrCreateJwtSecret(): Uint8Array {
   return new TextEncoder().encode(secret);
 }
 
-function persistJwtSecret(secret: string): Uint8Array {
+function persistJwtSecret(secret: string, dataDir: string): Uint8Array {
+  const secretFile = path.join(dataDir, 'jwt-secret');
   if (process.env.VARIN_JWT_SECRET) {
     const error = Object.assign(new Error('Global sign-out is unavailable while VARIN_JWT_SECRET is set'), { statusCode: 400 });
     throw error;
   }
 
-  fs.mkdirSync(VARIN_DATA_DIR, { recursive: true });
-  fs.writeFileSync(JWT_SECRET_FILE, secret, { mode: 0o600 });
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(secretFile, secret, { mode: 0o600 });
   return new TextEncoder().encode(secret);
 }
 
 export const createUiAuth = ({
+  dataDir = resolveVarinDataDir(process),
   password,
   cookieName = SESSION_COOKIE_NAME,
   sessionTtlMs = SESSION_TTL_MS,
@@ -557,7 +558,7 @@ export const createUiAuth = ({
     return res.json({ signedOut: true });
   };
   const normalizedPassword = normalizePassword(password);
-  let jwtSecret = getOrCreateJwtSecret();
+  let jwtSecret = getOrCreateJwtSecret(dataDir);
   const verifySessionPrincipal = async (token: string | null): Promise<string | null> => {
     if (!token) return null;
     try {
@@ -932,7 +933,7 @@ export const createUiAuth = ({
 
   const rotateJwtSecret = (): void => {
     const nextSecret = crypto.randomBytes(32).toString('hex');
-    jwtSecret = persistJwtSecret(nextSecret);
+    jwtSecret = persistJwtSecret(nextSecret, dataDir);
     requestSessions = new WeakMap();
     requestClients = new WeakMap();
     requestBearers = new WeakMap();

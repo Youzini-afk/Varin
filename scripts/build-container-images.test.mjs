@@ -71,6 +71,25 @@ test('read-only validation can only push loopback candidates and cannot export p
   }
 });
 
+test('resource node is a separate stage and exact-source candidate, without altering existing application targets', () => {
+  const old = containerBuildConfig({ ...input, publication: 'check' });
+  const current = containerBuildConfig({ ...input, publication: 'check', resourceNode: true, multiPlatform: true });
+  const ordinary = containerBakePlan(old, 'applications', bases);
+  const withNode = containerBakePlan(current, 'applications', bases);
+  assert.deepEqual(withNode.group.default.targets, ['standard_app', 'resource_node']);
+  assert.deepEqual({ ...withNode.target.standard_app, platforms: ['linux/amd64'] }, ordinary.target.standard_app);
+  const role = withNode.target.resource_node;
+  assert.equal(role.target, 'resource-node');
+  assert.equal(role.args.RUNTIME_BASE_IMAGE, bases.slim_base);
+  assert.equal(role.args.VARIN_SOURCE_REVISION, sha);
+  assert.deepEqual(role.platforms, ['linux/amd64', 'linux/arm64']);
+  assert.deepEqual(role.tags, ['localhost:5000/varin-node:candidate-12-1']);
+  assert.equal(role['cache-to'], undefined);
+  const release = containerBuildConfig({ ...input, publication: 'release', sourceSha: tooling, ref: 'refs/tags/v0.9.39', resourceNode: true });
+  assert.deepEqual(containerBakePlan(release, 'applications', bases).target.resource_node.tags, ['ghcr.io/astrmira/varin-node:candidate-12-1']);
+  assert.equal(containerBakePlan(containerBuildConfig({ ...input, resourceNode: true }), 'applications', bases).target.resource_node, undefined);
+});
+
 test('base overrides skip only their own build and retain the exact resolved companion reference', async t => {
   const outputDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-container-plan-'));
   t.after(() => fs.rmSync(outputDirectory, { recursive: true, force: true }));

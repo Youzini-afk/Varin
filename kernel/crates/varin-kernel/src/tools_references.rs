@@ -28,7 +28,7 @@ impl KernelToolExecutor {
                 let target: FileTarget = refs::resolve(&catalog, ReferenceKind::File, &reference)?;
                 match target {
                     FileTarget::Attachment {..} => return Err(ExecutionError::new("immutable_attachment", "Read the delivered file with file_read, or select a writable path for a new output.")),
-                    FileTarget::Observation {source,path,read_version,format} => {
+                    FileTarget::Observation {source,path,read_version,format,..} => {
                         refs::require_source(&source, &self.binding.source_selection().map_err(ExecutionError::from)?)?;
                         let fields = args.as_object_mut().expect("typed ref object");
                         fields.remove("ref");
@@ -96,7 +96,7 @@ impl KernelToolExecutor {
             ResourceOperation::FileRead(args) => {
                 let Some(version) = output.data["readVersion"].as_str() else { return Ok(()); };
                 let format = output.data["content"].get("format").cloned().map(serde_json::from_value).transpose().map_err(|e|ExecutionError::new("resource_reference",e.to_string()))?;
-                let target = FileTarget::Observation { source:source.clone(),path:args.path.clone(),read_version:version.into(),format };
+                let target = FileTarget::Observation { source:source.clone(),path:args.path.clone(),read_version:version.into(),format,location:self.resources.read_location.clone() };
                 let reference = refs::register(&mut catalog,ReferenceKind::File,&owner,&target,&context.run_id)?;
                 projected["ref"] = json!(reference);
                 if let Some(object) = projected.as_object_mut() { object.remove("source"); object.remove("readVersion"); }
@@ -116,7 +116,7 @@ impl KernelToolExecutor {
             ResourceOperation::FileMutation(mutation) => {
                 if let Some(version)=output.data["readVersion"].as_str() {
                     let format=output.data.get("format").cloned().map(serde_json::from_value).transpose().map_err(|e|ExecutionError::new("resource_reference",e.to_string()))?;
-                    let target=FileTarget::Observation {source,path:mutation.path().into(),read_version:version.into(),format};
+                    let target=FileTarget::Observation {source,path:mutation.path().into(),read_version:version.into(),format,location:None};
                     projected["ref"]=json!(refs::register(&mut catalog,ReferenceKind::File,&owner,&target,&context.run_id)?);
                     if let Some(fields)=projected.as_object_mut() {for field in ["readVersion","operationId"] {fields.remove(field);} }
                 }

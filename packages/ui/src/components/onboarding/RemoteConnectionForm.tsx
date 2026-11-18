@@ -134,20 +134,17 @@ export function RemoteConnectionForm({
       }
 
       const config = await desktopHostsGet();
-      const hostLabel = label.trim() || targetUrl;
-
       const existingHost = config.hosts.find(
         (h) => h.url === targetUrl
       );
 
       const hostId = existingHost ? existingHost.id : `host-${Date.now().toString(16)}`;
 
-      const newHost = {
-        id: hostId,
-        label: hostLabel,
-        url: targetUrl,
-        apiUrl: targetUrl,
-      };
+      // Re-selecting a saved address must not silently discard its paired
+      // identity, bearer, custom headers or relay fallback.
+      const newHost: DesktopHost = existingHost
+        ? { ...existingHost, label: label.trim() || existingHost.label }
+        : { id: hostId, label: label.trim() || targetUrl, url: targetUrl, apiUrl: targetUrl };
 
       const updatedHosts = existingHost
         ? config.hosts.map((h) => (h.id === hostId ? newHost : h))
@@ -177,14 +174,18 @@ export function RemoteConnectionForm({
   }, [resolvedUrl, label, onConnect, t]);
 
   const selectHost = useCallback(async (hostId: string) => {
-    const config = await desktopHostsGet();
-    await desktopHostsSet({
-      hosts: config.hosts,
-      defaultHostId: hostId,
-      initialHostChoiceCompleted: true,
-    });
-    await restartDesktopApp();
-  }, []);
+    setState('testing');
+    setError('');
+    try {
+      const config = await desktopHostsGet();
+      if (!config.hosts.some(host => host.id === hostId)) throw new Error(t('onboarding.remoteConnection.errors.failedToSaveConnection'));
+      await desktopHostsSet({ hosts: config.hosts, defaultHostId: hostId, initialHostChoiceCompleted: true });
+      await restartDesktopApp();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setState('error');
+    }
+  }, [t]);
 
   const handleImport = useCallback(async () => {
     setState('testing');
@@ -239,6 +240,7 @@ export function RemoteConnectionForm({
                 key={host.id}
                 variant="outline"
                 className="w-full justify-start"
+                disabled={isTesting}
                 onClick={() => void selectHost(host.id)}
               >
                 <span className="min-w-0 truncate">{host.label}</span>

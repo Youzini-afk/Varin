@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
 
-import { checkForDesktopUpdate } from './updater-check.js';
+import { checkForDesktopUpdate, matchesDesktopUpdate } from './updater-check.js';
 
 const compareVersions = (left: string, right: string): number => left.localeCompare(right, undefined, { numeric: true });
 
@@ -102,4 +102,33 @@ test('an empty successful check clears even a downloaded pending update', async 
   });
   assert.equal(result.available, false);
   assert.equal(result.pendingUpdate, null);
+});
+
+test('only the installed Linux role and architecture can become a downloadable update, even on a misconfigured feed', async () => {
+  const full = 'Varin-2.0.0-linux-x86_64.AppImage', light = 'Varin-Light-2.0.0-linux-x86_64.AppImage';
+  const check = (role: 'full' | 'light', files: string[], path?: string, packages?: unknown) => checkForDesktopUpdate({
+    autoUpdater: { checkForUpdates: async () => ({ updateInfo: { version: '2.0.0', files: files.map(url => ({ url })), path, packages } }) },
+    currentVersion: '1.0.0', pendingUpdate: null, compareVersions, target: { role, platform: 'linux', architecture: 'x64' },
+  });
+  for (const role of ['full', 'light'] as const) {
+    const same = role === 'full' ? full : light, other = role === 'full' ? light : full;
+    assert.equal((await check(role, [same], same)).available, true);
+    for (const files of [[other], [same, other], [], [same.replace('x86_64', 'arm64')], [same.replace('linux', 'mac')], [`subdir/${same}`]]) {
+      await assert.rejects(check(role, files), /does not match/);
+    }
+    await assert.rejects(check(role, [same], other), /does not match/);
+    await assert.rejects(check(role, [same], same, { x64: { path: other } }), /does not match/);
+  }
+});
+
+test('full Windows refuses another CPU or role; merged full Mac feed must actually contain the installed CPU ZIP', () => {
+  const match = (platform: 'win32' | 'darwin', names: string[]) => matchesDesktopUpdate({ version: '2.0.0', files: names.map(url => ({ url })) },
+    { role: 'full', platform, architecture: 'arm64' });
+  assert.equal(match('win32', ['Varin-2.0.0-win-arm64.exe']), true);
+  assert.equal(match('win32', ['Varin-2.0.0-win-x64.exe']), false);
+  assert.equal(match('win32', ['Varin-Light-2.0.0-linux-arm64.AppImage']), false);
+  const intel = 'Varin-2.0.0-mac-x64.zip', arm = 'Varin-2.0.0-mac-arm64.zip';
+  assert.equal(match('darwin', [intel, arm, 'Varin-2.0.0-mac-arm64.dmg']), true);
+  assert.equal(match('darwin', [intel]), false);
+  assert.equal(match('darwin', [arm, 'Varin-Light-2.0.0-linux-arm64.AppImage']), false);
 });

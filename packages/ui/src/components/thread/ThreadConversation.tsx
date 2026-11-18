@@ -310,7 +310,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const botSession = Boolean(snapshot?.thread.bot_id && !snapshot.thread.parent_thread_id);
   const inputMode = !delegated && (botSession ? botFollowUpBehavior : followUpBehavior) === 'queue' ? 'next_run' as const : 'boundary' as const;
   const launch = snapshot?.launch?.run_id === run?.id ? snapshot?.launch : null;
-  const workFocus = useThreadWorkFocus(draftKey, botSurface ? undefined : workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot ?? initialWorkspacePath, launch?.selection.agent?.workFocus, Boolean(snapshot) && !botSurface && !creationDefaultsPending);
+  // undefined: no choice yet; null: a confirmed chat-only choice. This is not an executor binding.
+  const branchDefault = branch?.workspace_default ?? null;
+  const confirmedWorkspaceSource = branchDefault ? branchDefault.source : launch ? launch.selection.source ?? null : undefined;
+  const workFocus = useThreadWorkFocus(draftKey, botSurface ? undefined : workspacePath ?? initialWorkspacePath,
+    launch?.selection.agent?.workFocus, Boolean(snapshot) && !botSurface && !creationDefaultsPending, botSurface ? undefined : confirmedWorkspaceSource);
   const agent = { profileId: null, workFocus };
   const pause = run?.state === 'waiting' && launch?.pause?.wait_id === run.waiting_on ? launch.pause : null;
   const policy = snapshot?.policySelection;
@@ -428,7 +432,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const visibleHistory = history.items;
   const firstMessage = useFirstMessagePreview(draftKey, Boolean(snapshot?.historyPage.head), handoff);
   const memorySelection = getRegisteredRuntimeAPIs()?.bots?.selection;
-  const referenceScope = JSON.stringify([host, draftKey, preparedSource?.source ?? launch?.selection.source ?? workspacePath]);
+  const composerSource = active ? launch?.selection.source
+    : draft.sourceDisabled ? null : preparedSource?.source ?? confirmedWorkspaceSource;
+  const referenceScope = JSON.stringify([host, draftKey, composerSource === undefined ? workspacePath : composerSource]);
   const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, draft.references, draft.markerObjects, draft.selectedAttachments, requestImages, materials, draft.files?.map(file => file.id), providerId, modelId, thinkingLevel, preparedSource?.source, draft.sourceDisabled, agent]);
   const sourceCannotBeApplied = active && Boolean(preparedSource) && !pendingInput.current;
   const sendBlocked = pending || (!draft.pendingInput && (!snapshot || preparingDelegation || preparingSource || sourceCannotBeApplied
@@ -519,14 +525,16 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const empty = Boolean(snapshot && !visibleHistory.length && !hasProgress && !active && !firstMessage.message && !pending && !draft.pendingInput);
   // The empty home animates away only when this view is sending; arriving history or a switch replaces it at once.
   const sendDeparts = Boolean(snapshot && (pending || draft.pendingInput || draft.firstSend || firstMessage.message));
-  const emptyWorkspacePath = preparedSource?.path ?? workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot;
-  const localWorkspacePath = preparedSource?.source.resourceOwner.kind === 'local' ? preparedSource.path
-    : launch?.selection.source?.resource_owner.kind === 'local' && launch.selection.source.mode === 'live_root' ? launch.selection.source.live_root?.canonicalRoot
-    : !launch?.selection.source ? workspacePath : undefined;
+  const effectiveWorkspace = active ? launch?.selection.source : confirmedWorkspaceSource;
+  const nextPrepared = !active && !draft.sourceDisabled ? preparedSource : null;
+  const emptyWorkspacePath = !active && draft.sourceDisabled ? undefined
+    : nextPrepared?.path ?? effectiveWorkspace?.live_root?.canonicalRoot ?? (effectiveWorkspace === undefined ? workspacePath : undefined);
+  const localWorkspacePath = (nextPrepared?.source.resourceOwner ?? effectiveWorkspace?.resource_owner)?.kind === 'managed_host'
+    ? undefined : emptyWorkspacePath;
   const composerCommands = useThreadComposerCommands({ api, identity, snapshot, sourcePath: localWorkspacePath, act, readOnly,
     disabled: pending || readOnly ? t('composer.menu.unavailable') : undefined, onHistory: () => openConversationTree(surface), onFork: head => forkFrom(head, true),
     refresh: async () => { await projection.current?.refresh(); }, onSources: () => showOverview('sources') });
-  const workflows = useThreadComposerWorkflows({ api, identity, snapshot, draftKey, draftText: text, referenceScope: JSON.stringify([host, draftKey, launch?.selection.source ?? workspacePath]), onMemoryOpen: () => showOverview('memory'),
+  const workflows = useThreadComposerWorkflows({ api, identity, snapshot, draftKey, draftText: text, referenceScope, onMemoryOpen: () => showOverview('memory'),
     refresh: () => { void projection.current?.refresh(); }, disabled: pending || readOnly ? t('composer.menu.unavailable') : undefined });
   const overviewRequest = focusedOverview?.owner === contentOwner ? focusedOverview : undefined;
   const overview = !botSurface && <ThreadOverview key={contentOwner} api={api} identity={identity} sessionKey={overviewKey} snapshot={snapshot}
@@ -541,7 +549,14 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     refresh={async () => { await projection.current?.refresh(); }} act={act} openProcess={openProcessTerminal}
     details={{
       goals: !readOnly && snapshot ? <ThreadGoal api={api.goals} identity={identity} goals={snapshot.goals} sourceRunId={run?.id} refresh={async () => { await projection.current?.refresh(); }} /> : undefined,
-      sources: <>{!readOnly && !delegated && <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={draft.sourceSelection?.path ?? draft.workspacePath ?? initialWorkspacePath} draftSelection={draft.sourceSelection}
+      sources: <>{!readOnly && !delegated && <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={draft.sourceSelection?.path ?? draft.workspacePath ?? initialWorkspacePath} draftSelection={draft.sourceSelection} chatOnly={draft.sourceDisabled} branchDefaultSource={branchDefault?.source}
+      {...(api.sources.setDefault && branch && !snapshot?.thread.parent_thread_id && !active && !pending && !draft.pendingInput
+        && (!launch?.selection.source || launch.selection.source.mode === 'live_root') ? { onSaveDefault: (source: import('@varin/application-client').ThreadSource | null) => act(async () => {
+          await api.sources.setDefault!(identity, { expectedRevision: branch.workspace_default?.revision ?? 0, source });
+          if (host === getRuntimeEndpointGeneration() && currentViewScope.current === viewScope)
+            useThreadDraftStore.getState().patch(draftKey, { preparedSource: null, workspacePath: undefined, sourceSelection: undefined,
+              projectId: undefined, sourceDisabled: false, creationDefaultsApplied: true });
+        }, false, true) } : {})}
       onUseChatOnly={() => { useThreadDraftStore.getState().patch(draftKey, { workspacePath: undefined, projectId: undefined, creationDefaultsApplied: true, preparedSource: null, sourceSelection: undefined, sourceDisabled: true }); }}
       active={active || pending} launch={snapshot?.launch ?? null} prepared={preparedSource} onPrepared={source => useThreadDraftStore.getState().patch(draftKey, { preparedSource: source, projectId: undefined, workspacePath: undefined, sourceSelection: undefined, ...(source ? { sourceDisabled: false } : {}), creationDefaultsApplied: true })} onPreparingChange={setPreparingSource} />}</>,
       context: <button type="button" onClick={() => openThreadContext(identity, initialWorkspacePath, undefined, readOnly)}>{t('harness.overview.contextDetails')}</button>,
@@ -736,15 +751,12 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {!botSurface && <AutoReviewBanner identity={identity} />}
       {!botSurface && draft.goalArmed && <p className="px-2 typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
       <ThreadComposer onReferenceSelect={reference => selectComposerFile(draftKey, reference)} attachmentCandidates={[...(draft.files ?? []).map(file => ({ id: file.id, name: file.filename, fileId: file.id })), ...composerHistoryAttachments(visibleHistory).map(attachment => ({ id: attachment.ref, name: attachment.filename, attachment }))]} referenceScope={referenceScope} commandActions={{ ...composerCommands, ...workflows.actions }} onOpenHistory={() => openConversationTree(surface)} identityKey={draftKey} placement={empty ? 'center' : 'bottom'}
-        permissionWorkspacePath={active || !preparedSource ? (launch?.selection.source
-          // Resource scope is independent of the conversation's presentation.
-          ? launch.selection.source.resource_owner.kind === 'local' ? launch.selection.source.live_root?.canonicalRoot : undefined
-          : workspacePath) : preparedSource.source.resourceOwner.kind === 'local' ? preparedSource.path : undefined}
+        permissionWorkspacePath={localWorkspacePath}
         agentControls={!botSurface && !snapshot?.thread.bot_id && !delegated ? <ThreadAgentControls workFocus={workFocus} pending={active} disabled={pending || Boolean(draft.firstSend || draft.pendingInput)}
           onWorkFocusChange={workFocus => useThreadDraftStore.getState().patch(draftKey, { workFocus })} /> : undefined}
         messageHistory={visibleHistory.filter(item => item.source === 'user').slice().reverse().map(item => typeof item.content === 'string' ? item.content : typeof (item.content as { userText?: unknown })?.userText === 'string' ? (item.content as { userText: string }).userText : typeof (item.content as { text?: unknown })?.text === 'string' ? (item.content as { text: string }).text : '')}
         onCompact={branch?.head && !active && providerId && modelId ? async () => { showOverview('context'); await compactThrough(branch.head!); } : undefined}
-        editorRef={messageInput} value={text} onChange={(text, references, interactions) => useThreadDraftStore.getState().patch(draftKey, { text, references, interactions })} references={draft.references} interactions={draft.interactions} api={api} identity={identity} source={preparedSource?.source} models={models}
+        editorRef={messageInput} value={text} onChange={(text, references, interactions) => useThreadDraftStore.getState().patch(draftKey, { text, references, interactions })} references={draft.references} interactions={draft.interactions} api={api} identity={identity} source={active ? undefined : draft.sourceDisabled ? null : nextPrepared?.source} models={models}
         suggestion={nextStep.text} suggestionError={nextStep.error} onSuggestionDismiss={nextStep.dismiss}
         providerId={providerId} modelId={modelId} thinkingLevel={thinkingLevel} onModelChange={selectModel}
         modelDisabled={pending || Boolean(draft.firstSend) || (delegated && !active)} attachmentDisabled={pending || Boolean(draft.firstSend || draft.pendingInput)}
@@ -765,7 +777,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         imageReferences={draftImageReferences(draft)} attachmentNames={[...images.map(() => ''), ...materials.map(material => material.filename), ...(draft.files ?? []).map(file => file.filename)]}
         hasInput={hasComposerInput}
         prepareSendMode={botSession ? mode => { submitMode.current = mode; } : undefined}
-        onWorkspace={botSurface || botSession ? undefined : () => showOverview('sources')} workspaceLabel={preparedSource ? formatDirectoryName(preparedSource.path) : launch?.selection.source?.live_root ? formatDirectoryName(launch.selection.source.live_root.canonicalRoot) : launch?.selection.source ? t('harness.overview.sources') : workspacePath ? formatDirectoryName(workspacePath) : t('thread.composer.chatOnly')}
+        onWorkspace={botSurface || botSession ? undefined : () => showOverview('sources')} workspaceLabel={draft.sourceDisabled ? t('thread.composer.chatOnly') : preparedSource ? formatDirectoryName(preparedSource.path) : confirmedWorkspaceSource?.live_root ? formatDirectoryName(confirmedWorkspaceSource.live_root.canonicalRoot) : confirmedWorkspaceSource ? t('harness.overview.sources') : confirmedWorkspaceSource === null ? t('thread.composer.chatOnly') : workspacePath ? formatDirectoryName(workspacePath) : t('chat.modelControls.default')}
         workspacePath={localWorkspacePath}
         skills={snapshot?.context.checkpoint?.resources?.snapshot.skills.map(skill => skill.name) ?? []}>
         <div className="space-y-2 px-3 empty:hidden">{!botSurface && emptyWorkspacePath && <ActiveEditorSuggestion threadKey={draftKey} />}      <EditorContextAttachmentChips threadKey={draftKey} /><DraftContentReferences draftKey={draftKey} locked={pending || Boolean(draft.firstSend || draft.pendingInput)} />

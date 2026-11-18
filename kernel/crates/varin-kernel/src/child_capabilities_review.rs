@@ -144,6 +144,43 @@ fn explicit_normal_narrowing_keeps_frozen_extensions_and_checks_exact_owning_sch
 }
 
 #[test]
+fn routed_parent_grants_only_the_original_native_reader_to_retrieval_and_normal_children() {
+    let read = select(&["file_read".into()]).unwrap().remove(0);
+    let mut parent_tools = vec![read.clone()];
+    crate::work_locations::add_schemas(&mut parent_tools);
+    let delegated = delegated(&parent_tools);
+    assert_eq!(delegated.len(), 1, "location discovery belongs only to the parent");
+    let routed = &delegated[0];
+
+    let f = fixture::Fixture::new_internal_retrieval_with_read(routed.clone());
+    let mut selected = f.db.capture_child_dispatch_invocation(&f.context).unwrap().load().unwrap();
+    selected.catalog.native_capabilities = descriptors();
+    let (_, tools) = crate::collaboration::resolve_selection(&selected, &f.input).unwrap();
+    assert_eq!(tools, with_disclosure(vec![read.clone()]));
+    assert!(!supports_frozen_builtin(routed, &read), "a child cannot rebind v3 by name");
+    assert!(select_frozen(&selected, &[crate::work_locations::NAME.into()]).is_err());
+
+    let mut normal = f.input.clone();
+    normal.preset = None;
+    normal.tools = Some(vec![read.name.clone()]);
+    assert_eq!(crate::collaboration::resolve_selection(&selected, &normal).unwrap().1, tools);
+    assert!(selected.frozen.allowed_delegation.contains(routed));
+
+    selected.catalog.native_capabilities.iter_mut().find(|t| t.name == read.name).unwrap().version = "1".into();
+    assert!(crate::collaboration::resolve_selection(&selected, &f.input).is_err(),
+        "an older frozen catalog cannot acquire the v2 reader");
+    selected.catalog.native_capabilities = descriptors();
+    let original = selected.frozen.allowed_delegation.iter_mut().find(|t| t.name == read.name).unwrap();
+    original.schema["oneOf"][0] = serde_json::json!({"required":["ref"]});
+    assert!(crate::collaboration::resolve_selection(&selected, &normal).is_err(),
+        "the name/version of a different or narrower frozen parent is not authority");
+    let root = f.root.clone();
+    drop(selected);
+    drop(f);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn binding_hook_freezes_model_visible_configuration_without_changing_tool_schemas() {
     let directory = schemas();
     let read = directory

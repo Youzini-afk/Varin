@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
+import { Router } from 'express';
+import { routerTransport } from '../extensions/direct-router.test-helper.js';
 import type { Express, Request, RequestHandler, Response as ExpressResponse } from 'express';
 import { registerManagedRemoteRoutes } from './managed-remote-routes.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import type { KernelRecordResult } from '../kernel/protocol.generated.js';
+import { createManagedResourceTarget } from './managed-resource-target.js';
 import { createResourceService, type ResourceSample } from './resources.js';
 import { createManagedRemoteExecutionService } from './managed-remote-service.js';
 import { createManagedRemoteTargetRegistry } from './managed-remote-client.js';
@@ -45,6 +48,52 @@ const probes = {
   probeLocal: () => ({ cpuCores: 4, memoryMb: 1024, usedMemoryMb: 0 }),
   probeLocalGpu: async () => ({ status: 'unavailable' as const, reason: 'no-device' as const }),
 };
+
+it('the standalone target assembly reattaches its original admitted capacity after a kernel epoch change', async () => {
+  // Storage rejects stale scoped grants. No Agent, model, scheduler or outbound registry is installed.
+  const original = storage();
+  const onError = vi.fn();
+  const target = createManagedResourceTarget({ kernel: original.client, capacity: probes, storageAvailable: false, onError });
+  try {
+    const identity = await target.execution.identity();
+    expect(identity.hostId).toBe('resource-owner');
+    expect(identity.capabilities).not.toContain('storage');
+    expect(identity.capabilities).not.toContain('sources');
+    const request = { coordinatorHostId: 'coordinator', workspaceId: 'workspace', machineId: 'managed:resource-owner',
+      attemptId: 'original-attempt', resources: { cpuCores: 1 } };
+    const reserved = await target.execution.admit(request, 'original-client');
+    expect(reserved.status).toBe('confirmed');
+    original.restart();
+    const recovered = await target.execution.observeAdmission(request, 'original-client');
+    expect(recovered).toMatchObject({ status: 'confirmed', commitmentId: reserved.commitmentId });
+    expect(await target.execution.observeAdmission(request, 'different-client')).toEqual({ status: 'unknown' });
+    expect([...original.records.values()].filter(record => record.recordType === 'resource.commitment')).toHaveLength(1);
+    expect(onError).not.toHaveBeenCalled();
+  } finally { await target.dispose(); }
+});
+
+it('mounts the shared resource target behind authenticated managed identity and per-client capabilities', async () => {
+  const original = storage();
+  const target = createManagedResourceTarget({ kernel: original.client, capacity: probes, storageAvailable: false, onError: e => { throw e; } });
+  const router = Router();
+  target.mount(router as unknown as Express, {
+    // This component test controls only the already-verified auth result.
+    // The native loopback test uses the actual persisted client credential.
+    requireAuth: (_req, _res, next) => next(), isDraining: () => false,
+    resolveAuthContext: async req => req.headers.authorization === 'Bearer fixture-reader'
+      ? { type: 'client', clientId: 'reader', client: { capabilities: ['filesystem:read'] } as never } : null,
+    documents: {} as never,
+  });
+  const transport = routerTransport(router);
+  const call = (route: string, init: RequestInit = {}) => transport(new URL('https://fixture.invalid/api/harness/managed-execution/v1' + route), init);
+  const headers = { authorization: 'Bearer fixture-reader' };
+  try {
+    expect((await call('/identity')).status).toBe(403);
+    expect(await (await call('/identity', { headers })).json()).toMatchObject({ hostId: 'resource-owner' });
+    expect((await call('/identity', { headers: { ...headers, 'x-varin-managed-target': 'different-target' } })).status).toBe(409);
+    expect((await call('/shell/exec', { method: 'POST', headers, body: JSON.stringify({}) })).status).toBe(403);
+  } finally { await target.dispose(); }
+});
 
 describe('original resource admission reconciliation', () => {
   it.each(['remote-reply', 'target-receipt'] as const)('recovers a lost %s through the original target owner without allocating again', async loss => {

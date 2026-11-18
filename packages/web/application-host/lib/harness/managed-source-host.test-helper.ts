@@ -1,7 +1,7 @@
 /** Original managed Source client/authenticated Router/target service over the
  * existing Rust↔Host stdio fixture. No HTTP or product IPC listener is started. */
 import assert from 'node:assert/strict';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -359,7 +359,9 @@ async function run(frame: Record<string, unknown>) {
 
 async function runWithHosts(frame: Record<string, unknown>, a: KernelClient, b: KernelClient) {
   assert.equal(typeof frame.runId, 'string'); const runId = frame.runId as string;
-  const root = String(frame.root), storageRootB = String(frame.storageRootB);
+  // Seed the same canonical directory identities that Documents actually admits.
+  // The runner's temp path can use a Windows 8.3 alias or a symlink.
+  const root = await realpath(String(frame.root)), storageRootB = String(frame.storageRootB);
   const aRoot = join(root, 'a-project'), bRoot = join(root, 'b-project');
   await Promise.all([mkdir(aRoot, { recursive: true }), mkdir(bRoot, { recursive: true })]);
   await writeFile(join(aRoot, 'source.txt'), 'A_PRIVATE_SOURCE\n');
@@ -530,7 +532,9 @@ async function runWithHosts(frame: Record<string, unknown>, a: KernelClient, b: 
     write({kind:'fixture-result',ok:true,reads:(await fixture<{reads:number}>('fixture.file.stats')).reads});return;
   }
   const coordinated = new Promise<Record<string, unknown>>((resolve, reject) => { coordinatorResult = { resolve, reject }; });
-  write({ kind: 'fixture-coordinator-tool', binding, source: selected });
+  write({ kind: 'fixture-coordinator-tool', binding, source: selected,
+    defaultSource: { resource_owner: { kind: 'local' }, mode: 'live_root', workspace_id: workspaceId, execution_workspace_id: workspaceId,
+      live_root: localRoot, branch_id: null, revision: null } });
   const coordinatedResult = await coordinated;
   assert.equal(coordinatedResult.ok, true);
   assert(JSON.stringify(coordinatedResult.result).includes('B_ORIGINAL_SOURCE'));
@@ -554,6 +558,14 @@ async function runWithHosts(frame: Record<string, unknown>, a: KernelClient, b: 
   assert.equal(await readFile(join(bRoot, 'source.txt'), 'utf8'), 'B_CHANGED_SOURCE\n');
   const search = data(await execute('file_search', { query: 'B_CHANGED_SOURCE', maxResults: 10 }));
   assert(JSON.stringify(search).includes('source.txt'), JSON.stringify(search));
+  if (frame.workLocationOnly) {
+    await service.release({ ...address, mode: 'retire' });
+    await packageQueries.dispose();
+    await storage.dispose();
+    await Promise.all(documents.map(item => item.dispose()));
+    write({ kind: 'fixture-result', ok: true, checks: ['original-receipt', 'separate-physical-files'] });
+    return;
+  }
   const spawn = call('process_spawn', { cwd: '', command: process.execPath, mode: 'pipe', args: ['-e',
     'const fs=require("node:fs");fs.appendFileSync("spawn-count","1");process.stdout.write("B_PROCESS_OUTPUT");setInterval(()=>{},1000);'] });
   await service.authorize({ ...address, call: spawn });

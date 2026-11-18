@@ -263,6 +263,16 @@ Deployment validation checks `status: "ok"`, the expected `varinVersion` and `re
 images expose `releaseId: image-<git-sha>`; SSH releases use their content-addressed release ID, so a
 probe cannot mistake a previous process with the same semantic version for the candidate.
 
+### 把开发机或测试机作为资源节点
+
+标准的 `docker-compose.yml` 不变，继续运行带工作台和 Agent 的完整应用。只需要把某台机器上的文件和命令提供给一个已有的 Agent 服务时，使用 `docker-compose.resource-node.yml`。节点没有工作台、模型、会话调度或 Bot；登录和发起工作仍在 Agent 服务。发布 CI 在同一次正式 Docker 构建中产生独立的 `ghcr.io/astrmira/varin-node`，校验节点角色和两种 Linux 架构后才写发布标签，不使用完整应用镜像的标签。
+
+- 在资源机器上设置 `VARIN_NODE_WORKSPACE`，让容器用户 `1000:1000` 能按需访问该目录。它在容器里始终映射到 `/home/varin/workspaces`；Agent 选择容器路径，不传宿主机路径。命令在节点的工具链里运行，不继承 Agent 服务上的工具。
+- 节点状态在 `varin_node_state`，和 Agent 的数据卷分开。替换节点镜像要重用这个卷；不能让节点和完整版同时使用同一个状态目录。默认只把节点端口发布到资源机器的 `127.0.0.1:3001`，跨机用 Agent 发起的 SSH 转发，或受控 HTTPS 入口。不要向公网直接暴露明文 Bearer 请求。
+- 用同一节点状态在启动前进行本地授权。先准备一个仅操作者和节点容器用户可写的私有目录，再执行 `docker compose -f docker-compose.resource-node.yml run --rm --no-deps -v /绝对路径/私有目录:/private varin-node pair --output /private/agent-pair.json`。它使用同一客户端授权记录，默认只读；只对明确允许的用途加 `--allow-write` 或 `--allow-commands`。系统命令以节点用户身份运行，目录授权不是命令沙箱。通过既有连接设置交给 Agent 私有授权文件里的令牌，不要把令牌写进工作目录、节点状态目录、Compose 环境变量、Git 或日志。运行 `docker compose -f docker-compose.resource-node.yml up -d` 后，在 Agent 服务的 Host 连接里登记它可访问的地址和令牌。需要撤销时先停节点，再用同一状态卷执行 `revoke <clientId>`。客户端连接云端 Agent 不会自动向它共享本机目录。
+
+节点的 HTTP 入口仅提供受授权的资源，不把未接入的桌面、浏览器或模型能力伪装成可用。镜像与标准角色共用当前锁定的生产依赖；不随节点装入 Web 界面或完整 Agent 入口。实际支持项以节点能力声明为准。
+
 ### Runtime environment
 
 | Variable | Behavior |

@@ -1085,6 +1085,8 @@ pub use policy_model::*;
 /// A selected invocation. External arguments are decoded when this handle is created, and the
 /// same implementation and typed input are retained through preparation, admission and dispatch.
 pub trait PreparedToolCall: Send {
+    /// The actual source selected by this trusted adapter, never a caller-supplied grant.
+    fn resource_source(&self) -> Option<&crate::catalog::launches::SourceSelection> { None }
     /// A read-only coordinator needs a durable parent identity for nested Operations.
     /// This retains ancestry without inventing an external effect for the coordinator.
     fn requires_operation(&self) -> bool { false }
@@ -1382,6 +1384,12 @@ pub enum ExecutionRecord {
         context: ToolExecutionContext,
         tool: AdmittedTool,
     },
+    /// Same admission transaction, with the source chosen by the bound physical adapter.
+    ResourceToolAdmitted {
+        context: ToolExecutionContext,
+        tool: AdmittedTool,
+        source: crate::catalog::launches::SourceSelection,
+    },
     ToolDispatched {
         context: ToolExecutionContext,
         executor_owner: ExecutorOwner,
@@ -1407,6 +1415,15 @@ pub enum ExecutionRecord {
         event: PolicyEvent,
     },
 }
+impl ExecutionRecord {
+    fn admit_bound_tool(context: &ToolExecutionContext, tool: &AdmittedTool, call: &dyn PreparedToolCall) -> Self {
+        match call.resource_source() {
+            Some(source) => Self::ResourceToolAdmitted { context: context.clone(), tool: tool.clone(), source: source.clone() },
+            None => Self::ToolAdmitted { context: context.clone(), tool: tool.clone() },
+        }
+    }
+}
+
 
 /// Implement each callback with short atomic writes and an owner-generation fence.
 /// Never retain a transaction or lock after return. Error means no new work may be dispatched.

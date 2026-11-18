@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { DocumentsAPI, RuntimeAPIs, ThreadIdentity, ThreadPreparedSource, ThreadsAPI, VarinDocumentRecoveryJournalSummary, VarinDocumentRecoveryWriteRequest } from '@varin/application-client';
+import type { LaunchSource } from '@varin/protocol';
 import { bindDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/session';
 import { unconfiguredWorkspaceEdits } from '@/lib/documents/workspace-edit.test-helper';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
@@ -168,6 +169,34 @@ it('keeps an explicit draft selection when only another workspace is dirty and k
   expect(container.querySelector('[aria-label="Snapshot content"]')).toBeNull();
 });
 
+it('shows the confirmed next-run location separately from the old launch, including chat only', async () => {
+  const f = await fixture();
+  const previous: LaunchSource = { resource_owner: { kind: 'local' }, workspace_id: 'original', execution_workspace_id: 'original',
+    branch_id: null, revision: null, mode: 'live_root', live_root: { hostId: 'A', rootId: 'A-root', canonicalRoot: '/previous' } };
+  const remote = { kind: 'managed_host' as const, connectionId: 'B-connection', hostId: 'B', endpointIdentity: 'B-endpoint' };
+  const next: LaunchSource = { ...previous, workspace_id: 'replacement', execution_workspace_id: 'replacement', resource_owner: remote,
+    live_root: { hostId: 'B', rootId: 'B-root', canonicalRoot: '/replacement' } };
+  vi.mocked(f.api.sources.list).mockResolvedValue({ targets: [{ resourceOwner: remote, label: 'Test machine', capabilities: [] }], unavailable: [] });
+  const api = { ...f.api };
+  const render = async (branchDefaultSource?: LaunchSource | null, chatOnly = false) => await act(async () => root.render(
+    <ThreadSourcePicker api={api} identity={identity} active={false} launch={{ selection: { source: previous } } as React.ComponentProps<typeof ThreadSourcePicker>['launch']}
+      branchDefaultSource={branchDefaultSource} chatOnly={chatOnly} prepared={null} onPrepared={f.onPrepared} onPreparingChange={f.onPreparingChange} />,
+  ));
+  await render();
+  expect(container.textContent).toContain('Current source:');
+  await render(next);
+  expect(container.textContent).toContain('Saved for the next run: Test machine · /replacement');
+  expect(container.textContent).toContain('Last run’s source:');
+  expect(container.textContent).not.toContain('Following runs use this same live workspace');
+  await render(next, true);
+  expect(container.querySelector('summary')?.textContent).toContain('Chat only');
+  expect(container.textContent).toContain('Saved for the next run: Test machine · /replacement');
+  await render(null);
+  expect(container.querySelector('summary')?.textContent).toContain('Chat only');
+  expect(container.textContent).toContain('Saved for the next run: Chat only');
+  expect(container.textContent).toContain('Last run’s source:');
+});
+
 it('aborts preparation and releases its snapshot on input changes, cancellation and Thread replacement', async () => {
   const f = await fixture();
   const late = gate<ThreadPreparedSource>(); f.prepareSource.mockImplementation(() => late.promise);
@@ -248,4 +277,31 @@ it('freezes the managed Host and resolves its Documents workspace once without c
   await f.render(identity, api);
   expect(container.querySelector('[aria-label="Prepared workspace"]')?.textContent).toContain('Remote B');
   expect(container.textContent).toContain('Available source tools: file_read');
+});
+
+it('opens a new draft without overriding its preference and pins the selected saved folder to its original Host', async () => {
+  const f = await fixture();
+  const local = { kind: 'local' } as const;
+  const remote = { kind: 'managed_host', hostId: 'b', connectionId: 'c', endpointIdentity: 'endpoint' } as const;
+  const list = async () => ({ targets: [{ resourceOwner: local, label: 'Dev', capabilities: [] }, { resourceOwner: remote, label: 'Test', capabilities: [] }],
+    unavailable: [], workspace: { servicePath: '/srv', defaultId: 'dev', locations: [
+      { id: 'dev', name: 'Logs', resourceOwner: local, path: '/same', workspaceId: 'a-docs' },
+      { id: 'lab', name: 'Logs', resourceOwner: remote, path: '/same', workspaceId: 'b-docs' },
+    ] } });
+  const api = { ...f.api, sources: { ...f.api.sources, list } };
+  const onDraftSelection = vi.fn();
+  await act(async () => root.render(<ThreadSourcePicker api={api} identity={null} active={false} launch={null}
+    prepared={null} onPrepared={f.onPrepared} onPreparingChange={f.onPreparingChange} onDraftSelection={onDraftSelection} />));
+  expect(onDraftSelection).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('Default for new conversations: Dev · /same');
+  await edit('Saved work locations', 'lab');
+  expect(onDraftSelection).toHaveBeenLastCalledWith(expect.objectContaining({ resourceOwner: remote, expectedWorkspaceId: 'b-docs', path: '/same', locationLabel: 'Test · Logs' }));
+  expect(f.api.sources.resolve).not.toHaveBeenCalled();
+  const selected = onDraftSelection.mock.calls.at(-1)![0];
+  await act(async () => root.render(<ThreadSourcePicker key="known" api={api} identity={identity} active={false} launch={null}
+    draftSelection={selected} prepared={null} onPrepared={f.onPrepared} onPreparingChange={f.onPreparingChange} />));
+  await click('Prepare workspace');
+  expect(f.api.sources.resolve).toHaveBeenCalledWith(identity, { resourceOwner: remote, path: '/same' }, expect.any(AbortSignal));
+  expect(container.textContent).toContain('saved workspace registration changed');
+  expect(f.prepareSource).not.toHaveBeenCalled();
 });

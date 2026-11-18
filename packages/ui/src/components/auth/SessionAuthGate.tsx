@@ -470,8 +470,16 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
 
         if (response.ok) {
           let data: { authenticated?: boolean; browserDevice?: { id?: string } } | null = null;
-          try { data = JSON.parse(responseText); } catch { /* Older Hosts may omit session metadata. */ }
-          browserDeviceRuntimeRef.current = data?.authenticated === true && typeof data.browserDevice?.id === 'string' && data.browserDevice.id.length > 0
+          try { data = JSON.parse(responseText); } catch { /* Not an Application Host session response. */ }
+          if (data?.authenticated !== true) {
+            // A proxy, captive portal or static document can also answer 200.
+            // Never start authenticated preferences or the workbench on that basis.
+            browserDeviceRuntimeRef.current = null;
+            resetTransientRetry();
+            setState('error');
+            return;
+          }
+          browserDeviceRuntimeRef.current = typeof data.browserDevice?.id === 'string' && data.browserDevice.id.length > 0
             ? runtime : null;
           resetTransientRetry();
           setState('authenticated');

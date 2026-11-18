@@ -61,6 +61,17 @@ test('new varin and varin-slim share slim bytes while both historical runtime-ba
   assert.throws(() => imagePromotionPlan(candidate, { ...images, standardApp: `${prefix}varin:latest` }, [input.ref]), /immutable image/);
 });
 
+test('resource nodes promote only to their own name and cannot substitute application bytes', () => {
+  const fixture = registryFixture(), node = `${prefix}varin-node@${digest('5')}`;
+  fixture.add(node, 'resource-node', 'slim');
+  const next = imagePromotionPlan(candidate, { ...images, resourceNode: node }, [input.ref]);
+  assert.deepEqual(next.slice(0, -1), plan());
+  const artifact = next.at(-1);
+  assert.deepEqual(artifact.repositories, [`${prefix}varin-node`]);
+  assert.equal(verifyImage(node, artifact, fixture.registry), node);
+  assert.throws(() => verifyImage(images.standardApp, artifact, fixture.registry), /resource-node\/slim metadata/);
+});
+
 test('base overrides resolve once, require real runtime role/variant/platforms, and are the published companion', () => {
   const fixture = registryFixture(), override = `registry.example:5000/team/reused-base@${digest('5')}`;
   fixture.add(override, 'runtime-base', 'toolbelt');

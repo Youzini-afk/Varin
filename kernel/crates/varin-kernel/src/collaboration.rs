@@ -1056,20 +1056,6 @@ pub(crate) fn resolve_selection_with_attachments(
     // The actual composed directory publishes a canonical name order; selection order grants
     // no additional capability and must not make an identical child fail on restore.
     schemas.sort_by(|left, right| left.name.cmp(&right.name));
-    if input.preset.is_none()
-        && schemas.iter().any(|schema| {
-            selected
-                .frozen
-                .allowed_delegation
-                .iter()
-                .find(|original| original.name == schema.name)
-                .is_some_and(|original| original != schema)
-        })
-    {
-        return Err(error(
-            "actual delegated capability schema is unsupported by this child implementation",
-        ));
-    }
     Ok((resolved, schemas))
 }
 fn accepted(catalog:&Mutex<Catalog>, c: &ToolExecutionContext, phase: &str) -> Result<ToolCompletion,ExecutionError> {

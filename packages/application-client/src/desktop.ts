@@ -196,6 +196,8 @@ export type DesktopKeepAwakeStatus = {
 };
 
 export type DesktopLocalHostMode = {
+  /** Absent on legacy full installations. */
+  installedRole?: 'full' | 'light';
   /** Saved preference for this desktop, independent of the selected Agent. */
   enabled: boolean;
   /** Next-launch policy after environment and recovery-shell constraints. */

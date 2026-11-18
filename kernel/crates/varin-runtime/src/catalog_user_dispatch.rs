@@ -515,6 +515,7 @@ pub(super) fn admit_operation(
         result: None,
         external_receipt: None,
         call_completion: None,
+        resource_source: None,
         host_job: None,
         mcp_resource_subscription: None,
         managed_process: None,

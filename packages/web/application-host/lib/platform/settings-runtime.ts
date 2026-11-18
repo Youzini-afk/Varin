@@ -4,9 +4,10 @@ import {
   type SettingsFileStore,
   type SettingsFileStoreOptions,
 } from '@varin/settings-store';
+import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { EXTERNAL_ACCESS_SETTINGS_KEY } from '../tunnels/external-access-config.js';
-import { parseProjectSourceBinding, projectResourceOwnerKey, projectFolders, projectPathKey } from '@varin/application-client';
+import { parseWorkspaceLocations, parseDefaultWorkspaceLocationId, parseProjectSourceBinding, projectResourceOwnerKey, projectFolders, projectPathKey, type WorkspaceLocationChangeResult } from '@varin/application-client';
 
 interface ProjectEntry extends Record<string, unknown> {
   id: string;
@@ -158,6 +159,32 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
         next = { ...next, projects: validated };
       }
 
+      // A bookmark is not a project registration, trust change or source grant. Validate only
+      // changed addresses, so an offline owner can still be renamed or removed.
+      const locationsChanged = Object.hasOwn(sanitized, 'workspaceLocations') || removed.has('workspaceLocations');
+      if (locationsChanged || Object.hasOwn(sanitized, 'defaultWorkspaceLocationId')) {
+        const previous = parseWorkspaceLocations(current.workspaceLocations ?? []);
+        const locations = parseWorkspaceLocations(next.workspaceLocations ?? []);
+        const defaultId = parseDefaultWorkspaceLocationId(next.defaultWorkspaceLocationId ?? null);
+        if (defaultId !== null && !locations.some(row => row.id === defaultId)) throw new Error('Choose an existing default workspace location');
+        if (locationsChanged) {
+          for (const location of locations) {
+            const before = previous.find(row => row.id === location.id);
+            if (location.kind === 'project') {
+              if (before?.kind === 'project' && before.projectId === location.projectId) continue;
+              if (!Array.isArray(next.projects) || !next.projects.some(row => row?.id === location.projectId)) throw new Error('The workspace project is not registered');
+            } else {
+              if (before?.kind === 'folder' && before.path === location.path && before.workspaceId === location.workspaceId
+                && isDeepStrictEqual(before.resourceOwner, location.resourceOwner)) continue;
+              if (!deps.resolveProjectSource) throw new Error('Workspace location owner is unavailable');
+              const found = await deps.resolveProjectSource({ resourceOwner: location.resourceOwner, path: location.path });
+              if (found.workspaceId !== location.workspaceId) throw new Error('Workspace location registration changed; select the folder again');
+              location.path = found.path;
+            }
+          }
+          if (!removed.has('workspaceLocations')) next = { ...next, workspaceLocations: locations };
+        }
+      }
       const nextProjects = Array.isArray(next.projects)
         ? next.projects.filter((project): project is ProjectEntry => (
             Boolean(project) && typeof project === 'object'
@@ -224,6 +251,56 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     return formatSettingsResponse(next);
   };
 
+  const changeWorkspaceLocation = async (change: unknown): Promise<WorkspaceLocationChangeResult> => {
+    if (!change || typeof change !== 'object') throw new Error('Invalid workspace location change');
+    const { kind, location, id, expectedId } = change as Record<string, unknown>;
+    const result = await settingsStore.transact<{ document: VarinSettingsDocument; changed?: true; conflict?: 'duplicate' | 'stale' }>(async current => {
+      const locations = parseWorkspaceLocations(current.workspaceLocations ?? []);
+      const selected = parseDefaultWorkspaceLocationId(current.defaultWorkspaceLocationId ?? null);
+      const unchanged = (conflict?: 'duplicate' | 'stale') => ({
+        write: false, result: { document: current, ...(conflict ? { conflict } : {}) },
+      });
+      let patch: VarinSettingsDocument;
+      switch (kind) {
+        case 'add': {
+          const added = parseWorkspaceLocations([location])[0]!;
+          if (locations.some(row => isDeepStrictEqual(row, added))) return unchanged();
+          if (locations.some(row => row.id === added.id
+            || (added.kind === 'project' && row.kind === 'project' && row.projectId === added.projectId)
+            || (added.kind === 'folder' && row.kind === 'folder' && row.workspaceId === added.workspaceId
+              && isDeepStrictEqual(row.resourceOwner, added.resourceOwner)))) return unchanged('duplicate');
+          if (added.kind === 'project' && (!Array.isArray(current.projects)
+            || !current.projects.some(row => row?.id === added.projectId))) return unchanged('stale');
+          patch = { workspaceLocations: [...locations, added] };
+          break;
+        }
+        case 'remove': {
+          if (typeof id !== 'string' || !id.trim()) throw new Error('Invalid saved workspace location');
+          const retained = locations.filter(row => row.id !== id);
+          if (retained.length === locations.length) return unchanged();
+          patch = { workspaceLocations: retained, ...(selected === id ? { defaultWorkspaceLocationId: null } : {}) };
+          break;
+        }
+        case 'set-default': {
+          const nextId = parseDefaultWorkspaceLocationId(id);
+          const expected = parseDefaultWorkspaceLocationId(expectedId);
+          const target = locations.find(row => row.id === nextId);
+          if (nextId !== null && (!target || (target.kind === 'project' && (!Array.isArray(current.projects)
+            || !current.projects.some(row => row?.id === target.projectId))))) return unchanged('stale');
+          if (selected === nextId) return unchanged();
+          if (selected !== expected) return unchanged('stale');
+          patch = { defaultWorkspaceLocationId: nextId };
+          break;
+        }
+        default: throw new Error('Invalid workspace location change');
+      }
+      const document = await applyPersistedChanges(current, patch, []);
+      return { document, result: { document, changed: true } };
+    });
+    if (result.changed) notify(result.document);
+    return { settings: formatSettingsResponse(result.document), ...(result.conflict ? { conflict: result.conflict } : {}) };
+  };
+
   /**
    * CAS variant for the agent-facing settings service (D-306): the caller's
    * expectedRevision is checked inside the store lock so concurrent UI writes
@@ -259,6 +336,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     readSettingsFromDisk,
     updateSettingsOnDisk,
     persistSettings,
+    changeWorkspaceLocation,
     persistSettingsCas,
     subscribe: (listener: (settings: VarinSettingsDocument) => void) => {
       listeners.add(listener);

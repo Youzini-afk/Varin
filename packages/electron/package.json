@@ -25,6 +25,7 @@
   "trustedDependencies": [
     "electron"
   ],
+  "desktopReleaseRoles": ["full", "light"],
   "desktopPrerequisites": [
     "Electron runtime dependencies installed via bun install",
     "Bun available for sidecar compilation",

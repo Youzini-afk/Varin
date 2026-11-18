@@ -31,6 +31,8 @@ on:
         value: ${{ jobs.build.outputs.standard_app }}
       toolbelt_app:
         value: ${{ jobs.build.outputs.toolbelt_app }}
+      resource_node:
+        value: ${{ jobs.build.outputs.resource_node }}
       slim_base:
         value: ${{ jobs.build.outputs.slim_base }}
       toolbelt_base:
@@ -53,6 +55,7 @@ jobs:
     outputs:
       standard_app: ${{ steps.build.outputs.standard_app }}
       toolbelt_app: ${{ steps.build.outputs.toolbelt_app }}
+      resource_node: ${{ steps.build.outputs.resource_node }}
       slim_base: ${{ steps.build.outputs.slim_base }}
       toolbelt_base: ${{ steps.build.outputs.toolbelt_base }}
       build_run_id: ${{ steps.build.outputs.build_run_id }}

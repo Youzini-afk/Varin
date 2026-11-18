@@ -42,13 +42,15 @@ export function parseSourceResourceOwner(value: unknown): SourceResourceOwner {
 
 export function createThreadSourceDirectory(options: {
   documents: Pick<DocumentAuthority, 'resolveWorkspace' | 'admitWorkspaceRegistration'>;
+  localLabel?: string;
+  workspace?(): Promise<import('@varin/application-client').ThreadLocationDirectory>;
   remote?: Pick<ThreadSourceRemoteOwner, 'list' | 'resolve' | 'draftSkills'>;
 }): SourceDirectory {
   return {
     async list(signal) {
       signal?.throwIfAborted();
-      const remote = await options.remote?.list(signal);
-      return { targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] }, ...(remote?.targets ?? [])],
+      const [remote, workspace] = await Promise.all([options.remote?.list(signal), options.workspace?.()]);
+      return { ...(workspace ? { workspace } : {}), targets: [{ resourceOwner: { kind: 'local' }, label: options.localLabel ?? 'This Host', capabilities: [] }, ...(remote?.targets ?? [])],
         unavailable: remote?.unavailable ?? [] };
     },
     async draftSkills(request, signal) {

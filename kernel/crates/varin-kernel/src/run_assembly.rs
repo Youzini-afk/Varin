@@ -320,6 +320,10 @@ impl RunAssembly {
                     })
                 })
                 .transpose()?;
+            if !is_child && host_authority && kinds.contains(&crate::tools::ToolKind::FileRead)
+                && crate::work_locations::eligible(source.as_ref()) {
+                crate::work_locations::add_schemas(&mut start.binding.tools);
+            }
             if !host_authority && source.is_some() { return Err(KernelError::Authorization("Member work cannot acquire Host resources".into())); }
             if source.is_none() && kinds.iter().any(|kind| *kind!=crate::tools::ToolKind::FileRead) {
                 return Err(KernelError::Protocol(
@@ -390,7 +394,14 @@ impl RunAssembly {
         }
         if !is_context_job {
             let existing=declarations.iter().position(|declaration|declaration.schema.name=="file_read").map(|index|declarations.remove(index));
-            declarations.push(crate::attachment_reads::declaration(existing,runtime.catalog(),self.resource.clone()));
+            let path_read = existing.is_some();
+            let reader = crate::attachment_reads::declaration(existing,runtime.catalog(),self.resource.clone());
+            if path_read && !is_child && host_authority && crate::work_locations::eligible(launch_source.as_ref()) {
+                declarations.extend(crate::work_locations::declarations(reader, p.run_id.clone(), launch_source.as_ref().unwrap().clone(),
+                    runtime.catalog(), resources.clone().with_journal_catalog(runtime.catalog())));
+            } else {
+                declarations.push(reader);
+            }
             declarations.push(crate::agent_resources::declaration(
                 runtime.catalog(),
                 self.resource.clone(),

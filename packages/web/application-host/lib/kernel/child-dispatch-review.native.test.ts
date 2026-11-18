@@ -1303,6 +1303,10 @@ it.each([
   }
   expect(parentSteps).toBe(3 + offset); expect(childSteps).toBe(2);
   const child = await h.runtime.child(operationId);
+  const parentTools = (await h.runtime.launch(receipt.run_id))!.selection.tools;
+  expect(parentTools.find(tool => tool.name === 'file_read')?.version).toBe('3');
+  expect(child.launch.tools.find(tool => tool.name === 'file_read')?.version).toBe('2');
+  expect(child.launch.tools.some(tool => tool.name === 'work_locations')).toBe(false);
   expect(child.report?.outcome).toBe('succeeded');
   expect(child.selected_profile.work_mode).toBe('shared');
   expect(child.launch.model).toBe(binding === 'distinct' ? retrievalModel.modelId : model.modelId);

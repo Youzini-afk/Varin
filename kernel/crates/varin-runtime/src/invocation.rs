@@ -394,10 +394,7 @@ impl<P: Persistence + ?Sized + 'static> InvocationRunner<P> {
             self.persistence.commit(
                 &self.run_id,
                 self.epoch,
-                &ExecutionRecord::ToolAdmitted {
-                    context: context.clone(),
-                    tool: tool.clone(),
-                },
+                &ExecutionRecord::admit_bound_tool(&context, &tool, bound.as_ref()),
             )?;
         }
         self.execute(

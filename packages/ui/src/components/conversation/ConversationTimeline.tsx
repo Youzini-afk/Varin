@@ -203,7 +203,7 @@ function Timeline({ api, identity, snapshot, history, runUsage, historyReady, hi
       const target = await fileTarget(callId, path);
       if (!alive.current || host !== getRuntimeEndpointGeneration()) return;
       revealResourceInEditor({ workspaceId: target.workspaceId, workspaceRoot: target.root, resourceId: target.resourceId,
-        thread: identity, toolCallId: callId, ...(line ? { line } : {}) });
+        resourceOwner: target.resourceOwner, thread: identity, toolCallId: callId, ...(line ? { line } : {}) });
     } catch (error) { if (alive.current && host === getRuntimeEndpointGeneration() && !(error instanceof DOMException && error.name === 'AbortError'))
       toast.error(error instanceof Error ? error.message : String(error)); }
   }, [fileTarget, identity]);

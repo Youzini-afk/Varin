@@ -8,7 +8,7 @@ import type { AgentPersonalizationCatalog } from '@varin/protocol';
 import { ThreadAdapter } from './thread-adapter.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
-import { createThreadContext, type ContextPreparer } from './thread-context.js';
+import { createThreadContext, resourceSource, type ContextPreparer } from './thread-context.js';
 import { ResourceScopeError } from './thread-resource-scope.js';
 import { createThreadSkillInputPreparer } from './thread-skill-input.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
@@ -245,6 +245,46 @@ it('ThreadAdapter submits an explicit source with real forSource preparation and
   expect(saved.resources?.source).toBeNull();
   expect(fAdapter.errors).toEqual([]);
   expect(fAdapter.runtime.refreshContext).not.toHaveBeenCalled();
+});
+
+it('uses the confirmed workspace for idle discovery and the next input, including its project context', async () => {
+  const f = await fixture();
+  const selected: ThreadSource = { mode: 'live_root', workspaceId: 'remote', executionWorkspaceId: 'remote',
+    resourceOwner: { kind: 'managed_host', hostId: 'test', connectionId: 'test', endpointIdentity: 'test-epoch' },
+    liveRoot: { hostId: 'test', rootId: 'test-root', canonicalRoot: '/work' }, tools: [] };
+  const projectLookup = vi.fn(async () => 'test-project');
+  const prepare = createThreadContext({ resources: { ...f.resources, async prepare(identity, source, scope, options) {
+    const snapshot = await f.resources.prepare(identity, null, scope, options);
+    return { ...snapshot, scope: { ...snapshot.scope, sourceIdentity: source?.workspaceId ?? null } };
+  } }, projectForWorkspace: projectLookup, personalization: { catalog: async () => ({ revision: 1, prompts: {}, memories: [
+    { id: 1, scope: { kind: 'project', id: 'old-project' }, content: 'OLD PROJECT NOTE', updatedAt: '2026-10-10T00:00:00Z' },
+    { id: 2, scope: { kind: 'project', id: 'test-project' }, content: 'TEST PROJECT NOTE', updatedAt: '2026-10-10T00:00:00Z' },
+  ] }) } });
+  const old = await prepare(identity, null, { mode: 'agent', threadRole: 'main', projectId: 'old-project' });
+  expect(old.effectiveSystemPrompt).toContain('OLD PROJECT NOTE');
+  const fAdapter = adapterFixture(checkpoint(old), prepare);
+  const thread = await fAdapter.runtime.thread();
+  const branch = Object.assign(thread.branches[0]!, { workspace_default: { revision: 1, source: resourceSource(selected) } });
+  fAdapter.runtime.thread.mockResolvedValue(thread);
+  Object.assign(fAdapter.runtime, { sourceTools: async () => [] });
+  const files = vi.fn(async () => ({ entries: [], nextCursor: null }));
+  fAdapter.adapter.bindSourceFiles({ files, draftFiles: files });
+  await fAdapter.adapter.files(identity);
+  expect(files).toHaveBeenCalledWith(identity, selected, {}, undefined, undefined);
+  files.mockClear();
+  await fAdapter.adapter.files(identity, { source: null });
+  expect(files).not.toHaveBeenCalled();
+  await fAdapter.adapter.skills(identity);
+  expect(projectLookup).toHaveBeenCalledWith(selected.workspaceId, selected);
+  await fAdapter.adapter.submit({ ...identity, key: 'next-location', expectedHead: 'history', text: 'Continue here',
+    model: { providerId: 'fixture', modelId: 'fixture' } });
+  const context = fAdapter.runtime.submit.mock.calls[0]![0].initialContext!;
+  expect(context.resources?.snapshot.scope.projectId).toBe('test-project');
+  expect(context.effectiveSystemPrompt).toContain('TEST PROJECT NOTE');
+  expect(context.effectiveSystemPrompt).not.toContain('OLD PROJECT NOTE');
+  branch.workspace_default.source = null;
+  await fAdapter.adapter.files(identity);
+  expect(files).not.toHaveBeenCalled();
 });
 
 it('ThreadAdapter reuses an accepted input receipt after settings break, and only a matching raced receipt can recover a new preparation failure', async () => {

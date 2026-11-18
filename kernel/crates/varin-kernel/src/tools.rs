@@ -988,6 +988,7 @@ pub(crate) struct KernelResourceClient {
     admission_control: Option<Arc<AdmissionControl>>,
     journal_catalog: Option<Arc<std::sync::Mutex<varin_runtime::Catalog>>>,
     reference_catalog: Option<Arc<std::sync::Mutex<varin_runtime::Catalog>>>,
+    read_location: Option<String>,
     environment_stops: Arc<std::sync::Mutex<BTreeSet<String>>>,
     source_bridge: Option<crate::host_query::OwnerChannel>,
     source_journal: Option<varin_runtime::catalog::journal::JournalAnchor>,
@@ -1009,6 +1010,7 @@ impl KernelResourceClient {
             admission_control: None,
             journal_catalog: None,
             reference_catalog: None,
+            read_location: None,
             environment_stops: Default::default(),
             source_bridge: None,
             source_journal: None,
@@ -1050,6 +1052,7 @@ impl KernelResourceClient {
         }
         Ok(result["value"].clone())
     }
+    pub(crate) fn with_read_location(mut self, location:String)->Self {self.read_location=Some(location);self}
     pub(crate) fn with_reference_catalog(mut self, catalog: Arc<std::sync::Mutex<varin_runtime::Catalog>>) -> Self {
         self.reference_catalog = Some(catalog);
         self
@@ -1262,9 +1265,8 @@ impl KernelResourceClient {
                 .operation(id)
                 .map_err(|e| KernelError::Operation(e.to_string()))?;
             let Some(source) = db
-                .launch_metadata(&operation.run_id)
+                .original_operation_source(&operation)
                 .map_err(|e| KernelError::Operation(e.to_string()))?
-                .and_then(|l| l.selection.source)
             else {
                 return Ok(None);
             };
@@ -1395,9 +1397,8 @@ impl KernelResourceClient {
             {
                 return Ok(());
             }
-            let Some(source) = db.launch_metadata(&operation.run_id)
-                .map_err(|e| KernelError::Operation(e.to_string()))?
-                .and_then(|launch| launch.selection.source) else { return Ok(()); };
+            let Some(source) = db.original_operation_source(&operation)
+                .map_err(|e| KernelError::Operation(e.to_string()))? else { return Ok(()); };
             if source.resource_owner.is_local() { return Ok(()); }
             let run = db.run(&operation.run_id).map_err(|e| KernelError::Operation(e.to_string()))?;
             (db.capture_operation_read(operation), source, run.thread_id)
@@ -2309,6 +2310,7 @@ impl ToolExecutor for KernelToolExecutor {
         } else {self};
         let operation = self_.frozen_operation(call, request)?;
         Ok(Box::new(KernelCall {
+            source: self_.binding.source_selection().map_err(ExecutionError::from)?,
             executor: self_,
             call: call.clone(),
             request: request.clone(),
@@ -2762,6 +2764,7 @@ impl KernelToolExecutor {
 }
 
 struct KernelCall {
+    source: varin_runtime::catalog::launches::SourceSelection,
     executor: Arc<KernelToolExecutor>,
     call: ToolCall,
     request: FrozenToolContext,
@@ -2775,6 +2778,15 @@ fn execution_context(run_id: &str, call: &ToolCall, origin: &ToolOrigin) -> Tool
     }
 }
 impl PreparedToolCall for KernelCall {
+    fn resource_source(&self) -> Option<&varin_runtime::catalog::launches::SourceSelection> { Some(&self.source) }
+
+    fn requires_operation(&self) -> bool {
+        // A target-side read has a receipt even when the effect is None. Its
+        // acknowledgement/cleanup must find the original coordinator Operation.
+        self.executor.binding.remote_authority.is_some() && !self.operation.coordinator_owned()
+            && managed_read_receipt_tool(&self.call.name)
+    }
+
     fn receipt_persisted(&self, context: &ToolExecutionContext) {
         if self.executor.binding.remote_authority.is_some()
             && !self.operation.coordinator_owned()

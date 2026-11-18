@@ -3,13 +3,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { resolveTargetArchitecture } from './target-architecture.mjs';
+import { nativeBuilderArguments, resolveTargetArchitecture } from './target-architecture.mjs';
 import { prepareRipgrep } from '../../../scripts/prepare-ripgrep.mjs';
+import { parseRoleArgument, assertDesktopTarget, desktopBuilderConfiguration } from './desktop-distribution.mjs';
 import { prepareDesktopProduct } from './build-desktop.mjs';
 
 const electronDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const env = { ...process.env };
 const builderArgs = process.argv.slice(2);
+const role = parseRoleArgument(builderArgs);
 const unsignedMacIndex = builderArgs.indexOf('--varin-unsigned-mac');
 const unsignedMac = unsignedMacIndex >= 0;
 if (unsignedMac) builderArgs.splice(unsignedMacIndex, 1);
@@ -22,12 +24,13 @@ for (const argument of builderArgs) {
 if (requestedPlatforms.size > 1) throw new Error(`Exactly one Electron target platform is required, got: ${[...requestedPlatforms].join(', ')}.`);
 const targetPlatform = [...requestedPlatforms][0] || process.platform;
 const targetArchitecture = resolveTargetArchitecture({ platform: targetPlatform, environment: env, builderArgs });
+assertDesktopTarget(role, targetPlatform, targetArchitecture.node);
 const require = createRequire(import.meta.url);
 const electronVersion = require('electron/package.json').version;
 env.VARIN_TARGET_ARCH = targetArchitecture.node;
 env.VARIN_TARGET_PLATFORM = targetPlatform;
 env.VARIN_PACKAGING_NODE = process.execPath;
-prepareRipgrep({ platform: targetPlatform, arch: targetArchitecture.node, stage: path.join(electronDir, 'resources', 'tools') });
+if (role === 'full') prepareRipgrep({ platform: targetPlatform, arch: targetArchitecture.node, stage: path.join(electronDir, 'resources', 'tools') });
 
 if (!builderArgs.some((argument) => argument.startsWith('--config.electronVersion='))) {
   builderArgs.push(`--config.electronVersion=${electronVersion}`);
@@ -64,10 +67,9 @@ const bunBinary = bunBinaryCandidates.find((candidate) => {
   return false;
 }) || (process.platform === 'win32' ? 'bun.exe' : 'bun');
 
-const prepared = await prepareDesktopProduct({ platform: targetPlatform, architecture: targetArchitecture.node });
-const configuration = structuredClone(require('../package.json').build);
-configuration.directories.app = prepared.directory;
-configuration.asarUnpack = prepared.unpackPatterns;
+const target = { role, platform: targetPlatform, architecture: targetArchitecture.node };
+const prepared = await prepareDesktopProduct(target);
+const configuration = desktopBuilderConfiguration(require('../package.json').build, prepared, target);
 if (unsignedMac) {
   configuration.dmg.sign = false;
   Object.assign(configuration.mac, { hardenedRuntime: false, identity: null, notarize: false });
@@ -75,12 +77,6 @@ if (unsignedMac) {
 const configurationPath = path.join(path.dirname(prepared.directory), 'electron-builder.cjs');
 await fs.promises.writeFile(configurationPath, `module.exports = ${JSON.stringify(configuration, null, 2)};\n`);
 builderArgs.unshift(`--config=${configurationPath}`);
-
-if (targetPlatform === 'linux' && !builderArgs.some((argument) => (
-  argument === '--x64' || argument === '--arm64' || argument === '--arch' || argument.startsWith('--arch=')
-))) {
-  builderArgs.push(`--${targetArchitecture.electronBuilder}`);
-}
 
 if (process.platform === 'darwin') {
   const compiledIconAssets = path.join(electronDir, 'resources', 'icons', 'Assets.car');
@@ -95,7 +91,7 @@ if (process.platform === 'darwin') {
   }
 }
 
-const child = spawn(bunBinary, ['x', 'electron-builder', ...builderArgs], {
+const child = spawn(bunBinary, ['x', 'electron-builder', ...nativeBuilderArguments(builderArgs, targetArchitecture)], {
   cwd: electronDir,
   env,
   stdio: 'inherit',

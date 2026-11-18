@@ -74,14 +74,14 @@ export function releaseImageAliases(candidate, releaseRefs) {
   return candidate.aliases;
 }
 
-export function imagePromotionPlan(candidate, { standardApp, toolbeltApp, slimBase, toolbeltBase }, releaseRefs, build) {
+export function imagePromotionPlan(candidate, { standardApp, toolbeltApp, slimBase, toolbeltBase, resourceNode }, releaseRefs, build) {
   const aliases = releaseImageAliases(candidate, releaseRefs);
-  const plan = imageArtifactPlan({ standardApp, toolbeltApp, slimBase, toolbeltBase }, aliases,
+  const plan = imageArtifactPlan({ standardApp, toolbeltApp, slimBase, toolbeltBase, resourceNode }, aliases,
     new Set([candidate.version, `sha-${candidate.sha}`]));
   if (build) {
     if (!/^[a-f0-9]{40}$/.test(build.toolingSha ?? '') || !/^[1-9]\d*$/.test(build.runId ?? '')
       || !/^[1-9]\d*$/.test(build.runAttempt ?? '')) throw new Error('Missing original image build identity');
-    for (const item of plan.filter(item => item.role === 'application')) item.labels = {
+    for (const item of plan.filter(item => item.role === 'application' || item.role === 'resource-node')) item.labels = {
       'org.opencontainers.image.revision': candidate.sha, 'org.opencontainers.image.version': candidate.version,
       'io.varin.publication.kind': 'release', 'io.varin.build.run_id': build.runId,
       'io.varin.build.run_attempt': build.runAttempt, 'io.varin.build.tooling_sha': build.toolingSha,
@@ -93,12 +93,13 @@ export function imagePromotionPlan(candidate, { standardApp, toolbeltApp, slimBa
 
 // Both publication channels share the artifact/compatibility-name owner. Their
 // admission and alias policies remain separate; this function grants neither.
-export function imageArtifactPlan({ standardApp, toolbeltApp, slimBase, toolbeltBase }, aliases, immutableAliases) {
+export function imageArtifactPlan({ standardApp, toolbeltApp, slimBase, toolbeltBase, resourceNode }, aliases, immutableAliases) {
   const images = [
     [standardApp, 'application', 'slim', ['varin', 'varin-slim']],
     [toolbeltApp, 'application', 'toolbelt', ['varin-toolbelt']],
     [slimBase, 'runtime-base', 'slim', ['varin-runtime-slim']],
     [toolbeltBase, 'runtime-base', 'toolbelt', ['varin-runtime-toolbelt', 'varin-runtime-base']],
+    ...(resourceNode ? [[resourceNode, 'resource-node', 'slim', ['varin-node']]] : []),
   ];
   return images.map(([source, role, variant, names]) => {
     const { digest } = pinnedImage(source);
@@ -287,7 +288,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const image = resolveRuntimeBase(process.env.BASE_OVERRIDE || `${process.env.BASE_REPOSITORY}@${process.env.BASE_DIGEST}`, process.argv[3], registry);
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `image=${image}\n`);
   } else {
+    // Role admission follows the exact selected source, not the current tooling
+    // checkout or an optional value that a failed smoke job can silently omit.
+    const hasNode = execFileSync('git', ['ls-tree', '--name-only', candidate.sha, '--', 'packages/web/application-host/resource-node.ts'], { encoding: 'utf8' }).trim() !== '';
+    const resourceNode = process.env.VARIN_RESOURCE_NODE_IMAGE || undefined;
+    if (Boolean(resourceNode) !== hasNode) throw new Error('Resource-node candidate does not match the selected release roles');
     const plan = imagePromotionPlan(candidate, { standardApp: process.env.VARIN_STANDARD_APP_IMAGE, toolbeltApp: process.env.VARIN_TOOLBELT_APP_IMAGE,
+      resourceNode,
       slimBase: process.env.VARIN_SLIM_BASE_IMAGE, toolbeltBase: process.env.VARIN_TOOLBELT_BASE_IMAGE }, releaseRefs,
     process.env.VARIN_BUILD_RUN_ID ? { runId: process.env.VARIN_BUILD_RUN_ID,
       runAttempt: process.env.VARIN_BUILD_RUN_ATTEMPT, toolingSha: process.env.VARIN_BUILD_TOOLING_SHA } : undefined);

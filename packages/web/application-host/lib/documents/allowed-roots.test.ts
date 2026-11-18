@@ -7,19 +7,24 @@ import { createDocumentAuthorityHarness } from './contract-fixtures.js';
 
 describe('document root guard', () => {
   it('compares Windows roots by canonical path identity', async () => {
+    const configuredRoot = 'D:\\PROJEC~1\\infOS';
+    const canonicalRoot = 'D:\\Project Files\\infOS';
     const fsPromises = {
-      realpath: vi.fn(async (value: PathLike) => path.win32.normalize(String(value))),
+      realpath: vi.fn(async (value: PathLike) => {
+        expect(value).toBe(configuredRoot);
+        return canonicalRoot;
+      }),
     };
     const guard = createDocumentRootGuard({
       fsPromises,
       pathModule: path.win32,
       platform: 'win32',
-      workspace: { root: 'D:\\project\\infOS', lockdown: true },
+      workspace: { root: configuredRoot, lockdown: true },
     });
 
-    await expect(guard('\\\\?\\D:\\project\\INFOS')).resolves.toBe(true);
-    await expect(guard('D:\\project\\infOS\\packages\\app')).resolves.toBe(true);
-    await expect(guard('D:\\project\\infOS-copy')).resolves.toBe(false);
+    await expect(guard('\\\\?\\D:\\Project Files\\INFOS')).resolves.toBe(true);
+    await expect(guard(path.win32.join(canonicalRoot, 'packages', 'app'))).resolves.toBe(true);
+    await expect(guard(`${canonicalRoot}-copy`)).resolves.toBe(false);
   });
 
   it('permits arbitrary resource locations when the Host is not locked down', async () => {

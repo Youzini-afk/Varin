@@ -44,4 +44,19 @@ export const createWebSettingsAPI = (): SettingsAPI => ({
     const payload = sanitizePayload(await response.json());
     return payload;
   },
+
+  async changeWorkspaceLocation(change, signal) {
+    const response = await runtimeFetch(`${SETTINGS_ENDPOINT}/workspace-location`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(change),
+      ...(signal ? { signal } : {}),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (response.status === 409 && (result.conflict === 'duplicate' || result.conflict === 'stale')) {
+      return { settings: sanitizePayload(result.settings), conflict: result.conflict };
+    }
+    if (!response.ok) throw new Error(result.error || 'Failed to save workspace location');
+    return { settings: sanitizePayload(result.settings) };
+  },
 });

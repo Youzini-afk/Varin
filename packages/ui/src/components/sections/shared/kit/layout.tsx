@@ -249,14 +249,12 @@ function useUnit({ dirty, saving = false, error, saveDisabled = false, onSave, o
   const [ok, setOk] = React.useState(false);
   const wasSaving = React.useRef(saving);
   React.useEffect(() => {
-    if (wasSaving.current && !saving && !dirty && !error) {
-      setOk(true);
-      const timer = window.setTimeout(() => setOk(false), 1800);
-      wasSaving.current = saving;
-      return () => window.clearTimeout(timer);
-    }
+    const acknowledged = wasSaving.current && !saving && !dirty && !error;
     wasSaving.current = saving;
-    return undefined;
+    setOk(acknowledged);
+    if (!acknowledged) return;
+    const timer = window.setTimeout(() => setOk(false), 1800);
+    return () => window.clearTimeout(timer);
   }, [saving, dirty, error]);
   const state: UnitState = saving ? 'busy' : error ? 'err' : dirty ? 'dirty' : ok ? 'ok' : 'idle';
   return state;

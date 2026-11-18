@@ -7,8 +7,7 @@ import { commitWebAssetGeneration } from './commit-web-asset-generation.mjs';
 import { prepareCompanionCatalog, stageDesktopWebAsset } from './companion-assets.mjs';
 
 /** Stage an already prepared browser product without building a Web Host, CLI or native kernel. */
-export async function stageDesktopUi(source) {
-  const resources = path.join(repository, 'packages/electron/resources');
+export async function stageDesktopUi(source, resources = path.join(repository, 'packages/electron/resources')) {
   await fs.mkdir(resources, { recursive: true });
   const candidateDir = await fs.mkdtemp(path.join(resources, 'web-dist-staging-'));
   const removeDir = target => fs.rm(target, { recursive: true, force: true, maxRetries: 4, retryDelay: 100 });

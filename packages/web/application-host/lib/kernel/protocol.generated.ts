@@ -224,6 +224,7 @@ export type KernelMethod =
   | "runtime.model.presentations"
   | "runtime.thread.catalog.list"
   | "runtime.thread.attention.read"
+  | "runtime.branch.workspace.set"
   | "runtime.thread.update"
   | "runtime.thread.title.prepare"
   | "runtime.thread.title.finish"
@@ -3274,7 +3275,15 @@ export interface ThreadOperationsParams {
   branchId?: string;
 }
 
+export interface BranchWorkspace {
+  revision: number;
+  source: LaunchSource | null;
+}
+
+export interface SetBranchWorkspace { threadId: string; branchId: string; expectedRevision: number; source: LaunchSource | null; }
+
 export interface ThreadBranch {
+  workspace_default?: BranchWorkspace | null;
   branch_id: string;
   head: string | null;
   active_run_id: string | null;
@@ -4102,6 +4111,7 @@ export interface InitialContext {
 }
 
 export interface InputSubmitParams {
+  expectedWorkspaceRevision?: number;
   inputPreparation?: InputResourcePreparation;
   expectedContextCheckpoint?: string;
   initialContext?: InitialContext;
@@ -4661,6 +4671,7 @@ export type OperationCallCompletion<M = StoredMedia> =
   | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime; content?: OutputBody<M> };
 
 export interface Operation {
+  resource_source?: LaunchSource;
   host_job?: HostJobView;
   execution_owner: ExecutorOwner | null;
   external_receipt: ExternalReceiptView | null;
@@ -7067,7 +7078,7 @@ export interface SourceMcpDeliveryResult { receipt:SourceMcpDeliveryReceipt;disp
 
 export interface SourceMcpHolderParams extends SourceAuthorityAddress { binding:SourceMcpHolderBinding;action:'retain'|'inspect'|'release'|'release_unstarted'; }
 
-export interface SourceAuthorityOpenParams { principalId:string;coordinatorHostId:string;scope:SourceAuthorityScope;source:LaunchSource;grantId:string;enabledTools:string[];purpose:'source'|'read'|'integration'|'result'|'process_view'|'script_environment'|'external_harness'|'mcp_owner';operationId?:string; }
+export interface SourceAuthorityOpenParams { principalId:string;coordinatorHostId:string;scope:SourceAuthorityScope;source:LaunchSource;grantId:string;enabledTools:string[];purpose:'source'|'read'|'integration'|'result'|'process_view'|'script_environment'|'external_harness'|'mcp_owner'|'work_location_read';operationId?:string; }
 
 export interface SourceAuthorityBindParams { principalId:string;coordinatorHostId:string;authorityId:string;resourceEpoch:string;toolBinding:SourceToolBinding|null;physicalRoot:LiveRoot|null; }
 
@@ -7091,7 +7102,7 @@ export interface ExecutionEnvironment {searchPath?:string;platform:string;defaul
 
 export interface SourceToolBinding { textEncoding?:KernelTextPolicy; executionEnvironment?:ExecutionEnvironment; resourceOwner:SourceResourceOwner;grantId:string;runId:string;threadId:string;workspaceId:string;executionWorkspaceId:string;sourceMode:SourceMode;nativeWorkspace?:{branchId:string;generation?:string;sourcePath?:string};rootId?:string;fileSource?:{branchId:string;revision:number};materializedSource?:{branchId:string;revision:number};liveRoot?:LiveRoot;environmentRunId?:string;enabledTools:string[];remoteAuthority?:{authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner}; }
 
-export interface SourceAuthorityResult { authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner;source:LaunchSource;scope:SourceAuthorityScope;phase:'preparing'|'ready'|'retaining'|'draining'|'retired'|'revoked';purpose:'source'|'read'|'integration'|'result'|'process_view'|'script_environment'|'external_harness'|'mcp_owner';operationId:string|null;grantId:string;toolBinding:SourceToolBinding|null;physicalRoot:LiveRoot|null;firstPreparation:boolean;materializationOperationId:string;mcpHolders:SourceMcpHolder[];mcpDeliveries:SourceMcpDeliveryReceipt[];mcpChildren:SourceMcpChildReference[];mcpDerivation:SourceMcpDerivationReference|null; }
+export interface SourceAuthorityResult { authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner;source:LaunchSource;scope:SourceAuthorityScope;phase:'preparing'|'ready'|'retaining'|'draining'|'retired'|'revoked';purpose:'source'|'read'|'integration'|'result'|'process_view'|'script_environment'|'external_harness'|'mcp_owner'|'work_location_read';operationId:string|null;grantId:string;toolBinding:SourceToolBinding|null;physicalRoot:LiveRoot|null;firstPreparation:boolean;materializationOperationId:string;mcpHolders:SourceMcpHolder[];mcpDeliveries:SourceMcpDeliveryReceipt[];mcpChildren:SourceMcpChildReference[];mcpDerivation:SourceMcpDerivationReference|null; }
 
 export interface SourceAuthorityScopeReleaseParams {principalId:string;coordinatorHostId:string;threadId:string;runId:string;mode:'retire'|'revoke';}
 
@@ -7780,6 +7791,7 @@ export type KernelMethodParams = {
   "runtime.model.presentations": ModelPresentationParams;
   "runtime.thread.catalog.list": ThreadCatalogQuery;
   "runtime.thread.attention.read": PrincipalQuery;
+  "runtime.branch.workspace.set": SetBranchWorkspace;
   "runtime.thread.update": ThreadMetadataUpdateParams;
   "runtime.thread.title.prepare": ThreadTitlePrepareParams;
   "runtime.thread.title.finish": ThreadTitleFinishParams;
@@ -9966,6 +9978,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.thread.attention.read";
       params: PrincipalQuery;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.branch.workspace.set";
+      params: SetBranchWorkspace;
       epoch?: string;
       grantId?: string;
     }

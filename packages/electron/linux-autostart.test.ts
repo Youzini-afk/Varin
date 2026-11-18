@@ -66,3 +66,17 @@ test('writes and removes the XDG autostart file', async () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   }
 });
+
+test('enabling or removing light autostart leaves an installed full application alone', async () => {
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-autostart-roles-'));
+  const env = { XDG_CONFIG_HOME: homeDir };
+  try {
+    const full = await setLinuxAutostartEnabled({ env, enabled: true, execPath: '/opt/varin' });
+    const light = await setLinuxAutostartEnabled({ env, role: 'light', enabled: true, execPath: '/opt/varin-light' });
+    assert.notEqual(full.filePath, light.filePath);
+    assert.match(await fs.readFile(light.filePath, 'utf8'), /StartupWMClass=varin-light/);
+    await setLinuxAutostartEnabled({ env, role: 'light', enabled: false });
+    assert.equal(await readLinuxAutostartEnabled({ env }), true);
+    assert.match(await fs.readFile(full.filePath, 'utf8'), /Exec=\/opt\/varin\n/);
+  } finally { await fs.rm(homeDir, { recursive: true, force: true }); }
+});

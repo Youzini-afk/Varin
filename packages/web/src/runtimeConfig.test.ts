@@ -6,6 +6,8 @@ vi.mock('@varin/application-client', () => ({
   getRuntimeBearerTokenSync: vi.fn(() => ''),
   getRuntimeExtraHeadersSync: vi.fn(() => ({})),
   getRuntimeKey: vi.fn(() => 'local'),
+  getRuntimeEndpointGeneration: vi.fn(() => 1),
+  runtimeFetch: vi.fn(),
   initializeRuntimeEndpoint: vi.fn(),
   installRuntimeFetchBridge: vi.fn(),
   refreshLocalRuntimeUrlAuthToken: vi.fn(() => Promise.resolve()),
@@ -22,9 +24,10 @@ vi.mock('@varin/ui/lib/desktopHosts', () => ({ desktopLocalClientTokenGet: vi.fn
 vi.mock('./api', () => ({ createWebAPIs: vi.fn() }));
 
 import { setLocalRuntimeAuthCredentialProvider, setRuntimeBearerToken, setRuntimeExtraHeaders } from '@varin/application-client';
-import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@varin/application-client';
+import { getRuntimeKey, getRuntimeEndpointGeneration, runtimeFetch, initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@varin/application-client';
 import { restoreDesktopRelayRuntime } from '@varin/ui/lib/desktopRelayRestore';
-import { createConfiguredWebAPIs, readRuntimeBootstrapConfig } from './runtimeConfig';
+import { getInjectedBootOutcome, resolveDesktopBootView, type DesktopBootOutcome } from '@varin/ui/lib/desktopBoot';
+import { createConfiguredWebAPIs, getDesktopRelayRestoreReady, readRuntimeBootstrapConfig } from './runtimeConfig';
 
 const originalWindow = globalThis.window;
 
@@ -46,6 +49,8 @@ const makeWindow = (search = ''): Record<string, unknown> => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getRuntimeKey).mockReturnValue('local');
+  vi.mocked(getRuntimeEndpointGeneration).mockReturnValue(1);
   installWindow(makeWindow());
 });
 
@@ -63,7 +68,7 @@ describe('readRuntimeBootstrapConfig', () => {
     current.__VARIN_CLIENT_TOKEN__ = ' remote-token ';
     current.__VARIN_LOCAL_ORIGIN__ = ' http://127.0.0.1:3000 ';
     current.__VARIN_RUNTIME_HEADERS__ = { 'x-varin-relay': 'relay-value' };
-    current.__VARIN_RELAY_HOST_ID__ = ' remote-host ';
+
     installWindow(current);
 
     expect(readRuntimeBootstrapConfig()).toEqual({
@@ -71,8 +76,14 @@ describe('readRuntimeBootstrapConfig', () => {
       clientToken: 'remote-token',
       localOrigin: 'http://127.0.0.1:3000',
       runtimeHeaders: { 'x-varin-relay': 'relay-value' },
-      relayHostId: 'remote-host',
+      relayHostId: '',
     });
+  });
+
+  test('an explicit relay selection cannot borrow HTTP headers or a fallback base from another window', () => {
+    installWindow({ ...makeWindow(), __VARIN_RELAY_HOST_ID__: ' cloud ', __VARIN_API_BASE_URL__: 'https://other.example',
+      __VARIN_CLIENT_TOKEN__: 'other', __VARIN_RUNTIME_HEADERS__: { 'X-Client': 'other' } });
+    expect(readRuntimeBootstrapConfig()).toEqual({ relayHostId: 'cloud', localOrigin: '', apiBaseUrl: '', clientToken: '', runtimeHeaders: undefined });
   });
 
   test('does not read runtime credentials directly from a parent window', () => {
@@ -149,4 +160,35 @@ describe('createConfiguredWebAPIs', () => {
     });
     expect(restoreDesktopRelayRuntime).not.toHaveBeenCalled();
   });
+});
+
+test('only a confirmed session on the selected restored relay profile dismisses recovery', async () => {
+  const bootOutcome: DesktopBootOutcome = { target: 'remote', status: 'relay-pending', hostId: 'cloud', url: 'relay://pinned', localAvailable: false };
+  const bootstrap = { apiBaseUrl: '', clientToken: '', localOrigin: '', relayHostId: 'cloud' };
+  Object.assign(window, { __VARIN_DESKTOP_BOOT_OUTCOME__: bootOutcome });
+  const view = () => resolveDesktopBootView({ isDesktopShell: true, bootOutcome: getInjectedBootOutcome() });
+  for (const state of ['confirmed', 'offline', 'different-owner', 'superseded'] as const) {
+    vi.mocked(getRuntimeKey).mockReturnValue(state === 'different-owner' ? 'host:other' : 'host:cloud');
+    vi.mocked(runtimeFetch).mockImplementation(async () => {
+      if (state === 'offline') throw new Error('relay unavailable');
+      if (state === 'superseded') vi.mocked(getRuntimeEndpointGeneration).mockReturnValue(2);
+      return Response.json({ authenticated: true });
+    });
+    createConfiguredWebAPIs(bootstrap); await getDesktopRelayRestoreReady();
+    expect(view()?.screen).toBe(state === 'confirmed' ? 'main' : 'recovery');
+    expect(view()?.localAvailable).toBe(false);
+  }
+  expect(runtimeFetch).toHaveBeenCalledTimes(3); // never probe a different owner
+  expect(runtimeFetch).toHaveBeenCalledWith('/auth/session', expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  expect(restoreDesktopRelayRuntime).toHaveBeenCalledTimes(4); // no startup retry loop
+});
+
+test('the bundled chooser without a selected Host cannot start session auth or restore an unrelated default relay', async () => {
+  installWindow({ ...makeWindow(), location: { origin: 'varin-ui://app', protocol: 'varin-ui:' } });
+  createConfiguredWebAPIs();
+  await getDesktopRelayRestoreReady();
+  const client = await import('@varin/application-client');
+  expect(client.refreshRuntimeUrlAuthToken).not.toHaveBeenCalled();
+  expect(restoreDesktopRelayRuntime).not.toHaveBeenCalled();
+  expect(runtimeFetch).not.toHaveBeenCalled();
 });

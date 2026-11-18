@@ -20,6 +20,7 @@ declare module 'electron' {
 }
 
 declare global {
+  const __VARIN_LIGHT_DESKTOP__: boolean;
   const __VARIN_UPDATER_E2E_BUILD__: boolean | undefined;
 }
 

@@ -3,7 +3,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { resolveCandidate, releaseTargets, recordAssets, verifyArtifacts, finalizeAssets, assertReleaseRef } from './release-artifacts.mjs';
+import { resolveCandidate, releaseTargets, releaseMatrices, recordAssets, verifyArtifacts, finalizeAssets, assertReleaseRef } from './release-artifacts.mjs';
+
+import { desktopReleaseProduct } from './desktop-release-product.mjs';
 
 const sourceSha = 'a'.repeat(40), toolingSha = 'b'.repeat(40);
 test('release retries retain the accepted source even after a tag moves', async () => {
@@ -17,15 +19,31 @@ test('release retries retain the accepted source even after a tag moves', async 
 test('assembly requires every selected desktop, component and Android product from the same source with intact files', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-release-assets-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const candidate = { schema: 1, sourceSha, toolingSha, version: '0.9.34', includeIntel: false };
-  for (const target of releaseTargets()) for (const kind of ['desktop', 'component']) {
-    const directory = path.join(root, `${kind}-${target.nodePlatform}-${target.architecture}`);
-    await fs.mkdir(directory); await fs.writeFile(path.join(directory, 'asset.bin'), kind);
-    await recordAssets(directory, { ...candidate, kind, platform: target.nodePlatform, arch: target.architecture });
+  const candidate = { schema: 1, sourceSha, toolingSha, version: '0.9.34', includeIntel: false, desktopRoles: ['full','light'] };
+  for (const target of releaseTargets()) {
+    const options = { ...candidate, platform: target.nodePlatform, arch: target.architecture };
+    for (const role of candidate.desktopRoles) {
+      const directory = path.join(root, 'desktop-' + role + '-' + options.platform + '-' + options.arch);
+      await fs.mkdir(directory);
+      const product = desktopReleaseProduct({ ...options, role });
+      for (const name of [...product.required, ...(product.manifest ? [product.manifest] : [])]) await fs.writeFile(path.join(directory, name), role);
+      await recordAssets(directory, { ...options, role, kind: 'desktop' });
+    }
+    const directory = path.join(root, 'component-' + options.platform + '-' + options.arch);
+    await fs.mkdir(directory); await fs.writeFile(path.join(directory, 'asset.bin'), 'component');
+    await recordAssets(directory, { ...options, kind: 'component' });
   }
   const android = path.join(root, 'android'); await fs.mkdir(android); await fs.writeFile(path.join(android, 'app.apk'), 'apk');
   await recordAssets(android, { ...candidate, kind: 'android', platform: 'android', arch: 'universal' });
   await verifyArtifacts(root, candidate);
+  const armLight = path.join(root, 'desktop-light-win32-arm64');
+  const armFile = 'Varin-Light-0.9.34-win-arm64.exe';
+  await fs.rename(path.join(armLight, armFile), path.join(armLight, 'Varin-0.9.34-win-arm64.exe'));
+  const options = { ...candidate, kind: 'desktop', role: 'light', platform: 'win32', arch: 'arm64' };
+  await recordAssets(armLight, options);
+  await assert.rejects(verifyArtifacts(root, candidate), /Missing desktop.light.win32.arm64 asset/);
+  await fs.rename(path.join(armLight, 'Varin-0.9.34-win-arm64.exe'), path.join(armLight, armFile));
+  await recordAssets(armLight, options);
   await assert.rejects(verifyArtifacts(root, { ...candidate, sourceSha: 'c'.repeat(40) }), /source mismatch/);
   await fs.writeFile(path.join(android, 'app.apk'), 'corrupt');
   await assert.rejects(verifyArtifacts(root, candidate), /digest mismatch/);
@@ -42,4 +60,21 @@ test('final checksums describe final installer and updater bytes with their sour
   await finalizeAssets(root, { sourceSha });
   assert.equal(JSON.parse(await fs.readFile(path.join(root, 'release-source.json'), 'utf8')).files[0].name, 'latest.yml');
   assert.match(await fs.readFile(path.join(root, 'SHA256SUMS'), 'utf8'), /[a-f0-9]{64}  release-source.json/u);
+});
+
+test('the official desktop matrix adds native role rows without duplicating inference components or VM inputs', () => {
+  for (const includeIntel of [true, false]) {
+    const native = releaseTargets(includeIntel);
+    const legacy = releaseMatrices({ includeIntel });
+    assert.equal(legacy.matrix.include.length + legacy.linux_matrix.include.length, native.length);
+    const { matrix, linux_matrix, component_matrix } = releaseMatrices({ includeIntel, desktopRoles: ['full','light'] });
+    const rows = [...matrix.include, ...linux_matrix.include];
+    assert.equal(rows.length, 2 * native.length);
+    assert.equal(new Set(rows.map(row => row.artifact)).size, rows.length);
+    assert.deepEqual(component_matrix.include, native);
+    assert.deepEqual(linux_matrix.include.map(row => [row.nodePlatform, row.architecture, row.role]), [['linux','x64','full']]);
+    for (const target of native) {
+      assert.deepEqual(rows.filter(row => row.runner === target.runner).map(row => row.role).sort(), ['full','light']);
+    }
+  }
 });

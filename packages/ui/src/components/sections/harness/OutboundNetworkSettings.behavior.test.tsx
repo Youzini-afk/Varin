@@ -2,11 +2,11 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-const fixture = vi.hoisted(() => ({ generation: 1, listeners: new Set<() => void>(), fetch: vi.fn(), translate: (key: string) => key }));
-vi.mock('@varin/application-client', async importOriginal => ({ ...await importOriginal<typeof import('@varin/application-client')>(),
-  runtimeFetch: fixture.fetch, registerRuntimeEndpointSwitchBlocker: vi.fn(),
-  getRuntimeEndpointGeneration: () => fixture.generation, getRuntimeApiBaseUrl: () => `https://host-${fixture.generation}.example`,
-  subscribeRuntimeEndpointChanged: (listener: () => void) => { fixture.listeners.add(listener); return () => fixture.listeners.delete(listener); } }));
+import type { RuntimeEndpointChangedDetail } from '@varin/application-client';
+const fixture = vi.hoisted(() => ({ generation: 1, url: (generation: number) => `https://host-${generation}.example`, listeners: new Set<(detail: RuntimeEndpointChangedDetail) => void>(), fetch: vi.fn(), translate: (key: string) => key }));
+vi.mock(import('@varin/application-client'), async importOriginal => ({ ...await importOriginal(), runtimeFetch: fixture.fetch, registerRuntimeEndpointSwitchBlocker: vi.fn(),
+  getRuntimeEndpointGeneration: () => fixture.generation, getRuntimeApiBaseUrl: () => fixture.url(fixture.generation),
+  subscribeRuntimeEndpointChanged: (listener: (detail: RuntimeEndpointChangedDetail) => void) => { fixture.listeners.add(listener); return () => fixture.listeners.delete(listener); } }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: fixture.translate }) }));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={event => onChange?.(event as unknown as React.ChangeEvent<HTMLInputElement>)} /> }));
 import { OutboundNetworkSettings } from './OutboundNetworkSettings';
@@ -16,7 +16,11 @@ const settings = () => ({ outboundNetwork: { mode: 'proxy', proxyUrl: `https://p
 const field = (name: string) => container.querySelector<HTMLInputElement>(`input[aria-label="settings.page.harness.network.${name}"]`)!;
 const button = (key: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === key)!;
 const input = (name: string, value: string) => act(async () => { field(name).value = value; field(name).dispatchEvent(new window.Event('input', { bubbles: true })); });
-const switchHost = () => act(async () => { fixture.generation += 1; for (const listener of fixture.listeners) listener(); });
+const switchHost = () => act(async () => {
+  const previousApiBaseUrl = fixture.url(fixture.generation);
+  const apiBaseUrl = fixture.url(++fixture.generation);
+  for (const listener of fixture.listeners) listener({ apiBaseUrl, previousApiBaseUrl, runtimeKey: `url:${apiBaseUrl}`, previousRuntimeKey: `url:${previousApiBaseUrl}` });
+});
 const credentialsWrites = () => fixture.fetch.mock.calls.filter(([url, init]) => url.endsWith('/credentials') && init?.method === 'PUT');
 beforeEach(() => {
   vi.clearAllMocks(); fixture.generation += 1;

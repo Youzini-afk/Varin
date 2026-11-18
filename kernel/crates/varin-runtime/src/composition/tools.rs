@@ -245,6 +245,7 @@ fn selected(
     }))
 }
 impl PreparedToolCall for SelectedCall {
+    fn resource_source(&self) -> Option<&crate::catalog::launches::SourceSelection> { self.invocation.resource_source() }
     fn requires_operation(&self) -> bool { self.invocation.requires_operation() }
     fn receipt_persisted(&self, context: &ToolExecutionContext) {
         self.invocation.receipt_persisted(context);

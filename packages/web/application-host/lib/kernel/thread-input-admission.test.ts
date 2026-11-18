@@ -3,7 +3,10 @@ import request from 'supertest';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createThreadsHttpAPI, ThreadRequestError, type ThreadSubmit } from '@varin/application-client';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
+import { createConversationWorkLocation } from './default-work-location.js';
+import { resourceSource } from './thread-context.js';
 import { ThreadAdapter } from './thread-adapter.js';
+import { createThreadFileTargetResolver } from './thread-file-target.js';
 import { registerThreadRoutes } from './thread-routes.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { KernelClientError, KernelRequestError } from './kernel-error.js';
@@ -16,9 +19,15 @@ function fixture() {
   const credentialOwner = new ExistingHostCredentialOwner({ runtime: { getAuth: async () => undefined }, providerId: 'provider', providerFamily: 'fixture',
     currentScope: async () => ({ reference: 'fixture', authority: 'fixture', account: 'fixture', generation: 1 }), endpoint: configuration.endpoint, allowAnonymous: true });
   const runtime = {
+    setBranchWorkspace: vi.fn<AgentRuntimeClient['setBranchWorkspace']>(),
+    principalCanUseHostResources: vi.fn(async () => true),
+    sourceTools: vi.fn(async () => ['file_read']),
     createThread: vi.fn<AgentRuntimeClient['createThread']>(async (threadId, branchId) => ({ threadId, branchId })),
     inputReceipt: vi.fn<AgentRuntimeClient['inputReceipt']>(async () => null),
     inheritedInputReceipt: vi.fn<AgentRuntimeClient['inheritedInputReceipt']>(async () => null),
+    historyPage: vi.fn<AgentRuntimeClient['historyPage']>(),
+    historyItem: vi.fn<AgentRuntimeClient['historyItem']>(),
+    operation: vi.fn<AgentRuntimeClient['operation']>(),
     thread: vi.fn(async () => ({ thread_id: identity.threadId, branches: [{ branch_id: identity.branchId, active_run_id: 'run', latest_run: { id: 'run', configuration } }] })),
     submit: vi.fn(async () => ({ thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'run', input_id: 'input', cursor: 1 })),
   };
@@ -41,6 +50,35 @@ function fixture() {
   return { api: createThreadsHttpAPI(), adapter, runtime, queued, models, source, configuration };
 }
 afterEach(() => vi.unstubAllGlobals());
+it('opens a cross-workspace read on its operation owner even when the launch has a different owner', async () => {
+  const f = fixture();
+  const owner = { kind: 'managed_host' as const, hostId: 'test', connectionId: 'test-peer', endpointIdentity: 'test-pin' };
+  const root = 'C:\\logs';
+  const read = { resource_owner: owner, workspace_id: 'test-docs', execution_workspace_id: 'test-docs', mode: 'live_root' as const,
+    live_root: { hostId: 'test', rootId: 'test-root', canonicalRoot: root }, branch_id: null, revision: null };
+  const entry = { id: 'history-tool', source: 'assistant' as const, run_id: 'run', thread_id: identity.threadId, parent: null, content_ref: 'body' };
+  f.runtime.historyPage.mockResolvedValue({ head: entry.id, previous: null, items: [entry] });
+  f.runtime.historyItem.mockResolvedValue({ ...entry, provider: null, content: {
+    id: 'model-item:7:request:provider-tool', content: { kind: 'tool_call', call: { name: 'file_read', call_id: 'read', arguments: { path: 'build.log', location: 'saved' } } },
+  } });
+  f.runtime.operation.mockResolvedValue({ id: 'request:tool:read', run_id: entry.run_id, resource_source: read } as Awaited<ReturnType<AgentRuntimeClient['operation']>>);
+  const resolveRemoteSource = vi.fn(async () => ({ resourceOwner: owner, workspaceId: 'test-docs', path: root }));
+  const validateLiveSource = vi.fn();
+  f.adapter.bindFileResolver(createThreadFileTargetResolver({ storageRoot: '/state',
+    documents: {} as Parameters<typeof createThreadFileTargetResolver>[0]['documents'], validateLiveSource, resolveRemoteSource }));
+  const input = { ...identity, itemId: entry.id, path: 'build.log' };
+  await expect(f.api.fileTarget(input)).resolves.toEqual({
+    kind: 'document', workspaceId: 'test-docs', root, resourceId: 'build.log', resourceOwner: owner,
+  });
+  expect(f.runtime.operation).toHaveBeenCalledWith('request:tool:read', expect.any(AbortSignal));
+  expect(resolveRemoteSource).toHaveBeenCalledWith({ resourceOwner: owner, path: root }, expect.any(AbortSignal));
+  expect(validateLiveSource).not.toHaveBeenCalled();
+  expect(f.queued.launch).not.toHaveBeenCalled();
+  f.runtime.operation.mockResolvedValueOnce({ id: 'request:tool:read', run_id: entry.run_id } as Awaited<ReturnType<AgentRuntimeClient['operation']>>);
+  await expect(f.api.fileTarget(input)).resolves.toMatchObject({ kind: 'unavailable' });
+  expect(f.queued.launch).not.toHaveBeenCalled();
+});
+
 it('supplies a device default for source-less sends while keeping explicit sources and inheritance intent', async () => {
   const f = fixture();
   const fallback = { resourceOwner: { kind: 'local' as const }, workspaceId: 'device', executionWorkspaceId: 'device',
@@ -177,4 +215,86 @@ it('accepts the selected organization placement through the public create HTTP a
   expect(f.runtime.createThread.mock.calls.at(-1)?.[4]).toEqual({ containerId: null });
   await expect(f.api.create('malformed', { organization: { containerId: 'group', principalId: 'forged' } as never })).rejects.toMatchObject({ status: 400 });
   expect(f.runtime.createThread).toHaveBeenCalledTimes(2);
+});
+
+it('checks the branch revision and Host authority before consulting a live workspace, and uses only the acknowledged default on the next send', async () => {
+  const f = fixture();
+  const source = { resourceOwner: { kind: 'local' as const }, workspaceId: 'registered', executionWorkspaceId: 'registered',
+    mode: 'live_root' as const, liveRoot: { hostId: 'test', canonicalRoot: '/same/path', rootId: 'test-root' }, tools: ['file_read'] };
+  const wire = { resource_owner: source.resourceOwner, workspace_id: source.workspaceId, execution_workspace_id: source.executionWorkspaceId,
+    branch_id: null, revision: null, mode: source.mode, live_root: source.liveRoot };
+  const summary = (workspace: { revision: number; source: typeof wire | null } | null) => ({ thread_id: identity.threadId, principal_id: null, parent_thread_id: null,
+    branches: [{ branch_id: identity.branchId, active_run_id: null, latest_run: null, workspace_default: workspace }] });
+  f.runtime.thread.mockImplementation(async () => summary(null) as never);
+  f.runtime.principalCanUseHostResources.mockResolvedValueOnce(false);
+  await expect(f.api.sources.setDefault!(identity, { expectedRevision: 0, source })).rejects.toMatchObject({status:403});
+  expect(f.source).not.toHaveBeenCalled();
+  f.source.mockRejectedValueOnce(new SourceAdmissionError('source_authority_denied'));
+  await expect(f.api.sources.setDefault!(identity, { expectedRevision: 0, source })).rejects.toMatchObject({status:403});
+  expect(f.runtime.setBranchWorkspace).not.toHaveBeenCalled();
+  f.runtime.setBranchWorkspace.mockResolvedValueOnce({revision:1,source:wire});
+  await expect(f.api.sources.setDefault!(identity, {expectedRevision:0,source})).resolves.toMatchObject({revision:1});
+  expect(f.runtime.setBranchWorkspace).toHaveBeenCalledWith({threadId:identity.threadId,branchId:identity.branchId,expectedRevision:0,source:wire},expect.any(AbortSignal));
+  f.runtime.thread.mockImplementation(async () => summary({revision:1,source:wire}) as never);
+  await expect(f.api.sources.setDefault!(identity, {expectedRevision:0,source:null})).rejects.toMatchObject({status:409});
+  const fallback = vi.fn(async (): Promise<never> => { throw new Error('Creation defaults do not apply'); });
+  f.adapter.bindDefaultDeviceSource(fallback);
+  await f.api.submit(input);
+  expect(f.runtime.submit).toHaveBeenLastCalledWith(expect.objectContaining({expectedWorkspaceRevision:1,launch:expect.objectContaining({
+    inheritSource:true,source:expect.objectContaining({workspaceId:'registered'}), enabledTools:['file_read']})}));
+  f.runtime.thread.mockImplementation(async () => summary({revision:2,source:null}) as never);
+  await f.api.submit({...input,key:'chat-next'});
+  expect(f.runtime.submit).toHaveBeenLastCalledWith(expect.objectContaining({expectedWorkspaceRevision:2,launch:expect.objectContaining({source:null,enabledTools:[]})}));
+  expect(fallback).not.toHaveBeenCalled();
+});
+
+it('uses the saved original Host on first native admission, retains inherited/chat-only choices and never prepares a replacement registration', async () => {
+  const f = fixture();
+  const a = { kind: 'local' as const }, b = { kind: 'managed_host' as const, hostId: 'b', connectionId: 'paired-b', endpointIdentity: 'endpoint-b' };
+  const rows = [a, b].map((resourceOwner, index) => ({ kind: 'folder' as const, resourceOwner, path: '/project', workspaceId: 'same',
+    id: String(index), name: index ? 'Remote project' : 'Local project' }));
+  let preferred = '1', workspaceId = 'same', principalAllowed = true, botId: string | null = null;
+  let checkpoint: {resources: {source: ReturnType<typeof resourceSource>}} | null = null;
+  const readWorkspaceSettings = vi.fn(async () => ({ projects: [], workspaceLocations: rows, defaultWorkspaceLocationId: preferred }));
+  const runtime = { thread: async () => ({ branches: [], principal_id: 'owner', bot_id: botId }), context: async () => checkpoint,
+    launch: async () => null, sourceTools: async () => ['file_read'], principalCanUseHostResources: async () => principalAllowed,
+    organizationCreationDefaults: async () => null } as unknown as Parameters<typeof createConversationWorkLocation>[0]['agentRuntime'];
+  const resolve = vi.fn<Parameters<typeof createConversationWorkLocation>[0]['sourceDirectory']['resolve']>(async input => ({ ...input, workspaceId }));
+  const prepare = vi.fn<Parameters<typeof createConversationWorkLocation>[0]['prepare']>(async input => ({
+    path: '/project', source: { resourceOwner: input.resourceOwner, workspaceId: input.workspaceId, executionWorkspaceId: input.workspaceId,
+      mode: 'live_root', liveRoot: { hostId: input.resourceOwner.kind === 'local' ? 'a' : input.resourceOwner.hostId,
+        rootId: 'original-root', canonicalRoot: '/project' }, tools: ['file_read'] },
+  }));
+  f.adapter.bindDefaultDeviceSource(createConversationWorkLocation({ agentRuntime: runtime, readWorkspaceSettings,
+    prepare, sourceDirectory: { resolve }, getBot: async () => ({ homeDir: '/bots/home' }), servicePath: '/service' }));
+  await f.adapter.submit(input);
+  expect(f.runtime.submit).toHaveBeenLastCalledWith(expect.objectContaining({ launch: expect.objectContaining({
+    inheritSource: true, source: expect.objectContaining({ resourceOwner: b, workspaceId: 'same' }), enabledTools: ['file_read'],
+  }) }));
+  const selected = (await prepare.mock.results[0]!.value).source;
+  checkpoint = { resources: { source: resourceSource(selected) } }; preferred = '0';
+  await f.adapter.submit({ ...input, key: 'successor' });
+  expect(f.runtime.submit).toHaveBeenLastCalledWith(expect.objectContaining({ launch: expect.objectContaining({
+    source: expect.objectContaining({ resourceOwner: b }),
+  }) }));
+  checkpoint = { resources: { source: null } };
+  await f.adapter.submit({ ...input, key: 'source-less-successor' });
+  expect(f.runtime.submit).toHaveBeenLastCalledWith(expect.objectContaining({ launch: expect.objectContaining({ source: null }) }));
+  checkpoint = null;
+  await f.adapter.submit({ ...input, key: 'explicit-none', source: null });
+  expect(readWorkspaceSettings).toHaveBeenCalledTimes(1);
+  expect(prepare).toHaveBeenCalledTimes(1);
+  principalAllowed = false;
+  await f.adapter.submit({ ...input, key: 'guest' });
+  expect(readWorkspaceSettings).toHaveBeenCalledTimes(1);
+  principalAllowed = true; botId = 'bot';
+  await f.adapter.submit({ ...input, key: 'bot-default' });
+  expect(resolve).toHaveBeenLastCalledWith({ resourceOwner: a, path: '/bots/home' }, undefined);
+  expect(readWorkspaceSettings).toHaveBeenCalledTimes(1);
+  botId = null; preferred = '1'; workspaceId = 'replacement';
+  const admitted = f.runtime.submit.mock.calls.length;
+  await expect(f.adapter.submit({ ...input, key: 'replaced' })).rejects.toThrow();
+  expect(resolve).toHaveBeenLastCalledWith({ resourceOwner: b, path: '/project' }, undefined);
+  expect(prepare).toHaveBeenCalledTimes(2);
+  expect(f.runtime.submit).toHaveBeenCalledTimes(admitted);
 });

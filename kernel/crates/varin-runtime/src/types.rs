@@ -54,6 +54,9 @@ pub struct Operation<
 > {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host_job: Option<H>,
+    /// Physical resource address fixed by the call adapter before dispatch. Not a live grant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource_source: Option<crate::catalog::launches::SourceSelection>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mcp_resource_subscription: Option<crate::catalog::mcp_resources::McpResourceSubscription>,
     #[serde(skip_serializing_if = "Option::is_none")]

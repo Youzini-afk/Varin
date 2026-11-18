@@ -4628,3 +4628,81 @@ fn manual_context_job_creation_notifies_original_branch_once() {
     assert_eq!(events[0].branch_id.as_deref(), Some(source.branch_id.as_str()));
     assert_eq!(events[0].data["job_run_id"], json!(job.receipt.run_id));
 }
+
+#[test]
+fn branch_workspace_cas_fences_preparation_and_preserves_handed_off_work() {
+    use super::branch_workspace::SetBranchWorkspace;
+    let f = Fixture::new();
+    let mut db = f.open();
+    db.create_thread("thread", "main").unwrap();
+    let source = |host: &str| -> launches::SourceSelection {
+        serde_json::from_value(json!({"resource_owner":{"kind":"managed_host","hostId":host,"connectionId":host,"endpointIdentity":format!("epoch:{host}")},
+            "mode":"live_root","workspace_id":"same","execution_workspace_id":"same","branch_id":null,"revision":null,
+            "live_root":{"hostId":host,"rootId":"root","canonicalRoot":"/work"}})).unwrap()
+    };
+    let set = |revision, source| SetBranchWorkspace { thread_id:"thread".into(), branch_id:"main".into(), expected_revision:revision, source };
+    let launch = |source| serde_json::from_value::<launches::LaunchSelection>(json!({"extension_bindings":[],"connection_identity":"fixture","provider_family":"fixture",
+        "model":"model","configuration_generation":1,"tool_schema_generation":1,"tools":[],"policy":{"name":"default","version":"1"},"source":source})).unwrap();
+    let a = Some(source("development"));
+    let b = Some(source("tests"));
+    let first = db.submit_with_launch(&command(),Some(launch(a.clone()))).unwrap();
+    let epoch = db.epoch();
+    let runnable = db.transition_run(&first.run_id, epoch, 1, RunState::Runnable).unwrap();
+    db.admit_operation("ongoing-job",&first.run_id,epoch,Lifetime::Thread,json!({"task":"retained"})).unwrap();
+    db.handoff_operation("ongoing-job",epoch).unwrap();
+    assert!(db.set_branch_workspace(set(0,b.clone())).is_err(), "cannot retarget an active Run");
+    db.transition_run(&first.run_id, epoch,runnable.revision, RunState::Completed).unwrap();
+    let old_op = db.operation("ongoing-job").unwrap();
+    let old_launch = db.launch_intent(&first.run_id).unwrap().unwrap();
+
+    let make = |db: &Catalog, revision, location| {
+        let cmd=SubmitInput { key:"next".into(), expected_head:Some(first.input_id.clone()), ..command() };
+        db.prepare_submission(cmd,None,None).unwrap().with_workspace_revision(revision).load(Some(launch(location)),true).unwrap()
+    };
+    let stale = make(&db,0,a.clone());
+    assert_eq!(db.set_branch_workspace(set(0,b.clone())).unwrap().revision,1);
+    assert!(matches!(db.set_branch_workspace(set(0,None)),Err(RuntimeError::Conflict(_))));
+    assert!(matches!(db.admit_submission(stale),Err(RuntimeError::Conflict(_))));
+    let wrong = make(&db,1,a.clone());
+    assert!(matches!(db.admit_submission(wrong),Err(RuntimeError::Conflict(_))));
+    let next = make(&db,1,b.clone());
+    let next = db.admit_submission(next).unwrap();
+    assert_eq!(db.launch_intent(&next.run_id).unwrap().unwrap().selection.source,b);
+    assert_eq!(db.launch_intent(&first.run_id).unwrap().unwrap(),old_launch);
+    assert_eq!(db.operation("ongoing-job").unwrap(),old_op);
+    // An explicitly switched historical head carries its own choice even after
+    // a later foreground Run. Readers do not need to guess from the current leaf.
+    db.fork_branch("main","saved-branch",Some(&first.input_id)).unwrap();
+    assert_eq!(branch_workspace::read(&db.db,"saved-branch").unwrap().unwrap().source,b);
+    assert_eq!(db.inspect_thread("thread").unwrap()["branches"][0]["workspace_default"]["revision"],1);
+    let next_run = db.transition_run(&next.run_id, epoch, 1, RunState::Runnable).unwrap();
+    db.transition_run(&next.run_id, epoch, next_run.revision, RunState::Completed).unwrap();
+    let one_send = SubmitInput { key: "one-send-chat".into(), expected_head: Some(next.input_id), ..command() };
+    let one_send = db.prepare_submission(one_send, None, None).unwrap()
+        .with_workspace_revision(1).load(Some(launch(None)), false).unwrap();
+    let one_send = db.admit_submission(one_send).unwrap();
+    assert_eq!(db.launch_intent(&one_send.run_id).unwrap().unwrap().selection.source, None);
+    assert_eq!(branch_workspace::read(&db.db,"main").unwrap().unwrap().source,b);
+    drop(db);
+    let db=f.open();
+    assert_eq!(branch_workspace::read(&db.db,"main").unwrap().unwrap().source,b);
+    assert_eq!(db.launch_intent(&first.run_id).unwrap().unwrap().selection.source,a);
+    assert_eq!(db.operation("ongoing-job").unwrap().run_id,first.run_id);
+}
+
+#[test]
+fn branch_workspace_explicit_chat_and_owner_checks() {
+    use super::branch_workspace::SetBranchWorkspace;
+    let f=Fixture::new(); let mut db=f.open();
+    db.initialize_principals("owner",false).unwrap();
+    db.create_thread_with_principal("owner-thread","main",Some("owner")).unwrap();
+    db.create_thread_with_principal("member-thread","member-branch",Some("member")).unwrap();
+    let change=|t:&str,b:&str|SetBranchWorkspace{thread_id:t.into(),branch_id:b.into(),expected_revision:0,source:None};
+    assert!(db.set_branch_workspace(change("member-thread","member-branch")).is_err());
+    assert!(db.set_branch_workspace(change("owner-thread","member-branch")).is_err());
+    assert!(serde_json::from_value::<SetBranchWorkspace>(json!({"threadId":"owner-thread","branchId":"main","expectedRevision":0})).is_err());
+    assert!(branch_workspace::read(&db.db,"main").unwrap().is_none());
+    let selected=db.set_branch_workspace(change("owner-thread","main")).unwrap();
+    assert_eq!(selected.revision,1); assert_eq!(selected.source,None);
+    assert_eq!(branch_workspace::read(&db.db,"main").unwrap(),Some(selected));
+}

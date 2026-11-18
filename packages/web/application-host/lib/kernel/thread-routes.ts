@@ -194,6 +194,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'mcp/interactions/respond': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'response'],
     'mcp/interactions/sampling/request': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'action', 'model', 'editedRequest'],
     'mcp/interactions/sampling/output': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'action'],
+    'source/set-default': ['runtime', 'threadId', 'branchId', 'source', 'expectedRevision'],
     'source/files': ['runtime', 'threadId', 'branchId', 'source', 'query', 'type', 'limit', 'cursor'],
     'source/draft-files': ['source', 'query', 'type', 'limit', 'cursor'],
     'source/list': ['runtime', 'threadId', 'branchId'],
@@ -522,7 +523,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     return adapter.draftSkills({ source: { resourceOwner: parseSourceResourceOwner(source.resourceOwner), path: text(source.path) } }, signal);
   });
   post('source/files', 'read', (body, signal) => adapter.files(identity(body), { ...parseThreadSourceFileOptions(body),
-    ...(body.source === undefined ? {} : { source: threadSource(body.source) }) }, signal));
+    ...(body.source === undefined ? {} : { source: body.source === null ? null : threadSource(body.source) }) }, signal));
   post('source/draft-files', 'read', (body, signal) => {
     const source = object(body.source);
     if (Object.keys(source).some(key => !['resourceOwner', 'path'].includes(key))) throw new Error('Pending source is malformed');
@@ -530,7 +531,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       source: { resourceOwner: parseSourceResourceOwner(source.resourceOwner), path: text(source.path) } }, signal);
   });
   post('resources/skills', 'read', (body, signal) => adapter.skills(identity(body),
-    body.source === undefined ? {} : { source: threadSource(body.source) }, signal));
+    body.source === undefined ? {} : { source: body.source === null ? null : threadSource(body.source) }, signal));
   post('resources/refresh', 'write', (body, signal) => {
     let instructionDirectories: string[] | undefined;
     if (body.instructionDirectories !== undefined) {
@@ -663,6 +664,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('fork', 'write', (body, signal) => adapter.fork({ ...identity(body), key: text(body.key), headId: body.headId === null ? null : text(body.headId) }, signal));
   post('branch/delete', 'write', (body, signal) => adapter.deleteBranch({ ...identity(body), key: text(body.key) }, signal));
   post('source/list', 'read', (body, signal) => adapter.listSourceTargets(Object.keys(body).length ? identity(body) : null, signal));
+  post('source/set-default', 'write', (body, signal) => adapter.setBranchWorkspace(identity(body),
+    revision(body.expectedRevision), body.source === null ? null : threadSource(body.source), signal));
   post('source/resolve', 'read', (body, signal) => adapter.resolveSource(identity(body), { resourceOwner: parseSourceResourceOwner(body.resourceOwner), path: text(body.path) }, signal));
   post('source/prepare', 'write', (body, signal) => {
     if (body.mode !== 'fixed_branch' && body.mode !== 'materialized' && body.mode !== 'live_root'&&body.mode!=='native_workspace') throw new Error('Invalid source mode');

@@ -10,9 +10,9 @@ This package owns the native shell: windows, menus, deep links, native notificat
 
 ## How it runs
 
-Desktop starts the Varin web server in the same Electron main process. There is no separate sidecar subprocess for the Varin server.
+By default the **full desktop** starts the Varin web server in the same Electron main process. There is no separate sidecar subprocess for the Varin server.
 
-The `main.ts` source imports `@varin/web/server/index.js` and calls `startWebUiServer()`; builds execute the generated `dist-bundle/main.mjs`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
+The full shell loads `embedded-host.ts` when it needs `@varin/web/server/index.js` and calls `startWebUiServer()` to run the local Host; builds execute the generated `dist-bundle/main.mjs`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
 
 Desktop LAN access and the optional UI password are independent preferences. Enabling LAN access
 binds the embedded Host on all interfaces, including when the password is empty; clearing a password
@@ -180,6 +180,54 @@ It also verifies the kernel identity/hash and rejects optional embedding weights
 packages and duplicate Web payload. Frontend assets live only in `resources/web-dist`; the kernel lives
 only in `resources/kernel`. Production `@varin/web` contains its compiled `server` and package/license
 metadata, excluding `public`, source and private Host development generations at collection time.
+
+### Light desktop release
+
+The existing **Release Build** assembles full and light packages from the same accepted source
+and shared frontend. It uses native Windows and Linux x64/ARM64 runners, macOS Apple Silicon,
+and (when selected) macOS Intel for both roles. Only the full Linux x64 package consumes the
+VM guest. Older tags that do not declare light packaging keep their original full-only matrix.
+
+Light assets are named `Varin-Light-<version>-win-<arch>.exe`,
+`Varin-Light-<version>-linux-<x86_64|arm64>.AppImage` and
+`Varin-Light-<version>-mac-<arch>.{dmg,zip}`. The full product's name, app ID, output, update
+feeds and profile stay unchanged. The native builder uses `--role=light` explicitly; omitting
+it builds full. A light product's staging and output are under
+`artifacts/build/desktop-light-<platform>-<arch>/`. CI refuses an incomplete or mislabelled
+set of role/architecture receipts. A new build definition does not imply assets have been published.
+
+The role is compiled into the main shell, and `package.json` records the role, platform and architecture.
+No embedded Host, Rust kernel, ripgrep, VM guest, Puppeteer or native resource drivers are installed.
+Both roles load the same `packages/web` frontend build at `varin-ui://app/index.html`.
+The shared React startup router renders the existing onboarding/recovery screens *before*
+Host authentication when no usable endpoint is selected. Only the normal session auth
+gate can mount the workbench. The static asset origin does not implement any Host API.
+The remote Host supplies data, not a replacement renderer. For a saved relay profile, the renderer restores the original transport and checks
+the authenticated session once before entering the workbench. A timeout keeps the connection and
+shows recovery instead of probing a relay identifier as HTTP. Native background SSE is direct-only;
+relay traffic belongs to the open renderer. The light app cannot enable a local Host with a saved preference or environment flag. Client
+profiles and pairing choices are local to **Varin Light**. The light app neither reads nor migrates
+the full Host's `VARIN_DATA_DIR`. SSH used by the Agent to reach resources belongs to that Agent;
+an SSH forward on the client itself is not provided. Closing the shell does not stop a separately
+running Agent or node.
+
+Windows Light uses `light.yml` (x64) or `light-arm64.yml`; Linux Light uses
+`light-linux.yml` or `light-linux-arm64.yml`. These are separate updater caches and asset
+names, never full fallback channels. Before offering a download the shell checks the actual
+installer's role, platform, version and CPU. Windows Light uses the normal NSIS packaging and
+publisher-signing settings without the full installer's optional WinFsp/Host setup. macOS Light
+follows the same unsigned release policy as full: install the matching DMG manually. No
+macOS Light automatic update feed is published or accepted. Existing full Mac channels are unchanged.
+
+Release jobs launch the packaged Light chooser with no local Host, check that Chromium userData
+and sessionData belong to Light, and reject writes to the Host data directory. The Linux updater
+fixture also accepts `--role light`. Native install, OS trust prompts and N-to-N+1 update/restart
+still need tests on the target OS; an ASAR or manifest check is not a substitute.
+
+Light is an additional product, not an in-place full-to-light migration. To undo a trial, quit
+Light, disable its own launch-at-login setting if enabled, and uninstall only Light. Keep the full
+installation and original profile. For a rollback, choose a verified older Light artifact for the
+same CPU manually. Running independent Agent services or nodes is unaffected by closing the client.
 
 ### Optional desktop companions
 
@@ -441,7 +489,7 @@ publishes it after the complete verified asset set has uploaded. Both options de
 The workflow accepts the tag's exact source SHA and Android counter once, retaining that candidate in
 an artifact. Browser assets build once; the Linux x64 kernel is shared with native acceptance, VM guest
 and Linux x64 packaging. Source checks, native acceptance, platform packaging, optional inference
-components and Android run along their actual dependencies in parallel. Only Linux x64 packaging waits
+components and Android run along their actual dependencies in parallel. Only full Linux x64 packaging waits
 for the VM guest. The manual Windows workflow calls the same packaging workflow and product builder.
 
 Use GitHub's **Re-run failed jobs** to resume a candidate: completed product artifacts remain usable,
@@ -451,7 +499,7 @@ and `SHA256SUMS`. Both upload and publication recheck the tag. If the tag has mo
 verified artifacts remain available but are not attached to the changed release. Start a new workflow
 run for the new source instead of mixing products from different commits.
 
-All platforms share one startup smoke: launch the unpacked packaged application with clean temporary
+On all platforms the full role shares one startup smoke: launch the unpacked packaged application with clean temporary
 data configured to use the local Host, wait for its main workspace and renderer readiness, then check
 the embedded Host and native kernel through `/health`. The Windows entry only supplies its default executable path. Feature
 verification for terminals, recovery, language services, semantic components and editors stays with

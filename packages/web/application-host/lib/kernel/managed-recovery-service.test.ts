@@ -94,7 +94,7 @@ describe('managed Recovery original file owner', () => {
   });
 
   it('rejects withdrawn capability, trust, original ownership and changed registration before Recovery enters', async () => {
-    for (const reason of ['capability', 'trust', 'principal', 'coordinator', 'root'] as const) {
+    for (const reason of ['capability', 'trust', 'principal', 'coordinator', 'root', 'read-only-location'] as const) {
       const h = fixture(); const input = request();
       let actor = principal;
       if (reason === 'capability') actor = { ...principal, capabilities: ['filesystem:read'] };
@@ -102,6 +102,7 @@ describe('managed Recovery original file owner', () => {
       if (reason === 'principal') actor = { ...principal, principalId: 'other-client' };
       if (reason === 'coordinator') input.coordinatorHostId = 'other-coordinator';
       if (reason === 'root') h.state.rootId = 'replacement-root';
+      if (reason === 'read-only-location') h.state.originals[0]!.purpose = 'work_location_read';
       await expect(h.service.handle(actor, input)).rejects.toThrow();
       expect(h.store.recordTurnStart).not.toHaveBeenCalled();
       expect(h.recovery.prepareFileRecovery).not.toHaveBeenCalled();

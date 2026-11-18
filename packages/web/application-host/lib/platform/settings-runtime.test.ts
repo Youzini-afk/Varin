@@ -3,6 +3,7 @@ import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import type { VarinSettingsDocument } from '@varin/settings-store';
+import type { WorkspaceLocation } from '@varin/application-client';
 import { createSettingsRuntime } from './settings-runtime.js';
 
 const createRuntime = async (
@@ -35,6 +36,32 @@ const createRuntime = async (
     },
   };
 };
+
+it('commits concurrent bookmark edits and checks the default in the same settings transaction', async () => {
+  const { runtime, cleanup } = await createRuntime(undefined, (current, changes) => ({ ...current, ...changes }),
+    async ({ path }) => ({ path, workspaceId: path }));
+  const folder = (id: string): WorkspaceLocation => ({
+    kind: 'folder', id, name: id, path: `/${id}`, workspaceId: `/${id}`, resourceOwner: { kind: 'local' },
+  });
+  const a = folder('desktop'), b = folder('web');
+  try {
+    const additions = await Promise.all([a, b].map(location => runtime.changeWorkspaceLocation({ kind: 'add', location })));
+    expect(additions.every(result => !result.conflict)).toBe(true);
+    expect((await runtime.readSettingsFromDisk()).workspaceLocations).toHaveLength(2);
+    expect(await runtime.changeWorkspaceLocation({ kind: 'add', location: { ...a, id: 'copy' } })).toMatchObject({ conflict: 'duplicate' });
+    await runtime.changeWorkspaceLocation({ kind: 'set-default', id: a.id, expectedId: null });
+    const [selected, removed] = await Promise.all([
+      runtime.changeWorkspaceLocation({ kind: 'set-default', id: b.id, expectedId: a.id }),
+      runtime.changeWorkspaceLocation({ kind: 'remove', id: a.id }),
+    ]);
+    expect(selected.conflict).toBeUndefined();
+    expect(removed.settings).toMatchObject({ workspaceLocations: [b], defaultWorkspaceLocationId: b.id });
+    await expect(runtime.changeWorkspaceLocation({ kind: 'set-default', id: null, expectedId: a.id }))
+      .resolves.toMatchObject({ conflict: 'stale', settings: { defaultWorkspaceLocationId: b.id } });
+    await expect(runtime.changeWorkspaceLocation({ kind: 'remove', id: b.id }))
+      .resolves.toMatchObject({ settings: { workspaceLocations: [], defaultWorkspaceLocationId: null } });
+  } finally { await cleanup(); }
+});
 
 describe('settings runtime', () => {
   it('reads the current settings document without rewriting it', async () => {
@@ -139,5 +166,32 @@ it('registers remote folders through their owner and retains saved offline proje
     await expect(runtime.persistSettings({ projects: [{ ...project, path: 'Z:\\another' }] })).rejects.toThrow('offline');
     await expect(runtime.persistSettings({ projects: [{ id: 'remote', path: project.path }] })).rejects.toThrow('explicit source binding');
     expect((await runtime.readSettingsFromDisk()).projects).toEqual([{ ...project, label: 'Still visible offline' }]);
+  } finally { await cleanup(); }
+});
+
+it('saves bookmarks as exact addresses, keeps them offline, and atomically rejects a changed registration', async () => {
+  const registered = new Map([['local', 'local-docs'], ['managed_host', 'remote-docs']]);
+  const resolved: string[] = [];
+  const { runtime, cleanup } = await createRuntime(undefined, (current, changes) => ({ ...current, ...changes }), async ({ resourceOwner, path }) => {
+    resolved.push(resourceOwner.kind);
+    const workspaceId = registered.get(resourceOwner.kind);
+    if (!workspaceId) throw new Error('Device offline');
+    return { path, workspaceId };
+  });
+  try {
+    const local = { kind: 'folder', id: 'desk', name: 'Desk', path: '/same', workspaceId: 'local-docs', resourceOwner: { kind: 'local' } };
+    const remote = { ...local, id: 'test', name: 'Test', workspaceId: 'remote-docs', resourceOwner: { kind: 'managed_host', hostId: 'b', connectionId: 'c', endpointIdentity: 'epoch' } };
+    const original = await runtime.persistSettings({ workspaceLocations: [local, remote], defaultWorkspaceLocationId: remote.id });
+    expect(resolved).toEqual(['local', 'managed_host']);
+    expect(original).not.toHaveProperty('projects');
+    registered.clear();
+    const renamed = { ...remote, name: 'Test lab (offline)' };
+    await runtime.persistSettings({ workspaceLocations: [local, renamed] });
+    expect(resolved).toHaveLength(2);
+    await expect(runtime.persistSettings({ workspaceLocations: [local] })).rejects.toThrow('existing default');
+    registered.set('managed_host', 'new-registration');
+    await expect(runtime.persistSettings({ workspaceLocations: [local, { ...renamed, path: '/moved' }] })).rejects.toThrow('registration changed');
+    expect((await runtime.readSettingsFromDisk()).workspaceLocations).toEqual([local, renamed]);
+    await expect(runtime.persistSettings({ workspaceLocations: [local], defaultWorkspaceLocationId: null })).resolves.toMatchObject({ workspaceLocations: [local], defaultWorkspaceLocationId: null });
   } finally { await cleanup(); }
 });

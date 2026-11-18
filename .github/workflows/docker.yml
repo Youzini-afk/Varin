@@ -58,6 +58,8 @@ jobs:
       mode: ${{ steps.accept.outputs.mode }}
       standard_app: ${{ steps.accept.outputs.standard_app }}
       toolbelt_app: ${{ steps.accept.outputs.toolbelt_app }}
+      resource_node: ${{ steps.accept.outputs.resource_node }}
+      expects_resource_node: ${{ steps.accept.outputs.expects_resource_node }}
       slim_base: ${{ steps.accept.outputs.slim_base }}
       toolbelt_base: ${{ steps.accept.outputs.toolbelt_base }}
       build_run_id: ${{ steps.accept.outputs.build_run_id }}
@@ -240,11 +242,43 @@ jobs:
           docker exec varin-slim-smoke node verify-services.mjs
           node scripts/smoke-container-stop.mjs varin-slim-smoke slim
 
+  smoke-resource-node:
+    name: Verify immutable resource node candidate
+    runs-on: ubuntu-latest
+    needs: [candidate, build-images]
+    if: ${{ !cancelled() && needs.candidate.result == 'success' && needs.candidate.outputs.expects_resource_node == 'true' && (needs.candidate.outputs.mode == 'resume' || needs.build-images.result == 'success') }}
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE_REF: ${{ needs.candidate.outputs.mode == 'resume' && needs.candidate.outputs.resource_node || needs.build-images.outputs.resource_node }}
+      EXPECTED_RELEASE_ID: image-${{ needs.candidate.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Log in to GHCR for immutable candidate read
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+      - name: Verify resource node, owner pairing and retained state
+        run: |
+          node scripts/smoke-container-resource-node.mjs "$IMAGE_REF" "$EXPECTED_RELEASE_ID" linux/amd64
+          node scripts/smoke-container-resource-node.mjs "$IMAGE_REF" "$EXPECTED_RELEASE_ID" linux/arm64
+
   promote:
     name: Promote verified release image tags
     runs-on: ubuntu-latest
-    needs: [candidate, source-quality, build-images, smoke-toolbelt, smoke-standard]
-    if: ${{ !cancelled() && needs.candidate.result == 'success' && needs.source-quality.result == 'success' && (needs.candidate.outputs.mode == 'resume' || needs.build-images.result == 'success') && needs.smoke-toolbelt.result == 'success' && needs.smoke-standard.result == 'success' }}
+    needs: [candidate, source-quality, build-images, smoke-toolbelt, smoke-standard, smoke-resource-node]
+    if: ${{ !cancelled() && needs.candidate.result == 'success' && needs.source-quality.result == 'success' && (needs.candidate.outputs.mode == 'resume' || needs.build-images.result == 'success') && needs.smoke-toolbelt.result == 'success' && needs.smoke-standard.result == 'success' && (needs.candidate.outputs.expects_resource_node != 'true' || needs.smoke-resource-node.result == 'success') }}
     # Other release tags may build in parallel, but public alias updates cannot
     # interleave or be cancelled by a newer push halfway through the set.
     concurrency:
@@ -278,6 +312,7 @@ jobs:
           VARIN_RELEASE_TOOLING_SHA: ${{ github.sha }}
           VARIN_STANDARD_APP_IMAGE: ${{ needs.candidate.outputs.mode == 'resume' && needs.candidate.outputs.standard_app || needs.build-images.outputs.standard_app }}
           VARIN_TOOLBELT_APP_IMAGE: ${{ needs.candidate.outputs.mode == 'resume' && needs.candidate.outputs.toolbelt_app || needs.build-images.outputs.toolbelt_app }}
+          VARIN_RESOURCE_NODE_IMAGE: ${{ needs.candidate.outputs.mode == 'resume' && needs.candidate.outputs.resource_node || needs.build-images.outputs.resource_node }}
           VARIN_SLIM_BASE_IMAGE: ${{ needs.candidate.outputs.mode == 'resume' && needs.candidate.outputs.slim_base || needs.build-images.outputs.slim_base }}
           VARIN_TOOLBELT_BASE_IMAGE: ${{ needs.candidate.outputs.mode == 'resume' && needs.candidate.outputs.toolbelt_base || needs.build-images.outputs.toolbelt_base }}
           VARIN_BUILD_RUN_ID: ${{ needs.candidate.outputs.mode == 'resume' && needs.candidate.outputs.build_run_id || needs.build-images.outputs.build_run_id }}

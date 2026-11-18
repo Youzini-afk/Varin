@@ -345,6 +345,7 @@ impl Catalog {
             usage_attribution: Some(super::usage_ledger::UsageAttribution::of_binding(&snapshot.view.binding)),
         };
         let op = Operation {
+            resource_source: None,
             host_job: None,
             mcp_resource_subscription: None,
             managed_process: None,

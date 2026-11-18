@@ -60,6 +60,9 @@ export function DesktopLocalHostSettings() {
     catch (reason) { if (live.current) { setError(String(reason)); setConfirm(false); } }
     finally { writing.current = false; if (live.current) setBusy(false); }
   };
+  if (mode?.installedRole === 'light') return <SettingsSection title={t('settings.connections.localHost.title')}>
+    <p role="status" className="typography-meta">{t('settings.connections.localHost.light')}</p>
+  </SettingsSection>;
   return <SettingsSection title={t('settings.connections.localHost.title')} description={t('settings.connections.localHost.description')}>
     {!mode ? <p role={error ? 'alert' : 'status'}>{error ?? t('common.loading')}</p> : <div className="space-y-3">
       <label className="flex items-center gap-3 typography-ui-label"><input type="checkbox" checked={enabled}
@@ -91,6 +94,7 @@ export function LocalHostRecovery() {
     } catch (reason) { if (live.current) { setError(String(reason)); setConfirm(false); } }
     finally { writing.current = false; if (live.current) setBusy(false); }
   };
+  if (mode?.installedRole === 'light') return <p role="status" className="typography-meta">{t('settings.connections.localHost.light')}</p>;
   return <div className="app-region-no-drag space-y-3 rounded-lg border border-border p-4">
     <p className="typography-meta text-muted-foreground">{t('settings.connections.localHost.recoveryHint')}</p>
     {mode?.environmentDisabled || mode?.environmentRemoteTarget

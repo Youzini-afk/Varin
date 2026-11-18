@@ -1202,3 +1202,12 @@ pub(super) fn policy_preparable(
     let used:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1) OR EXISTS(SELECT 1 FROM policy_checkpoints WHERE run_id=?1) OR EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='run.launch_bound')",[&run.id],|r|r.get(0))?;
     Ok(!used)
 }
+
+impl Catalog {
+    /// New physical Operations carry their exact selected view. Only old or legacy
+    /// single-source adapters need the immutable original launch; never read a branch default.
+    pub fn original_operation_source(&self, operation: &Operation) -> Result<Option<SourceSelection>> {
+        if let Some(source) = &operation.resource_source { return Ok(Some(source.clone())); }
+        Ok(self.launch_metadata(&operation.run_id)?.and_then(|launch| launch.selection.source))
+    }
+}

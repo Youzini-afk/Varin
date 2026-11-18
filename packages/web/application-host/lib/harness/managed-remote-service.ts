@@ -126,6 +126,7 @@ export interface ManagedRemoteExecutionServiceOptions {
   now?: () => number;
   onError?: (error: Error) => void;
   sourceOwner?: ManagedSourceService;
+  liveSourceOnly?: boolean;
   storageAvailable?: boolean;
 }
 
@@ -143,10 +144,17 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
   const report = (error: unknown) => options.onError?.(error instanceof Error ? error : new Error(String(error)));
   let contextPromise: Promise<KernelScopedClient> | null = null;
   const monitors = new Map<string, Promise<void>>();
+  let generation = 0;
+  let detached = false;
+  const disconnect = () => { generation++; contextPromise = null; };
 
   const context = async (): Promise<KernelScopedClient> => {
-    contextPromise ??= (async () => {
+    if (detached) throw new Error("Managed target observer is detached");
+    if (contextPromise) return contextPromise;
+    const original = generation;
+    const opening = (async () => {
       await options.client.start();
+      if (detached || original !== generation) throw new Error("Managed target generation changed");
       return options.client.scoped(await options.client.issueGrant({
         grantId: `managed-remote:${options.hostId}:${randomUUID()}`,
         owningWorkspace: WORKSPACE_ID,
@@ -155,7 +163,9 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
         pathScopes: [""],
       }));
     })();
-    return contextPromise;
+    contextPromise = opening;
+    try { return await opening; }
+    catch (error) { if (contextPromise === opening) contextPromise = null; throw error; }
   };
 
   const putRecord = async (input: {
@@ -198,7 +208,10 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
       protocolVersion: MANAGED_REMOTE_PROTOCOL_VERSION,
       requestHostIdentity: true,
       hostId: options.hostId,
-      capabilities: ["materials", "process", "attach", "cancel", "logs", "outputs", "resource-admission", "remote-shell", ...(sourceOwner ? ['sources', 'attachment-stream'] : []), ...(options.storageAvailable ? ['storage'] : [])],
+      capabilities: options.liveSourceOnly
+        ? (sourceOwner ? ['sources', 'work-location-read'] : [])
+        : ['materials', 'process', 'attach', 'cancel', 'logs', 'outputs', 'resource-admission', 'remote-shell',
+          ...(sourceOwner ? ['sources', 'attachment-stream', 'work-location-read'] : []), ...(options.storageAvailable ? ['storage'] : [])],
       machine,
     };
   };
@@ -455,16 +468,19 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
 
   const monitor = (principalId: string, coordinatorHostId: string, backendJobId: string): void => {
     const key = `${principalId}\0${coordinatorHostId}\0${backendJobId}`;
-    if (monitors.has(key)) return;
+    const current = generation;
+    const monitorKey = JSON.stringify([current, key]);
+    if (detached || monitors.has(monitorKey)) return;
     const running = (async () => {
-      for (;;) {
+      while (!detached && current === generation) {
         let job: Awaited<ReturnType<typeof getJob>>;
         try { job = await getJob(principalId, coordinatorHostId, backendJobId); } catch { return; }
-        if (!ACTIVE_JOB_STATES.has(job.record.state)) return;
+        if (detached || current !== generation || !ACTIVE_JOB_STATES.has(job.record.state)) return;
         const processId = text(job.payload.processId);
         if (!processId) return;
         try {
           const observation = observationOf(await job.scoped.processInspect({ workspaceId: WORKSPACE_ID, processId }) as unknown as Record<string, unknown>);
+          if (detached || current !== generation) return;
           if (!observation.writerActive && observation.status !== "running" && observation.status !== "starting" && observation.status !== "unknown") {
             await updateJob(job.record, observation.status, { endedAt: now(), exitCode: observation.exitCode, signal: observation.signal, reason: observation.reason });
             await settleJob(job.record, observation);
@@ -473,8 +489,8 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
         } catch (error) { report(error); }
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
-    })().finally(() => { monitors.delete(key); });
-    monitors.set(key, running);
+    })().catch(report).finally(() => { monitors.delete(monitorKey); });
+    monitors.set(monitorKey, running);
   };
 
   const submitJob = async (input: ManagedRemoteJobSubmit & { resources?: ExperimentResourceRequest }, principalId: string): Promise<ManagedRemoteJobReceipt> => {
@@ -937,7 +953,10 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
   };
 
   const reconcile = async (): Promise<void> => {
+    if (detached) return;
+    const original = generation;
     for (const record of await listRecords("managed.remote.job")) {
+      if (detached || original !== generation) return;
       if (!ACTIVE_JOB_STATES.has(record.state)) continue;
       const payload = recordPayload(record);
       const coordinatorHostId = text(payload.coordinatorHostId);
@@ -955,7 +974,13 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     submitJob, inspectJob, readJob, killJob, releaseJob,
     collectOutput, readOutput,
     shellExec, shellRead, shellWrite, shellKill, setShellScopeSleeping,
-    reconcile,
+    reconcile, disconnect,
+    // Detaching is not a stop, a release, or evidence of termination. The next
+    // target generation observes the same native job and its durable receipt.
+    async detachObservers() {
+      detached = true;
+      await Promise.allSettled([...monitors.values()]);
+    },
   };
 }
 

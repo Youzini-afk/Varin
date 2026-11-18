@@ -579,10 +579,7 @@ impl<
                                             if durable {
                                                 self.commit(
                                                     input,
-                                                    ExecutionRecord::ToolAdmitted {
-                                                        context: context.clone(),
-                                                        tool: tool.clone(),
-                                                    },
+                                                    ExecutionRecord::admit_bound_tool(&context, &tool, bound.as_ref()),
                                                 )?;
                                             }
                                             self.execute_one(

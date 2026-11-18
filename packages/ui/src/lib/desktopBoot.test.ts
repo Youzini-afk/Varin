@@ -1,10 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import {
   resolveDesktopBootView,
-  canDismissInitialLoading,
   getInjectedBootOutcome,
   getBootInjectionStatus,
-  shouldRestartDesktopBootFlow,
 } from './desktopBoot';
 
 describe('resolveDesktopBootView', () => {
@@ -141,111 +139,6 @@ describe('resolveDesktopBootView', () => {
         bootOutcome: null,
       }),
     ).toBeNull();
-  });
-});
-
-describe('canDismissInitialLoading', () => {
-  test('does not dismiss desktop loading before boot outcome is known', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: true,
-        runtimeReady: true,
-        bootOutcomeKnown: false,
-      }),
-    ).toBe(false);
-  });
-
-  test('dismisses desktop when main outcome is known and initialized', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: true,
-        runtimeReady: true,
-        bootOutcomeKnown: true,
-        bootViewIsMain: true,
-      }),
-    ).toBe(true);
-  });
-
-  test('does not dismiss desktop when main outcome is known but not initialized', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: true,
-        runtimeReady: false,
-        bootOutcomeKnown: true,
-        bootViewIsMain: true,
-      }),
-    ).toBe(false);
-  });
-
-  test('dismisses desktop for non-main outcome without waiting for init', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: true,
-        runtimeReady: false,
-        bootOutcomeKnown: true,
-        bootViewIsMain: false,
-      }),
-    ).toBe(true);
-  });
-
-  test('does not dismiss desktop for non-main outcome when outcome is not known', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: true,
-        runtimeReady: true,
-        bootOutcomeKnown: false,
-        bootViewIsMain: false,
-      }),
-    ).toBe(false);
-  });
-
-  test('dismisses non-desktop when initialized', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: false,
-        runtimeReady: true,
-        bootOutcomeKnown: false,
-      }),
-    ).toBe(true);
-  });
-
-  test('does not dismiss non-desktop when not initialized', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: false,
-        runtimeReady: false,
-        bootOutcomeKnown: false,
-      }),
-    ).toBe(false);
-  });
-});
-
-describe('shouldRestartDesktopBootFlow', () => {
-  test('restarts the desktop app when boot UI is running in the startup window', () => {
-    expect(
-      shouldRestartDesktopBootFlow({
-        isDesktopShell: true,
-        isDesktopLocalOriginActive: false,
-      }),
-    ).toBe(true);
-  });
-
-  test('does not restart when the local desktop origin is already active', () => {
-    expect(
-      shouldRestartDesktopBootFlow({
-        isDesktopShell: true,
-        isDesktopLocalOriginActive: true,
-      }),
-    ).toBe(false);
-  });
-
-  test('does not restart outside the desktop shell', () => {
-    expect(
-      shouldRestartDesktopBootFlow({
-        isDesktopShell: false,
-        isDesktopLocalOriginActive: false,
-      }),
-    ).toBe(false);
   });
 });
 
@@ -389,28 +282,5 @@ describe('getBootInjectionStatus', () => {
     } finally {
       restoreWindow();
     }
-  });
-});
-
-describe('canDismissInitialLoading with malformed injection', () => {
-  test('does NOT dismiss desktop splash when injection is malformed', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: true,
-        runtimeReady: true,
-        bootOutcomeKnown: false,
-      }),
-    ).toBe(false);
-  });
-
-  test('dismisses desktop main outcome when valid and initialized', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: true,
-        runtimeReady: true,
-        bootOutcomeKnown: true,
-        bootViewIsMain: true,
-      }),
-    ).toBe(true);
   });
 });

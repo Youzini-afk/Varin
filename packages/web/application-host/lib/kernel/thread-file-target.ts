@@ -3,8 +3,9 @@ import type { ThreadFileTarget } from '@varin/application-client';
 import type { LaunchSource } from './protocol.generated.js';
 import type { DocumentAuthority } from '../documents/authority.js';
 import type { LiveSourceResolver } from './live-source.js';
+import type { SourceDirectory } from './thread-sources.js';
 import { admitMaterializedRoot, originalMaterializationLocation } from './source-launch.js';
-import { assertAbsolutePathInWorkspace, resolveWorkspacePath, canonicalizePathIdentity, isPathWithinRoot } from '../workspace/path-safety.js';
+import { assertAbsolutePathInWorkspace, resolveWorkspacePath, canonicalizePathIdentity, isPathWithinRoot, normalizeWorkspaceRelativePath } from '../workspace/path-safety.js';
 
 export type ThreadFileTargetResolver = (runId: string, source: LaunchSource | null, file: string, signal?: AbortSignal) => Promise<ThreadFileTarget>;
 
@@ -13,12 +14,20 @@ export function createThreadFileTargetResolver(options: {
   storageRoot: string;
   documents: Pick<DocumentAuthority, 'resolveWorkspace' | 'admitWorkspaceRegistration' | 'ensureResourceRoot'>;
   validateLiveSource: LiveSourceResolver;
+  resolveRemoteSource?: SourceDirectory['resolve'];
   nativeWorkspaces?:import('./native-workspaces.js').NativeWorkspaceOwner|undefined;
 }): ThreadFileTargetResolver {
   return async (runId, source, file, signal) => {
     signal?.throwIfAborted();
     if (!source) return { kind: 'unavailable', reason: 'no_source' };
-    if (source.resource_owner.kind === 'managed_host') return { kind: 'unavailable', reason: 'managed_source' };
+    if (source.resource_owner.kind === 'managed_host') {
+      if (source.mode !== 'live_root' || !source.live_root || !options.resolveRemoteSource) return { kind: 'unavailable', reason: 'managed_source' };
+      const resourceId = normalizeWorkspaceRelativePath(file);
+      const root = source.live_root.canonicalRoot;
+      const remote = await options.resolveRemoteSource({ resourceOwner: source.resource_owner, path: root }, signal);
+      if (remote.workspaceId !== source.execution_workspace_id || remote.path !== root) throw new Error('The original file location changed');
+      return { kind: 'document', root, resourceId, workspaceId: remote.workspaceId, resourceOwner: source.resource_owner };
+    }
     if (source.mode === 'fixed_branch') return { kind: 'unavailable', reason: 'fixed_source' };
     let root: string;
     if (source.mode === 'live_root') {

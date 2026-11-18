@@ -29,9 +29,9 @@ import { CompanionStoolWindows } from './companion-stool.js';
 import { CompanionAssets, readCompanionAssetCatalog } from './companion-assets.js';
 import { CompanionSceneWindows, readCompanionSceneDescriptor, type CompanionSceneViewport } from './companion-scene.js';
 import { CompanionWindowMovement, CompanionWindowPresentation, requireCompanionWindow, applyCompanionPassthrough, companionWorldRect, captureCompanionPlacement, restoreCompanionPlacement } from './companion-window.js';
-import { createComputerFeedback } from './computer-feedback.js';
-import { createComputerControls } from './computer-controls.js';
-import { ElectronBrowserOwner } from './browser-owner.js';
+import type { createComputerFeedback } from './computer-feedback.js';
+import type { createComputerControls } from './computer-controls.js';
+import type { ElectronBrowserOwner } from './browser-owner.js';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
 import fs from 'node:fs';
@@ -39,7 +39,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn, spawnSync } from 'node:child_process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import type { UpdateCheckResult } from 'electron-updater';
@@ -54,12 +54,13 @@ import {
 } from '@varin/application-client/desktop';
 import type { WebUiServerController } from '@varin/web/server/index.js';
 import type { HostSshManager } from '@varin/web/server/lib/connections/ssh-manager.js';
-import { readHostConnections, writeHostConnections } from '@varin/web/server/lib/connections/hosts.js';
+import { readHostConnections, writeHostConnections } from '../web/application-host/lib/connections/hosts.js';
 import { createDesktopNetworkFetch } from './harness-network-fetch.js';
 import { createTray, createTrayController, type TrayAction } from './tray.js';
 import { NotificationListener } from './notification-listener.js';
 import { routeThreadWindow, runtimeTargetKey, threadMiniChatUrl, threadWindowKey as buildThreadWindowKey } from './thread-window-target.js';
-import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.js';
+import { servePackagedUi } from './packaged-ui.js';
+import { rendererRelayStartup, resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.js';
 import { createStartupSplashHtml } from './startup-splash.js';
 import { createQuitLifecycle } from './quit-lifecycle.js';
 import { readLocalHostMode, writeLocalHostMode, restartDesktopNormally, type LocalHostModeContext } from './local-host-mode.js';
@@ -92,13 +93,18 @@ import {
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.js';
 import type { RendererRuntimeConfig, WindowFocusListener } from './electron-runtime.js';
 import { errorMessage, recordOf } from './runtime-types.js';
-import {
-  mintOutsideFileGrant,
-  resolveVarinDataDir,
-  clearAppImageArgv0FromProcessEnv,
-} from '@varin/web/server/index.js';
+import { resolveVarinDataDir } from '../web/application-host/lib/platform/data-paths.js';
+import { clearAppImageArgv0FromProcessEnv } from '../web/application-host/lib/platform/inherited-env.js';
+import { pathLooksUserConfigured, mergePathValues } from '../web/application-host/lib/platform/path-utils.js';
 import { createSettingsFileStore, type VarinSettingsDocument } from '@varin/settings-store';
 
+// This is a build-time constant, never an environment variable or saved preference.
+// Bun drops the entire embedded Host/driver import edge from the light bundle.
+const loadEmbeddedHost = () => __VARIN_LIGHT_DESKTOP__
+  ? Promise.reject<typeof import('./embedded-host.js')>(new Error('Local resources require the full desktop or a separately connected Host'))
+  : import('./embedded-host.js');
+const desktopRole = __VARIN_LIGHT_DESKTOP__ ? 'light' : 'full';
+const desktopName = __VARIN_LIGHT_DESKTOP__ ? 'Varin Light' : 'Varin';
 const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
@@ -108,7 +114,7 @@ const electronStartupStartedAt = performance.now();
 
 const DEEP_LINK_PROTOCOL = 'varin';
 const UI_PROTOCOL = 'varin-ui';
-const PACKAGED_APP_USER_MODEL_ID = 'dev.varin.desktop';
+const PACKAGED_APP_USER_MODEL_ID = __VARIN_LIGHT_DESKTOP__ ? 'dev.varin.desktop.light' : 'dev.varin.desktop';
 const DEV_APP_USER_MODEL_ID = 'dev.varin.desktop.dev';
 const APP_USER_MODEL_ID = app.isPackaged ? PACKAGED_APP_USER_MODEL_ID : DEV_APP_USER_MODEL_ID;
 const BACKGROUND_START_ARG = '--background';
@@ -145,12 +151,33 @@ const shouldStartInBackground = (loginItemSettings = readLoginItemSettings()) =>
 
 // Set the product name early so electron-log derives its log directory as
 // ~/Library/Logs/Varin/ (not ~/Library/Logs/@varin/electron/).
-app.setName('Varin');
+app.setName(desktopName);
 if (process.platform === 'linux') {
-  app.setDesktopName('varin.desktop');
+  app.setDesktopName(__VARIN_LIGHT_DESKTOP__ ? 'varin-light.desktop' : 'varin.desktop');
 }
 if (isDev) {
-  app.setPath('userData', path.join(app.getPath('appData'), 'Varin Dev'));
+  app.setPath('userData', path.join(app.getPath('appData'), `${desktopName} Dev`));
+}
+if (__VARIN_LIGHT_DESKTOP__) {
+  // Electron can resolve these paths before app.setName(). Do not let a full
+  // install's cookies, lock, settings or tokens become a second writer's state.
+  if (process.argv.includes('--varin-smoke-profile') && process.env.VARIN_SMOKE_APP_DATA) {
+    app.setPath('appData', process.env.VARIN_SMOKE_APP_DATA);
+  }
+  if (!isDev && !app.commandLine.hasSwitch('user-data-dir')) {
+    const profile = path.join(app.getPath('appData'), desktopName);
+    fs.mkdirSync(profile, { recursive: true, mode: 0o700 });
+    app.setPath('userData', profile);
+  }
+  app.setPath('sessionData', app.getPath('userData'));
+  if (process.argv.includes('--varin-smoke-profile')) {
+    const expected = path.join(app.getPath('appData'), desktopName);
+    // Emit only product-relative identity, never home paths, cookies or tokens.
+    process.stdout.write('[varin-smoke-profile] ' + JSON.stringify({
+      userData: app.getPath('userData') === expected ? desktopName : null,
+      sessionData: app.getPath('sessionData') === expected ? desktopName : null,
+    }) + '\n');
+  }
 }
 app.setAppUserModelId(APP_USER_MODEL_ID);
 if (process.platform === 'win32' && app.isPackaged) {
@@ -262,7 +289,7 @@ try {
 }
 
 try {
-  if (!app.isDefaultProtocolClient(DEEP_LINK_PROTOCOL)) {
+  if (!__VARIN_LIGHT_DESKTOP__ && !app.isDefaultProtocolClient(DEEP_LINK_PROTOCOL)) {
     app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL);
   }
 } catch (error) {
@@ -280,7 +307,7 @@ const readAppMetadata = () => {
     try {
       const raw = fs.readFileSync(candidate, 'utf8');
       const parsed = JSON.parse(raw);
-      if (parsed?.name === '@varin/electron' && typeof parsed.version === 'string') {
+      if (parsed?.name === (__VARIN_LIGHT_DESKTOP__ ? 'varin-light' : '@varin/electron') && typeof parsed.version === 'string') {
         return { name: parsed.name, version: parsed.version };
       }
     } catch {
@@ -361,7 +388,6 @@ interface DesktopState {
   trayController: ReturnType<typeof createTrayController> | null;
   trayEnabled: boolean;
   trayFocusListener: WindowFocusListener | null;
-  unreachableHosts: Set<string>;
   windowCounter: number;
   windowGeometryRevisions: Map<string, number>;
   windowGeometryTimers: Map<string, ReturnType<typeof setTimeout>>;
@@ -389,7 +415,6 @@ const state: DesktopState = {
   sshShutdownPromise: null,
   installingUpdate: false,
   pendingUpdate: null,
-  unreachableHosts: new Set<string>(),
   windowCounter: 1,
   focusedWindowIds: new Set<number>(),
   windowGeometryRevisions: new Map<string, number>(),
@@ -708,10 +733,11 @@ const refreshQuitRiskFlags = async () => {
   }
 };
 
-const settingsFilePath = (): string => path.join(resolveVarinDataDir(process), 'settings.json');
+const settingsFilePath = (): string => path.join(__VARIN_LIGHT_DESKTOP__ ? app.getPath('userData') : resolveVarinDataDir(process), 'settings.json');
 const settingsStore = createSettingsFileStore({ filePath: settingsFilePath() });
 
 const hostConnections = (): HostSshManager => {
+  if (__VARIN_LIGHT_DESKTOP__) throw new Error('This client cannot run local SSH forwards. Manage remote SSH resources on the connected Agent service.');
   if (!state.serverHandle) throw new Error('Application Host is not ready');
   return state.serverHandle.connections;
 };
@@ -1210,6 +1236,7 @@ const detectLanIPv4Address = async (): Promise<string | null> => {
 const buildLocalUrl = (port: number): string => `http://127.0.0.1:${port}`;
 
 const resolveLocalWorkspaceHome = (): string => {
+  if (__VARIN_LIGHT_DESKTOP__) return ''; // A client directory is never the remote Agent’s home.
   const configuredRoot = process.env.VARIN_WORKSPACE_ROOT?.trim();
   return configuredRoot ? path.resolve(configuredRoot) : (os.homedir() || '');
 };
@@ -1219,6 +1246,7 @@ const resolveLocalWorkspaceHome = (): string => {
 const resourceRoot = () => app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '..', 'resources');
 const resolveWebDistDir = () => path.join(resourceRoot(), 'web-dist');
 const shouldUsePackagedUi = () => {
+  if (__VARIN_LIGHT_DESKTOP__) return true;
   if (process.env.VARIN_ELECTRON_LOAD_SERVER_UI === '1') return false;
   if (process.env.VARIN_ELECTRON_USE_BUNDLED_UI === '1') return true;
   return app.isPackaged;
@@ -1226,57 +1254,9 @@ const shouldUsePackagedUi = () => {
 const packagedUiOrigin = () => `${UI_PROTOCOL}://app`;
 const buildPackagedUiUrl = (pathname = '/index.html') => new URL(pathname, `${packagedUiOrigin()}/`).toString();
 
-const injectRuntimeConfigIntoHtml = (html: string): string => {
-  const apiBaseUrl = state.apiBaseUrl || state.sidecarUrl || '';
-  const localOrigin = state.localOrigin || state.sidecarUrl || '';
-  const initScript = `<script>if(window.__VARIN_LOCAL_ORIGIN__===undefined){window.__VARIN_LOCAL_ORIGIN__=${JSON.stringify(localOrigin)};}if(window.__VARIN_API_BASE_URL__===undefined){window.__VARIN_API_BASE_URL__=${JSON.stringify(apiBaseUrl)};}if(window.__VARIN_CLIENT_TOKEN__===undefined&&${JSON.stringify(state.clientToken || '')}){window.__VARIN_CLIENT_TOKEN__=${JSON.stringify(state.clientToken || '')};}</script>`;
-  if (html.includes('<head>')) return html.replace('<head>', `<head>${initScript}`);
-  if (html.includes('</head>')) return html.replace('</head>', `${initScript}</head>`);
-  return `${initScript}${html}`;
-};
-
 const registerPackagedUiProtocol = () => {
-  protocol.handle(UI_PROTOCOL, async (request) => {
-    const distPath = resolveWebDistDir();
-    let requestedPath = '/index.html';
-    try {
-      const url = new URL(request.url);
-      requestedPath = decodeURIComponent(url.pathname || '/index.html');
-    } catch {
-      requestedPath = '/index.html';
-    }
-    if (requestedPath.startsWith('/companion-assets/')) {
-      const assets = await ensureCompanionAssets();
-      const file = await assets.resolve(requestedPath.slice('/companion-assets/'.length));
-      if (!file) return new Response('Companion artwork is not installed', { status: 404 });
-      const response = await electronNet.fetch(pathToFileURL(file).toString());
-      const headers = new Headers(response.headers);
-      headers.set('Access-Control-Allow-Origin', '*');
-      return new Response(response.body, { status: response.status, headers });
-    }
-    const normalized = path.normalize(requestedPath).replace(/^([/\\])+/, '');
-    const candidate = path.join(distPath, normalized || 'index.html');
-    const relative = path.relative(distPath, candidate);
-    const isInsideDist = relative && !relative.startsWith('..') && !path.isAbsolute(relative);
-    const filePath = isInsideDist ? candidate : path.join(distPath, 'index.html');
-    try {
-      const info = await fsp.stat(filePath);
-      if (info.isFile()) {
-        if (filePath.endsWith('.html')) {
-          const html = await fsp.readFile(filePath, 'utf8');
-          const body = injectRuntimeConfigIntoHtml(html);
-          return new Response(body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
-        }
-        return electronNet.fetch(pathToFileURL(filePath).toString());
-      }
-    } catch {
-      /* file missing or not a regular file; fall through to index.html fallback */
-    }
-    const indexPath = path.join(distPath, 'index.html');
-    const html = await fsp.readFile(indexPath, 'utf8');
-    const body = injectRuntimeConfigIntoHtml(html);
-    return new Response(body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
-  });
+  protocol.handle(UI_PROTOCOL, request => servePackagedUi(request, resolveWebDistDir(),
+    url => electronNet.fetch(url), async name => (await ensureCompanionAssets()).resolve(name)));
 };
 
 const normalizeNotificationInput = (raw: unknown): Record<string, unknown> => {
@@ -1485,7 +1465,6 @@ const loadShellEnv = (): Record<string, string> | null => {
 };
 
 // Merge the user's login-shell env (PATH, etc.) into this process before we
-import { pathLooksUserConfigured, mergePathValues } from '@varin/web/server/index.js';
 
 // import/start the server in-process. The server and its children (native kernel,
 // git, etc.) inherit process.env directly now — there is no sidecar
@@ -1515,9 +1494,9 @@ const inheritUserShellEnv = () => {
 
 let startedLocalHostEnabled: boolean | null = null;
 const localHostModeContext = (): LocalHostModeContext => {
-  inheritUserShellEnv();
+  if (!__VARIN_LIGHT_DESKTOP__) inheritUserShellEnv();
   return {
-    environment: process.env,
+    role: desktopRole, environment: process.env,
     recoveryUiAvailable: shouldUsePackagedUi() && fs.existsSync(path.join(resolveWebDistDir(), 'index.html')),
     startedEnabled: startedLocalHostEnabled,
     runtime: state.serverHandle ? 'embedded' : state.sidecarUrl ? 'external' : 'stopped',
@@ -1579,7 +1558,7 @@ const spawnLocalServer = async () => {
   process.env.NO_PROXY = process.env.NO_PROXY || 'localhost,127.0.0.1';
   process.env.no_proxy = process.env.no_proxy || 'localhost,127.0.0.1';
 
-  const { startWebUiServer } = await import('@varin/web/server/index.js');
+  const { startWebUiServer, createComputerControls, createComputerFeedback, ElectronBrowserOwner } = await loadEmbeddedHost();
   const outboundSession = session.fromPartition('varin-harness-egress', { cache: false });
 
   const computerFeedback = createComputerFeedback();
@@ -2132,36 +2111,8 @@ const redeemConnectPairingDeepLink = async (
 const switchToHostById = async (rawId: unknown): Promise<void> => {
   const id = typeof rawId === 'string' ? rawId.trim() : '';
   if (!id) return;
-  const config = readDesktopHostsConfig();
-  let targetUrl = null;
-  let apiBaseUrl = null;
-  let clientToken = '';
-  let requestHeaders = {};
-  if (id === LOCAL_HOST_ID) {
-    targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
-    apiBaseUrl = state.sidecarUrl;
-    clientToken = readDesktopLocalClientToken();
-    requestHeaders = {};
-  } else {
-    const host = config.hosts.find((entry) => entry.id === id);
-    if (!host) {
-      log.warn('[electron] deep-link host not found:', id);
-      return;
-    }
-    targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : host.url;
-    apiBaseUrl = host.apiUrl || host.url;
-    clientToken = host.clientToken || '';
-    requestHeaders = sanitizeRuntimeRequestHeaders(host.requestHeaders || {});
-  }
-  if (!targetUrl || !apiBaseUrl) {
-    log.warn('[electron] deep-link host has no target URL:', id);
-    return;
-  }
-  const bootOutcome: BootOutcome = id === LOCAL_HOST_ID
-    ? { target: 'local', status: 'ok' }
-    : { target: 'remote', status: 'ok', hostId: id, url: apiBaseUrl };
-  log.info('[electron] switching to host', { id, bootOutcome });
-  await activateMainWindow(targetUrl, state.localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+  const selected = await resolveInitialUrl({ hostId: id, reuseServer: true });
+  await activateMainWindow(selected.initialUrl, selected.localOrigin, selected.bootOutcome, selected);
 };
 
 const confirmConnectDeepLink = async (payload: ConnectImportPayload): Promise<boolean> => {
@@ -2376,6 +2327,7 @@ const canUseTitleBarOverlay = (browserWindow: BrowserWindow | null | undefined):
 };
 
 interface BrowserWindowCreationInput {
+  bootOutcome?: BootOutcome | null;
   presentation?: 'companion' | 'companion-stool' | 'companion-scene';
   fixedBounds?: Electron.Rectangle;
   label?: string | undefined;
@@ -2385,6 +2337,7 @@ interface BrowserWindowCreationInput {
 }
 
 const createBrowserWindow = ({
+  bootOutcome = state.bootOutcome,
   presentation,
   fixedBounds,
   label,
@@ -2467,7 +2420,7 @@ const createBrowserWindow = ({
     log.info('[electron] window responsive', { label: browserWindow.__varinLabel });
   });
   browserWindow.__varinRuntimeConfig = rendererRuntimeConfig;
-  browserWindow.__varinInitScript = decorative ? '' : buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
+  browserWindow.__varinInitScript = decorative ? '' : buildInitScript(desktopLocalOrigin, bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
   browserWindow.__varinTitleBarOverlayEnabled = titleBarOverlayEnabled;
 
   if (useSaved && saved?.maximized) {
@@ -2734,6 +2687,7 @@ const activateMainWindow = async (
   state.requestHeaders = sanitizeRuntimeRequestHeaders(runtimeConfig.requestHeaders || {});
   state.bootOutcome = bootOutcome ?? null;
   const rendererRuntimeConfig = buildRendererRuntimeConfig(url, {
+    relayHostId: runtimeConfig.relayHostId,
     apiBaseUrl: state.apiBaseUrl || '',
     clientToken: state.clientToken || '',
     requestHeaders: state.requestHeaders || {},
@@ -2766,43 +2720,16 @@ const activateMainWindow = async (
 };
 
 const openMainWindow = async () => {
-  if (!state.startupResolved) {
-    const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
-    return activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
-  }
-
-  const config = readDesktopHostsConfig();
-  const localUiUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
-  if (!localUiUrl) throw new Error('Local UI is not available');
-  const host = config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID
-    ? config.hosts.find((entry) => entry.id === config.defaultHostId)
-    : null;
-  const relayHost = host && host.relay && typeof host.relay === 'object' ? host : null;
-  if (relayHost) {
-    // Relay hosts have no reachable HTTP base. Boot the LOCAL UI with the local
-    // runtime; the renderer re-opens the E2EE tunnel on startup by reading the
-    // relay descriptor + token from desktopHosts and calling
-    // switchRuntimeEndpoint({ relay }).
-    const localApiBaseUrl = state.sidecarUrl || state.apiBaseUrl || state.localOrigin || '';
-    const localToken = resolveStoredClientTokenForUrl(localApiBaseUrl, config) || state.clientToken || '';
-    return activateMainWindow(localUiUrl, state.localOrigin, state.bootOutcome, {
-      apiBaseUrl: localApiBaseUrl,
-      clientToken: localToken,
-      requestHeaders: {},
-    });
-  }
-  const apiBaseUrl = host?.apiUrl || host?.url || state.sidecarUrl || state.apiBaseUrl || '';
-  const clientToken = host?.clientToken || resolveStoredClientTokenForUrl(apiBaseUrl, config) || state.clientToken || '';
-  const requestHeaders = sanitizeRuntimeRequestHeaders(host?.requestHeaders || {});
-  const targetUrl = host?.url && apiBaseUrl && !state.unreachableHosts.has(apiBaseUrl)
-    ? (shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : host.url)
-    : localUiUrl;
-  return activateMainWindow(targetUrl, state.localOrigin, state.bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+  // Reopening uses the same target resolution as cold startup. In particular,
+  // a stale offline result or an earlier window's credentials cannot be reused.
+  const selected = await resolveInitialUrl({ reuseServer: startedLocalHostEnabled !== null });
+  return activateMainWindow(selected.initialUrl, selected.localOrigin, selected.bootOutcome, selected);
 };
 
 const createAdditionalWindow = async (
   url: string | null,
-  runtimeConfig: Partial<RendererRuntimeConfig> = {},
+  runtimeConfig: Partial<RendererRuntimeConfig>,
+  bootOutcome: BootOutcome,
 ): Promise<BrowserWindow | null> => {
   if (!state.startupResolved || !url) {
     return null;
@@ -2812,6 +2739,7 @@ const createAdditionalWindow = async (
     restoreGeometry: false,
     url,
     runtimeConfig,
+    bootOutcome,
   });
   return browserWindow;
 };
@@ -3179,20 +3107,20 @@ const setMiniChatPinned = (browserWindow: BrowserWindow | null | undefined, pinn
   return { pinned: nextPinned };
 };
 
-const resolveInitialUrl = async () => {
+const resolveInitialUrl = async ({ hostId, reuseServer = false }: { hostId?: string; reuseServer?: boolean } = {}) => {
   const hmrApiPort = process.env.VARIN_HMR_API_PORT || '3901';
   const hmrUiPort = process.env.VARIN_HMR_UI_PORT || '5173';
   const hmrApiUrl = `http://127.0.0.1:${hmrApiPort}`;
   const hmrUiUrl = `http://127.0.0.1:${hmrUiPort}`;
   const usePackagedUi = shouldUsePackagedUi();
   const skipLocalServer = shouldSkipLocalServer();
-  startedLocalHostEnabled = !skipLocalServer;
+  if (!reuseServer) startedLocalHostEnabled = !skipLocalServer;
   const startupProbePlan = resolveStartupUrlProbePlan({
     development: isDev,
     packagedUi: usePackagedUi,
     skipLocalServer,
   });
-  const localUrl = skipLocalServer
+  const localUrl = reuseServer ? state.sidecarUrl : skipLocalServer
     ? null
     : startupProbePlan.probeHmrApi && await waitForHealth(hmrApiUrl, 5_000, 100)
       ? hmrApiUrl
@@ -3216,8 +3144,9 @@ const resolveInitialUrl = async () => {
   let requestHeaders: Record<string, string> = {};
   let remoteProbe: HostProbeResult | null = null;
 
-  const envTarget = normalizeHostUrl(process.env.VARIN_SERVER_URL || '');
-  const config = readDesktopHostsConfig();
+  const envTarget = hostId ? null : normalizeHostUrl(process.env.VARIN_SERVER_URL || '');
+  const saved = readDesktopHostsConfig();
+  const config = hostId ? { ...saved, defaultHostId: hostId } : saved;
   if (envTarget) {
     apiBaseUrl = envTarget;
     clientToken = '';
@@ -3226,7 +3155,9 @@ const resolveInitialUrl = async () => {
   } else if (config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID) {
     const host = config.hosts.find((entry) => entry.id === config.defaultHostId);
     if (host?.url) {
-      apiBaseUrl = host.apiUrl || host.url;
+      const relay = rendererRelayStartup(host, localUiUrl, localAvailable);
+      if (relay) return { ...relay, localOrigin, localUiUrl };
+      apiBaseUrl = normalizeHostUrl(host.apiUrl || host.url) || '';
       clientToken = host.clientToken || '';
       requestHeaders = sanitizeRuntimeRequestHeaders(host.requestHeaders || {});
       initialUrl = usePackagedUi ? localUiUrl : host.url;
@@ -3239,7 +3170,6 @@ const resolveInitialUrl = async () => {
       remoteProbe = await probeHostWithTimeout(apiBaseUrl, 10_000, clientToken, requestHeaders);
     }
     if (remoteProbe.status === 'unreachable') {
-      state.unreachableHosts.add(apiBaseUrl);
       apiBaseUrl = localUrl || '';
       clientToken = localUrl ? readDesktopLocalClientToken() : '';
       requestHeaders = {};
@@ -3263,7 +3193,7 @@ const resolveInitialUrl = async () => {
     localAvailable,
   });
 
-  return { initialUrl, localOrigin, localUiUrl, bootOutcome, apiBaseUrl, clientToken, requestHeaders };
+  return { initialUrl, localOrigin, localUiUrl, bootOutcome, apiBaseUrl, clientToken, requestHeaders, relayHostId: '' };
 };
 
 // ---------------------------------------------------------------------------
@@ -3315,7 +3245,7 @@ const setupTrayAndListener = (bootOutcome: BootOutcome | null): void => {
   const config = readDesktopHostsConfig();
   const host = config.hosts.find((entry) => entry.id === bootOutcome.hostId);
   const serverUrl = bootOutcome.url || host?.url;
-  if (!serverUrl) return;
+  if (!serverUrl || bootOutcome.status === 'relay-pending') return; // Native SSE cannot use the renderer-owned tunnel.
 
   // Remote hosts carry their own client token; the local UI password belongs
   // only to this Host and must not be sent to another configured connection.
@@ -3355,6 +3285,14 @@ const compareSemver = (left: unknown, right: unknown): number => {
   return 0;
 };
 
+// The native updater keeps one mutable download slot. Serialize its check and
+// download so a new, unadmitted manifest cannot replace it mid-operation.
+let updateActionRunning = false;
+const withDesktopUpdater = async <T>(action: () => Promise<T>): Promise<T> => {
+  if (state.installingUpdate || updateActionRunning) throw new Error('A desktop update action is already in progress');
+  updateActionRunning = true;
+  try { return await action(); } finally { updateActionRunning = false; }
+};
 const setupAutoUpdater = () => {
   if (!app.isPackaged) {
     return;
@@ -3369,11 +3307,12 @@ const setupAutoUpdater = () => {
   const testBuild = typeof __VARIN_UPDATER_E2E_BUILD__ !== 'undefined'
     && __VARIN_UPDATER_E2E_BUILD__ === true;
   const feed = resolveUpdaterFeed({ testBuild });
-  const updaterChannel = feed.provider === 'github'
-    ? resolveUpdaterChannel({ platform: process.platform, architecture: process.arch })
+  const updaterChannel = feed.provider === 'github' || __VARIN_LIGHT_DESKTOP__
+    ? resolveUpdaterChannel({ role: desktopRole, platform: process.platform, architecture: process.arch })
     : null;
   if (updaterChannel) {
     autoUpdater.channel = updaterChannel;
+    autoUpdater.allowDowngrade = false; // assigning channel implicitly enables downgrades
   }
   autoUpdater.setFeedURL(feed);
   log.info('[electron] updater feed configured', {
@@ -4189,7 +4128,7 @@ const handleInvoke = async (
 
     case 'desktop_get_launch_at_login': {
       if (process.platform === 'linux') {
-        return { supported: true, enabled: await readLinuxAutostartEnabled() };
+        return { supported: true, enabled: await readLinuxAutostartEnabled({ role: desktopRole }) };
       }
       if (process.platform !== 'darwin' && process.platform !== 'win32') return { supported: false, enabled: false };
       const settings = app.getLoginItemSettings(getLoginItemOptions());
@@ -4200,6 +4139,7 @@ const handleInvoke = async (
       if (process.platform === 'linux') {
         const enabled = args.enabled === true;
         return setLinuxAutostartEnabled({
+          role: desktopRole,
           enabled,
           appName: app.getName(),
           backgroundArg: BACKGROUND_START_ARG,
@@ -4731,13 +4671,16 @@ const handleInvoke = async (
       return { enabled, requiresRestart: true };
     }
 
-    case 'desktop_check_for_updates': {
-      assertUpdaterCapability({ packaged: app.isPackaged });
+    case 'desktop_check_for_updates': return withDesktopUpdater(async () => {
+      assertUpdaterCapability({ packaged: app.isPackaged, role: desktopRole });
       const currentVersion = APP_VERSION;
+      const previous = state.pendingUpdate;
+      state.pendingUpdate = null; // do not keep a stale installer paired with the next native slot
       const { available, updateInfo, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
         autoUpdater,
         currentVersion,
-        pendingUpdate: state.pendingUpdate,
+        pendingUpdate: previous,
+        target: { role: desktopRole, platform: process.platform, architecture: process.arch },
         compareVersions: compareSemver,
       });
       const body =
@@ -4754,10 +4697,10 @@ const handleInvoke = async (
           (typeof updateInfo?.releaseDate === 'string' && updateInfo.releaseDate) ||
           null,
       };
-    }
+    });
 
-    case 'desktop_download_and_install_update':
-      assertUpdaterCapability({ packaged: app.isPackaged });
+    case 'desktop_download_and_install_update': return withDesktopUpdater(async () => {
+      assertUpdaterCapability({ packaged: app.isPackaged, role: desktopRole });
       if (!state.pendingUpdate) {
         throw new Error('No pending update');
       }
@@ -4806,6 +4749,7 @@ const handleInvoke = async (
       } finally {
         setTaskbarProgress(-1);
       }
+    });
 
     case 'desktop_get_local_host_mode': {
       return readLocalHostMode(settingsStore, localHostModeContext());
@@ -4825,8 +4769,9 @@ const handleInvoke = async (
     }
 
     case 'desktop_restart': {
+      if (updateActionRunning) throw new Error('Wait for the current desktop update action before restarting');
       const applyUpdate = Boolean(state.pendingUpdate?.downloaded && app.isPackaged);
-      if (applyUpdate) assertUpdaterCapability({ packaged: app.isPackaged });
+      if (applyUpdate) assertUpdaterCapability({ packaged: app.isPackaged, role: desktopRole });
       log.info(`[electron] desktop_restart applyUpdate=${applyUpdate} packaged=${app.isPackaged}`);
       if (applyUpdate && process.platform === 'darwin' && typeof app.isInApplicationsFolder === 'function') {
         try {
@@ -4878,58 +4823,12 @@ const handleInvoke = async (
     case 'desktop_get_lan_address':
       return await detectLanIPv4Address();
 
-    case 'desktop_new_window': {
-      const config = readDesktopHostsConfig();
-      const localUiUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
-      let targetUrl = localUiUrl;
-      let runtimeConfig = {
-        apiBaseUrl: state.sidecarUrl || state.localOrigin || '',
-        clientToken: readDesktopLocalClientToken(),
-        requestHeaders: {},
-      };
-      if (config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID) {
-        const host = config.hosts.find((entry) => entry.id === config.defaultHostId);
-        const apiUrl = host?.apiUrl || host?.url;
-        if (host?.url && apiUrl && !state.unreachableHosts.has(apiUrl)) {
-          targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : host.url;
-          runtimeConfig = {
-            apiBaseUrl: normalizeHostUrl(apiUrl) || '',
-            clientToken: sanitizeClientTokenForStorage(host.clientToken) || '',
-            requestHeaders: sanitizeRuntimeRequestHeaders(host.requestHeaders),
-          };
-        }
-      }
-      await createAdditionalWindow(targetUrl, runtimeConfig);
-      return null;
-    }
-
+    case 'desktop_new_window':
     case 'desktop_new_window_for_host': {
-      // Open a saved host in a new window. Hosts with a relay leg boot the
-      // LOCAL UI and let the renderer pick the transport (direct first, E2EE
-      // tunnel fallback) via the injected relay host id — a fixed apiBaseUrl
-      // would strand the window when the direct leg is unreachable.
-      const hostId = typeof args.hostId === 'string' ? args.hostId.trim() : '';
-      const config = readDesktopHostsConfig();
-      const host = config.hosts.find((entry) => entry.id === hostId);
-      if (!host) throw new Error('Host not found');
-      if (host.relay) {
-        const windowUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
-        await createAdditionalWindow(windowUrl, {
-          apiBaseUrl: '',
-          clientToken: host.clientToken || '',
-          requestHeaders: sanitizeRuntimeRequestHeaders(host.requestHeaders || {}),
-          relayHostId: host.id,
-        });
-        return null;
-      }
-      const targetUrl = normalizeHostUrl(host.apiUrl || host.url);
-      if (!targetUrl) throw new Error('Invalid URL');
-      const windowUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : targetUrl;
-      await createAdditionalWindow(windowUrl, {
-        apiBaseUrl: targetUrl,
-        clientToken: host.clientToken || '',
-        requestHeaders: sanitizeRuntimeRequestHeaders(host.requestHeaders || {}),
-      });
+      const hostId = command === 'desktop_new_window_for_host' && typeof args.hostId === 'string' ? args.hostId.trim() : '';
+      if (command === 'desktop_new_window_for_host' && !hostId) throw new Error('Host is required');
+      const selected = await resolveInitialUrl({ ...(hostId ? { hostId } : {}), reuseServer: true });
+      await createAdditionalWindow(selected.initialUrl, selected, selected.bootOutcome);
       return null;
     }
 
@@ -4947,7 +4846,10 @@ const handleInvoke = async (
       if (shouldUsePackagedUi()) {
         windowUrl = buildPackagedUiUrl('/index.html');
       }
-      await createAdditionalWindow(windowUrl, runtimeConfig);
+      await createAdditionalWindow(windowUrl, runtimeConfig, {
+        target: 'remote', hostId: config.hosts.find(host => normalizeHostUrl(host.apiUrl || host.url) === targetUrl)?.id || ENV_OVERRIDE_HOST_ID,
+        status: 'ok', url: targetUrl, localAvailable: Boolean(state.sidecarUrl),
+      });
       return null;
     }
 
@@ -5425,9 +5327,9 @@ ipcMain.handle('varin:dialog:open', async (event: IpcMainInvokeEvent, rawOptions
     : await dialog.showOpenDialog(dialogOptions);
   if (result.canceled) return null;
   const grantFilePath = async (filePath: string) => {
-    if (options?.directory) return { path: filePath };
+    if (options?.directory || __VARIN_LIGHT_DESKTOP__) return { path: filePath };
     try {
-      const grant = await mintOutsideFileGrant(filePath, { scopes: ['stat', 'read', 'raw'], fsPromises: fsp, path });
+      const grant = await (await loadEmbeddedHost()).mintOutsideFileGrant(filePath, { scopes: ['stat', 'read', 'raw'], fsPromises: fsp, path });
       return { path: grant.path, outsideFileGrant: grant.outsideFileGrant, expiresAt: grant.expiresAt };
     } catch (error) {
       log.warn(`[ipc] failed to mint outside file grant: ${errorMessage(error)}`);
@@ -5455,7 +5357,7 @@ ipcMain.handle('varin:file:grant-existing', async (event, filePath) => {
     throw new Error('Path is required');
   }
 
-  const grant = await mintOutsideFileGrant(targetPath, { scopes: ['stat', 'read', 'raw'], fsPromises: fsp, path });
+  const grant = await (await loadEmbeddedHost()).mintOutsideFileGrant(targetPath, { scopes: ['stat', 'read', 'raw'], fsPromises: fsp, path });
   return {
     path: grant.path,
     outsideFileGrant: grant.outsideFileGrant,
@@ -5770,9 +5672,10 @@ app.whenReady().then(async () => {
 
   if (process.platform === 'linux' && app.isPackaged) {
     try {
-      const enabled = await readLinuxAutostartEnabled();
+      const enabled = await readLinuxAutostartEnabled({ role: desktopRole });
       if (enabled) {
         await setLinuxAutostartEnabled({
+          role: desktopRole,
           enabled: true,
           appName: app.getName(),
           backgroundArg: BACKGROUND_START_ARG,
@@ -5811,8 +5714,8 @@ app.whenReady().then(async () => {
   const initial = extractInitialDeepLinks();
   if (initial.length > 0) handleDeepLinks(initial);
 
-  const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
-  await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+  const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders, relayHostId } = await resolveInitialUrl();
+  await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders, relayHostId });
 
   // Restore downloaded artwork without holding the main application's startup on its first frame.
   void (async () => {

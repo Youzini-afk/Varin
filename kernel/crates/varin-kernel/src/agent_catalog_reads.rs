@@ -695,12 +695,9 @@ fn dispatch_read(
         }
         "runtime.tools.catalog" => {
             let _: KernelEmptyParams = serde_json::from_value(params)?;
-            Ok(serde_json::to_value(crate::run_tools::builtin_schemas(
-                &crate::tools::ToolKind::all().collect(),
-                true,
-                true,
-                false,
-            ))?)
+            let mut tools = crate::run_tools::builtin_schemas(&crate::tools::ToolKind::all().collect(), true, true, false);
+            crate::work_locations::add_schemas(&mut tools);
+            Ok(serde_json::to_value(tools)?)
         }
         "runtime.source.tools" => {
             let p: SourceToolsParams = serde_json::from_value(params)?;

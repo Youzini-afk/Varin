@@ -12,9 +12,9 @@ const ARCHITECTURES = new Map([
 ]);
 
 const usage = `Usage:
-  updater-e2e-fixture.mjs stage --arch <x64|arm64> --next <N+1.AppImage> --version <N+1> --dir <feed-dir>
+  updater-e2e-fixture.mjs stage --arch <x64|arm64> [--role <full|light>] --next <N+1.AppImage> --version <N+1> --dir <feed-dir>
   updater-e2e-fixture.mjs serve --dir <feed-dir> [--port <port>]
-  updater-e2e-fixture.mjs run --arch <x64|arm64> --current <N.AppImage> --next <N+1.AppImage> --version <N+1> --dir <feed-dir> [--port <port>]
+  updater-e2e-fixture.mjs run --arch <x64|arm64> --current <N.AppImage> [--role <full|light>] --next <N+1.AppImage> --version <N+1> --dir <feed-dir> [--port <port>]
 
 Both AppImages must be packaged with VARIN_UPDATER_E2E_BUILD=1 during bundle:main.
 The run command stages N+1, serves it on 127.0.0.1, and launches N with only the two
@@ -52,12 +52,15 @@ const resolveExistingFile = (value, name) => {
 
 const sha512 = (filePath) => crypto.createHash('sha512').update(fs.readFileSync(filePath)).digest('base64');
 
-export const stageUpdaterFixture = ({ architecture, nextAppImage, version, directory }) => {
-  const manifestName = ARCHITECTURES.get(resolveArchitecture(architecture));
+export const stageUpdaterFixture = ({ architecture, nextAppImage, version, directory, role = 'full' }) => {
+  if (role !== 'full' && role !== 'light') throw new Error('Expected a full or light desktop role');
+  const manifestName = ARCHITECTURES.get(resolveArchitecture(architecture)).replace(/^latest/, role === 'full' ? 'latest' : 'light');
   const sourcePath = resolveExistingFile(nextAppImage, 'next');
   const feedDirectory = path.resolve(directory);
   fs.mkdirSync(feedDirectory, { recursive: true });
   const artifactName = path.basename(sourcePath);
+  const expected = `Varin-${role === 'light' ? 'Light-' : ''}${version}-linux-${architecture === 'x64' ? 'x86_64' : architecture}.AppImage`;
+  if (artifactName !== expected) throw new Error(`Expected updater artifact ${expected}, not ${artifactName}`);
   const artifactPath = path.join(feedDirectory, artifactName);
   if (sourcePath !== artifactPath) fs.copyFileSync(sourcePath, artifactPath);
   const size = fs.statSync(artifactPath).size;
@@ -120,6 +123,7 @@ const main = async () => {
   const directory = requireOption(options, 'dir');
   if (command === 'stage' || command === 'run') {
     const result = stageUpdaterFixture({
+      role: options.role,
       architecture: requireOption(options, 'arch'),
       nextAppImage: requireOption(options, 'next'),
       version: requireOption(options, 'version'),

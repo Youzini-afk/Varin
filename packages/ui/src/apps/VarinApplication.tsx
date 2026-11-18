@@ -3,6 +3,8 @@ import React from 'react';
 import type { RuntimeAPIs } from '@varin/application-client';
 import { ApplicationLoadingScreen } from '@/components/ui/ApplicationLoadingScreen';
 
+import type { DesktopBootView } from '@/lib/desktopBoot';
+
 const App = React.lazy(async () => {
   const [appModule, extensionRuntime, workbenchRegistration, surfaceRuntime] = await Promise.all([
     import('@/App'),
@@ -17,8 +19,8 @@ const App = React.lazy(async () => {
   return { default: appModule.default };
 });
 
-export const VarinApplication: React.FC<{ apis: RuntimeAPIs }> = ({ apis }) => (
+export const VarinApplication: React.FC<{ apis: RuntimeAPIs; bootView: Extract<DesktopBootView, { screen: 'main' }> | null }> = (props) => (
   <React.Suspense fallback={<ApplicationLoadingScreen />}>
-    <App apis={apis} />
+    <App {...props} />
   </React.Suspense>
 );

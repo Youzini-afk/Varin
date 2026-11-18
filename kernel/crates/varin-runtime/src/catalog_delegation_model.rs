@@ -386,6 +386,7 @@ impl Preparation {
             waiting_on: None,
             intent: json!({"kind":KIND,"executionId":self.execution.execution_id,"recipeRef":reference,"selector":recipe.catalog.selector}),
             result: Some(OperationResultMetadata::Control { value: Value::Null }),
+            resource_source: None,
             host_job: None,
             mcp_resource_subscription: None,
             managed_process: None,

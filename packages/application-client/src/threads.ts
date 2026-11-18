@@ -151,7 +151,16 @@ export interface ThreadSourceTarget {
   label: string;
   capabilities: string[];
 }
+/** Presentation data only: resolution and preparation stay with the selected source owner. */
+export interface ThreadLocationDirectory {
+  servicePath: string;
+  defaultId: string | null;
+  locations: Array<{ id: string; name: string; unavailable: string } | {
+    id: string; name: string; resourceOwner: SourceResourceOwner; path: string; workspaceId?: string; selection?: ProjectSourceSelection;
+  }>;
+}
 export interface ThreadSourceTargets {
+  workspace?: ThreadLocationDirectory;
   targets: ThreadSourceTarget[];
   unavailable: Array<{ connectionId: string; label: string; message: string }>;
 }
@@ -161,6 +170,8 @@ export interface ThreadResolvedSource {
   path: string;
 }
 export interface ThreadSourcesAPI {
+  /** Confirm the default for subsequent native work. A conflict requires a fresh branch view. */
+  setDefault?(identity: ThreadIdentity, request: { expectedRevision: number; source: ThreadSource | null }, signal?: AbortSignal): Promise<import('@varin/protocol').BranchWorkspace>;
   /** Metadata only from the current branch Source or an explicitly prepared replacement. */
   files(identity: ThreadIdentity, options?: import('./thread-source-files.js').ThreadSourceFilesOptions, signal?: AbortSignal): Promise<import('./thread-source-files.js').ThreadSourceFilePage>;
   /** Explicit pending source discovery before Thread creation. */
@@ -260,7 +271,7 @@ export interface ThreadRunUsage {
   requests: Array<Pick<import('@varin/protocol').ModelPresentation, 'requestId' | 'usage' | 'completeInputTokens' | 'generation'>>;
 }
 /** Current file in the historical operation's original source, never the navigation project. */
-export type ThreadFileTarget = { kind: 'document'; workspaceId: string; root: string; resourceId: string }
+export type ThreadFileTarget = { kind: 'document'; workspaceId: string; root: string; resourceId: string; resourceOwner?: SourceResourceOwner }
   | { kind: 'unavailable'; reason: 'no_source' | 'fixed_source' | 'managed_source' };
 /** Display metadata from the original frozen request; absent for non-model history. */
 export interface ThreadHistoryItem extends HistoryItem {
@@ -426,7 +437,7 @@ export interface ThreadResourcesAPI {
   /** Global skills and an explicitly selected pending source, without creating a Thread. */
   draftSkills(options?: ThreadDraftSkillOptions, signal?: AbortSignal): Promise<ThreadSkillCatalog>;
   /** Metadata from this branch’s prepared resources, or the explicitly admitted pending source. */
-  skills(identity: ThreadIdentity, options?: { source?: ThreadSource }, signal?: AbortSignal): Promise<ThreadSkillCatalog>;
+  skills(identity: ThreadIdentity, options?: { source?: ThreadSource | null }, signal?: AbortSignal): Promise<ThreadSkillCatalog>;
   /** Prepare a new resource snapshot; old in-flight requests keep their original version. */
   refresh(input: ThreadResourceRefresh): Promise<ContextCheckpoint>;
 }

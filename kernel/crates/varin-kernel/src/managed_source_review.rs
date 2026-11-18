@@ -340,6 +340,15 @@ fn managed_source_original_effects_survive_epoch_fence_and_reject_foreign_author
 }
 #[test]
 fn managed_source_two_hosts_original_storage_and_direct_router() {
+    two_managed_hosts(false);
+}
+
+#[test]
+fn admitted_workspace_operation_survives_a_different_conversation_default() {
+    two_managed_hosts(true);
+}
+
+fn two_managed_hosts(work_location_only: bool) {
     let root = std::env::temp_dir().join(format!(
         "varin-managed-source-host-{}",
         uuid::Uuid::new_v4()
@@ -393,7 +402,7 @@ fn managed_source_two_hosts_original_storage_and_direct_router() {
     let mut host = Host::with_script(
         "packages/web/application-host/lib/harness/managed-source-host.test-helper.ts",
     );
-    host.send(json!({"kind":"fixture-init","root":root,"storageRootA":a.root,"storageRootB":b.root,"epochA":a.epoch,"epochB":b.epoch,"runId":submitted.run_id}));
+    host.send(json!({"kind":"fixture-init","root":root,"storageRootA":a.root,"storageRootB":b.root,"epochA":a.epoch,"epochB":b.epoch,"runId":submitted.run_id,"workLocationOnly":work_location_only}));
     let release_attempts: Arc<Mutex<HashMap<String, usize>>> = Default::default();
     let mut released_hashes = std::collections::HashSet::new();
     let (send, completed) = mpsc::channel();
@@ -507,6 +516,19 @@ fn managed_source_two_hosts_original_storage_and_direct_router() {
     assert_eq!(result["ok"], true, "{result}");
     assert!(a.tasks.lock().unwrap().is_empty());
     assert!(b.tasks.lock().unwrap().is_empty());
+    if work_location_only {
+        assert_eq!(result["checks"], json!(["original-receipt", "separate-physical-files"]));
+        assert_eq!(std::fs::read_to_string(root.join("a-project/source.txt")).unwrap(), "A_PRIVATE_SOURCE\n");
+        assert_eq!(std::fs::read_to_string(root.join("b-project/source.txt")).unwrap(), "B_CHANGED_SOURCE\n");
+        assert!(!release_attempts.lock().unwrap().is_empty());
+        bridge.close();
+        drop(host);
+        drop(a);
+        drop(b);
+        drop(catalog);
+        std::fs::remove_dir_all(root).unwrap();
+        return;
+    }
     {
         let _owner = b.storage.lock().unwrap();
         let db = rusqlite::Connection::open_with_flags(
@@ -1210,6 +1232,10 @@ fn coordinator_read(
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let source: varin_runtime::catalog::launches::SourceSelection =
             serde_json::from_value(frame["binding"]["source"].clone())?;
+        let launch_source: varin_runtime::catalog::launches::SourceSelection =
+            serde_json::from_value(frame["defaultSource"].clone())?;
+        assert_eq!(source.workspace_id, launch_source.workspace_id);
+        assert_ne!(source.resource_owner, launch_source.resource_owner);
         let address = &frame["binding"];
         let binding: crate::tools::ToolBinding = serde_json::from_value(
             json!({"resourceOwner":source.resource_owner,"grantId":address["authorityId"],"runId":run,"threadId":"thread:managed-review","workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,"rootId":address["physicalRoot"]["rootId"],"sourceMode":"live_root","liveRoot":source.live_root,"enabledTools":["file_read"],"remoteAuthority":{"authorityId":address["authorityId"],"resourceEpoch":address["resourceEpoch"],"executionOwner":address["executionOwner"]}}),
@@ -1252,7 +1278,7 @@ fn coordinator_read(
                 varin_runtime::catalog::launches::LaunchSelection::from_binding(
                     &request,
                     policy.clone(),
-                    Some(source.clone()),
+                    Some(launch_source.clone()),
                 ),
             )?;
             db.prepare_execution(run, request.clone(), policy.clone(), Value::Null)?
@@ -1330,7 +1356,7 @@ fn coordinator_read(
             origin,
             tool_schema_generation: 1,
             tools: Arc::new(schemas),
-            source: Some(source),
+            source: Some(launch_source.clone()),
         };
         let executor = Arc::new(crate::tools::KernelToolExecutor::new(
             binding,
@@ -1339,17 +1365,12 @@ fn coordinator_read(
         let cancel = CancellationToken::default();
         let bound = executor.clone().bind_call(&call, &frozen, &cancel)?;
         let contract = bound.prepare(&cancel)?;
-        catalog.commit(
-            run,
-            epoch,
-            &ExecutionRecord::ToolAdmitted {
-                context: context.clone(),
-                tool: AdmittedTool {
-                    call,
-                    contract: contract.clone(),
-                },
-            },
-        )?;
+        assert!(bound.requires_operation(), "the remote owner must receive a delivery acknowledgement");
+        let tool = AdmittedTool { call, contract: contract.clone() };
+        let admitted = |source| ExecutionRecord::ResourceToolAdmitted { context: context.clone(), tool: tool.clone(), source };
+        catalog.commit(run, epoch, &admitted(bound.resource_source().unwrap().clone()))?;
+        assert!(catalog.commit(run, epoch, &admitted(launch_source.clone())).is_err(),
+            "an accepted call cannot change target, even with the same path/workspace ID");
         bound.authorize(&context, &contract, &cancel)?;
         let owner = bound.executor_owner();
         catalog.commit(
@@ -1381,6 +1402,7 @@ fn coordinator_read(
             &catalog, &resources, &pending
         )?);
         let operation = catalog.lock().unwrap().operation(&context.operation_id)?;
+        assert_eq!(operation.resource_source.as_ref(), Some(&source));
         assert_eq!(operation.execution_owner, Some(owner));
         assert_eq!(operation.outcome, Some(varin_runtime::Outcome::Succeeded));
         // The production policy runner freezes the original ToolDirectory and
@@ -1410,6 +1432,7 @@ fn coordinator_read(
             .iter()
             .find(|op| op.id != context.operation_id && crate::reconcile::is_managed_read(op))
             .expect("policy read has its actual Catalog Operation");
+        assert_eq!(policy_read.resource_source.as_ref(), Some(&source), "directory forwards the bound physical address");
         assert!(catalog
             .lock()
             .unwrap()
@@ -3696,5 +3719,64 @@ fn external_source_stop_fences_late_spawn_and_recalls_original_after_reopen() {
     assert_eq!(recalled["executorStopped"],true);
     assert_eq!(recalled["process"]["processId"],"active-process");
     drop(reopened);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn one_operation_location_read_cannot_move_the_run_source_or_borrow_device_access() {
+    let root = std::env::temp_dir().join(format!("work-location-read-{}",uuid::Uuid::new_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let owner = Owner::new(root.join("target"), "target", "gen", "epoch");
+    let primary = root.join("primary");
+    let alternate = root.join("alternate");
+    for (directory, value) in [(&primary, "primary"), (&alternate, "alternate")] {
+        std::fs::create_dir(directory).unwrap();
+        std::fs::write(directory.join("same.txt"), value).unwrap();
+    }
+    let (main, _) = owner.bind_live(&primary, "primary-grant", 1);
+    // Source preparation registers the folder. This stage is not the read grant.
+    let issue = |grant: &str, operation: Option<&str>, caps: Vec<&str>| {
+        owner.rpc("authority.grant.issue", json!({"grantId":grant,"hostGeneration":owner.generation,
+            "storageIdentity":owner.root,"sessionId":null,"owningWorkspace":"alternate","executionWorkspace":"alternate",
+            "threadId":"thread","runId":"run","operationId":operation,"capabilities":caps,"pathScopes":[""]}),None).unwrap();
+    };
+    issue("preparer", None, vec!["storage.read","storage.write"]);
+    let registration = owner.rpc("file.root.register",json!({"workspaceId":"alternate","executionWorkspaceId":"alternate",
+        "canonicalRoot":alternate}),Some("preparer")).unwrap();
+    let live = json!({"hostId":"target","rootId":registration["rootId"],"canonicalRoot":registration["canonicalRoot"]});
+    let source = json!({"resource_owner":{"kind":"managed_host","hostId":"target","connectionId":"registered","endpointIdentity":"identity"},
+        "workspace_id":"alternate","execution_workspace_id":"alternate","mode":"live_root","branch_id":null,"revision":null,"live_root":live});
+    let call_id = "request:tool:alternate-read";
+    let open = |grant: &str| owner.rpc("source.authority.open",json!({"principalId":"client","coordinatorHostId":"coordinator",
+        "scope":{"kind":"run","threadId":"thread","runId":"run","epoch":1},"source":source,"grantId":grant,
+        "operationId":call_id,"enabledTools":["file_read"],"purpose":"work_location_read"}),None);
+    issue("too-broad",Some(call_id),vec!["storage.read","filesystem.device"]);
+    assert!(open("too-broad").is_err());
+    issue("read-grant",Some(call_id),vec!["storage.read"]);
+    let opened=open("read-grant").unwrap();
+    let address=json!({"principalId":"client","coordinatorHostId":"coordinator","authorityId":opened["authorityId"],"resourceEpoch":opened["resourceEpoch"]});
+    let mut binding=address.clone();
+    binding["physicalRoot"]=live.clone();
+    binding["toolBinding"]=json!({"resourceOwner":source["resource_owner"],"grantId":"read-grant","runId":"run","threadId":"thread",
+        "workspaceId":"alternate","executionWorkspaceId":"alternate","rootId":registration["rootId"],"sourceMode":"live_root","liveRoot":live,"enabledTools":["file_read"]});
+    owner.rpc("source.authority.bind",binding,None).unwrap();
+    for bad in [json!({"path":"../primary/same.txt"}),json!({"path":"C:\\test.txt"}),json!({"path":primary.join("same.txt")}),json!({"ref":"file:1"}),json!({"path":"same.txt","unit":{"line":1}})] {
+        assert!(owner.tool(&address,"file_read","alternate-read",bad).is_err());
+    }
+    assert!(owner.tool(&address,"file_write","alternate-read",json!({"path":"same.txt","content":"bad"})).is_err());
+    assert!(owner.tool(&address,"file_read","different-call",json!({"path":"same.txt"})).is_err());
+    let receipt=owner.tool(&address,"file_read","alternate-read",json!({"path":"same.txt"})).unwrap();
+    assert_eq!(receipt["result"]["completion"]["content"]["data"]["content"]["text"],"alternate", "{receipt}");
+    let original=owner.tool(&main,"file_read","ordinary-read",json!({"path":"same.txt"})).unwrap();
+    assert_eq!(original["result"]["completion"]["content"]["data"]["content"]["text"],"primary", "{original}");
+    let mut recall=address.clone(); recall["operationId"]=json!(call_id);
+    assert_eq!(owner.rpc("source.resource.observe",recall.clone(),None).unwrap(),receipt);
+    let mut wrong=address.clone(); wrong["operationId"]=json!("unrelated");
+    assert!(owner.rpc("source.resource.release",wrong,None).is_err());
+    assert_eq!(owner.rpc("source.resource.release",recall,None).unwrap()["released"],true);
+    assert!(owner.tool(&address,"file_read","alternate-read",json!({"path":"same.txt"})).is_err());
+    issue("replacement",Some(call_id),vec!["storage.read"]);
+    assert!(open("replacement").is_err());
+    drop(owner);
     std::fs::remove_dir_all(root).unwrap();
 }
