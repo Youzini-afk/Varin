@@ -528,9 +528,20 @@ impl PreparedSubmission {
                         )
                     })?;
                     let next = personalization.as_ref().expect("resource scope checked");
-                    if context::ContextScope::from(previous) != context::ContextScope::from(next)
-                        || previous.memory_snapshot != next.memory_snapshot
-                        || active.proposal.memory_checkpoint != proposal.memory_checkpoint
+                    let previous_scope = context::ContextScope::from(previous);
+                    let mut next_scope = context::ContextScope::from(next);
+                    // Only a confirmed ordinary branch workspace can replace its project
+                    // context. A one-send override, child or Bot keeps its owned scope.
+                    let project_changed = branch_default && inherit_source
+                        && previous_scope.mode == "agent" && previous_scope.thread_role == "main"
+                        && previous_scope.project_id != next_scope.project_id
+                        && active.resources.as_ref().is_some_and(|r| r.source != normalized_source);
+                    if project_changed {
+                        next_scope.project_id.clone_from(&previous_scope.project_id);
+                    }
+                    if previous_scope != next_scope
+                        || (!project_changed && (previous.memory_snapshot != next.memory_snapshot
+                            || active.proposal.memory_checkpoint != proposal.memory_checkpoint))
                         || next.revision < previous.revision
                     {
                         return Err(RuntimeError::Conflict(

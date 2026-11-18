@@ -4,7 +4,7 @@ import { subscribeVarinEvents } from '@/lib/varinEvents';
 
 export interface ComposerSkill { resourceId: string; version: string; name: string; invocation: string; scope: string; source: string; sourceLabel?: string; description?: string; locator?: ThreadSkillLocator }
 const EMPTY_SKILLS: ComposerSkill[] = [];
-export function useComposerResources({ api, identity, source, pendingSource, enabled = true }: { cwd?: string | null; sessionId?: string | null; refreshOnMount?: boolean; api?: ThreadsAPI; identity?: ThreadIdentity; source?: ThreadSource; pendingSource?: ThreadDraftSkillOptions['source']; enabled?: boolean }) {
+export function useComposerResources({ api, identity, source, pendingSource, enabled = true }: { cwd?: string | null; sessionId?: string | null; refreshOnMount?: boolean; api?: ThreadsAPI; identity?: ThreadIdentity; source?: ThreadSource | null; pendingSource?: ThreadDraftSkillOptions['source']; enabled?: boolean }) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const scope = JSON.stringify([host, identity?.threadId, identity?.branchId, source, pendingSource]);
   const [result, setResult] = React.useState<{ scope: string; skills: ComposerSkill[]; loading: boolean; error?: string }>();
@@ -17,7 +17,7 @@ export function useComposerResources({ api, identity, source, pendingSource, ena
     if (!enabled || !api?.resources.skills) return;
     const controller = new AbortController();
     setResult(previous => ({ scope, skills: previous?.scope === scope ? previous.skills : [], loading: true }));
-    void (identity ? api.resources.skills(identity, source ? { source } : {}, controller.signal) : api.resources.draftSkills(pendingSource ? { source: pendingSource } : {}, controller.signal)).then(result => {
+    void (identity ? api.resources.skills(identity, source === undefined ? {} : { source }, controller.signal) : api.resources.draftSkills(pendingSource ? { source: pendingSource } : {}, controller.signal)).then(result => {
       if (controller.signal.aborted || host !== getRuntimeEndpointGeneration()) return;
       setResult({ scope, loading: false, skills: result.skills.map(skill => ({
         resourceId: skill.resourceId, version: skill.version, locator: skill.locator, name: skill.name, invocation: `skill:${skill.name}`,

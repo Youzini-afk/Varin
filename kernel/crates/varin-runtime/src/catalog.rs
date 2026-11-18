@@ -528,7 +528,9 @@ impl Catalog {
                 return Err(RuntimeError::Conflict("branch workspace changed during input preparation".into()));
             }
         }
-        if let Some(default) = &branch_default {
+        if let Some(default) = branch_default.as_ref().filter(|_| {
+            inherit_source || matches!(origin, submissions::SubmissionOrigin::Ingress { .. })
+        }) {
             if launch.as_ref().is_none_or(|l| l.source != default.source) {
                 return Err(RuntimeError::Conflict("launch differs from the confirmed branch workspace".into()));
             }

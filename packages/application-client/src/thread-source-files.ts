@@ -9,7 +9,7 @@ export interface ThreadSourceFileOptions {
   limit?: number;
   cursor?: string;
 }
-export interface ThreadSourceFilesOptions extends ThreadSourceFileOptions { source?: ThreadSource }
+export interface ThreadSourceFilesOptions extends ThreadSourceFileOptions { source?: ThreadSource | null }
 export interface ThreadDraftFileOptions extends ThreadSourceFileOptions { source: { resourceOwner: SourceResourceOwner; path: string } }
 export interface ThreadSourceFileEntry {
   /** Relative to this exact Source, never implicitly a path on the coordinating Host. */

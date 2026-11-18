@@ -32,6 +32,7 @@ export interface ContextPreparer {
   refresh?(checkpoint: ContextCheckpoint, signal?: AbortSignal): Promise<InitialContext>;
   compact?(checkpoint: ContextCheckpoint, signal?: AbortSignal): Promise<InitialContext>;
   forSource?(checkpoint: ContextCheckpoint, source: ThreadSource | null, signal?: AbortSignal): Promise<InitialContext>;
+  forWorkspace?(checkpoint: ContextCheckpoint, source: ThreadSource | null, signal?: AbortSignal): Promise<InitialContext>;
   refreshResources?(checkpoint: ContextCheckpoint, options?: ResourceRefreshOptions): Promise<InitialContext>;
 }
 export type ResourceRefreshOptions = Pick<ThreadResourceScopeOptions, 'instructionDirectories' | 'supportingFiles' | 'signal'>;
@@ -124,26 +125,31 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
       instructionSources: [...sources(snapshot), ...(admitted.childProfile?.preset_id ? [`agent.child-profile:${JSON.stringify({ catalogIdentity: admitted.childProfile.catalog_identity, presetId: admitted.childProfile.preset_id })}`] : [])] }, { source: resourceSource(source), snapshot }, true, signal);
   };
   const replaceResources = async (checkpoint: ContextCheckpoint, source: ThreadSource | null,
-    options: ResourceRefreshOptions | undefined, retainSource: boolean): Promise<InitialContext> => {
+    options: ResourceRefreshOptions | undefined, target: 'refresh' | 'source' | 'workspace'): Promise<InitialContext> => {
     const previous = checkpoint.resources; const basis = checkpoint.personalization;
     if (!previous || !basis) throw new Error('Context has no frozen resource provenance');
     const scope = previous.snapshot.scope;
     if (scope.threadId !== basis.threadId || scope.projectId !== basis.projectId || scope.mode !== basis.mode || scope.threadRole !== basis.threadRole) {
       throw new Error('Resource and context scopes do not match');
     }
+    const projectId = target === 'workspace' && scope.mode === 'agent' && scope.threadRole === 'main'
+      ? source ? await owners.projectForWorkspace(source.workspaceId, source) ?? null : null
+      : scope.projectId;
+    const changedProject = projectId !== scope.projectId;
     const snapshot = await prepareResources({ runtime: 'agent', threadId: scope.threadId, branchId: checkpoint.proposal.branch_id }, source,
-      { mode: scope.mode, threadRole: scope.threadRole as AdmittedContextScope['threadRole'], projectId: scope.projectId }, options);
-    if (retainSource && (snapshot.scope.sourceIdentity !== scope.sourceIdentity || snapshot.scope.cwd !== scope.cwd
+      { mode: scope.mode, threadRole: scope.threadRole as AdmittedContextScope['threadRole'], projectId }, options);
+    if (target === 'refresh' && (snapshot.scope.sourceIdentity !== scope.sourceIdentity || snapshot.scope.cwd !== scope.cwd
       || snapshot.scope.projectRoot !== scope.projectRoot)) {
       throw new Error('Resource refresh cannot change the original source');
     }
-    const candidate = await render({ ...basis,
+    const candidate = await render({ ...basis, projectId,
       originalSections: [...Object.entries(sections(snapshot)).map(([name, content]) => ({ name, content })),
         ...basis.originalSections.filter(section => ['child_profile', 'agent_profile'].includes(section.name))],
-      instructionSources: [...sources(snapshot), ...basis.instructionSources.filter(source => source.startsWith('agent.child-profile:'))] }, { source: retainSource ? previous.source : resourceSource(source), snapshot }, false, options?.signal);
+      instructionSources: [...sources(snapshot), ...basis.instructionSources.filter(source => source.startsWith('agent.child-profile:'))],
+    }, { source: target === 'refresh' ? previous.source : resourceSource(source), snapshot }, changedProject, options?.signal);
     options?.signal?.throwIfAborted();
     // Resource publication does not acknowledge a newer memory note snapshot.
-    return { ...candidate, memoryCheckpoint: checkpoint.proposal.memory_checkpoint };
+    return changedProject ? candidate : { ...candidate, memoryCheckpoint: checkpoint.proposal.memory_checkpoint };
   };
   return Object.assign(initial, {
     ...(owners.resources.draftSourceSkills ? { draftSourceSkills: (workspaceId: string, signal?: AbortSignal) => owners.resources.draftSourceSkills!(workspaceId, signal) } : {}),
@@ -157,11 +163,14 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
       return render({ ...basis, originalSections }, context.resources);
     },
     async forSource(checkpoint: ContextCheckpoint, source: ThreadSource | null, signal?: AbortSignal): Promise<InitialContext> {
-      return replaceResources(checkpoint, source, signal ? { signal } : undefined, false);
+      return replaceResources(checkpoint, source, signal ? { signal } : undefined, 'source');
+    },
+    async forWorkspace(checkpoint: ContextCheckpoint, source: ThreadSource | null, signal?: AbortSignal): Promise<InitialContext> {
+      return replaceResources(checkpoint, source, signal ? { signal } : undefined, 'workspace');
     },
     async refreshResources(checkpoint: ContextCheckpoint, options?: ResourceRefreshOptions): Promise<InitialContext> {
       if (!checkpoint.resources) throw new Error('Context has no frozen resource provenance');
-      return replaceResources(checkpoint, resourceThreadSource(checkpoint.resources.source), options, true);
+      return replaceResources(checkpoint, resourceThreadSource(checkpoint.resources.source), options, 'refresh');
     },
     async main(identity: ThreadIdentity, source: ThreadSource | null, signal?: AbortSignal): Promise<InitialContext> {
       const bot = await owners.botForThread?.(identity.threadId) ?? null;

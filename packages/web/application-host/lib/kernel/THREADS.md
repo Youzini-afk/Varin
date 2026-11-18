@@ -308,10 +308,15 @@ source identity, not the caller's tool list or a live grant. A competing selecti
 active foreground Run, activating input, or isolated execution view is not
 retargeted. Refresh on a revision conflict; do not auto-repeat a switch.
 
-On the next user submission the Host re-admits the selected source and prepares
-its source-dependent context where needed. The Catalog rechecks the branch
-revision, source, head and context in the input admission transaction, before
-publishing the next Run. Existing Runs, requests, handed-off Operations and
-uncertain effects do not move. An automatic activation that would clone a
-different original launch waits for a prepared submission instead. This is
-a between-Runs boundary, **not** live switching between steps within a Run.
+For an idle branch, the composer looks up files, directory references and
+skills using the confirmed selection. The Host re-admits that source for the
+next user submission and prepares the active project's instructions and notes.
+The Catalog checks the branch revision, head and prepared context in the same
+transaction that admits the next Run. The user can still choose a different
+source or chat-only for one send. The selected source belongs to that Run and
+the durable branch preference applies to later sends that inherit it.
+
+An automatic activation whose previous launch uses a different source waits
+until a foreground submission prepares a matching launch or the user restores
+the previous default. The branch preference applies between Runs. Each
+admitted request and Operation retains its original execution source.

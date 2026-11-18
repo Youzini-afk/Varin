@@ -523,7 +523,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     return adapter.draftSkills({ source: { resourceOwner: parseSourceResourceOwner(source.resourceOwner), path: text(source.path) } }, signal);
   });
   post('source/files', 'read', (body, signal) => adapter.files(identity(body), { ...parseThreadSourceFileOptions(body),
-    ...(body.source === undefined ? {} : { source: threadSource(body.source) }) }, signal));
+    ...(body.source === undefined ? {} : { source: body.source === null ? null : threadSource(body.source) }) }, signal));
   post('source/draft-files', 'read', (body, signal) => {
     const source = object(body.source);
     if (Object.keys(source).some(key => !['resourceOwner', 'path'].includes(key))) throw new Error('Pending source is malformed');
@@ -531,7 +531,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       source: { resourceOwner: parseSourceResourceOwner(source.resourceOwner), path: text(source.path) } }, signal);
   });
   post('resources/skills', 'read', (body, signal) => adapter.skills(identity(body),
-    body.source === undefined ? {} : { source: threadSource(body.source) }, signal));
+    body.source === undefined ? {} : { source: body.source === null ? null : threadSource(body.source) }, signal));
   post('resources/refresh', 'write', (body, signal) => {
     let instructionDirectories: string[] | undefined;
     if (body.instructionDirectories !== undefined) {

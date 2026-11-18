@@ -3,7 +3,7 @@ import { getRuntimeEndpointGeneration, type ThreadsAPI, type ThreadIdentity, typ
 
 /** Each type owns its paging and failures; no group can replace another group's visible results. */
 export function useSourceFileCandidates({ api, identity, source, pendingSource, scope, query, requestedQuery, type, revision }: {
-  api?: ThreadsAPI; identity?: ThreadIdentity; source?: ThreadSource; pendingSource?: ThreadDraftSkillOptions['source']; scope: string;
+  api?: ThreadsAPI; identity?: ThreadIdentity; source?: ThreadSource | null; pendingSource?: ThreadDraftSkillOptions['source']; scope: string;
   query: string; requestedQuery: string; type: 'file' | 'directory'; revision: number;
 }) {
   const generation = React.useRef({ scope, requestedQuery, id: 0 });
@@ -13,7 +13,7 @@ export function useSourceFileCandidates({ api, identity, source, pendingSource, 
   const currentCursor = cursor?.generation === requestGeneration ? cursor.value : undefined;
   const [result, setResult] = React.useState<{ scope: string; query: string; rows: ThreadSourceFileEntry[]; loading: boolean; error?: string; next?: string | null }>();
   React.useEffect(() => {
-    if (!api || !identity && !pendingSource || query !== requestedQuery) return;
+    if (!api || source === null || !identity && !pendingSource || query !== requestedQuery) return;
     const controller = new AbortController(), host = getRuntimeEndpointGeneration();
     setResult(previous => ({ scope, query, rows: previous?.scope === scope && previous.query === query ? previous.rows : [], loading: true }));
     const options = { query, type, limit: 60, ...(currentCursor ? { cursor: currentCursor } : {}) };

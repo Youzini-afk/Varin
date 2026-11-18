@@ -437,7 +437,7 @@ export interface ThreadResourcesAPI {
   /** Global skills and an explicitly selected pending source, without creating a Thread. */
   draftSkills(options?: ThreadDraftSkillOptions, signal?: AbortSignal): Promise<ThreadSkillCatalog>;
   /** Metadata from this branch’s prepared resources, or the explicitly admitted pending source. */
-  skills(identity: ThreadIdentity, options?: { source?: ThreadSource }, signal?: AbortSignal): Promise<ThreadSkillCatalog>;
+  skills(identity: ThreadIdentity, options?: { source?: ThreadSource | null }, signal?: AbortSignal): Promise<ThreadSkillCatalog>;
   /** Prepare a new resource snapshot; old in-flight requests keep their original version. */
   refresh(input: ThreadResourceRefresh): Promise<ContextCheckpoint>;
 }

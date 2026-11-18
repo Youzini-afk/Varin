@@ -185,7 +185,8 @@ export class ThreadAdapter {
     const runId = branch.active_run_id ?? branch.latest_run?.id;
     const launch = runId ? await this.runtime.launch(runId, signal) : null;
     const original = resourceThreadSource(launch?.selection.source ?? null);
-    const source = options.source ?? original;
+    const source = options.source !== undefined ? options.source : (!branch.active_run_id && branch.workspace_default
+      ? resourceThreadSource(branch.workspace_default.source) : original);
     signal?.throwIfAborted();
     if (!source) return { entries: [], nextCursor: null };
     if (!this.sourceFiles) throw new Error('Source file discovery is unavailable');
@@ -355,22 +356,24 @@ export class ThreadAdapter {
   }
 
   /** Candidate metadata uses the same source/context owner as submission, never navigation cwd. */
-  async skills(identity: ThreadIdentity, options: { source?: ThreadSource } = {}, signal?: AbortSignal): Promise<ThreadSkillCatalog> {
+  async skills(identity: ThreadIdentity, options: { source?: ThreadSource | null } = {}, signal?: AbortSignal): Promise<ThreadSkillCatalog> {
     const thread = await this.requireIdentity(identity, signal);
     const checkpoint = await this.runtime.context(identity.branchId, signal);
+    const branch = thread.branches.find(branch => branch.branch_id === identity.branchId)!;
+    const workspace = !branch.active_run_id && options.source === undefined ? branch.workspace_default : undefined;
+    const changedWorkspace = workspace && !isDeepStrictEqual(workspace.source, checkpoint?.resources?.source);
     let resources = checkpoint?.resources;
-    if (options.source !== undefined || !checkpoint) {
+    if (options.source !== undefined || !checkpoint || changedWorkspace) {
       if (!this.prepareContext) throw Object.assign(new Error('Resource catalog is unavailable'), { code: 'resource-unavailable' });
-      let source = options.source ?? null;
-      if (!source) {
-        const branch = thread.branches.find(branch => branch.branch_id === identity.branchId)!;
+      let source = options.source ?? (workspace ? resourceThreadSource(workspace.source) : null);
+      if (options.source === undefined && !workspace) {
         const runId = branch.active_run_id ?? branch.latest_run?.id;
         const launch = runId ? await this.runtime.launch(runId, signal) : null;
         source = resourceThreadSource(launch?.selection.source ?? null);
       }
       if (source) await this.admitSource(source, identity, undefined, signal);
       const context = checkpoint
-        ? await this.prepareContext.forSource?.(checkpoint, source, signal)
+        ? await (changedWorkspace ? this.prepareContext.forWorkspace : this.prepareContext.forSource)?.(checkpoint, source, signal)
         : await this.prepareContext.main(identity, source, signal);
       resources = context?.resources;
     }
@@ -1195,8 +1198,9 @@ export class ThreadAdapter {
             const agent = input.agent ? await this.prepareAgent(input.agent) : undefined;
             if (agent) command.launch!.agent = agent.selection;
             if (this.prepareContext && checkpoint && replacingSource) {
-              if (!this.prepareContext!.forSource) throw new Error('Resource source preparation is unavailable');
-              initialContext = await this.prepareContext!.forSource(checkpoint, candidateSource);
+              const prepare = workspace && input.source === undefined ? this.prepareContext.forWorkspace : this.prepareContext.forSource;
+              if (!prepare) throw new Error('Resource source preparation is unavailable');
+              initialContext = await prepare(checkpoint, candidateSource);
               command.expectedContextCheckpoint = checkpoint.id;
             } else if (this.prepareContext && !checkpoint) {
               let source = workspace ? candidateSource : input.source ?? null;

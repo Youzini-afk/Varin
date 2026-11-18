@@ -4675,6 +4675,14 @@ fn branch_workspace_cas_fences_preparation_and_preserves_handed_off_work() {
     db.fork_branch("main","saved-branch",Some(&first.input_id)).unwrap();
     assert_eq!(branch_workspace::read(&db.db,"saved-branch").unwrap().unwrap().source,b);
     assert_eq!(db.inspect_thread("thread").unwrap()["branches"][0]["workspace_default"]["revision"],1);
+    let next_run = db.transition_run(&next.run_id, epoch, 1, RunState::Runnable).unwrap();
+    db.transition_run(&next.run_id, epoch, next_run.revision, RunState::Completed).unwrap();
+    let one_send = SubmitInput { key: "one-send-chat".into(), expected_head: Some(next.input_id), ..command() };
+    let one_send = db.prepare_submission(one_send, None, None).unwrap()
+        .with_workspace_revision(1).load(Some(launch(None)), false).unwrap();
+    let one_send = db.admit_submission(one_send).unwrap();
+    assert_eq!(db.launch_intent(&one_send.run_id).unwrap().unwrap().selection.source, None);
+    assert_eq!(branch_workspace::read(&db.db,"main").unwrap().unwrap().source,b);
     drop(db);
     let db=f.open();
     assert_eq!(branch_workspace::read(&db.db,"main").unwrap().unwrap().source,b);

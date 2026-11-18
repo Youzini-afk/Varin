@@ -53,9 +53,13 @@ export function createThreadObjectInputPreparer(owners: {
       if (source === undefined) {
         const thread = await owners.runtime.thread(input.threadId, signal);
         const branch = thread?.branches.find(item => item.branch_id === input.branchId);
-        runId = branch?.active_run_id ?? branch?.latest_run?.id;
-        const launch = runId ? await owners.runtime.launch(runId, signal) : null;
-        source = resourceThreadSource(launch?.selection.source ?? null) ?? undefined;
+        if (branch?.workspace_default && !branch.active_run_id) {
+          source = resourceThreadSource(branch.workspace_default.source);
+        } else {
+          runId = branch?.active_run_id ?? branch?.latest_run?.id;
+          const launch = runId ? await owners.runtime.launch(runId, signal) : null;
+          source = resourceThreadSource(launch?.selection.source ?? null);
+        }
       }
       if (!source) throw Object.assign(new Error('A directory reference needs an admitted execution source'), { code: 'reference-unavailable' });
       await owners.admitSource(source, input, runId, signal);
