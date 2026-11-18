@@ -1,167 +1,53 @@
 import React from 'react';
 import './settings.css';
 import { SettingsFooterContext } from './settings-context';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { Icon } from '@/components/icon/Icon';
-import { useI18n } from '@/lib/i18n';
-import { getSettingsSaveState, subscribeToSettingsSaveState } from '@/lib/persistence';
+import { PageHeader } from './kit';
 import { cn } from '@/lib/utils';
-import {
-  SETTINGS_DESCRIPTION_CLASS,
-  SETTINGS_PAGE_TITLE_CLASS,
-} from '@/components/sections/shared/SettingsSection';
 
 interface SettingsPageLayoutProps {
-  /** Page content */
   children: React.ReactNode;
-  /** Optional page title shown above settings content. */
   title?: React.ReactNode;
-  /** Optional content rendered before a string/number page title. */
   titleLeading?: React.ReactNode;
-  /** Optional content rendered after a string/number page title. */
   titleAccessory?: React.ReactNode;
-  /** Optional supporting description under the page title. */
   description?: React.ReactNode;
-  /** Optional content rendered at the end of the header row (before save status). */
+  /** Content at the end of the header row (actions). */
   headerEnd?: React.ReactNode;
   scope?: React.ReactNode;
-  /** Show persistence feedback for instant-save settings. */
+  /** Instant-save pages flash "Saved" in the header. */
   showSaveStatus?: boolean;
-  /** Additional className for the content container */
   className?: string;
-  /** Additional className for the outer ScrollableOverlay */
   outerClassName?: string;
+  wide?: boolean;
+  /** Content between the header and the first section. */
+  lead?: React.ReactNode;
 }
 
 /**
- * Standard layout wrapper for settings page content.
- * Shared responsive content width, scrolling and fixed save-unit footer.
+ * Preference-form page: header with scope label and save feedback, sections below.
+ * Save units dock over the canvas bottom through SettingsFooterContext.
  */
 export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
-  children,
-  className,
-  outerClassName,
-  title,
-  titleLeading,
-  titleAccessory,
-  description,
-  headerEnd,
-  scope,
-  showSaveStatus = false,
+  children, className, outerClassName, title, titleLeading, titleAccessory, description, headerEnd, scope, showSaveStatus = true, wide, lead,
 }) => {
   const [footerTarget, setFooterTarget] = React.useState<HTMLDivElement | null>(null);
-  const hasHeader = title != null || description != null || headerEnd != null || showSaveStatus;
-  const isPlainTitle = typeof title === 'string' || typeof title === 'number';
-  const hasTitleChrome = titleLeading != null || titleAccessory != null;
-
-  return (
-    <SettingsFooterContext.Provider value={footerTarget}>
+  const hasHeader = title != null || description != null || headerEnd != null;
+  const isWide = wide || Boolean(className?.match(/settings-(chat|wide)-page/));
+  return <SettingsFooterContext.Provider value={footerTarget}>
     <div className={cn('flex h-full min-h-0 flex-col', outerClassName)}>
-    <ScrollableOverlay
-      preventOverscroll userIntentOnly
-      outerClassName="flex-1 min-h-0"
-      className="w-full @container"
-    >
-      <div
-        data-settings-page
-        className={cn(
-          'settings-page mx-auto w-full max-w-[1040px] space-y-0 px-5 py-6 @3xl:px-10 @3xl:py-8',
-          // The first visible section never needs the top divider, no matter
-          // which platform-conditional sections above it rendered null.
-          '[&>section:first-of-type]:border-t-0 [&>section:first-of-type]:pt-0',
-          className?.includes('settings-chat-page') && 'max-w-[1320px]',
-          className
-        )}
-      >
-        {hasHeader && (
-          <div className="settings-page-header mb-2 flex items-start justify-between gap-4">
-            <div className="min-w-0 space-y-1">
-              {title != null ? (
-                isPlainTitle ? (
-                  hasTitleChrome ? (
-                    <div className="flex min-w-0 items-center gap-2">
-                      {titleLeading}
-                      <h1 className={cn(SETTINGS_PAGE_TITLE_CLASS, 'min-w-0 truncate')}>{title}</h1>
-                      {titleAccessory}
-                    </div>
-                  ) : (
-                    <h1 className={SETTINGS_PAGE_TITLE_CLASS}>{title}</h1>
-                  )
-                ) : (
-                  title
-                )
-              ) : null}
-              {description != null ? (
-                typeof description === 'string' || typeof description === 'number' ? (
-                  <p className={SETTINGS_DESCRIPTION_CLASS}>{description}</p>
-                ) : (
-                  description
-                )
-              ) : null}
-              {scope ? <div className="settings-page-scope"><Icon name="stack" className="mt-0.5 size-3.5 shrink-0" /><span>{scope}</span></div> : null}
-            </div>
-            <div className="flex shrink-0 items-center gap-3">
-              {headerEnd}
-              {showSaveStatus && <SettingsSaveStatus />}
-            </div>
-          </div>
-        )}
-        {children}
+      <div className="sk-scroll" data-settings-page-scroll="">
+        <div data-settings-page="" className={cn('sk-page', isWide && 'wide', className)}>
+          {hasHeader ? <PageHeader
+            title={titleLeading || titleAccessory ? <>{titleLeading}{title}{titleAccessory}</> : title}
+            description={description}
+            scope={scope ? <span className="sk-scope"><span>{scope}</span></span> : undefined}
+            actions={headerEnd}
+            saved={showSaveStatus}
+          /> : null}
+          {lead ? <div className="sk-lead">{lead}</div> : null}
+          {children}
+        </div>
       </div>
-    </ScrollableOverlay>
-    <div ref={setFooterTarget} className="shrink-0 empty:hidden" />
+      <div ref={setFooterTarget} className="sk-footer-slot" />
     </div>
-    </SettingsFooterContext.Provider>
-  );
-};
-
-// Only saves slower than this surface a "Saving…" spinner — local writes
-// finish instantly and stay silent; remote/mobile connections get feedback.
-const SAVE_SPINNER_DELAY_MS = 500;
-
-const SettingsSaveStatus: React.FC = () => {
-  const { t } = useI18n();
-  const status = React.useSyncExternalStore(
-    subscribeToSettingsSaveState,
-    getSettingsSaveState,
-    getSettingsSaveState,
-  );
-  const [showSaving, setShowSaving] = React.useState(false);
-
-  React.useEffect(() => {
-    if (status !== 'saving') {
-      setShowSaving(false);
-      return;
-    }
-    const timer = setTimeout(() => setShowSaving(true), SAVE_SPINNER_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [status]);
-
-  if (status === 'error') {
-    return (
-      <div
-        aria-live="assertive"
-        className="flex shrink-0 items-center gap-1.5 typography-meta text-[var(--status-error)]"
-      >
-        <Icon name="error-warning" className="size-3.5" />
-        <span>{t('settings.common.status.saveFailed')}</span>
-      </div>
-    );
-  }
-
-  if (status === 'saved') return <div aria-live="polite" className="flex shrink-0 items-center gap-1.5 typography-meta text-muted-foreground"><Icon name="check" className="size-3.5" /><span>{t('settings.common.status.saved')}</span></div>;
-
-  if (status !== 'saving' || !showSaving) {
-    return null;
-  }
-
-  return (
-    <div
-      aria-live="polite"
-      className="flex shrink-0 items-center gap-1.5 typography-meta text-muted-foreground"
-    >
-      <Icon name="loader-4" className="size-3.5 animate-spin" />
-      <span>{t('settings.common.actions.saving')}</span>
-    </div>
-  );
+  </SettingsFooterContext.Provider>;
 };

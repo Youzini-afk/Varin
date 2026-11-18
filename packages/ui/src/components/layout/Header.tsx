@@ -46,6 +46,7 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { TitlebarLeftControls } from '@/components/layout/TitlebarLeftControls';
+import { SettingsTitlebar } from '@/components/layout/SettingsTitlebar';
 import { BotDelegatedNote, BotReturnChip } from '@/workbenches/bot/BotReturnChip';
 import { ThreadSwitcherDropdown } from '@/components/thread/ThreadSwitcherDropdown';
 import { isDesktopShell, startDesktopWindowDrag } from '@/lib/desktop';
@@ -195,6 +196,7 @@ export const Header: React.FC<HeaderProps> = ({
     return isDesktopShell();
   });
   const titlebarLeftInset = useTitlebarLeftInset();
+  const settingsOpen = useUIStore((state) => state.isSettingsDialogOpen);
 
   const isMacPlatform = React.useMemo(() => {
     if (typeof navigator === 'undefined') {
@@ -739,6 +741,7 @@ export const Header: React.FC<HeaderProps> = ({
       role="tablist"
       aria-label={t('header.navigation.mainAria')}
     >
+      {settingsOpen ? <SettingsTitlebar leftInset={titlebarLeftInset} /> : <>
       <TitlebarLeftControls attention={sidebarAttention ?? null} leftInset={titlebarLeftInset} />
       {navigationTitle === undefined ? <BotReturnChip /> : null}
       <div className="flex min-w-0 flex-1 self-stretch items-center">
@@ -909,6 +912,8 @@ export const Header: React.FC<HeaderProps> = ({
           <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
         </div>
       </div>
+      </>}
+      {settingsOpen ? <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" /> : null}
     </div>
   );
 

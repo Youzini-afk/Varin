@@ -1,24 +1,32 @@
 import React from 'react';
-import { getRuntimeApiBaseUrl, getRuntimeEndpointGeneration, getSettingsCatalogEntry, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { useI18n } from '@/lib/i18n';
-import { SettingsMixedScopeContext } from './settings-context';
+import { useServiceIdentity } from '@/lib/settings/service-identity';
+import { Scope } from './kit';
 
-/** Use only the URL host for display; a path, query or userinfo may contain secrets. */
+/** Where a page's settings are stored, shown under the page title; the hint explains who shares it. */
+export type SettingsScopeKind = 'device' | 'host' | 'hostProject' | 'mixed';
+
+export function SettingsScopeLabel({ kind, project }: { kind: SettingsScopeKind | 'project'; project?: string }) {
+  const { t } = useI18n();
+  const service = useServiceIdentity();
+  const name = service?.name ?? '…';
+  switch (kind) {
+    case 'device': return <Scope icon="computer" label={t('settings.scope.device')} hint={t('settings.scope.deviceHint')} />;
+    case 'mixed': return <Scope icon="stack" label={t('settings.scope.mixed')} hint={t('settings.scope.mixedHint')} />;
+    case 'project': return <Scope icon="folder" label={t('settings.scope.project', { name: project ?? '' })} hint={t('settings.scope.projectHint')} />;
+    case 'hostProject': return <Scope icon="server" label={t('settings.scope.service', { name })} hint={t('settings.scope.serviceProjectHint')} />;
+    default: return <Scope icon="server" label={t('settings.scope.service', { name })} hint={t('settings.scope.serviceHint')} />;
+  }
+}
+
+/** Kept for existing callers: the host scope label's text. */
 export function HostSettingsScope() {
   const { t } = useI18n();
-  React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
-  let authority = '';
-  try { authority = new URL(getRuntimeApiBaseUrl() || '/', window.location.href).host; } catch { /* Native scheme or offline startup. */ }
-  return <span title={t('settings.scope.hostGlobalHint')}>{t('settings.scope.host')}{authority ? ' · ' + authority : ''}</span>;
+  const service = useServiceIdentity();
+  return <span>{t('settings.scope.service', { name: service?.name ?? '…' })}</span>;
 }
 
-export function SettingsItemScope({ item }: {item?: string}) {
-  const mixed = React.useContext(SettingsMixedScopeContext);
-  return mixed && item ? <FieldOwner item={item} /> : null;
-}
-function FieldOwner({item}: {item: string}) {
-  const { t } = useI18n();
-  const owner = getSettingsCatalogEntry(item)?.owner;
-  const scope = owner === 'client' ? 'settings.scope.client' : owner === 'app' || owner === 'agent-settings' ? 'settings.scope.host' : undefined;
-  return scope ? <span className="settings-field-scope">{t(scope)}</span> : null;
+/** Field-level owner marks are replaced by the page scope and section notes. */
+export function SettingsItemScope(_: { item?: string }) {
+  return null;
 }

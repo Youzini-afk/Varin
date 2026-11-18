@@ -7,6 +7,7 @@ import type {
   SettingsPageMeta,
   SettingsPageSlug,
 } from './page-types';
+import { SETTINGS_SLUG_ALIASES } from './navigation';
 
 export type {
   SettingsPageGroup,
@@ -24,15 +25,21 @@ export function getSettingsPageMetadata(): SettingsPageMeta[] {
 export { subscribeSettingsPageRegistrations };
 
 export function getSettingsPageMeta(slug: string): SettingsPageMeta | null {
-  const normalized = slug.trim().toLowerCase();
-  return getSettingsPageMetadata().find((page) => page.slug === normalized) ?? null;
+  const requested = slug.trim().toLowerCase();
+  const pages = getSettingsPageMetadata();
+  return pages.find((page) => page.slug === requested)
+    ?? pages.find((page) => page.slug === SETTINGS_SLUG_ALIASES[requested])
+    ?? null;
 }
 
 export function resolveSettingsSlug(value: string | null | undefined): SettingsPageSlug {
-  const normalized = (value ?? '').trim().toLowerCase();
-  if (!normalized) return 'home';
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized)) return 'home';
+  const requested = (value ?? '').trim().toLowerCase();
+  if (!requested) return 'home';
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(requested)) return 'home';
   const registrations = getSettingsPageRegistrations();
+  const normalized = registrations.some((registration) => registration.meta.slug === requested)
+    ? requested
+    : SETTINGS_SLUG_ALIASES[requested] ?? requested;
   if (registrations.length === 0) return normalized;
   return registrations.some((registration) => registration.meta.slug === normalized) ? normalized : 'home';
 }

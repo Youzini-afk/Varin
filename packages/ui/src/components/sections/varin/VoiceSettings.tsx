@@ -21,7 +21,6 @@ import {
     SettingsChipGroup,
     SETTINGS_SELECT_SIZE,
     SETTINGS_SELECT_ROW_TRIGGER_CLASS,
-    SETTINGS_FIELD_LABEL_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
@@ -831,13 +830,6 @@ export const VoiceSettings: React.FC = () => {
                             />
                         </SettingsFieldRow>
 
-                        {sttProvider === 'local' && (
-                            <div className="space-y-1.5">
-                                <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.model')}</span>
-                                <LocalSttModelPicker selectedModelId={sttLocalModel} onSelect={persistSttLocalModel} language={sttLanguage} onLanguageChange={persistSttLanguage} />
-                            </div>
-                        )}
-
                         {sttProvider === 'openai-compatible' && <>
                             <VoiceTextField label={t('settings.voice.page.field.serverUrl')} info={t('settings.voice.page.field.sttServerUrlHint')}
                                 value={sttServerUrl} onChange={persistSttServerUrl} placeholder="http://localhost:8001/v1" />
@@ -865,6 +857,8 @@ export const VoiceSettings: React.FC = () => {
                     </>
                 )}
             </SettingsSection>
+            {dictationEnabled && sttProvider === 'local' && <LocalSttModelPicker selectedModelId={sttLocalModel} onSelect={persistSttLocalModel}
+                language={sttLanguage} onLanguageChange={persistSttLanguage} />}
         </>
     );
 };

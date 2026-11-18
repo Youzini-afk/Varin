@@ -27,7 +27,8 @@ import {
   SETTINGS_ICON_BUTTON_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 
-export const DesktopNetworkSettings: React.FC<{ section?: 'general' | 'access' | 'all' }> = ({ section = 'all' }) => {
+/** Desktop startup, LAN access and interface password, owned by the local desktop Host and shell. */
+export function useDesktopNetwork(section: 'general' | 'access' | 'all' = 'all') {
   const { t } = useI18n();
   const isLocalDesktop = isDesktopShell() && isDesktopLocalOriginActive();
   const isMacDesktop = isLocalDesktop
@@ -327,6 +328,27 @@ export const DesktopNetworkSettings: React.FC<{ section?: 'general' | 'access' |
     }
   }, [draftMacMenuBarEnabled, draftPassword, draftValue, isDirty, section, t]);
 
+  return {
+    isLocalDesktop, isMacDesktop, isLoading, isSaving, error, setError, isDirty, saveDisabled, lanUrl, passwordlessLanAccess,
+    savedValue, draftValue, setDraftValue, savedPassword, draftPassword, setDraftPassword, showPassword, setShowPassword,
+    launchAtLoginSupported, launchAtLoginEnabled, isSavingLaunchAtLogin, handleLaunchAtLoginToggle,
+    minimizeToTraySupported, minimizeToTrayEnabled, isSavingMinimizeToTray, handleMinimizeToTrayToggle,
+    keepAwakeSupported, keepAwakeEnabled, isSavingKeepAwake, handleKeepAwakeToggle,
+    savedMacMenuBarEnabled, draftMacMenuBarEnabled, setDraftMacMenuBarEnabled, handleSaveAndRestart,
+    discard: () => { setDraftValue(savedValue); setDraftPassword(savedPassword); setDraftMacMenuBarEnabled(savedMacMenuBarEnabled); setError(null); },
+  };
+}
+
+export const DesktopNetworkSettings: React.FC<{ section?: 'general' | 'access' | 'all' }> = ({ section = 'all' }) => {
+  const { t } = useI18n();
+  const {
+    isLocalDesktop, isMacDesktop, isLoading, isSaving, error, setError, isDirty, saveDisabled, lanUrl, passwordlessLanAccess,
+    savedValue, draftValue, setDraftValue, savedPassword, draftPassword, setDraftPassword, showPassword, setShowPassword,
+    launchAtLoginSupported, launchAtLoginEnabled, isSavingLaunchAtLogin, handleLaunchAtLoginToggle,
+    minimizeToTraySupported, minimizeToTrayEnabled, isSavingMinimizeToTray, handleMinimizeToTrayToggle,
+    keepAwakeSupported, keepAwakeEnabled, isSavingKeepAwake, handleKeepAwakeToggle,
+    savedMacMenuBarEnabled, draftMacMenuBarEnabled, setDraftMacMenuBarEnabled, handleSaveAndRestart,
+  } = useDesktopNetwork(section);
   if (!isLocalDesktop) {
     return null;
   }

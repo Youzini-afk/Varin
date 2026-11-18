@@ -15,7 +15,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { requestSettingsNavigation } from '@/lib/settings/drafts';
 
 /** A purpose binding, not another Agent profile or conversation loop. */
-export function DelegationModelSelectionSettings({ harness, update }: HarnessSettingsPageProps) {
+export function DelegationModelSelectionSettings({ harness, update, status }: HarnessSettingsPageProps & { status?: React.ReactNode }) {
   const { t } = useI18n();
   const catalog = useModelChannels();
   const selection = harness.delegationModelSelection;
@@ -26,12 +26,7 @@ export function DelegationModelSelectionSettings({ harness, update }: HarnessSet
   const selected = candidates.find(candidate => candidate.key === key);
   const levels = selected && !selected.model.operations.includes('decision') ? modelThinkingLevels(selected.model) : undefined;
   const label = t('settings.delegationModelSelection.model');
-  return <SettingsSection settingsItem="harness.delegationModelSelection" divider={false}>
-    <SettingsCheckboxRow checked={selection.enabled} disabled={!selection.enabled && !selected}
-      label={t('settings.delegationModelSelection.enabled')} ariaLabel={t('settings.delegationModelSelection.enabled')}
-      onChange={enabled => update({ delegationModelSelection: { enabled } })} />
-    {catalog.error ? <p role="alert" className="typography-meta text-destructive">{catalog.error}</p> : null}
-    <SettingsFieldRow label={label}>
+  const picker = (
       <Select value={key} onValueChange={value => {
         const candidate = candidates.find(entry => entry.key === value);
         if (value !== '__none' && !candidate) return;
@@ -50,11 +45,24 @@ export function DelegationModelSelectionSettings({ harness, update }: HarnessSet
           </SelectItem>)}
         </SelectContent>
       </Select>
+  );
+  const thinking = levels ? <ModelThinkingSelect value={selection.thinkingLevel} levels={levels} label={t('settings.delegationModelSelection.thinking')}
+    onChange={thinkingLevel => update({ delegationModelSelection: { thinkingLevel } })} className={status ? 'w-auto min-w-24' : undefined} /> : null;
+  if (status) return <SettingsFieldRow settingsItem="harness.delegationModelSelection" label={t('settings.delegationModelSelection.title')}
+    description={<>{t('settings.delegationModelSelection.description')}{status}</>}>
+    <div className="flex min-w-0 flex-wrap items-center gap-2">{picker}{thinking}</div>
+  </SettingsFieldRow>;
+  return <SettingsSection settingsItem="harness.delegationModelSelection" divider={false}>
+    <SettingsCheckboxRow checked={selection.enabled} disabled={!selection.enabled && !selected}
+      label={t('settings.delegationModelSelection.enabled')} ariaLabel={t('settings.delegationModelSelection.enabled')}
+      onChange={enabled => update({ delegationModelSelection: { enabled } })} />
+    {catalog.error ? <p role="alert" className="typography-meta text-destructive">{catalog.error}</p> : null}
+    <SettingsFieldRow label={label}>
+      {picker}
     </SettingsFieldRow>
     {!selected ? <p role="status" className="typography-meta text-muted-foreground">{t(selection.model ? 'settings.delegationModelSelection.unavailable' : 'settings.delegationModelSelection.chooseModel')}</p> : null}
-    {levels ? <SettingsFieldRow label={t('settings.delegationModelSelection.thinking')} description={t('settings.delegationModelSelection.thinkingHint')}>
-      <ModelThinkingSelect value={selection.thinkingLevel} levels={levels} label={t('settings.delegationModelSelection.thinking')}
-        onChange={thinkingLevel => update({ delegationModelSelection: { thinkingLevel } })} />
+    {thinking ? <SettingsFieldRow label={t('settings.delegationModelSelection.thinking')} description={t('settings.delegationModelSelection.thinkingHint')}>
+      {thinking}
     </SettingsFieldRow> : null}
     <div className="mt-7 border-t border-border/60 pt-5">
       <h3 className="typography-ui-label">{t('settings.delegationModelSelection.candidates')}</h3>

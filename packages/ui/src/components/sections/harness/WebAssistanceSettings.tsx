@@ -6,8 +6,9 @@ import { useConfigurationModels } from './ConfigurationModels';
 import { HarnessModelField } from './HarnessModelField';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 
-export function AssistanceModel({ harness, update, purpose, slot }: HarnessSettingsPageProps & {
+export function AssistanceModel({ harness, update, purpose, slot, status, item }: HarnessSettingsPageProps & {
   purpose: 'web-selection' | 'web-reading'; slot: 'webSelection' | 'reader';
+  status?: React.ReactNode; item?: string;
 }) {
   const { t } = useI18n();
   const catalog = useConfigurationModels();
@@ -20,8 +21,8 @@ export function AssistanceModel({ harness, update, purpose, slot }: HarnessSetti
   const unavailable = explicit && explicit !== 'off'
     && !catalog.modelsFor(explicit.providerId, 'decision').some(model => model.id === explicit.modelId);
   const label = t(purpose === 'web-selection' ? 'settings.page.harness.web.assistance.selection' : 'settings.page.harness.web.assistance.reading');
-  return <div className="space-y-3">
-    <SettingsFieldRow label={label} description={t('settings.page.harness.web.assistance.model.description')}>
+  return <>
+    <SettingsFieldRow settingsItem={item} label={label} description={<>{t('settings.page.harness.web.assistance.model.description')}{status}</>}>
       <Select value={selected} onValueChange={value => {
         if (value === 'chat') update({ models: { [slot]: { enabled: true } }, fastDecision: { purposes: { [purpose]: 'off' } } });
         else if (value === 'default') update({ models: { [slot]: { enabled: false } }, fastDecision: { purposes: { [purpose]: undefined } } });
@@ -46,7 +47,7 @@ export function AssistanceModel({ harness, update, purpose, slot }: HarnessSetti
       : decision.status !== 'ready' ? <p className="typography-meta text-muted-foreground">{t('settings.page.harness.web.assistance.unconfigured')}</p> : null}
     {unavailable ? <p role="alert" className="typography-meta text-muted-foreground">{t('settings.delegationModelSelection.unavailable')}</p> : null}
     {catalog.error ? <p role="alert" className="typography-meta text-destructive">{catalog.error}</p> : null}
-  </div>;
+  </>;
 }
 
 /** The switch changes optional assistance only, never basic source retrieval or original text. */

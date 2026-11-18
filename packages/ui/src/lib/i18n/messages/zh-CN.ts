@@ -1,3 +1,4 @@
+import { settingsRedesignZh } from '@varin/application-client/settings-locales/settings-redesign';
 import { browserResourcesZhCN } from './browser-resources';
 import { conversationOrganizationZhCN } from './conversation-organization';
 import { companionAttentionZh } from './companion-attention';
@@ -4787,4 +4788,5 @@ export const dict: Record<I18nKey, string> = {
   "chat.context.userSource": "用户消息",
   'chat.model.useImagesAsFiles': "将图片作为可读取文件",
   'chat.model.imagesAsFilesNotice': "此模型无法查看图片。图片将作为文件附件提供，不作为直接视觉输入。",
+  ...settingsRedesignZh,
 };

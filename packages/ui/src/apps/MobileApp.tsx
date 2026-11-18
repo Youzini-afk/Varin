@@ -87,12 +87,12 @@ import { useEdgeSwipeSessionChat } from './useEdgeSwipeSessionSwitch';
 import { useNativePushRegistration } from './useNativePushRegistration';
 
 const MOBILE_SETTINGS_PAGES = [
-  'general', 'appearance', 'chat', 'sessions', 'notifications', 'voice', 'storage', 'history',
+  'general', 'appearance', 'chat', 'notifications', 'voice', 'storage', 'history',
   'model-connections', 'model-roles', 'usage', 'agents', 'harness-bots', 'agent-prompt', 'agent-memory',
-  'harness-tools', 'harness-web', 'images', 'harness-computers', 'harness-permissions', 'harness-context',
-  'projects', 'editor', 'terminal', 'git', 'harness-retrieval', 'harness-embeddings', 'language-support',
-  'work-connections', 'remote-instances', 'network', 'access', 'tunnel', 'mcp-connections',
-  'skills', 'commands', 'extensions', 'about',
+  'harness-tools', 'harness-web', 'harness-computers', 'harness-permissions', 'harness-context',
+  'projects', 'editor', 'terminal', 'git', 'code-intel',
+  'devices', 'remote-access', 'proxy', 'workspaces', 'browsers', 'mcp-connections',
+  'skills', 'extensions', 'about',
 ] as const;
 
 type MobileAppProps = {

@@ -36,12 +36,12 @@ it('preserves a failed request-settings draft and saves against the last acknowl
     expect(button).toBeTruthy(); button!.click();
   });
   await type('4');
-  await click('settings.common.actions.saveChanges');
+  await click('settings.kit.save');
   expect(fixture.save).toHaveBeenCalledWith({ concurrentRequests: 4, requestIntervalMs: 0, localCpuMode: 'auto', localCpuThreads: null }, 'original');
   expect(input.value).toBe('4'); expect(container.textContent).toContain('changed elsewhere');
-  await click('settings.common.actions.cancel'); expect(input.value).toBe('1');
+  await click('settings.kit.discard'); expect(input.value).toBe('1');
   fixture.save.mockResolvedValue({ config: { ...config, concurrentRequests: 2 }, activeConfig: config, revision: 'saved', restartRequired: true });
-  await type('2'); await click('settings.common.actions.saveChanges');
+  await type('2'); await click('settings.kit.save');
   expect(container.textContent).toContain('settings.page.harness.embeddings.requests.restartRequired');
   expect(container.textContent).not.toContain('assistant.unsaved');
 });

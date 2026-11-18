@@ -348,8 +348,10 @@ const createPresetId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 };
 
-export const TunnelSettings: React.FC = () => {
+export const TunnelSettings: React.FC<{ only?: 'provider' | 'self-hosted' }> = ({ only }) => {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
+  if (only === 'provider') return <LegacyTunnelSettings key={host} />;
+  if (only === 'self-hosted') return <ExternalAccessSettings key={host} />;
   return <TunnelSettingsPanel key={host} />;
 };
 

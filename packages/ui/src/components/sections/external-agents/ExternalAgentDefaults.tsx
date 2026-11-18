@@ -141,7 +141,7 @@ export function ExternalAgentDefault() {
   const [error, setError] = React.useState("");
   return (
     <>
-      <SettingsFieldRow label={t("external.default")}>
+      <SettingsFieldRow label={t("external.default")} settingsItem="sessions.default-agent">
         <Select
           value={settings?.defaultAgent ?? "varin"}
           disabled={!settings}

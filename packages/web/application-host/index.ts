@@ -256,6 +256,7 @@ import { createEnvironmentForwardJobRuntime, ENVIRONMENT_FORWARD_CAPABILITY } fr
 
 import { HostSshManager } from './lib/connections/ssh-manager.js';
 import { registerConnectionRoutes } from './lib/connections/connection-routes.js';
+import { createDeviceRegistry, registerDeviceRoutes } from './lib/devices/device-registry.js';
 import { attachConnectionProxy } from './lib/connections/host-proxy.js';
 import { configuredVmProviders } from './lib/computer/vm-provider.js';
 import { registerComputerRoutes } from './lib/computer/computer-routes.js';
@@ -2907,6 +2908,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     originAllowed: isRequestOriginAllowed,
   });
   registerConnectionRoutes(app, connections, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
+  registerDeviceRoutes(app, createDeviceRegistry(VARIN_DATA_DIR), uiAuthController?.requireAuth ?? ((_request, _response, next) => next()));
   const connectionProxy = attachConnectionProxy({
     isDraining: () => isShuttingDown,
     app, server, settings: connections.settingsStore,

@@ -2,7 +2,7 @@ import React from 'react';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { RetrySettings } from './RetrySettings';
 import { ExternalAgentDefault } from '@/components/sections/external-agents/ExternalAgentsPage';
-import { toast } from '@/components/ui';
+import { flashSettingsSaved } from '../shared/kit';
 import { SettingsPageLink } from '@/components/sections/shared/SettingsPageLink';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, modelThinkingLevels, type AgentSettingsSnapshot } from '@varin/application-client';
@@ -47,7 +47,7 @@ export const DefaultsSettings: React.FC<{ modelsOnly?: boolean }> = ({ modelsOnl
     const owner = host; const saveScope = scopeKey; setSaving(true); setError(undefined);
     try {
       const next = await api.updateSettings({ scope: 'global', set, remove, expectedRevision: snapshot.globalRevision });
-      if (owner === getRuntimeEndpointGeneration() && saveScope === currentScope.current) { setSnapshot(next); toast.success(t('settings.defaults.saved')); return true; }
+      if (owner === getRuntimeEndpointGeneration() && saveScope === currentScope.current) { setSnapshot(next); flashSettingsSaved(); return true; }
       return false;
     } catch (failure) { if (owner === getRuntimeEndpointGeneration() && saveScope === currentScope.current) setError(failure instanceof Error ? failure.message : String(failure)); return false; }
     finally { if (owner === getRuntimeEndpointGeneration() && saveScope === currentScope.current) setSaving(false); }
@@ -62,25 +62,29 @@ export const DefaultsSettings: React.FC<{ modelsOnly?: boolean }> = ({ modelsOnl
   const defaultThinking = string(settings.defaultThinkingLevel) as ThinkingLevel;
   const utilityDefault = !utility.modelId && utilityLevels?.includes(defaultThinking) ? defaultThinking : utilityLevels?.[0];
   return <>
-  <SettingsSection title={t('settings.varin.defaults.title')} description={t('settings.defaults.globalHint')} divider={false} contentClassName="divide-y divide-border/50">
-    {!modelsOnly && <ExternalAgentDefault />}
+  <SettingsSection title={t(modelsOnly ? 'settings.roles.conversation' : 'settings.varin.defaults.title')}
+    description={t(modelsOnly ? 'settings.defaults.projectLinkHint' : 'settings.defaults.globalHint')}>
+    <ExternalAgentDefault />
     {!snapshot && !error && <p role="status" className="py-3 typography-meta text-muted-foreground">{t('settings.defaults.loading')}</p>}
     {error && <p role="alert" className="text-destructive text-sm">{error} <Button variant="ghost" onClick={() => void reload()}>{t('assistant.reload')}</Button></p>}
-    <SettingsFieldRow settingsItem="roles.default" label={t('settings.varin.agents.detail.model')}><ModelSelector providerId={string(settings.defaultProvider)} modelId={string(settings.defaultModel)} disabled={!snapshot || saving}
-      onChange={async (providerId, modelId) => { await save(providerId && modelId ? { defaultProvider: providerId, defaultModel: modelId } : {}, [...(providerId && modelId ? ['defaultThinkingLevel'] : ['defaultProvider', 'defaultModel', 'defaultThinkingLevel']), ...(!utility.modelId ? ['utilityThinkingLevel'] : [])]); }} /></SettingsFieldRow>
-    <SettingsFieldRow label={t('settings.varin.agents.detail.thinking')}><Select value={string(settings.defaultThinkingLevel) || 'inherit'} disabled={!snapshot || saving} onValueChange={value => void save(value !== 'inherit' ? { defaultThinkingLevel: value } : {}, value !== 'inherit' ? [] : ['defaultThinkingLevel'])}>
-      <SelectTrigger className="w-48"><SelectValue /></SelectTrigger><SelectContent>
+    <SettingsFieldRow settingsItem="sessions.default-model" label={t('settings.roles.defaultModel')}>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <ModelSelector providerId={string(settings.defaultProvider)} modelId={string(settings.defaultModel)} disabled={!snapshot || saving}
+        onChange={async (providerId, modelId) => { await save(providerId && modelId ? { defaultProvider: providerId, defaultModel: modelId } : {}, [...(providerId && modelId ? ['defaultThinkingLevel'] : ['defaultProvider', 'defaultModel', 'defaultThinkingLevel']), ...(!utility.modelId ? ['utilityThinkingLevel'] : [])]); }} />
+      <Select value={string(settings.defaultThinkingLevel) || 'inherit'} disabled={!snapshot || saving} onValueChange={value => void save(value !== 'inherit' ? { defaultThinkingLevel: value } : {}, value !== 'inherit' ? [] : ['defaultThinkingLevel'])}>
+      <SelectTrigger data-settings-item="sessions.default-thinking" aria-label={t('settings.varin.agents.detail.thinking')} size="settings" className="w-auto min-w-24"><SelectValue /></SelectTrigger><SelectContent>
         <SelectItem value="inherit">{t('chat.modelControls.default')}</SelectItem>{thinkingLevels.map(level => <SelectItem key={level} value={level}>{t(`settings.agents.thinking.${level}`)}</SelectItem>)}
       </SelectContent>
-    </Select></SettingsFieldRow>
-    <SettingsFieldRow label={t('thread.settings.utilityModel')} info={t('settings.varin.defaults.utilityModel.description')} settingsItem="sessions.small-model">
-      <ModelSelector {...model(settings.utilityModel)} disabled={!snapshot || saving} placeholder={t('settings.bots.model.inherit')}
+    </Select></div></SettingsFieldRow>
+    <SettingsFieldRow label={t('thread.settings.utilityModel')} description={t('settings.varin.defaults.utilityModel.description')} settingsItem="sessions.small-model">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <ModelSelector {...model(settings.utilityModel)} allowNone disabled={!snapshot || saving} placeholder={t('settings.bots.model.inherit')}
         onChange={async (providerId, modelId) => { await save(providerId && modelId ? { utilityModel: { providerId, modelId } } : {}, providerId && modelId ? ['utilityThinkingLevel'] : ['utilityModel', 'utilityThinkingLevel']); }} />
-    </SettingsFieldRow>
-    <SettingsFieldRow label={t('settings.varin.agents.detail.thinking')}>
       <ModelThinkingSelect value={string(settings.utilityThinkingLevel)} levels={utilityLevels} defaultLevel={utilityDefault}
         disabled={!snapshot || saving} label={`${t('thread.settings.utilityModel')} · ${t('settings.varin.agents.detail.thinking')}`}
+        className="w-auto min-w-24"
         onChange={value => void save(value ? { utilityThinkingLevel: value } : {}, value ? [] : ['utilityThinkingLevel'])} />
+      </div>
     </SettingsFieldRow>
     <SettingsFieldRow label={t('settings.titleUpdates.label')} info={t('settings.titleUpdates.description')} settingsItem="sessions.title-updates">
       <div className="flex items-center gap-2">
