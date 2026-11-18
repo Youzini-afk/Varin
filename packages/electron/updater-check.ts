@@ -32,7 +32,7 @@ export function matchesDesktopUpdate(info: DesktopUpdateInfo, target: DesktopUpd
     || !['x64', 'arm64'].includes(arch) || !Array.isArray(info.files) || !info.files.length || info.packages != null) return false;
   const files = info.files.map(file => file?.url);
   const prefix = `Varin-${role === 'light' ? 'Light-' : ''}${info.version}-`;
-  if (role === 'light' && platform !== 'linux') return false;
+  if (role === 'light' && platform === 'darwin') return false;
   if (platform === 'darwin') {
     // The existing full Mac channel merges Intel and Apple Silicon files. Require
     // a ZIP for this CPU and allow only the corresponding release's mac assets.

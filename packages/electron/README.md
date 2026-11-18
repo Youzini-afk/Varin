@@ -181,13 +181,20 @@ packages and duplicate Web payload. Frontend assets live only in `resources/web-
 only in `resources/kernel`. Production `@varin/web` contains its compiled `server` and package/license
 metadata, excluding `public`, source and private Host development generations at collection time.
 
-### Linux light desktop (local assembly)
+### Light desktop release
 
-Use `bun run --cwd packages/electron package --role=light --linux --publish=never` on a native
-Linux x64 or ARM64 builder. Omitting `--role` keeps the existing full product, output paths
-and update feeds on every platform. The light product stages the same renderer and shell in
-`artifacts/build/desktop-light-linux-<arch>/`; its output under `dist/` is named
-`Varin-Light-<version>-linux-<x86_64|arm64>.AppImage`. No public light release is implied.
+The existing **Release Build** assembles full and light packages from the same accepted source
+and shared frontend. It uses native Windows and Linux x64/ARM64 runners, macOS Apple Silicon,
+and (when selected) macOS Intel for both roles. Only the full Linux x64 package consumes the
+VM guest. Older tags that do not declare light packaging keep their original full-only matrix.
+
+Light assets are named `Varin-Light-<version>-win-<arch>.exe`,
+`Varin-Light-<version>-linux-<x86_64|arm64>.AppImage` and
+`Varin-Light-<version>-mac-<arch>.{dmg,zip}`. The full product's name, app ID, output, update
+feeds and profile stay unchanged. The native builder uses `--role=light` explicitly; omitting
+it builds full. A light product's staging and output are under
+`artifacts/build/desktop-light-<platform>-<arch>/`. CI refuses an incomplete or mislabelled
+set of role/architecture receipts. A new build definition does not imply assets have been published.
 
 The role is compiled into the main shell, and `package.json` records the role, platform and architecture.
 No embedded Host, Rust kernel, ripgrep, VM guest, Puppeteer or native resource drivers are installed.
@@ -201,22 +208,23 @@ the full Host's `VARIN_DATA_DIR`. SSH used by the Agent to reach resources belon
 an SSH forward on the client itself is not provided. Closing the shell does not stop a separately
 running Agent or node.
 
-The light AppImage uses the `light-linux.yml` or `light-linux-arm64.yml` channel and a separate
-updater cache. Before enabling download, the Linux shell checks the sole AppImage against the
-installed role, architecture and candidate version. Missing light manifests mean no update,
-not a fallback to `latest-linux.yml`. On supported builders, run
-`node packages/electron/scripts/smoke-desktop-unpacked.mjs --role=light /path/to/linux-unpacked/varin-light`
-with a display. This checks the rendered chooser using a fresh XDG profile with no reachable Host,
-including Chromium profile isolation and lack of Host data writes. The loopback updater fixture
-also accepts `--role light`.
+Windows Light uses `light.yml` (x64) or `light-arm64.yml`; Linux Light uses
+`light-linux.yml` or `light-linux-arm64.yml`. These are separate updater caches and asset
+names, never full fallback channels. Before offering a download the shell checks the actual
+installer's role, platform, version and CPU. Windows Light uses the normal NSIS packaging and
+publisher-signing settings without the full installer's optional WinFsp/Host setup. macOS Light
+follows the same unsigned release policy as full: install the matching DMG manually. No
+macOS Light automatic update feed is published or accepted. Existing full Mac channels are unchanged.
 
-This is an additional product, not an in-place full-to-light migration. The full executable,
-autostart entry, sessions, credentials and running work are not replaced. To undo a trial, quit
-the light app, turn off its own launch-at-login setting if enabled, and remove its AppImage;
-resume the full app using its original profile. Removing the AppImage does not erase the light
-profile. For a light-version rollback, select an earlier verified light AppImage of the same
-architecture manually; automatic updates do not downgrade. An independent resource-node image
-and its data ownership are separate work, not included in this desktop package.
+Release jobs launch the packaged Light chooser with no local Host, check that Chromium userData
+and sessionData belong to Light, and reject writes to the Host data directory. The Linux updater
+fixture also accepts `--role light`. Native install, OS trust prompts and N-to-N+1 update/restart
+still need tests on the target OS; an ASAR or manifest check is not a substitute.
+
+Light is an additional product, not an in-place full-to-light migration. To undo a trial, quit
+Light, disable its own launch-at-login setting if enabled, and uninstall only Light. Keep the full
+installation and original profile. For a rollback, choose a verified older Light artifact for the
+same CPU manually. Running independent Agent services or nodes is unaffected by closing the client.
 
 ### Optional desktop companions
 
@@ -478,7 +486,7 @@ publishes it after the complete verified asset set has uploaded. Both options de
 The workflow accepts the tag's exact source SHA and Android counter once, retaining that candidate in
 an artifact. Browser assets build once; the Linux x64 kernel is shared with native acceptance, VM guest
 and Linux x64 packaging. Source checks, native acceptance, platform packaging, optional inference
-components and Android run along their actual dependencies in parallel. Only Linux x64 packaging waits
+components and Android run along their actual dependencies in parallel. Only full Linux x64 packaging waits
 for the VM guest. The manual Windows workflow calls the same packaging workflow and product builder.
 
 Use GitHub's **Re-run failed jobs** to resume a candidate: completed product artifacts remain usable,
@@ -488,7 +496,7 @@ and `SHA256SUMS`. Both upload and publication recheck the tag. If the tag has mo
 verified artifacts remain available but are not attached to the changed release. Start a new workflow
 run for the new source instead of mixing products from different commits.
 
-All platforms share one startup smoke: launch the unpacked packaged application with clean temporary
+On all platforms the full role shares one startup smoke: launch the unpacked packaged application with clean temporary
 data configured to use the local Host, wait for its main workspace and renderer readiness, then check
 the embedded Host and native kernel through `/health`. The Windows entry only supplies its default executable path. Feature
 verification for terminals, recovery, language services, semantic components and editors stays with

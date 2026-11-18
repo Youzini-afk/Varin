@@ -290,7 +290,7 @@ jobs:
           overwrite: true
 
   package:
-    name: Desktop packages
+    name: Desktop packages (full and light when provided by source)
     needs: [prepare, frontend]
     uses: ./.github/workflows/desktop-package.yml
     with:
@@ -300,7 +300,7 @@ jobs:
       matrix: ${{ needs.prepare.outputs.matrix }}
 
   linux-x64:
-    name: Linux x64 package
+    name: Full Linux x64 package with VM guest
     needs: [prepare, frontend, native-build, vm-guest]
     uses: ./.github/workflows/desktop-package.yml
     with:
@@ -481,30 +481,12 @@ jobs:
             node .release-automation/packages/electron/scripts/finalize-latest-yml.mjs
 
           find artifacts -type f -name 'Varin-*' -exec cp {} release-assets/ \;
-          find artifacts -type f \( -name 'latest-linux.yml' -o -name 'latest-linux-arm64.yml' \) \
+          find artifacts -type f \( -name 'light*.yml' -o -name 'latest-linux.yml' -o -name 'latest-linux-arm64.yml' \) \
             -exec cp {} release-assets/ \;
           cp finalized/latest.yml finalized/latest-arm64.yml finalized/latest-mac.yml release-assets/
 
-          required_assets=(
-            "Varin-${version}-win-x64.exe" \
-            "Varin-${version}-win-arm64.exe" \
-            "Varin-${version}-linux-x86_64.AppImage" \
-            "Varin-${version}-linux-arm64.AppImage" \
-            "Varin-${version}-mac-arm64.dmg" \
-            "Varin-${version}-mac-arm64.zip" \
-            "Varin-${version}-android.apk" \
-            "Varin-${version}-android.apk.sha256" \
-            latest.yml latest-arm64.yml latest-linux.yml latest-linux-arm64.yml latest-mac.yml
-          )
-          if [ "${{ inputs.include_macos_intel }}" = "true" ]; then
-            required_assets+=(
-              "Varin-${version}-mac-x64.dmg"
-              "Varin-${version}-mac-x64.zip"
-            )
-          fi
-          for required in "${required_assets[@]}"; do
-            test -f "release-assets/$required" || { echo "Missing release asset: $required" >&2; exit 1; }
-          done
+          # finalize verifies every desktop role/OS/CPU inventory from the candidate.
+          test -f "release-assets/Varin-${version}-android.apk"
           (cd release-assets && sha256sum --check "Varin-${version}-android.apk.sha256")
           find release-assets -maxdepth 1 -type f -printf '%f\n' | sort
 

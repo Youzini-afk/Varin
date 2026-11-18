@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { resolveTargetArchitecture } from './target-architecture.mjs';
+import { nativeBuilderArguments, resolveTargetArchitecture } from './target-architecture.mjs';
 import { prepareRipgrep } from '../../../scripts/prepare-ripgrep.mjs';
 import { parseRoleArgument, assertDesktopTarget, desktopBuilderConfiguration } from './desktop-distribution.mjs';
 import { prepareDesktopProduct } from './build-desktop.mjs';
@@ -78,12 +78,6 @@ const configurationPath = path.join(path.dirname(prepared.directory), 'electron-
 await fs.promises.writeFile(configurationPath, `module.exports = ${JSON.stringify(configuration, null, 2)};\n`);
 builderArgs.unshift(`--config=${configurationPath}`);
 
-if (targetPlatform === 'linux' && !builderArgs.some((argument) => (
-  argument === '--x64' || argument === '--arm64' || argument === '--arch' || argument.startsWith('--arch=')
-))) {
-  builderArgs.push(`--${targetArchitecture.electronBuilder}`);
-}
-
 if (process.platform === 'darwin') {
   const compiledIconAssets = path.join(electronDir, 'resources', 'icons', 'Assets.car');
   if (fs.existsSync(compiledIconAssets) && fs.statSync(compiledIconAssets).size > 0) {
@@ -97,7 +91,7 @@ if (process.platform === 'darwin') {
   }
 }
 
-const child = spawn(bunBinary, ['x', 'electron-builder', ...builderArgs], {
+const child = spawn(bunBinary, ['x', 'electron-builder', ...nativeBuilderArguments(builderArgs, targetArchitecture)], {
   cwd: electronDir,
   env,
   stdio: 'inherit',

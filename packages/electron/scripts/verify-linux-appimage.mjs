@@ -67,16 +67,24 @@ const collectFiles = (root, predicate) => {
 export const verifyExtractedPayload = ({
   root,
   targetArchitecture,
+  role = 'full',
 }) => {
-  const desktopPath = path.join(root, 'varin.desktop');
+  if (!['light', 'full'].includes(role)) throw new Error('Unsupported desktop role');
+  const executable = role === 'light' ? 'varin-light' : 'varin';
+  const name = role === 'light' ? 'Varin Light' : 'Varin';
+  const desktopPath = path.join(root, executable + '.desktop');
   if (!fs.existsSync(desktopPath)) throw new Error(`Missing desktop entry: ${desktopPath}`);
   const desktop = fs.readFileSync(desktopPath, 'utf8');
-  for (const entry of ['Name=Varin', 'Icon=varin', 'StartupWMClass=varin']) {
+  for (const entry of [`Name=${name}`, `Icon=${executable}`, `StartupWMClass=${executable}`]) {
     if (!desktop.split(/\r?\n/).includes(entry)) throw new Error(`Desktop identity mismatch: missing ${entry}`);
   }
   if (!/^Exec=AppRun(?:\s|$)/m.test(desktop)) throw new Error('Desktop identity mismatch: expected AppImage AppRun entrypoint');
 
-  assertElfArchitecture(path.join(root, 'varin'), targetArchitecture, 'Electron executable');
+  assertElfArchitecture(path.join(root, executable), targetArchitecture, 'Electron executable');
+  if (role === 'light') {
+    if (fs.existsSync(path.join(root, 'resources/kernel'))) throw new Error('Light AppImage contains a local kernel');
+    return { nativeModuleCount: 0 };
+  }
 
   const unpackedModules = path.join(root, 'resources', 'app.asar.unpacked', 'node_modules');
   if (!fs.existsSync(unpackedModules)) throw new Error(`Missing unpacked native modules: ${unpackedModules}`);

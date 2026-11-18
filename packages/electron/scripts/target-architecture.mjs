@@ -31,8 +31,8 @@ export const readElectronBuilderArchitecture = (args = []) => {
   const requested = [];
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
-    if (argument === '--x64' || argument === '--arm64') requested.push(argument.slice(2));
-    if (argument === '--arch' && args[index + 1]) requested.push(args[index + 1]);
+    if (['--x64', '--arm64', '--ia32', '--armv7l', '--universal'].includes(argument)) requested.push(argument.slice(2));
+    if (argument === '--arch') requested.push(args[++index]);
     if (argument.startsWith('--arch=')) requested.push(argument.slice('--arch='.length));
   }
   if (requested.length === 0) return null;
@@ -43,6 +43,17 @@ export const readElectronBuilderArchitecture = (args = []) => {
   }
   return [...architectures][0];
 };
+
+// electron-builder's CLI accepts --x64 and --arm64. Normalize our --arch
+// option and env-only requests too, so its default cannot silently choose the host CPU.
+export function nativeBuilderArguments(args, architecture) {
+  const rest = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--arch') { i++; continue; }
+    if (!['--x64', '--arm64'].includes(args[i]) && !args[i].startsWith('--arch=')) rest.push(args[i]);
+  }
+  return [...rest, '--' + architecture.electronBuilder];
+}
 
 export const resolveTargetArchitecture = ({
   platform = process.platform,

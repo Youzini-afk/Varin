@@ -23,7 +23,10 @@ export const parseUpdateManifest = (content) => {
   if (entry) files.push(entry);
   return {
     version,
-    files: files.filter((file) => file.url && file.sha512 && Number.isSafeInteger(file.size)),
+    files,
+    releaseDate: content.match(/^releaseDate:\s*(.+?)\s*$/m)?.[1]?.replace(/^'|'$/g, '') ?? '',
+    path: content.match(/^path:\s*(\S+)\s*$/m)?.[1],
+    packages: /^packages:/m.test(content),
   };
 };
 
@@ -33,11 +36,11 @@ export const verifyUpdateManifest = ({ manifestPath, artifactPath, expectedVersi
   if (manifest.version !== expectedVersion) {
     throw new Error(`Update manifest version mismatch: expected ${expectedVersion}, got ${manifest.version || '(missing)'}`);
   }
-  if (manifest.files.length !== 1) {
-    throw new Error(`Linux update manifest must contain exactly one artifact, got ${manifest.files.length}`);
+  if (manifest.packages || manifest.files.length !== 1) {
+    throw new Error(`Desktop update manifest must contain exactly one standalone artifact, got ${manifest.files.length}`);
   }
   const [entry] = manifest.files;
-  if (decodeURIComponent(path.basename(entry.url)) !== expectedName) {
+  if (entry.url !== expectedName || (manifest.path !== undefined && manifest.path !== expectedName)) {
     throw new Error(`Update manifest artifact mismatch: expected ${expectedName}, got ${entry.url}`);
   }
   const bytes = fs.readFileSync(artifactPath);

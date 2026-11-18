@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
 import {
+  nativeBuilderArguments,
   normalizeTargetArchitecture,
   readElectronBuilderArchitecture,
   resolveTargetArchitecture,
@@ -29,6 +30,16 @@ test('normalizes host and release architecture aliases', () => {
 test('reads a single electron-builder target architecture', () => {
   assert.equal(readElectronBuilderArchitecture(['--linux', '--arch=aarch64']), 'arm64');
   assert.equal(readElectronBuilderArchitecture(['--linux', '--x64']), 'x64');
+});
+
+test('passes exactly one actual CPU to the native builder even for env-only and --arch alias input', () => {
+  for (const args of [['--win'], ['--win', '--arch', 'aarch64'], ['--win', '--arch=arm64'], ['--win', '--arm64']]) {
+    const target = resolveTargetArchitecture({ platform: 'win32', hostArchitecture: 'x64', environment: { VARIN_TARGET_ARCH: 'arm64' }, builderArgs: args });
+    assert.deepEqual(nativeBuilderArguments(args, target), ['--win', '--arm64']);
+  }
+  for (const unsupported of ['--universal', '--ia32', '--armv7l', '--arch']) {
+    assert.throws(() => readElectronBuilderArchitecture([unsupported]), /Supported architectures/);
+  }
 });
 
 test('rejects unsupported architectures', () => {

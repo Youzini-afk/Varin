@@ -4,16 +4,21 @@ import path from 'node:path';
 export const assertUpdaterCapability = ({
   platform = process.platform,
   packaged,
+  role = 'full',
   appImagePath = process.env.APPIMAGE,
   access = fs.accessSync,
   stat = ((p: string) => fs.statSync(p)) as (path: string) => { isFile(): boolean },
 }: {
   access?: typeof fs.accessSync;
   appImagePath?: string | undefined;
+  role?: 'full' | 'light';
   packaged?: boolean | undefined;
   platform?: NodeJS.Platform | undefined;
   stat?: (path: string) => { isFile(): boolean };
 } = {}): void => {
+  if (packaged && role === 'light' && platform === 'darwin') {
+    throw new Error('This macOS Light release requires a manual update. Install the matching Varin Light DMG from the release page.');
+  }
   if (platform !== 'linux' || !packaged) return;
 
   if (!appImagePath) {

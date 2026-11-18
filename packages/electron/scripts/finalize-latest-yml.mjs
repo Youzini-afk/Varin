@@ -2,6 +2,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { parseUpdateManifest } from './verify-update-manifest.mjs';
 
 const dir = process.env.LATEST_YML_DIR;
 const repo = process.env.GH_REPO;
@@ -10,45 +11,6 @@ const version = process.env.VARIN_VERSION;
 if (!dir) throw new Error('LATEST_YML_DIR is required');
 if (!repo) throw new Error('GH_REPO is required');
 if (!version) throw new Error('VARIN_VERSION is required');
-
-const parse = (content) => {
-  const lines = content.split('\n');
-  let releaseDate = '';
-  let parsedVersion = '';
-  const files = [];
-  let current;
-
-  const flush = () => {
-    if (current?.url && current?.sha512 && current?.size) {
-      files.push(current);
-    }
-    current = undefined;
-  };
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    const indented = line.startsWith('    ') || line.startsWith('  -');
-    if (line.startsWith('version:')) {
-      parsedVersion = line.slice('version:'.length).trim();
-    } else if (line.startsWith('releaseDate:')) {
-      releaseDate = line.slice('releaseDate:'.length).trim().replace(/^'|'$/g, '');
-    } else if (trimmed.startsWith('- url:')) {
-      flush();
-      current = { url: trimmed.slice('- url:'.length).trim() };
-    } else if (indented && current && trimmed.startsWith('sha512:')) {
-      current.sha512 = trimmed.slice('sha512:'.length).trim();
-    } else if (indented && current && trimmed.startsWith('size:')) {
-      current.size = Number(trimmed.slice('size:'.length).trim());
-    } else if (indented && current && trimmed.startsWith('blockMapSize:')) {
-      current.blockMapSize = Number(trimmed.slice('blockMapSize:'.length).trim());
-    } else if (!indented && current) {
-      flush();
-    }
-  }
-
-  flush();
-  return { version: parsedVersion, releaseDate, files };
-};
 
 const serialize = (data) => {
   const lines = [`version: ${data.version}`, 'files:'];
@@ -64,7 +26,7 @@ const serialize = (data) => {
   return `${lines.join('\n')}\n`;
 };
 
-const read = async (subdir, filename) => {
+const read = async (subdir, filename, platform, arch) => {
   const artifactDirectory = path.join(dir, subdir);
   const filePath = path.join(artifactDirectory, filename);
   let content;
@@ -75,17 +37,22 @@ const read = async (subdir, filename) => {
     throw error;
   }
 
-  const manifest = parse(content);
+  const manifest = parseUpdateManifest(content);
   if (manifest.version !== version) {
     throw new Error(`${subdir}/${filename} targets ${manifest.version || '(missing version)'}, expected ${version}`);
   }
   if (manifest.files.length === 0) {
     throw new Error(`${subdir}/${filename} does not contain a downloadable file`);
   }
+  const stem = `Varin-${version}-${platform}-${arch}.`;
+  const allowed = platform === 'win' ? [stem + 'exe'] : [stem + 'zip', stem + 'dmg'];
+  const names = manifest.files.map(entry => entry.url);
+  if (!names.includes(allowed[0]) || names.length !== new Set(names).size || names.some(name => !allowed.includes(name))
+    || manifest.packages || (manifest.path !== undefined && !names.includes(manifest.path))) {
+    throw new Error(`${subdir}/${filename} references an artifact outside its desktop role or CPU`);
+  }
   for (const entry of manifest.files) {
-    const parsedUrl = entry.url.includes('://') ? new URL(entry.url).pathname : entry.url;
-    const artifactName = path.posix.basename(decodeURIComponent(parsedUrl.replaceAll('\\', '/')));
-    if (!artifactName) throw new Error(`${subdir}/${filename} contains an invalid artifact URL`);
+    const artifactName = entry.url;
     const artifactPath = path.join(artifactDirectory, artifactName);
     const bytes = await fs.readFile(artifactPath).catch((error) => {
       throw new Error(`${subdir}/${filename} references missing ${artifactName}: ${error.message}`);
@@ -101,16 +68,16 @@ const read = async (subdir, filename) => {
 
 const output = {};
 
-const winX64 = await read('latest-yml-x86_64-pc-windows-msvc', 'latest.yml');
-const winArm64 = await read('latest-yml-aarch64-pc-windows-msvc', 'latest.yml');
+const winX64 = await read('latest-yml-x86_64-pc-windows-msvc', 'latest.yml', 'win', 'x64');
+const winArm64 = await read('latest-yml-aarch64-pc-windows-msvc', 'latest.yml', 'win', 'arm64');
 if (!winX64 || !winArm64) {
   throw new Error('Both x64 and arm64 Windows update manifests are required');
 }
 output['latest.yml'] = serialize(winX64);
 output['latest-arm64.yml'] = serialize(winArm64);
 
-const macX64 = await read('latest-yml-x86_64-apple-darwin', 'latest-mac.yml');
-const macArm64 = await read('latest-yml-aarch64-apple-darwin', 'latest-mac.yml');
+const macX64 = await read('latest-yml-x86_64-apple-darwin', 'latest-mac.yml', 'mac', 'x64');
+const macArm64 = await read('latest-yml-aarch64-apple-darwin', 'latest-mac.yml', 'mac', 'arm64');
 if (macX64 || macArm64) {
   const base = macArm64 || macX64;
   output['latest-mac.yml'] = serialize({

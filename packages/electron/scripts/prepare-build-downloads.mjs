@@ -58,7 +58,7 @@ if (process.env.PREPARE_TOOLS === 'true') {
       await getMakeNsisPath();
       await getNsisPluginsPath();
       console.log('[desktop-downloads] Preparing Windows installer tools');
-      await require('./scripts/prepare-installer-tool.cjs').prepare();
+      if (process.env.VARIN_DESKTOP_ROLE !== 'light') await require('./scripts/prepare-installer-tool.cjs').prepare();
       if (process.env.PREPARE_PACKAGE === 'true') await getRceditBundle(require('./package.json').build.toolsets?.winCodeSign);
     } else if (process.platform === 'linux' && process.env.PREPARE_PACKAGE === 'true') {
       await library('./toolsets/linux').getAppImageTools(require('./package.json').build.toolsets?.appimage ?? '0.0.0',

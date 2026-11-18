@@ -160,6 +160,9 @@ if (isDev) {
 if (__VARIN_LIGHT_DESKTOP__) {
   // Electron can resolve these paths before app.setName(). Do not let a full
   // install's cookies, lock, settings or tokens become a second writer's state.
+  if (process.argv.includes('--varin-smoke-profile') && process.env.VARIN_SMOKE_APP_DATA) {
+    app.setPath('appData', process.env.VARIN_SMOKE_APP_DATA);
+  }
   if (!isDev && !app.commandLine.hasSwitch('user-data-dir')) {
     const profile = path.join(app.getPath('appData'), desktopName);
     fs.mkdirSync(profile, { recursive: true, mode: 0o700 });
@@ -4762,7 +4765,7 @@ const handleInvoke = async (
     }
 
     case 'desktop_check_for_updates': return withDesktopUpdater(async () => {
-      assertUpdaterCapability({ packaged: app.isPackaged });
+      assertUpdaterCapability({ packaged: app.isPackaged, role: desktopRole });
       const currentVersion = APP_VERSION;
       const previous = state.pendingUpdate;
       state.pendingUpdate = null; // do not keep a stale installer paired with the next native slot
@@ -4790,7 +4793,7 @@ const handleInvoke = async (
     });
 
     case 'desktop_download_and_install_update': return withDesktopUpdater(async () => {
-      assertUpdaterCapability({ packaged: app.isPackaged });
+      assertUpdaterCapability({ packaged: app.isPackaged, role: desktopRole });
       if (!state.pendingUpdate) {
         throw new Error('No pending update');
       }
@@ -4861,7 +4864,7 @@ const handleInvoke = async (
     case 'desktop_restart': {
       if (updateActionRunning) throw new Error('Wait for the current desktop update action before restarting');
       const applyUpdate = Boolean(state.pendingUpdate?.downloaded && app.isPackaged);
-      if (applyUpdate) assertUpdaterCapability({ packaged: app.isPackaged });
+      if (applyUpdate) assertUpdaterCapability({ packaged: app.isPackaged, role: desktopRole });
       log.info(`[electron] desktop_restart applyUpdate=${applyUpdate} packaged=${app.isPackaged}`);
       if (applyUpdate && process.platform === 'darwin' && typeof app.isInApplicationsFolder === 'function') {
         try {

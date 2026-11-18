@@ -209,7 +209,7 @@ export async function smokeDesktopApp(executable, appArguments = [], role = 'ful
   const userDataDir = role === 'light' ? path.join(configHome, 'Varin Light') : path.join(smokeRoot, 'user-data');
   const workspaceRoot = path.join(smokeRoot, 'workspace');
   await fsp.mkdir(workspaceRoot);
-  if (role === 'full') await fsp.mkdir(userDataDir);
+  await fsp.mkdir(role === 'full' ? userDataDir : configHome);
   // Select the embedded Host up front; completing onboarding restarts the app.
   if (role === 'full') await fsp.writeFile(path.join(userDataDir, 'settings.json'), JSON.stringify({
     desktopDefaultHostId: 'local',
@@ -234,7 +234,7 @@ export async function smokeDesktopApp(executable, appArguments = [], role = 'ful
     cwd: path.dirname(appPath),
     env: {
       ...smokeEnvironment,
-      ...(role === 'light' ? { XDG_CONFIG_HOME: configHome, XDG_CACHE_HOME: path.join(smokeRoot, 'cache'),
+      ...(role === 'light' ? { VARIN_SMOKE_APP_DATA: configHome, XDG_CONFIG_HOME: configHome, XDG_CACHE_HOME: path.join(smokeRoot, 'cache'),
         XDG_DATA_HOME: path.join(smokeRoot, 'data'), HOME: smokeRoot } : {}),
       VARIN_STARTUP_PERF: '1',
       VARIN_DATA_DIR: role === 'light' ? path.join(smokeRoot, 'absent-host-data') : userDataDir,
