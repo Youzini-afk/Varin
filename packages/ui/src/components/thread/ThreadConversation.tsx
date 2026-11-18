@@ -310,7 +310,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const botSession = Boolean(snapshot?.thread.bot_id && !snapshot.thread.parent_thread_id);
   const inputMode = !delegated && (botSession ? botFollowUpBehavior : followUpBehavior) === 'queue' ? 'next_run' as const : 'boundary' as const;
   const launch = snapshot?.launch?.run_id === run?.id ? snapshot?.launch : null;
-  const workFocus = useThreadWorkFocus(draftKey, botSurface ? undefined : workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot ?? initialWorkspacePath, launch?.selection.agent?.workFocus, Boolean(snapshot) && !botSurface && !creationDefaultsPending);
+  // undefined: no choice yet; null: a confirmed chat-only choice. This is not an executor binding.
+  const branchDefault = branch?.workspace_default ?? null;
+  const confirmedWorkspaceSource = branchDefault ? branchDefault.source : launch ? launch.selection.source ?? null : undefined;
+  const workFocus = useThreadWorkFocus(draftKey, botSurface ? undefined : workspacePath ?? initialWorkspacePath,
+    launch?.selection.agent?.workFocus, Boolean(snapshot) && !botSurface && !creationDefaultsPending, botSurface ? undefined : confirmedWorkspaceSource);
   const agent = { profileId: null, workFocus };
   const pause = run?.state === 'waiting' && launch?.pause?.wait_id === run.waiting_on ? launch.pause : null;
   const policy = snapshot?.policySelection;
@@ -519,9 +523,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const empty = Boolean(snapshot && !visibleHistory.length && !hasProgress && !active && !firstMessage.message && !pending && !draft.pendingInput);
   // The empty home animates away only when this view is sending; arriving history or a switch replaces it at once.
   const sendDeparts = Boolean(snapshot && (pending || draft.pendingInput || draft.firstSend || firstMessage.message));
-  // undefined: no choice yet; null: a confirmed chat-only choice. This is not an executor binding.
-  const branchDefault = branch?.workspace_default ?? null;
-  const confirmedWorkspaceSource = branchDefault ? branchDefault.source : launch ? launch.selection.source ?? null : undefined;
   const emptyWorkspacePath = preparedSource?.path ?? workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot;
   const localWorkspacePath = preparedSource?.source.resourceOwner.kind === 'local' ? preparedSource.path
     : launch?.selection.source?.resource_owner.kind === 'local' && launch.selection.source.mode === 'live_root' ? launch.selection.source.live_root?.canonicalRoot
