@@ -390,6 +390,13 @@ fn native_workspace_mounts_share_storage_and_keep_fork_independent() {
     mount.wait_ready().unwrap();
     #[cfg(windows)]
     let parent_path = mount.path().to_path_buf();
+    #[cfg(windows)]
+    let drive = super::execution_path(&parent_path)
+        .unwrap()
+        .ancestors()
+        .last()
+        .unwrap()
+        .to_path_buf();
     let client = std::env::current_exe().unwrap();
     let result = std::process::Command::new(&client)
         .args([
@@ -521,6 +528,10 @@ fn native_workspace_mounts_share_storage_and_keep_fork_independent() {
         }
     };
     stop(&mut child_mount, &child);
+    assert_eq!(
+        std::fs::read(parent_path.join("written.txt")).unwrap(),
+        b"parent after fork"
+    );
     #[cfg(windows)]
     {
         // Only now, after actual native Close and detach, reopen the durable
@@ -534,6 +545,8 @@ fn native_workspace_mounts_share_storage_and_keep_fork_independent() {
         reopened.close().unwrap();
     }
     stop(&mut mount, &parent);
+    #[cfg(windows)]
+    assert!(!drive.try_exists().unwrap());
     drop((child_mount, mount, child, parent, port));
     stopping.send(None).unwrap();
     drop(owner.join().unwrap());

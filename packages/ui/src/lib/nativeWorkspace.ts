@@ -9,6 +9,7 @@ export interface ProjectWorkspaceStatus {
     workspace: VersionedProjectWorkspace | null;
     executionPath: string | null;
     mountState: string | null;
+    mountError?: string | null;
     leases: number;
     progress: {
         phase: string;
@@ -28,8 +29,8 @@ export async function inspectWorkspaceBackend(id: string, signal?: AbortSignal):
     if (!response.ok) throw new Error(value.message ?? 'Workspace backend inspection failed');
     return value;
 }
-export async function projectWorkspaceRequest(id: string, action: 'enable' | 'disable' | 'inspect', signal?: AbortSignal): Promise<ProjectWorkspaceStatus> {
-    const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/workspace/${action}`, { method: 'POST', signal });
+export async function projectWorkspaceRequest(id: string, action: 'enable' | 'disable' | 'inspect', signal?: AbortSignal, observeOnly = false): Promise<ProjectWorkspaceStatus> {
+    const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/workspace/${action}${observeOnly ? '?observeOnly=true' : ''}`, { method: 'POST', signal });
     const result = await response.json() as ProjectWorkspaceStatus & {
         message?: string;
     };
@@ -52,6 +53,6 @@ export async function projectExecutionPath(project: Pick<ProjectEntry, 'id' | 'p
         return project.path;
     const status = await projectWorkspaceRequest(project.id, 'inspect');
     if (status.mountState !== 'ready' || !status.executionPath)
-        throw new Error('The project workspace is unavailable');
+        throw new Error(status.mountError ?? 'The project workspace is unavailable');
     return status.executionPath;
 }

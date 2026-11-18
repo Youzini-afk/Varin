@@ -13,9 +13,14 @@ mod fuse3_sys;
 #[cfg(fuser_mount_impl = "libfuse3")]
 mod fuse3_loader;
 
+#[cfg(any(target_os = "linux", fuser_mount_impl = "pure-rust"))]
+mod fuse_helper;
 #[cfg(fuser_mount_impl = "pure-rust")]
 mod fuse_pure;
 pub(crate) mod mount_options;
+
+#[cfg(target_os = "linux")]
+pub(crate) use fuse_helper::unmount_path;
 
 use std::io;
 

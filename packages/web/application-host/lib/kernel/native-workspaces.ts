@@ -110,7 +110,7 @@ export interface NativeProjectLifecycle {
     enable(projectId: string, signal?: AbortSignal): Promise<unknown>;
     disable(projectId: string): Promise<void>;
     inspectBackend(projectId: string, signal?: AbortSignal): ReturnType<KernelScopedClient['inspectWorkspaceBackend']>;
-    inspectProject(projectId: string, signal?: AbortSignal): Promise<{
+    inspectProject(projectId: string, signal?: AbortSignal, observeOnly?: boolean): Promise<{
         workspace: VersionedProjectWorkspace | null;
         view: KernelWorkspaceInspection | null;
         progress: { phase: string; entries: number; bytes: number } | null;
@@ -184,10 +184,17 @@ function createWorkspaceOwner(owners: Owners, sessions: ReturnType<typeof create
         const work = (async () => {
             const actor = owners.kernel.scoped(entry.grant);
             const address = { branchId: entry.source.branch_id!, generation: entry.view.binding.generation };
-            if (waitForIdle) await closeAfterNativeIdle(owners.kernel, actor, address, async () => {
+            const refresh = async () => {
                 entry.view = await actor.inspectWorkspace(address).catch(() => entry.view);
-            });
-            else await actor.closeWorkspace(address);
+            };
+            try {
+                if (waitForIdle) await closeAfterNativeIdle(owners.kernel, actor, address, refresh);
+                else await actor.closeWorkspace(address);
+            }
+            catch (error) {
+                await refresh();
+                throw error;
+            }
             await owners.kernel.revokeGrant(entry.grant.grantId);
             if (opened.get(address.branchId) === entry) opened.delete(address.branchId);
         })().finally(() => { if (entry.closing === work) delete entry.closing; });
@@ -245,7 +252,14 @@ function createWorkspaceOwner(owners: Owners, sessions: ReturnType<typeof create
             const entry: Opened = { epoch: handshake.kernelEpoch, grant, view, source: { workspace_id: source.workspace_id, execution_workspace_id: source.execution_workspace_id, branch_id: source.branch_id }, originalPath: registration.canonicalPath };
             opened.set(branch, entry);
             known.set(source.execution_workspace_id, { ...entry.source });
-            entry.view = await actor.mountWorkspace({ branchId: branch, generation: view.binding.generation }, ownerSignal);
+            const address = { branchId: branch, generation: view.binding.generation };
+            try {
+                entry.view = await actor.mountWorkspace(address, ownerSignal);
+            }
+            catch (error) {
+                entry.view = await actor.inspectWorkspace(address).catch(() => entry.view);
+                throw error;
+            }
             if (entry.view.mount?.state !== 'ready' || !entry.view.mount.path || !entry.view.rootId)
                 throw new Error('Native workspace mount is unavailable');
             return entry;
@@ -442,19 +456,12 @@ function createWorkspaceOwner(owners: Owners, sessions: ReturnType<typeof create
         if (!ref)
             throw new Error('Project has no versioned workspace');
         const entry = opened.get(ref.branchId);
-        if (entry && entry.epoch === owners.kernel.handshake?.kernelEpoch) {
-            try {
-                await closeEntry(entry);
-            }
-            catch (error) {
-                entry.view = await owners.kernel.scoped(entry.grant).inspectWorkspace({ branchId: ref.branchId, generation: entry.view.binding.generation }).catch(() => entry.view);
-                throw error;
-            }
-        }
+        if (entry && entry.epoch === owners.kernel.handshake?.kernelEpoch)
+            await closeEntry(entry);
         known.delete(ref.executionWorkspaceId);
         await owners.update(projectId, { ...ref, state: 'disabled' });
     };
-    const inspectProject = async (projectId: string, signal?: AbortSignal) => {
+    const inspectProject = async (projectId: string, signal?: AbortSignal, observeOnly = false) => {
         const project = (await owners.projects()).find(project => project.id === projectId);
         if (!project)
             throw new Error('Project is unavailable');
@@ -481,9 +488,10 @@ function createWorkspaceOwner(owners: Owners, sessions: ReturnType<typeof create
             }
             return { workspace: ref ?? null, view: null, progress, preparing: enabling.has(projectId) };
         }
-        const entry = await open(sourceOf(ref), signal);
-        entry.view = await owners.kernel.scoped(entry.grant).inspectWorkspace({ branchId: ref.branchId, generation: entry.view.binding.generation }, signal);
-        return { workspace: ref, view: entry.view, progress: null, preparing: false };
+        const entry = observeOnly ? opened.get(ref.branchId) : await open(sourceOf(ref), signal);
+        const original = entry && entry.epoch === owners.kernel.handshake?.kernelEpoch ? entry : undefined;
+        if (original) original.view = await owners.kernel.scoped(original.grant).inspectWorkspace({ branchId: ref.branchId, generation: original.view.binding.generation }, signal);
+        return { workspace: ref, view: original?.view ?? null, progress: null, preparing: enabling.has(projectId) };
     };
     const retainPrepared = async (source: Source, threadId: string, release = false, signal?: AbortSignal) => {
         if (!source.branch_id)
@@ -608,7 +616,6 @@ function createWorkspaceOwner(owners: Owners, sessions: ReturnType<typeof create
         catch (error) {
             if (error instanceof KernelClientError && error.code === 'workspace_in_use')
                 return;
-            entry.view = await actor.inspectWorkspace({ branchId: branch, generation: entry.view.binding.generation }).catch(() => entry.view);
             throw error;
         }
     };

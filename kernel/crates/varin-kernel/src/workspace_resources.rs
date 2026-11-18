@@ -142,7 +142,15 @@ impl Workspaces {
     }
     fn inspect(entry: &Entry, grant: &Grant) -> Result<Value, KernelError> {
         let mut view=locked(&entry.view)?.clone();
-        if entry.session.is_mount_disconnected(){if let Some(view)=&mut view{view["state"]=json!("failed");view["path"]=Value::Null;view["error"]=json!("workspace_mount_disconnected");}}
+        if entry.session.is_mount_disconnected() {
+            if let Some(view) = &mut view {
+                if view["state"] == "ready" {
+                    view["state"] = json!("failed");
+                    view["path"] = Value::Null;
+                    view["error"] = json!("The original workspace mount disconnected");
+                }
+            }
+        }
         let root=view.as_ref().filter(|view|view["state"]=="ready").map(|_|crate::storage::native_sources::root_id(
             &entry.binding.workspace_id,&entry.binding.execution_workspace_id,&entry.binding.branch_id,""));
         Ok(
@@ -343,10 +351,12 @@ impl Workspaces {
                             return Err(failure);
                         }
                     };
-                    *locked(&entry.view)? = Some(
-                        json!({"mountId":id,"path":if worker.ready {Some(worker.path.clone())} else {None},"backend":worker.capabilities.get("backend").and_then(Value::as_str).unwrap_or(backend()),
-                            "capabilities":worker.capabilities,"state":if worker.ready {"ready"} else {"cleanup_pending"}}),
-                    );
+                    let mut view = json!({"mountId":id,"path":if worker.ready {Some(worker.path.clone())} else {None},"backend":worker.capabilities.get("backend").and_then(Value::as_str).unwrap_or(backend()),
+                        "capabilities":worker.capabilities,"state":if worker.ready {"ready"} else {"cleanup_pending"}});
+                    if let Some(failure) = startup_error.as_ref() {
+                        view["error"] = json!(failure.to_string());
+                    }
+                    *locked(&entry.view)? = Some(view);
                     *mounted = Some(worker);
                     if let Some(failure) = startup_error {
                         return Err(mount_failure(failure, &entry, &grant));
@@ -448,11 +458,19 @@ impl Workspaces {
             view["state"] = json!("cleanup_pending");
             view["path"] = Value::Null;
         }
-        if let Some(mount) = locked(&entry.mount)?.as_mut() {
-            mount.stop()?;
+        let detached = (|| {
+            if let Some(mount) = locked(&entry.mount)?.as_mut() {
+                mount.stop()?;
+            }
+            entry.session.close()?;
+            entry.session.release_drained_leases()
+        })();
+        if let Err(failure) = detached {
+            if let Some(view) = locked(&entry.view)?.as_mut() {
+                view["error"] = json!(failure.to_string());
+            }
+            return Err(failure);
         }
-        entry.session.close()?;
-        entry.session.release_drained_leases()?;
         *live = false;
         let mut entries = locked(&self.entries)?;
         if entries
@@ -535,15 +553,20 @@ impl MountWorker {
         let (ready, readiness) = mpsc::channel();
         let target = path.clone();
         let thread = std::thread::spawn(move || {
-            let prepared = (|| {
-                #[cfg(not(windows))]
-                std::fs::create_dir_all(&target)?;
-                crate::workspace_mount::Mount::start(session.clone(), &target)
-            })();
-            let mut mount = match prepared {
+            #[cfg(unix)]
+            if let Err(error) = crate::workspace_mount::unix::create_target(&target) {
+                let _ = ready.send(Err(error.into()));
+                return;
+            }
+            let finish = || {
+                #[cfg(unix)]
+                crate::workspace_mount::unix::remove_empty_target(&target);
+            };
+            let mut mount = match crate::workspace_mount::Mount::start(session.clone(), &target) {
                 Ok(mount) => mount,
                 Err(failure) => {
                     session.mount_disconnected();
+                    finish();
                     let _ = ready.send(Err(failure));
                     return;
                 }
@@ -559,7 +582,7 @@ impl MountWorker {
             #[cfg(not(windows))]
             let mounted_path = target.clone();
             if ready.send(Ok((startup_error,capabilities,mounted_path))).is_err() {
-                let _ = mount.stop();
+                if mount.stop().is_ok() { finish(); }
                 return;
             }
             while let Ok(command) = receiver.recv() {
@@ -571,17 +594,16 @@ impl MountWorker {
                     }
                     MountCommand::Stop(reply) => {
                         let result = mount.stop();
-                        let stopped = result.is_ok();
-                        let _ = reply.send(result);
-                        if stopped {
-                            #[cfg(not(windows))]
-                            let _ = std::fs::remove_dir(&target);
+                        if result.is_ok() {
+                            finish();
+                            let _ = reply.send(result);
                             return;
                         }
+                        let _ = reply.send(result);
                     }
                 }
             }
-            let _ = mount.stop();
+            if mount.stop().is_ok() { finish(); }
         });
         match readiness.recv().map_err(|_| {
             error(

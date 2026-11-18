@@ -1131,9 +1131,7 @@ impl Mount {
         self.detach()
     }
     fn detach(&mut self) -> Result<(), KernelError> {
-        if let Some(namespace) = &self.namespace { namespace.remove(&self.name)?; }
-        self.namespace.take();
-        Ok(())
+        namespace::Volume::detach(&mut self.namespace, &self.name)
     }
 }
 impl Drop for Mount {

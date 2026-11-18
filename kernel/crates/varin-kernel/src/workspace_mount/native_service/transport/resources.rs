@@ -1,11 +1,23 @@
 //! Crash leftovers are owned executor resources, not user projects. A live OS
 //! lock protects every active instance; cleanup never infers death from age.
 use super::*;
+use crate::workspace_mount::unix;
 use std::os::unix::fs::MetadataExt;
-pub(super) fn root() -> Result<PathBuf, KernelError> {
-    let path = PathBuf::from(format!("/tmp/varin-workspaces-{}", unsafe {
+fn root_path() -> PathBuf {
+    PathBuf::from(format!("/tmp/varin-workspaces-{}", unsafe {
         libc::geteuid()
-    }));
+    }))
+}
+
+pub(in crate::workspace_mount) fn recover_previous_resources() -> std::io::Result<()> {
+    if root_path().try_exists()? {
+        root().map_err(|error| std::io::Error::other(error.to_string()))?;
+    }
+    Ok(())
+}
+
+pub(super) fn root() -> Result<PathBuf, KernelError> {
+    let path = root_path();
     match std::fs::DirBuilder::new().mode(0o700).create(&path) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
@@ -48,7 +60,7 @@ fn cleanup(root: &Path) {
         let Some(manifest) = manifest else {
             // A crash before resource publication may leave only its owner
             // file/socket. Check the OS table before releasing this candidate.
-            if matches!(mounts(),Ok(values) if !values.iter().any(|(_,_,source)|source==&path.to_string_lossy() || source==&format!("file://{}",path.display())))
+            if matches!(unix::mounts(), Ok(values) if !values.iter().any(|mount| owns_mount(mount, &path)))
             {
                 let _ = std::fs::remove_dir_all(&path);
             }
@@ -60,60 +72,37 @@ fn cleanup(root: &Path) {
         let Some(target) = manifest["mountTarget"].as_str() else {
             continue;
         };
-        // getmntinfo does not enter a disconnected filesystem. Only detach an
-        // exact path-resource mount, never a replacement at the same pathname.
-        let Ok(mounted) = mount_source(target) else {
+        // Match the original path and resource without opening the filesystem.
+        let target = Path::new(target);
+        let Ok(mounted) = unix::mount_at(target) else {
             continue;
         };
-        if let Some((kind, source)) = mounted {
-            if kind != "varin"
-                || (source != path.to_string_lossy()
-                    && source != format!("file://{}", path.display()))
-            {
+        if let Some(mount) = mounted {
+            if !owns_mount(&mount, &path) || unix::detach(target).is_err() {
                 continue;
             }
-            match std::process::Command::new("/sbin/umount")
-                .arg(target)
-                .output()
-            {
-                Ok(output) if output.status.success() => {}
-                _ => continue,
-            }
-            if !matches!(mount_source(target), Ok(None)) {
-                continue;
-            }
+        }
+        // Production mount directories use the original Session generation.
+        if target.parent().is_some_and(|parent| {
+            parent.ends_with("managed/workspaces")
+                && parent
+                    .canonicalize()
+                    .is_ok_and(|canonical| canonical == parent)
+        }) && manifest["generation"]
+            .as_str()
+            .and_then(|id| uuid::Uuid::parse_str(id).ok())
+            .is_some()
+            && target.file_name().and_then(|name| name.to_str()) == manifest["generation"].as_str()
+        {
+            unix::remove_empty_target(target);
         }
         // The nonce directory was validated under our private root, its owner
         // lock is held and its original mount has really detached.
         let _ = std::fs::remove_dir_all(&path);
     }
 }
-pub(super) fn mount_source(target: &str) -> std::io::Result<Option<(String, String)>> {
-    Ok(mounts()?
-        .into_iter()
-        .find(|(path, _, _)| path == target)
-        .map(|(_, kind, source)| (kind, source)))
-}
-fn mounts() -> std::io::Result<Vec<(String, String, String)>> {
-    let mut mounts = std::ptr::null_mut();
-    let count = unsafe { libc::getmntinfo(&mut mounts, libc::MNT_NOWAIT) };
-    if count == 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    let values = unsafe { std::slice::from_raw_parts(mounts, count as usize) };
-    let mut result = Vec::new();
-    for mount in values {
-        let path =
-            unsafe { std::ffi::CStr::from_ptr(mount.f_mntonname.as_ptr()) }.to_string_lossy();
-        result.push((
-            path.into_owned(),
-            unsafe { std::ffi::CStr::from_ptr(mount.f_fstypename.as_ptr()) }
-                .to_string_lossy()
-                .into_owned(),
-            unsafe { std::ffi::CStr::from_ptr(mount.f_mntfromname.as_ptr()) }
-                .to_string_lossy()
-                .into_owned(),
-        ));
-    }
-    Ok(result)
+pub(super) fn owns_mount(mount: &unix::MountInfo, resource: &Path) -> bool {
+    let mut url = std::ffi::OsString::from("file://");
+    url.push(resource);
+    mount.filesystem == "varin" && (mount.source == resource.as_os_str() || mount.source == url)
 }

@@ -4,7 +4,7 @@
 use super::*;
 use std::path::{Path, PathBuf};
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     RwLock, Weak,
 };
 use winfsp::{
@@ -30,10 +30,11 @@ impl Inodes {
 }
 
 pub(super) struct Volume {
-    host: Mutex<FileSystemHost<Namespace>>,
+    host: Mutex<Option<FileSystemHost<Namespace>>>,
     entries: Entries,
     root: PathBuf,
-    drive: PathBuf,
+    drive: Drive,
+    retired: AtomicBool,
     next_inode: Arc<AtomicU64>,
 }
 impl Volume {
@@ -82,13 +83,20 @@ impl Volume {
         };
         if let Err(error) = host.start() {
             host.unmount();
+            if let Err(cleanup) = drive.remove() {
+                return Err(failure(
+                    "start dispatcher and release its drive",
+                    format!("{error}; {cleanup}"),
+                ));
+            }
             return Err(failure("start dispatcher", error));
         }
         let volume = Arc::new(Self {
-            host: Mutex::new(host),
+            host: Mutex::new(Some(host)),
             entries,
             root: PathBuf::from(format!("\\\\?\\UNC\\{server}\\workspaces")),
             drive,
+            retired: AtomicBool::new(false),
             next_inode: Arc::new(AtomicU64::new(2)),
         });
         *shared = Arc::downgrade(&volume);
@@ -119,12 +127,52 @@ impl Volume {
         drop(backend);
         Ok(())
     }
+
+    pub(super) fn detach(slot: &mut Option<Arc<Self>>, name: &str) -> Result<(), KernelError> {
+        let Some(volume) = slot.as_ref() else {
+            return Ok(());
+        };
+        let mut shared = VOLUME
+            .lock()
+            .map_err(|_| unsupported("Native namespace registry failed"))?;
+        volume.remove(name)?;
+        // An in-flight acquire owns a reference before it inserts its entry.
+        // Do not detach underneath it or a sibling workspace.
+        if Arc::strong_count(volume) == 1 {
+            let result = volume.retire();
+            if shared.as_ptr() == Arc::as_ptr(volume) {
+                *shared = Weak::new();
+            }
+            result?;
+        }
+        slot.take();
+        Ok(())
+    }
+
+    fn retire(&self) -> Result<(), KernelError> {
+        let mut host = self
+            .host
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if self.retired.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        if let Some(mut host) = host.take() {
+            host.unmount();
+            host.stop();
+        }
+        self.drive
+            .remove()
+            .map_err(|error| failure("retire its drive", error))?;
+        self.retired.store(true, Ordering::Release);
+        Ok(())
+    }
 }
 impl Drop for Volume {
     fn drop(&mut self) {
-        let host = self.host.get_mut().unwrap_or_else(|p| p.into_inner());
-        host.unmount();
-        host.stop();
+        if let Err(error) = self.retire() {
+            eprintln!("[Workspace] {error}");
+        }
     }
 }
 
@@ -138,7 +186,7 @@ pub(crate) fn execution_path(path: &Path) -> Result<PathBuf, KernelError> {
     let Some(volume) = volume else {
         return Ok(path.into());
     };
-    let canonical = if path.starts_with(&volume.drive) {
+    let canonical = if path.starts_with(&volume.drive.root) {
         std::fs::canonicalize(path)?
     } else {
         path.into()
@@ -146,7 +194,7 @@ pub(crate) fn execution_path(path: &Path) -> Result<PathBuf, KernelError> {
     let Ok(relative) = canonical.strip_prefix(&volume.root) else {
         return Ok(path.into());
     };
-    let selected = volume.drive.join(relative);
+    let selected = volume.drive.root.join(relative);
     if std::fs::canonicalize(&selected)? != canonical {
         return Err(KernelError::Authorization(
             "Native execution alias changed source identity".into(),
@@ -155,35 +203,94 @@ pub(crate) fn execution_path(path: &Path) -> Result<PathBuf, KernelError> {
     Ok(selected)
 }
 
-fn owned_drive(prefix: &str) -> Result<PathBuf, KernelError> {
-    use windows_sys::Win32::Storage::FileSystem::QueryDosDeviceW;
-    let suffix = prefix.encode_utf16().collect::<Vec<_>>();
+struct Drive {
+    name: [u16; 3],
+    root: PathBuf,
+    target: Vec<u16>,
+}
+impl Drive {
+    fn remove(&self) -> std::io::Result<()> {
+        use windows_sys::Win32::Storage::FileSystem::{
+            DefineDosDeviceW, DDD_EXACT_MATCH_ON_REMOVE, DDD_RAW_TARGET_PATH, DDD_REMOVE_DEFINITION,
+        };
+        use windows_sys::Win32::UI::Shell::{SHChangeNotify, SHCNE_DRIVEREMOVED, SHCNF_PATHW};
+        let mut mappings = drive_mappings(&self.name)?;
+        if mappings.contains(&self.target) {
+            let target: Vec<u16> = self.target.iter().copied().chain([0]).collect();
+            let removed = unsafe {
+                DefineDosDeviceW(
+                    DDD_REMOVE_DEFINITION | DDD_EXACT_MATCH_ON_REMOVE | DDD_RAW_TARGET_PATH,
+                    self.name.as_ptr(),
+                    target.as_ptr(),
+                )
+            };
+            let remove_error = (removed == 0).then(std::io::Error::last_os_error);
+            mappings = drive_mappings(&self.name)?;
+            if mappings.contains(&self.target) {
+                return Err(remove_error.unwrap_or_else(|| {
+                    std::io::Error::other("The original drive mapping is still present")
+                }));
+            }
+        }
+        if mappings.is_empty() {
+            // WinFsp documents that the device broadcast may miss Explorer.
+            // Refresh only after removal, and only when the drive is vacant.
+            let path = [self.name[0], b':' as u16, b'\\' as u16, 0];
+            unsafe {
+                SHChangeNotify(
+                    SHCNE_DRIVEREMOVED as i32,
+                    SHCNF_PATHW,
+                    path.as_ptr().cast(),
+                    std::ptr::null(),
+                )
+            };
+        }
+        Ok(())
+    }
+}
+
+fn owned_drive(prefix: &str) -> Result<Drive, KernelError> {
+    let suffix: Vec<u16> = prefix.encode_utf16().collect();
     for letter in b'A'..=b'Z' {
         let name = [letter as u16, b':' as u16, 0];
-        let mut buffer = vec![0u16; 256];
-        loop {
-            let count =
-                unsafe { QueryDosDeviceW(name.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32) };
-            if count == 0 {
-                if std::io::Error::last_os_error().raw_os_error() == Some(122) {
-                    buffer.resize(buffer.len() * 2, 0);
-                    continue;
-                }
-                break;
-            }
-            let end = buffer
-                .iter()
-                .position(|ch| *ch == 0)
-                .unwrap_or(count as usize);
-            if buffer[..end].ends_with(&suffix) {
-                return Ok(PathBuf::from(format!("{}:\\", letter as char)));
-            }
-            break;
+        if let Some(target) = drive_mappings(&name)?
+            .into_iter()
+            .next()
+            .filter(|path| path.ends_with(&suffix))
+        {
+            return Ok(Drive {
+                name,
+                root: PathBuf::from(format!("{}:\\", letter as char)),
+                target,
+            });
         }
     }
     Err(unsupported(
         "WinFsp did not retain its original per-user execution drive",
     ))
+}
+
+fn drive_mappings(name: &[u16; 3]) -> std::io::Result<Vec<Vec<u16>>> {
+    use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_INSUFFICIENT_BUFFER};
+    use windows_sys::Win32::Storage::FileSystem::QueryDosDeviceW;
+    let mut buffer = vec![0u16; 256];
+    loop {
+        let count =
+            unsafe { QueryDosDeviceW(name.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32) };
+        if count != 0 {
+            return Ok(buffer[..count as usize]
+                .split(|&unit| unit == 0)
+                .filter(|entry| !entry.is_empty())
+                .map(<[u16]>::to_vec)
+                .collect());
+        }
+        let error = std::io::Error::last_os_error();
+        match error.raw_os_error().map(|code| code as u32) {
+            Some(ERROR_FILE_NOT_FOUND) => return Ok(Vec::new()),
+            Some(ERROR_INSUFFICIENT_BUFFER) => buffer.resize(buffer.len() * 2, 0),
+            _ => return Err(error),
+        }
+    }
 }
 
 fn failure(stage: &str, error: impl std::fmt::Display) -> KernelError {
@@ -207,9 +314,13 @@ struct Namespace {
 impl NotifyingFileSystemContext<Vec<(String, Arc<Backend>)>> for Namespace {
     fn should_notify(&self) -> Option<Vec<(String, Arc<Backend>)>> {
         let entries = self.entries.read().unwrap_or_else(|p| p.into_inner());
-        let closing = entries.iter().filter(|(_, backend)| {
-            backend.closing.load(Ordering::Acquire) && !backend.opens.cleaned_files().is_empty()
-        }).map(|(name, backend)| (name.clone(), backend.clone())).collect::<Vec<_>>();
+        let closing = entries
+            .iter()
+            .filter(|(_, backend)| {
+                backend.closing.load(Ordering::Acquire) && !backend.opens.cleaned_files().is_empty()
+            })
+            .map(|(name, backend)| (name.clone(), backend.clone()))
+            .collect::<Vec<_>>();
         // Do not consume work before NotifyBegin has acquired the rename fence.
         (!closing.is_empty()).then_some(closing)
     }
@@ -228,10 +339,15 @@ impl NotifyingFileSystemContext<Vec<(String, Arc<Backend>)>> for Namespace {
             for node in backend.opens.cleaned_files() {
                 if let Ok(Some(path)) = node.path() {
                     let mut info = NotifyInfo::<NAME_UNITS>::new();
-                    if info.set_name(format!("\\{}\\{}", name, path.replace('/', "\\"))).is_ok() {
+                    if info
+                        .set_name(format!("\\{}\\{}", name, path.replace('/', "\\")))
+                        .is_ok()
+                    {
                         notifier.notify(&info);
                         #[cfg(test)]
-                        if let Some(observer) = &*backend.opens.invalidation_observer.lock().unwrap() {
+                        if let Some(observer) =
+                            &*backend.opens.invalidation_observer.lock().unwrap()
+                        {
                             let _ = observer.send(node.id);
                         }
                     }

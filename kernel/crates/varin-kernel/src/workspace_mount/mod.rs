@@ -9,6 +9,8 @@ use std::sync::Arc;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod fuse;
+#[cfg(unix)]
+pub(crate) mod unix;
 #[cfg(any(target_os = "macos", test))]
 mod native_service;
 #[cfg(target_os = "macos")]

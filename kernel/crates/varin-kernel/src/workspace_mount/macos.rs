@@ -111,7 +111,7 @@ impl NativeMount {
             .open(&log)?;
         session.mount_started();
         let mounting = std::process::Command::new("/sbin/mount")
-            .args(["-F", "-t", "varin", "-o", "nosuid,nodev"])
+            .args(["-F", "-t", "varin", "-o", "nosuid,nodev,nobrowse"])
             .arg(&server.resource)
             .arg(&target)
             .stdout(output.try_clone()?)
@@ -178,9 +178,8 @@ impl NativeMount {
                 child.wait()?;
             }
         }
-        let mounted = std::fs::metadata(&self.target).is_ok_and(|m| m.dev() != self.device);
-        if mounted {
-            if !self.server.owns_mount(&self.target)? {
+        if let Some(mount) = unix::mount_at(&self.target)? {
+            if !self.server.owns_mount(&mount) {
                 return Err(unsupported(
                     "The original FSKit mount was replaced; its replacement will not be detached",
                 ));
@@ -198,23 +197,16 @@ impl NativeMount {
                     ),
                 ));
             }
+            if !self.session.revoked() {
+                self.session.flush_all()?;
+            }
             self.server.stopping(true);
-            let output = std::process::Command::new("/sbin/umount")
-                .arg(&self.target)
-                .output()?;
-            if !output.status.success() {
+            if let Err(error) = unix::detach(&self.target) {
                 self.server.stopping(false);
                 if !self.server.attached.load(Ordering::Acquire) {
                     self.session.mount_disconnected();
                 }
-                return Err(KernelError::Storage(format!(
-                    "FSKit detach failed: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                )));
-            }
-            if std::fs::metadata(&self.target)?.dev() != self.device {
-                self.server.stopping(false);
-                return Err(unsupported("FSKit detach was not confirmed"));
+                return Err(KernelError::Storage(format!("FSKit detach failed: {error}")));
             }
         }
         self.server.stop();

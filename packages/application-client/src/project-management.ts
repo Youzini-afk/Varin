@@ -5,6 +5,7 @@ export interface ProjectWorkspaceStatus {
   workspace: VersionedProjectWorkspace | null;
   executionPath: string | null;
   mountState: string | null;
+  mountError?: string | null;
   leases: number;
   capabilities: { mountCompiled: boolean; hardlinks: boolean; symlinks: boolean; xattrs: boolean } | null;
   progress: { phase: string; entries: number; bytes: number } | null;
@@ -30,7 +31,7 @@ export interface ProjectManagementOperations {
   'worktree-remote-branch-delete': { input: GitDeleteRemoteBranchPayload; result: { success: boolean } };
   'worktree-remove': { input: RemoveGitWorktreePayload; result: { success: boolean } };
   'worktree-bootstrap': { input: { directory: string }; result: GitWorktreeBootstrapStatus };
-  inspect: { input: Record<string, never>; result: ProjectWorkspaceStatus };
+  inspect: { input: { observeOnly?: boolean }; result: ProjectWorkspaceStatus };
   enable: { input: Record<string, never>; result: ProjectWorkspaceStatus };
   disable: { input: Record<string, never>; result: ProjectWorkspaceStatus };
   backend: { input: Record<string, never>; result: WorkspaceBackendStatus };

@@ -418,3 +418,5 @@ mod resource_owner;
 mod transport;
 #[cfg(target_os = "macos")]
 pub(super) use transport::Server;
+#[cfg(target_os = "macos")]
+pub(super) use transport::recover_previous_resources;

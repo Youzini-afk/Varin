@@ -5008,7 +5008,7 @@ export interface KernelWorkspaceInspection {
   binding: KernelWorkspaceBinding;
   leases: number;
   rootId: string | null;
-  mount: { mountId:string; path:string|null; backend:'winfsp'|'macfuse'|'fuse'; state:'starting'|'ready'|'failed'|'cleanup_pending'; error?:string } | null;
+  mount: { mountId:string; path:string|null; backend:'winfsp'|'macfuse'|'fuse'|'fskit'; state:'starting'|'ready'|'failed'|'cleanup_pending'; error?:string } | null;
   capabilities: { nativeFiles:boolean; mountCompiled:boolean; hardlinks:boolean; symlinks:boolean; xattrs:boolean; losslessNativeNames:boolean; activeWritableMappingFork:boolean };
 }
 

@@ -25,6 +25,12 @@ use std::time::SystemTime;
 /// Actual mount permission and readiness are verified by the original session.
 pub fn mount_dependencies()->io::Result<()>{mnt::dependencies()}
 
+/// Detach a Linux FUSE mount already identified by its owner from the OS mount table.
+#[cfg(target_os = "linux")]
+pub fn unmount_path(path: &Path) -> io::Result<()> {
+    mnt::unmount_path(path)
+}
+
 use log::warn;
 #[cfg(target_os = "macos")]
 pub use reply::ReplyXTimes;

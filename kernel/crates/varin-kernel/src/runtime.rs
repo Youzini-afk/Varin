@@ -545,6 +545,10 @@ impl Kernel {
             fs::create_dir_all(root)?;
             let canonical_root = fs::canonicalize(root)?.to_string_lossy().to_string();
             let storage = Storage::open(Path::new(&canonical_root), &host_id)?;
+            #[cfg(all(unix, feature = "workspace-mount"))]
+            if let Err(error) = crate::workspace_mount::unix::recover(storage.root()) {
+                eprintln!("[Workspace] Previous mounts could not be inspected: {error}");
+            }
             self.host_id = Some(host_id.clone());
             self.host_generation = Some(host_generation.clone());
             self.build_version = Some(build_version.clone());

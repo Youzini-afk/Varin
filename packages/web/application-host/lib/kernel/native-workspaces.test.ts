@@ -214,7 +214,7 @@ function closingFixture() {
   let idle=false;
   const listeners=new Set<()=>void>(), exits=new Set<(error:Error)=>void>();
   const emitIdle=()=>{for(const listener of [...listeners])listener();};
-  const view={binding:{generation:'original-generation'},mount:{state:'ready',path:'/mounted'},rootId:'original-root'};
+  const view={binding:{generation:'original-generation'},mount:{state:'ready',path:'/mounted' as string|null},rootId:'original-root' as string|null};
   const actor={openWorkspace:vi.fn(async()=>view),mountWorkspace:vi.fn(async()=>view),inspectWorkspace:vi.fn(async()=>view),
     closeWorkspace:vi.fn(async(_address:unknown)=>{if(!idle)throw new KernelClientError({code:'workspace_native_handles_active',message:'Original Close is still pending'});}),
     deleteBranch:vi.fn(async()=>({}))};
@@ -280,6 +280,21 @@ it('does not reinterpret active execution leases as native Close progress',async
   await expect(f.managed.disable('managed')).rejects.toBe(busy);
   expect(f.actor.closeWorkspace).toHaveBeenCalledOnce();expect(f.kernel.revokeGrant).not.toHaveBeenCalled();expect(f.update).not.toHaveBeenCalled();
   expect(f.listeners.size).toBe(0);expect(f.exits.size).toBe(0);
+});
+
+it('observes an inactive or failed mount in settings without reopening the workspace', async () => {
+  const f = closingFixture();
+  expect((await f.managed.inspectProject('managed', undefined, true)).view).toBeNull();
+  expect(f.actor.mountWorkspace).not.toHaveBeenCalled();
+  const original = await f.owner.open(f.source);
+  const error = new KernelClientError({ code: 'workspace_cleanup_pending', message: 'The OS refused to detach the mount' });
+  const pending = { ...original.view, mount: { state: 'cleanup_pending', path: null, error: error.message }, rootId: null };
+  f.actor.closeWorkspace.mockRejectedValueOnce(error);
+  f.actor.inspectWorkspace.mockResolvedValue({ ...pending, binding: { generation: 'original-generation' } });
+  await expect(f.managed.disable('managed')).rejects.toBe(error);
+  expect((await f.managed.inspectProject('managed', undefined, true)).view).toMatchObject(pending);
+  expect(f.actor.mountWorkspace).toHaveBeenCalledOnce();
+  expect(f.kernel.revokeGrant).not.toHaveBeenCalled();
 });
 
 it('defers source retirement without blocking maintenance and resumes only after original Close',async()=>{

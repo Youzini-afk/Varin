@@ -13,8 +13,8 @@ export function ProjectWorkspaceSection({ project }: {
     const { t } = useI18n();
     const remote = project.source?.resourceOwner.kind === 'managed_host';
     const workspaceRequest = React.useCallback((action: 'enable' | 'disable' | 'inspect', signal?: AbortSignal) => remote
-        ? manageProject(project.id, action, {}, signal, project.source)
-        : projectWorkspaceRequest(project.id, action, signal), [project.id, project.source, remote]);
+        ? manageProject(project.id, action, action === 'inspect' ? { observeOnly: true } : {}, signal, project.source)
+        : projectWorkspaceRequest(project.id, action, signal, action === 'inspect'), [project.id, project.source, remote]);
     const [status, setStatus] = React.useState<ProjectWorkspaceStatus | null>(null);
     const [backend, setBackend] = React.useState<WorkspaceBackendStatus | null>(null);
     const [checkingBackend, setCheckingBackend] = React.useState(false);
@@ -83,6 +83,7 @@ export function ProjectWorkspaceSection({ project }: {
         }
     };
     const enabled = (status?.workspace ?? project.versionedWorkspace)?.state === 'ready';
+    const mountError = error ?? status?.mountError;
     return <SettingsSection title={t('settings.projects.workspace.title')} description={t('settings.projects.workspace.description')}>
     <div className="space-y-3">
       <p className="typography-meta max-w-2xl text-muted-foreground">{t('settings.projects.workspace.explanation')}</p>
@@ -103,7 +104,7 @@ export function ProjectWorkspaceSection({ project }: {
         <div className="flex flex-wrap gap-x-3"><dt className="text-muted-foreground">{t('settings.projects.workspace.original')}</dt><dd className="break-all">{project.path}</dd></div>
         {status?.executionPath && <div className="flex flex-wrap gap-x-3"><dt className="text-muted-foreground">{t('settings.projects.workspace.current')}</dt><dd className="break-all text-foreground">{status.executionPath}</dd></div>}
       </dl>
-      {error && <p role="alert" className="typography-meta text-destructive break-words">{error}</p>}
+      {mountError && <p role="alert" className="typography-meta text-destructive break-words">{mountError}</p>}
       {status?.progress && <p role="status" className="typography-meta text-muted-foreground tabular-nums">
         {t(status.progress.phase === 'capture' ? 'settings.projects.workspace.capture' : status.progress.phase === 'verify' ? 'settings.projects.workspace.verify' : 'settings.projects.workspace.inventory')}
         {' · '}{status.progress.entries.toLocaleString()}{' · '}{(status.progress.bytes / 1048576).toFixed(1)} MiB

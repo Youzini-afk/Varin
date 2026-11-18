@@ -26,9 +26,10 @@ export function registerNativeWorkspaceRoutes(app: Express, owner: NativeWorkspa
                 await owner.enable(id, controller.signal);
             if (action === 'disable')
                 await owner.disable(id);
-            const latest = await owner.inspectProject(id, controller.signal);
+            const latest = await owner.inspectProject(id, controller.signal, action !== 'inspect' || request.query.observeOnly === 'true');
             const view = latest?.view;
             response.json({ workspace: latest?.workspace ?? null, executionPath: view?.mount?.path ?? null, mountState: view?.mount?.state ?? null,
+                mountError: view?.mount?.error ?? null,
                 leases: view?.leases ?? 0, capabilities: view?.capabilities ?? null, progress: latest.progress, preparing: latest.preparing });
         }
         catch (error) {

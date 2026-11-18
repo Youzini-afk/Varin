@@ -10,6 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 mod resources;
 
+pub(in crate::workspace_mount) use resources::recover_previous_resources;
+
 pub(in crate::workspace_mount) struct Server {
     pub resource: PathBuf,
     pub attached: Arc<AtomicBool>,
@@ -185,18 +187,9 @@ impl Server {
     }
     pub(in crate::workspace_mount) fn owns_mount(
         &self,
-        target: &Path,
-    ) -> Result<bool, KernelError> {
-        let target = target
-            .to_str()
-            .ok_or_else(|| unsupported("Mount path is not representable"))?;
-        Ok(
-            resources::mount_source(target)?.is_some_and(|(kind, source)| {
-                kind == "varin"
-                    && (source == self.resource.to_string_lossy()
-                        || source == format!("file://{}", self.resource.display()))
-            }),
-        )
+        mount: &crate::workspace_mount::unix::MountInfo,
+    ) -> bool {
+        resources::owns_mount(mount, &self.resource)
     }
     pub(in crate::workspace_mount) fn stopping(&self, value: bool) {
         self.stopping.store(value, Ordering::Release);

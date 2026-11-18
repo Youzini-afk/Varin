@@ -898,9 +898,10 @@ impl Mount {
         target: &Path,
     ) -> Result<Self, KernelError> {
         admit_target(target)?;
+        let target = target.canonicalize()?;
         session.mount_started();
         use std::os::unix::fs::MetadataExt;
-        let previous_device = std::fs::metadata(target)?.dev();
+        let previous_device = std::fs::metadata(&target)?.dev();
         let root = session.lookup("")?;
         let handles = Arc::new(Mutex::new(Handles {
             next: 1,
@@ -921,10 +922,12 @@ impl Mount {
         };
         let mut options = Config::default();
         options.mount_options = vec![
-            MountOption::FSName("Varin Workspace".into()),
+            MountOption::FSName(unix::fuse_source(&session.identity().to_string())),
             MountOption::RW,
             MountOption::DefaultPermissions,
         ];
+        #[cfg(target_os = "macos")]
+        options.mount_options.push(MountOption::CUSTOM("nobrowse".into()));
         #[cfg(target_os = "linux")]
         {
             options.n_threads = Some(
@@ -933,7 +936,7 @@ impl Mount {
                     .unwrap_or(1),
             );
         }
-        let native = spawn_mount(backend, target, &options).map_err(|error| {
+        let native = spawn_mount(backend, &target, &options).map_err(|error| {
             KernelError::Execution(varin_runtime::execution::ExecutionError::new("workspace_mount_failed",format!("Workspace FUSE mount failed: {error}"))
                 .with_details(serde_json::json!({"stage":"workspace_mount","backend":if cfg!(target_os="macos"){"macfuse"}else{"fuse"},
                     "reason":match error.kind(){std::io::ErrorKind::PermissionDenied=>"permission_denied",std::io::ErrorKind::NotFound=>"dependency_missing",_=>"mount_refused"}})))
@@ -941,7 +944,7 @@ impl Mount {
         Ok(Self {
             native: Some(native),
             session,
-            target: target.to_owned(),
+            target,
             previous_device,
             handles,
             open_boundary,
@@ -1054,8 +1057,12 @@ impl Mount {
     }
 
     pub(crate) fn stop(&mut self) -> Result<(), KernelError> {
-        if self.native.as_ref().is_some_and(|native|native.guard.is_finished()){
-            self.native.take().unwrap().join().map_err(|error|KernelError::Storage(format!("Workspace callback drainage failed: {error}")))?;
+        if self.native.is_none() || self.native.as_ref().is_some_and(|native| native.guard.is_finished()) {
+            if let Some(native) = self.native.take() {
+                native.join().map_err(|error| KernelError::Storage(format!("Workspace callback drainage failed: {error}")))?;
+            }
+            unix::detach_disconnected_fuse(&self.target, &self.session.identity().to_string())
+                .map_err(|error| KernelError::Storage(format!("Disconnected workspace FUSE detach failed: {error}")))?;
             // The dispatcher and all its workers have really stopped. These
             // callbacks can no longer deliver Release; retain dirty namespace
             // state in Session while dropping their unreachable handle cache.
@@ -1080,6 +1087,9 @@ impl Mount {
                 return Err(KernelError::Execution(varin_runtime::execution::ExecutionError::new("workspace_native_handles_active",format!("Waiting for {remaining} original native file/directory handles to close before detaching the workspace"))));
             }
         }
+        if !self.session.revoked() {
+            self.session.flush_all()?;
+        }
         if let Some(native) = self.native.as_mut() {
             native.unmount().map_err(|error| {
                 KernelError::Storage(format!("Workspace FUSE detach failed: {error}"))
@@ -1088,6 +1098,8 @@ impl Mount {
                 KernelError::Storage(format!("Workspace FUSE callback drainage failed: {error}"))
             })?;
         }
+        unix::detach_disconnected_fuse(&self.target, &self.session.identity().to_string())
+            .map_err(|error| KernelError::Storage(format!("Workspace FUSE detach could not be verified: {error}")))?;
         self.session.close()
     }
 }

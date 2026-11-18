@@ -122,8 +122,9 @@ export function createManagedProjectManagementOwner(options: { kernel: KernelCli
       case 'inspect': break;
       default: throw new Error('Unknown project management action');
     }
-    const latest = await lifecycle().inspectProject(request.projectId, signal), view = latest.view;
+    const latest = await lifecycle().inspectProject(request.projectId, signal, command.action !== 'inspect' || command.input.observeOnly === true), view = latest.view;
     return { workspace: latest.workspace ?? null, executionPath: view?.mount?.path ?? null, mountState: view?.mount?.state ?? null,
+      mountError: view?.mount?.error ?? null,
       leases: view?.leases ?? 0, capabilities: view?.capabilities ?? null, progress: latest.progress, preparing: latest.preparing };
   };
 }
