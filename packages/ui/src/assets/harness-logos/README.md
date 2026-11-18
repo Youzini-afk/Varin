@@ -29,14 +29,16 @@ The original MIT/Apache license texts are shipped in `packages/web/public/licens
 
 ### Codeg product marks
 
-These SVGs are unchanged copies of `docs/images/agents/` in
-[Codeg](https://github.com/spacering-net/codeg/tree/4991406e6/docs/images/agents),
-reference commit `4991406e6`, under its repository Apache-2.0 license.
+These SVGs are unchanged copies of
+[docs/images/agents/](https://github.com/spacering-net/codeg/tree/4991406e6/docs/images/agents)
+in Codeg (reference commit `4991406e6`, Apache-2.0).
 The source license is shipped in `packages/web/public/licenses/codeg-LICENSE.txt`.
-These marks are used by the product catalogue and conversation HarnessIcon.
+These marks are used by the product catalogue and conversation `HarnessIcon`
+(`packages/ui/src/components/thread/HarnessIcon.tsx`).
 Product names and marks belong to their respective owners and do not imply endorsement.
 
-Codeg's `src/components/agent-icon.tsx` records additional mark provenance:
+Upstream [Codeg agent-icon.tsx](https://github.com/spacering-net/codeg/blob/4991406e6/src/components/agent-icon.tsx)
+records additional mark provenance:
 Antigravity and Qoder from the ACP registry; Kiro from kiro.dev/icon.svg;
 ZCode from zai-org/ZCode; Command Code from its published extension icon;
 TRAE from LobeHub's MIT icon set, whose license is shipped in `packages/web/public/licenses/lobe-icons-LICENSE.txt`.

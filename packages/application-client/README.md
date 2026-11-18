@@ -1,562 +1,241 @@
 # @varin/application-client
 
-Framework-neutral Varin application client boundary.
+Framework-neutral Varin application client boundary. Depends only on `@varin/protocol` and
+`@varin/extension-contract` (no React, Zustand, or UI component dependencies).
 
-`src/settings-locales` owns the static settings dictionaries shared by UI labels and Host tool
-discovery. Edit translations there; UI message modules re-export the same data. The
-`settingsSearchTranslations` loader builds a cached search index only when needed, without React
-or UI state dependencies. `querySettingsCatalog` accepts that index alongside stable IDs and fields.
+## Package Boundary & Consumers
 
-## Purpose
+- **Subpath exports**:
+  - `.` — `RuntimeAPIs` aggregate, typed domain APIs (Terminal, Git, Files, Documents, Settings,
+    Permissions, Notifications, Extensions, Language, LanguageSupport, Tasks, Debug, Tests,
+    Threads, etc.), typed failures (`DocumentsError`, `FilesystemError`, `LanguageServicesError`,
+    `LanguageSupportError`, `RunServicesError`, `WorkspaceSearchError`), pure DTOs
+    (`WorktreeMetadata`, `DraftStarterRef`, `FileEditorSettingsPatch`, `ThreadResultHistory`),
+    transport primitives, and standalone Host clients.
+  - `./desktop` (`src/desktop.ts`) — single desktop IPC contract, imported directly by
+    `packages/electron` main/preload so bundling the native bridge never pulls HTTP/relay modules.
+  - `./locale` (`src/locale.ts`) — shared locale normalization.
+  - `./settings-locales/*` (`src/settings-locales/`) — static settings dictionaries shared by UI
+    labels and Host tool discovery. Edit translations here; UI message modules re-export them.
+    `settingsSearchTranslations` builds a cached search index on demand for `querySettingsCatalog`.
+- **Consumers**: `packages/web` (web/remote implementations), `packages/ui` (shared React
+  presentation and client-side kernels), and `packages/electron` (`./desktop`).
+- **Relay injection**: Relay transport is injected through `registerRelayTunnelProvider` and
+  `registerRelayTunnelLifecycle`; this package never imports the UI tunnel implementation.
+  Selecting Relay without a registered lifecycle fails explicitly.
 
-This package owns the `RuntimeAPIs` aggregate interface and the API interfaces (Terminal, Git,
-Files, Documents, Settings, Permissions, Notifications, Extensions, Language, LanguageSupport, Tasks, Debug, Tests,
-etc.), typed failures (`DocumentsError`, `FilesystemError`, `LanguageServicesError`,
-`LanguageSupportError`, `RunServicesError`, `WorkspaceSearchError`), pure DTO types (`WorktreeMetadata`,
-`DraftStarterRef`, `FileEditorSettingsPatch`, `ThreadResultHistory`), and the single desktop IPC contract (`desktop.ts`).
+## Transport, Host Switching & URL-Auth
 
-`AgentProfilesAPI` edits native Agent profiles through the authenticated Host. It separates shared
-profile fields from the actual registered-tool directory and retains revision-checked settings writes;
-see [Agent profile settings](#agent-profile-settings). Accepted Runs keep their frozen profile.
+- **Authenticated HTTP vs browser URLs**:
+  - Ordinary APIs pass route paths to `runtimeFetch` (`src/transport/runtime-fetch.ts`).
+  - Browser-owned URLs (iframes, downloads, assets, WebSockets) use the runtime URL/auth resolver
+    (`src/transport/runtime-url.ts`). Never pass a browser URL back into `runtimeFetch` or place
+    long-lived bearer credentials in a URL.
+- **Multiplexed observations** (`src/transport/observation-transport.ts`):
+  - Direct-browser long observations multiplex the fixed `src/transport/observation-protocol.ts`
+    route allowlist over `/api/varin/observations/ws`, keeping HTTP/1 connections available across
+    views and tabs (relay requests retain their own transport).
+  - Each channel preserves original HTTP status, headers, and body. Peers negotiate binary frames
+    and a byte-credit receive window (bounds queued bytes, never total response size; older peers
+    retain the pull protocol).
+  - Desktop streams negotiate length-prefixed JSON metadata and image bytes via
+    `src/transport/binary-events.ts`; `RuntimeEventSource` (`src/transport/runtime-event-source.ts`)
+    retains reconnect and cancellation semantics for both binary streams and SSE.
+  - Cancellation closes only that observation; socket failure fails unfinished channels without
+    replay. The Host validates WebSocket identity/Origin and reuses route authorization. Local
+    extension observations stay on the local Host when a remote runtime is selected.
+- **Host switching**:
+  - React features consume `RuntimeAPIs` via provider hooks; framework-neutral consumers use the
+    registered accessor only when hooks cannot own the lifecycle.
+  - Switching Host replaces endpoint/auth ownership and fences async work by Host generation so
+    stale completions cannot publish. Asset caches key by Host + content revision and revoke retired
+    object URLs. Unsupported capabilities return typed unavailable results rather than empty
+    successes or accidental fallthrough.
+- **URL-auth mint lifetime** (`src/transport/runtime-auth.ts`, tested in
+  `test/runtime-auth-timeout.test.ts`):
+  - Owns the shared in-flight URL-token mint with a **10-second deadline** across credential lookup,
+    HTTP/relay fetch, and response-body parsing.
+  - Concurrent consumers share the mint; a stalled mint releases its shared promise so later
+    connections can retry without restarting the app. Fetch receives the owner's abort signal, late
+    completions check runtime/origin generation before publication, and token values are never logged.
+  - Authentication or observation failure never establishes the outcome of input already accepted by
+    the native Catalog.
 
-`thread-history.ts` describes the user-only Thread history list and release response. The Host owns
-selection validation and object cleanup; the UI sends a frozen branch/revision selection. Logical bytes
-referenced by a version and bytes actually removed by cleanup are distinct fields. These DTOs do not
-add an Agent tool or a second state store.
+## Desktop IPC Contract (`src/desktop.ts`)
 
-`ThreadsAPI.list` searches native Thread title/identity and controls archive visibility. Each summary
-has a stable `main_branch_id`, metadata revision, timestamps, pin/archive/tombstone facts and durable
-activity/read cursors. `update` and `delete` retain their original command key and expected revision
-for uncertain retries; `markRead` acknowledges only the cursor actually presented. Same-key replies
-are original receipts, so a late response cannot replace a newer cached summary. Delete hides product
-navigation and closes fresh user admission; it does not cancel accepted execution or release resources.
-Those original owners continue to discover and settle hidden work. Restore is `update({ archived:
-false, ... })`; deletion is a retained tombstone, not archive or physical collection.
+- `VarinDesktopCommandMap` — typed `{ args, result }` for the exhaustive `desktop_*` command catalog.
+- `VarinDesktopBridge` — typed bridge interface implemented by Electron preload and consumed by UI.
+- `PreloadBootstrapPayload` — discriminated union carrying credentials only for local pages.
+- `VarinDesktopEventMap` — typed desktop events (update progress, SSH status, menu actions, etc.).
+- Exhaustive command/event catalogs, runtime guards, and `VARIN_REMOTE_SAFE_DESKTOP_COMMANDS`.
 
-`ThreadsAPI.sources` lists configured source Hosts and resolves a folder through the selected Host’s
-Documents owner. The returned `resourceOwner` freezes the Host, configured connection and non-secret
-endpoint identity. `ThreadsAPI.prepareSource` takes that owner, a Documents-resolved `workspaceId`, stable key, source mode,
-explicit saved-files or surface-drafts content, and capture scopes. A draft context belongs to the
-exact Thread/branch consumer. The picker preserves that entire intent for an uncertain retry; it
-does not resolve the folder again or capture newer editor bytes under the same key. Managed sources
-use saved target files; this window’s editor drafts remain on their original Host. A materialized
-source retains its original `environmentRunId` through Context and continuation. The Host owns
-durable preparation receipts and resource cleanup. Cancelling one observer does not cancel another
-observer of the same preparation; the last cancellation waits for that preparation's work to drain.
+## Native Threads API (`src/threads.ts`, `src/threads-http.ts`)
 
-`ThreadsAPI.prepareNavigation` reads the original ancestry and editable input. `navigate` submits a
-stable key, expected head and target head to Catalog; `navigationReceipt` resolves an uncertain result
-without replaying an old input. Only an original receipt can authorize undo to a removed descendant.
-`recoverySource` discovers sources across the affected history range. `ThreadSnapshot.recovery`
-projects standalone navigation and the original combined file/history operations separately, including
-after reopen. Combined recovery uses the versioned workspace-recovery service and its operation
-revision; it must not be presented as a conversation-only undo.
+Read calls accept `AbortSignal`, fence against endpoint-generation changes, and discard stale
+responses after Host or selection changes. Unless noted, Host owns durable receipts, permissions,
+and cleanup; aborting a transport or closing a view never cancels accepted Catalog execution.
 
-`DocumentsAPI.resolveResourceIdentity(resource, { withinWorkspaceId })` scopes alias discovery to a
-selected registered root. A `null` result means the Host proved the registered roots disjoint;
-unavailable or untrusted overlapping roots still fail. Calling without a scope returns the ordinary
-physical identity. Consumers do not parse the opaque coordination ID as a filesystem path.
+| Surface | Key Methods / Files | Core Contract |
+| --- | --- | --- |
+| Thread catalog & history | `list`, `update`, `delete`, `markRead`; `src/thread-history.ts` | Stable `main_branch_id`, metadata revision, durable activity/read cursors. Uncertain retries reuse key + expected revision; same-key receipts cannot overwrite newer cache. `delete` writes a tombstone without cancelling accepted execution; restore via `update({ archived: false, ... })`. History release separates logical vs reclaimed bytes. |
+| Sources & identity | `sources`, `prepareSource`; `DocumentsAPI.resolveResourceIdentity` | Resolves folders via selected Host's Documents owner; freezes non-secret `resourceOwner` + `workspaceId` + key/mode/scopes (retries reuse frozen intent). Managed sources use saved target files; materialized sources retain `environmentRunId`; last observer cancel drains prep. `resolveResourceIdentity(..., { withinWorkspaceId })` returns `null` only when disjoint; never parse IDs as paths. |
+| Navigation & recovery | `prepareNavigation`, `navigate`, `navigationReceipt`, `recoverySource` | Stable key + expected/target head; only an original receipt authorizes undo to a removed descendant. `ThreadSnapshot.recovery` separates combined file/history recovery from standalone conversation undo. |
+| Run control & inspection | `resume(runId, waitId)`, `retryPreparation(runId)`, `inspectTools`, `inspectPolicy`, `restartPolicy`, `cancelPolicyUpdate` | `resume` idempotently consumes only the displayed Pause (read derived `LaunchIntent.startable`/`pause`; queueing input ≠ resume). `inspectTools` exposes activated directory & prep state (preparing ≠ callable; revoked unavailable immediately; retiring stays callable via Run pin; listing ≠ permission). `restartPolicy` resets only the candidate's private checkpoint at a closed boundary without resuming Pause. |
+| Goals | `ThreadsAPI.goals`, `ThreadSnapshot.goals` | Revision-checked continuing objectives returning short admission receipts (usage/objective read separately). Retries reuse key/input; ordinary submit/fork never creates a Goal; Goal-owned followups use Goal controls. |
+| Family inspection | `ThreadsAPI.family` (`list`, `runs`, `read`, `item`) | Read-only cross-family view with caller `ThreadIdentity` separate from target. Anchors survive append/fork/rollback but expire with runtime epoch; empty pages can carry cursors; no launch or control methods. |
+| Delegated continuation | `collaboration.continueChild`, `executions`, `readReport`, `readExecutionReport` | Explicit User continuation with stable key, previous Run, expected head (retries reuse intent; runtime derives config/source). `ChildReportPage` carries owner-set `format: 'text' \| 'output_body'` (assemble complete UTF-8 range before parsing `OutputBody<StoredMedia>`). Original `ChildTask`/`readReport` remains dispatch-round view. |
+| Materials | `materials.upload`, `read`, `readSource`, `readArtifact` | `upload` ingests base64 `application/pdf` -> fixed `snapshotId`. `read` returns `FetchResult` from `snapshotId` (rechecks reading/OCR settings; hash verifies equality, never grants access). `readSource` / `readArtifact` (`/api/threads/materials/read-artifact`) require explicit retained research `sourceRunId`. |
+| Research | `ThreadsAPI.research` (`scopes`, `submit`, `cancel`, logs/artifacts) | `scopes` lists retained source Runs; every domain call passes explicit `sourceRunId`. `canSubmit` is separate from read/control. `submit` uses stable User request ID + intent (does not restart historical source Run); `cancel` requests stop (closing readers does not); collection is separate. |
+| MCP interactions | `ThreadsAPI.listMcpInteractions` | Compact `McpInteractionItem` pages with full evidence loaded on demand. `server_request` retains reviewed response delivery; `rpc_error` URL cards record local choices only and stay reviewable after Run failure without retrying the RPC or resuming the Run. |
 
-`ThreadsAPI.resume(runId, waitId)` explicitly consumes the displayed policy Pause and returns its
-durable receipt. Retrying the same command preserves that receipt and cannot resume a later Pause.
-`retryPreparation(runId)` is a separate launch-preparation retry; queueing input is not a resume
-command. The UI reads derived `LaunchIntent.startable`/`pause` projections rather than guessing
-eligibility from a waiting Run or a Wait ID prefix.
+### Task-family messages, questions & follow-ups
 
-`ThreadsAPI.inspectTools(identity, runId)` queries the authenticated Host for the Run's activated
-tool directory, selected provider identities, and per-service preparation state. An extension still
-preparing is not callable. Revoked providers are unavailable immediately; a normally retiring provider
-can remain callable through its original Run pin. Listing a callable tool does not grant permission:
-each actual invocation is authorized against its original operation and current permission policy.
+- **Messages** (`ThreadsAPI.messages`: `feed`, `inform`/`request`, `replyTo`,
+  `collaboration.exchange`):
+  - Trusted Host sets User identity (clients cannot set Agent actor/sender). `replyTo` targets the
+    exact peer; `feed` pages immutable numeric acceptance cursors without activation effects.
+  - Send receipts (`acceptedAtMs`) confirm Catalog acceptance separately from history delivery or
+    completion; retry lost sends with the same key and intent.
+  - `replyWait` projects an Agent's observation/deadline/winner (never client timers; User sends do
+    not accept `wait`). Cancelling an Agent observation via Operation control never withdraws the
+    message or hides a late reply.
+- **Questions & permissions**:
+  - `answerQuestion` submits the full `answers[]` (`questionId`, `selectedOptionIds`, `text`,
+    `skipped?`) validated against the immutable `ask_user` set; equal retries reuse the receipt;
+    cancellation uses `cancelOperation`.
+  - Permission `allow_always` persists the displayed rule through the Host settings owner before
+    resolving the one-action permission; renderers cannot supply rules.
+- **Follow-ups** (`ThreadsAPI.followups`, `src/thread-workflows.ts`):
+  - Registers one instruction for `at`, `process_stopped`/`job_stopped`, original-source file
+    condition, research `artifact`/`collection`, job `log_literal`/`log_end`, machine `metric`, or
+    flat `any`/`all`. Retries reuse key, source Run, trigger, and body; control uses revision.
+  - `repeat: 'each'` repeats on each accepted match/crossing (omitted = once); repeated `any`
+    consumes finite leaves once; repeated `all` pairs FIFO changes from all repeatable leaves.
+    Pause holds accepted work/cursors; cancel withdraws future/undelivered occurrences without
+    cancelling delivered Runs or the underlying Job.
+  - `list` returns compact metadata; abortable `get`, `occurrences(identity, followupId, after?)`
+    (`nextCursor` ≠ source `trigger_cursor`), and `occurrence(identity, followupId, occurrenceId)`
+    load details on demand as inert data (never executed markup).
+  - Source specifics:
+    - `artifact` takes `artifactId` XOR `name` (neither = any); `collection` observes completion
+      including empty/failed snapshots.
+    - `metric` selects `machineId`, CPU/memory (MiB or %) or stable `gpuUuid` from
+      `research.resources`, strict `above`/`below`, and finite threshold. Local sampling only;
+      unknown/stale values do not rearm; historical gaps stay visible without replaying crossings.
+    - `log_literal` matches non-empty exact UTF-8 bytes on stdout/stderr (omitted `fromOffset`
+      starts at 0; `each` allows overlaps); `log_end` is finite per stream. Evidence freezes byte
+      ranges/revisions without copying log text into lists. Catalog projects `exhausted` and
+      `delivery_pending`.
+    - `jobSources(identity, runId)` discovers task-family Jobs and returns authoritative
+      `observationKinds`.
 
-`ThreadsAPI.inspectPolicy` and `ThreadSnapshot.policySelection` separate the committed strategy
-generation and desired update from the current Host's preparation status. Preparation is not activation.
-`restartPolicy(identity, runId, selectionId)` explicitly restarts only that displayed candidate's private
-checkpoint at a closed decision boundary; the candidate ID and active generation are rechecked by
-Catalog. Conversation history and independent tasks remain intact. `cancelPolicyUpdate` cancels that
-unpublished candidate, not the Run. Neither operation resumes an explicit Pause.
+### Typed output media (`src/thread-media.ts`)
 
-`ThreadsAPI.goals` starts an explicitly authorized continuing objective, updates its objective/budget,
-and applies revision-checked pause/resume/complete/cancel controls. Writes return short admission
-receipts; `list` and `ThreadSnapshot.goals` contain separately read current usage and objective views.
-An uncertain creation retry keeps its original key and input. Update/control conflicts require reading
-the current revision before a new explicit action. Ordinary message submission and conversation fork
-are not Goal creation commands. Goal-owned followups are controlled through their Goal.
+- `ThreadsAPI.mediaRead` reads one byte chunk through its original holder (history/input/Operation/
+  event, policy evidence, family view, or `child_report` with dispatch + execution + report item).
+  `expectedContentRef` verifies equality only and never grants bare hash access.
+- `readThreadMedia` assembles and validates chunks, ordinal, byte total, and base64 into ephemeral
+  bytes with no persistent cache, aborting on cancellation or Host switch.
+- `OutputBody.parts` preserves text/media order while `data` remains opaque (never scanned for
+  images). Operation results distinguish `control.value` and `output.output`. On input edits,
+  omitted images preserve media, `[]` removes it, and new inline uploads replace it (public
+  `StoredMedia` hashes cannot authorize replacement).
 
-`ThreadsAPI.messages.feed` reads a chronological page of the selected Thread's task-family messages,
-including peer traffic. Numeric before/after bounds refer to immutable native acceptance cursors;
-the result includes the original actor, delivery state and compact participant identities. Reading has
-no activation effect. User messages can address the main Thread or reply to a visible family exchange;
-Agent messages retain their original directed reply rules. `collaboration.exchange` resolves a message
-to its original Integration operation and reads recorded file versions from that resource owner.
+### Composer resources & frozen chat quotes
 
-`ThreadsAPI.followups` registers one explicit instruction for an absolute `at` instant, accepted
-`process_stopped`/`job_stopped` operation, original-source file condition, research `artifact`/`collection`,
-original-job `log_literal`/`log_end`, original-machine `metric`, or flat `any`/`all` combination. Register retains a stable key and
-exact source Run/trigger/body for uncertain retries. `list` exposes short lifecycle metadata, while
-abortable `get` reads the original instruction and `registration_trigger` (including literal text).
-Control uses the displayed revision. Triggering, input binding and actual history delivery are distinct:
-a bound but undelivered occurrence can still be paused/cancelled without cancelling its shared Run or
-process. Agent-only optional waiting is not part of this User API. Independently registered followups
-retain their explicit actor even under a Goal; automatic Goal-owned definitions use Goal controls.
+- **Skills & source files** (`src/thread-source-files.ts`): `ThreadSubmit`, queued input, and child
+  continuation carry `skills` selectors (`resourceId`, `version`, UTF-16 `start`/`end`) as part of
+  durable input identity (prepared in text order, deduplicated; leading `/skill:name` keeps the
+  original parser).
+  - `ThreadsAPI.resources.skills` and `draftSkills` resolve branch or pending-source skills by exact
+    locator/version (drift fails explicitly rather than falling back by display name).
+  - `threads.sources.files` and `draftFiles` return metadata-only Source-relative entries (`path`,
+    `relativePath`, `name`, `type`, `nextCursor`, default page size `50`). Missing source yields
+    empty only for chat-only Threads; source read errors reject explicitly.
+  - `references` carry task/branch or source-directory locators and ranges as context only.
+- **Frozen chat quotes** (`src/content-reference.ts`, `src/content-reference-input.ts`): Native
+  submit, queue, child continuation, and User messages accept `contentReferences` +
+  `contentReferenceOccurrences` bound to UTF-16 draft ranges (plain marker-shaped text is not a
+  binding; metadata never grants file access; Rust projects once preserving order). Queue
+  `editInput` accepts replacement quotes as its final argument (omission keeps frozen objects; text
+  edits clear old positions). Navigation prep returns quotes, files, and image bindings without
+  duplicating file-backed images.
 
-`repeat: 'each'` explicitly authorizes the same instruction on each accepted file-change, research
-metadata edge, log-literal match or known metric crossing; omitted `repeat` means once. Repeated Any consumes finite leaves once; repeated All pairs FIFO changes from
-every repeatable leaf. The definition retains its observer after delivery. Pause holds accepted work;
-Cancel withdraws future and undelivered occurrences, without changing delivered Runs or results.
-`pending_occurrences` and latest `.occurrence` are compact projections. Abortable
-`followups.occurrences(identity, followupId, after?)` pages original occurrences in accepted-cursor
-order and returns `nextCursor`; source `trigger_cursor` has a different meaning. The GUI retains
-continuous controls, explicit retry of undelivered work and a refreshable history page. Run navigation
-reuses the original read-only `family` reader with the exact delivered Run, not another execution target.
+### Thread observation (`src/thread-observation.ts`)
 
-Abortable `followups.occurrence(identity, followupId, occurrenceId)` reads one exact occurrence and
-the original metadata accepted for its source facts. The GUI loads details on demand, checks their
-occurrence/source cursors and discards late replies after identity or selection changes. Bodies are
-shown as data, never executed markup or another trigger. The short history list does not fetch them.
-These are historical metadata, not a new immutable artifact-byte snapshot; original artifact reads
-remain current-domain operations with their own authority and availability.
-`artifact` accepts an optional `artifactId` or `name`, not both; no selector means any original artifact.
-`collection` explicitly observes the original collection completion, including empty or failed results.
-An explicit Any observes both. Failed collection absence, missing in a completed snapshot, pending
-metadata and a zero-byte available artifact retain different meanings.
-
-`metric` selects a real `machineId`, CPU/memory dimension or stable `gpuUuid`, strict `above`/`below`
-and a finite threshold. Memory dimensions use MiB; percentage dimensions use percent. Machine/GPU choices come from the existing `research.resources` API for the
-original source Run, not a second directory or permission list. The UI sends UUIDs while displaying
-ordinals/names. Local sampling follows active definitions without an open panel; remote sampling is
-currently unsupported. Initial known satisfaction fires once; Each requires known false-to-true.
-Missing, stale or unread values stay unknown and do not rearm a previously satisfied condition.
-Short metric state and occurrence evidence retain original revision, value, time, identity and gap.
-Historical gaps are visible; overwritten unobserved crossings cannot be replayed. Uncertain retries
-keep the exact original key/source/selector, and late directory reads cannot switch Host/Thread/Run.
-
-`log_literal` selects stdout or stderr and matches exact UTF-8 literal bytes, preserving whitespace
-and case. An omitted `fromOffset` starts at byte 0, including already published output; a future offset
-waits for new output. Each includes overlapping matches; Once observes the first. `log_end` is a finite
-single fact for one stream, independent of artifact collection. It can join repeated Any alongside a
-repeatable source; repeated All requires every source to repeat. Empty literals are invalid.
-Short sources expose only the stream, offset and literal byte length; source `log` state exposes cursor,
-end and short failure status. `exhausted` is the Catalog's projection of whether the original source
-queues can produce another occurrence; consumers do not infer it from individual leaves. Exhaustion
-without a match has no occurrence, and an Agent observation can finish as `exhausted`. The original
-observation owner derives `delivery_pending`: an undelivered observation on a terminal Run has no
-further delivery obligation. Consumers distinguish it from a live observation awaiting history delivery.
-Original literals
-are read only on explicit detail expansion. Occurrence evidence freezes the matched byte range or stream end, publication high-water and original Job/attempt
-revisions; log text is not copied into list or occurrence metadata reads. Pause/resume keep the cursor,
-and cancelling the observation never cancels its accepted Job.
-
-`followups.jobSources(identity, runId)` discovers original accepted domain Jobs in the actual task
-family, including independent User, historical and child/sibling work absent from the current history
-page. It returns short binding/origin/lifecycle metadata and accepts AbortSignal. The selected Run must
-belong to the selected Thread/branch; a target Job's `sourceRunId` remains attribution, never the
-follow-up execution source. A Job's executor stop is separate from artifact collection and unknown
-business outcomes. The UI retains the original selected Run/key/trigger when retrying an uncertain
-registration and discards stale Host/selection responses. Required `observationKinds` comes from the
-original owner and determines the UI's available source kinds without a second domain support table.
-
-`ThreadsAPI.family` reads the original task family without selecting another execution target.
-The caller `ThreadIdentity` is separate from the target request. `list` discovers actual related
-Threads, `runs` lists direct and inherited historical Run owners, `read` uses fixed recent/range/search
-pages, and `item` expands the original semantic JSON in byte pages. These methods accept AbortSignal;
-Host/caller/target changes must discard old views. Anchors survive append/fork/rollback but expire with
-the runtime owner epoch. An empty scan page can still have a continuation cursor. Partial JSON is not
-a complete tool exchange. This API contains no target launch, source preparation or control method.
-
-`ThreadsAPI.mediaRead` reads typed bytes through an original history/input/Operation/event,
-policy-evidence, family or child-report holder. The expected content reference is an equality check,
-not permission to read any content hash. `readThreadMedia` assembles the original chunks, validates
-identity/ranges, and aborts on Host change without keeping a persistent byte cache. Semantic history
-and family pages contain StoredMedia descriptors; ordinary output `data` is never scanned for images.
-
-`collaboration.readReport` and `readExecutionReport` return the exact operation/execution/history
-identity plus `format: text | output_body`. An output-body page is a UTF-8 JSON fragment; assemble
-its original complete range before parsing `OutputBody<StoredMedia>`. Media uses that same child
-report holder and exact execution ID, including later Runs. Both report readers accept AbortSignal;
-cancelling a read does not cancel the child or alter its report.
-
-`ThreadsAPI.materials.upload(identity, request, signal?)` accepts an original PDF as canonical
-base64 with its filename and `application/pdf` MIME type. The authenticated Host derives the material
-domain from the real Thread/branch and retains original bytes through its document reader and
-MaterialStore. The response supplies a fixed PDF snapshot; no workspace upload or browser-side text
-ingestion is involved. Submit, `boundary`/`interrupt`/`next_run` enqueue and child continuation accept
-`materials: [{ snapshotId }]`. Admission resolves provenance through the material owner; arbitrary
-paths and hashes are never grants. Uncertain retries keep the same snapshots and original input key.
-
-`ThreadsAPI.materials.read(identity, request, signal?)` reads a retained Web/PDF snapshot through the
-same authenticated Thread route. The request contains a fixed `snapshotId` and document view options;
-workspace, grants, source Runs, local paths and artifacts are not public selectors. The Host derives the
-current domain from the real Thread/branch and rechecks current User reading/OCR settings. The response
-is the original `FetchResult`, including distinguishable material, parser and image failures. A content
-hash verifies source equality; it never grants access. Endpoint/identity changes cancel or reject old
-reads, without cancelling a Run or changing the tool's frozen configuration.
-
-`ThreadsAPI.materials.readSource(selection, request, signal?)` reads an explicitly selected path
-through a retained research source Run. The Host derives source authority and resolves that path within
-the original source, including retained fixed/materialized views. This does not authorize arbitrary
-files on the coordinating Host.
-
-`ThreadsAPI.materials.readArtifact(selection, request, signal?)` uses an explicit retained research
-`sourceRunId` alongside the same Thread/branch identity. Its artifact reference is the original
-`attemptId` and `artifactId`; the authenticated `/api/threads/materials/read-artifact` route delegates
-nested document validation to the material owner. The Host resolves the original research source and
-artifact authority. A successful PDF ingestion supplies the retained snapshot for subsequent `read`
-calls, whose contract remains snapshot-only. Neither route accepts renderer-granted filesystem,
-workspace or content-hash authority. Cancelling this observation never cancels or collects the attempt.
-
-`ThreadsAPI.research` projects the original experiment, source and resource owners for an actual
-Agent `ThreadIdentity`. `scopes` lists retained source Runs, including earlier branches; callers
-select an explicit `sourceRunId` for every domain request. `canSubmit` is separate from historical
-read/control access. The Host derives workspace, family and actor authority; these are not renderer
-arguments. Attempts carry the current caller's control permission. Logs and binary artifacts retain
-the original attempt, stream/artifact and byte offsets, and reads accept AbortSignal.
-
-Research `submit` requires a stable User request ID and exact intent. An uncertain response must
-retry that same pair. It admits an independent User command and original domain attempt without
-starting the historical source Run. `cancel` requests the original job's stop; closing a reader does
-not cancel a job. Collection remains a separate domain action. These APIs do not own a second
-experiment store or turn a historical read into execution.
-
-The desktop contract defines:
-
-- `VarinDesktopCommandMap` — typed `{ args, result }` for the exhaustive `desktop_*` command catalog
-- `VarinDesktopBridge` — the typed bridge interface implemented by Electron preload and consumed by the UI
-- `PreloadBootstrapPayload` — discriminated union carrying credentials only for local pages
-- `VarinDesktopEventMap` — typed desktop events (update progress, SSH status, menu actions, etc.)
-- exhaustive command/event catalogs and runtime guards, plus `VARIN_REMOTE_SAFE_DESKTOP_COMMANDS`
-
-It has no React, Zustand, or UI component dependencies. It depends only on `@varin/protocol` and
-`@varin/extension-contract`.
-
-## Consumers
-
-- `packages/web` — Web/remote surface API implementations
-- `packages/ui` — shared React presentation and client-side kernels
-- `packages/electron` — Electron main/preload import the focused `@varin/application-client/desktop`
-  subpath so bundling the native bridge does not pull in unrelated HTTP/relay transport modules
-
-All three product consumers import contracts and transport primitives directly from
-`@varin/application-client`; the former UI forwarding modules have been removed. Relay is injected
-through `registerRelayTunnelProvider` and `registerRelayTunnelLifecycle`, so this package never imports
-the UI tunnel implementation. Selecting Relay without a registered lifecycle fails explicitly.
-
-`ThreadsAPI.listMcpInteractions` returns compact `McpInteractionItem` pages; exact read/respond adds
-the complete original evidence. A tagged `server_request` retains reviewed response delivery, while
-`rpc_error` URL cards have null delivery and record only local choices. Natural Run failure or a
-closed completion watcher does not remove the user's ability to review that retained error. The
-shared panel fetches full JSON on demand; neither local choice nor explicit external navigation
-retries the old RPC or resumes its Run. Public identity checks remain the original Thread/branch path.
-
-## Standalone Host clients
-
-The package root also exports `createExternalAgentsHttpAPI` (`external-agents.ts`) and
-`createUsageHttpAPI` (`usage.ts`); these are not fields on the `RuntimeAPIs` aggregate. External
-conversations use `/api/external-agents/*` and their own Harness/session/turn identities, not fabricated
-native Runs. Usage reads `/api/usage/summary` from the selected Host with explicit date boundaries.
-Both clients retain endpoint generation and reject stale results after Host switching. These adapters
-do not own external execution or the Catalog usage ledger.
-
-## Transport and Host switching
-
-Ordinary authenticated APIs pass route paths to `runtimeFetch`. Browser-owned URLs such as iframes,
-downloads, assets and WebSockets use the runtime URL/auth resolver and their transport helper. Do not
-build a browser URL and pass it back into `runtimeFetch`, or place long-lived bearer credentials in a
-URL. Browser URL admission remains a narrow authenticated Host contract.
-
-Direct-browser long observations use `transport/observation-transport.ts` to multiplex the fixed
-`observation-protocol.ts` route allowlist over `/api/varin/observations/ws`. This keeps HTTP/1
-connections available across views and tabs; relay requests retain their existing transport.
-Each channel receives the original HTTP status, headers and body. Peers negotiate binary data frames
-and a byte-credit receive window; readers replenish capacity before the window empties, so a stream
-can carry several chunks per network round trip. Older peers retain their original pull protocol.
-The window bounds queued bytes and never limits the response's total size. Desktop streams negotiate
-length-prefixed JSON metadata and image bytes through `binary-events.ts`; `RuntimeEventSource` retains
-the original reconnect and cancellation lifecycle for both this format and SSE.
-Cancellation closes only that original observation; a socket failure fails all unfinished channels
-without replaying them. Existing consumers own cursor/revision recovery and resource-lease lifetime.
-The Host validates the WebSocket identity and Origin, then reuses each original route's authorization.
-Local extension observations retain their local Host when the selected runtime is remote.
-
-React features consume RuntimeAPIs through the provider hooks. Framework-neutral consumers use the
-registered accessor only when a hook cannot own the lifecycle. Switching the current Host replaces
-endpoint/auth ownership and resets or rebinds existing consumers. Async work retains its original Host
-generation; old completions cannot publish into the new one. Asset caches include Host and content
-revision and revoke retired object URLs. Unsupported capabilities remain typed unavailable results,
-not empty successes or accidental route fallthrough.
-
-## URL-auth mint lifetime
-
-`transport/runtime-auth.ts` owns the shared in-flight URL-token mint, including its 10-second
-deadline across credential lookup, HTTP/relay fetch and response-body parsing. Concurrent consumers
-share that operation; a stalled mint must release its shared promise so a later connection can retry
-without restarting the application. Fetch receives the owner's abort signal and late completion is
-checked before token publication, even when a transport ignores cancellation. Runtime/origin generation
-checks still prevent an old authority from overwriting a new token. Token values are never logged.
-
-`test/runtime-auth-timeout.test.ts` exercises a stalled response body, concurrent mint sharing,
-retry and late-publication rejection. Authentication or observation failure does not establish the
-outcome of input already accepted by the native Catalog.
-
-## Task-family message contract
-
-`ThreadsAPI.messages` exposes immutable `inform`/`request` acceptance and original incoming/outgoing message
-views. The caller supplies its `ThreadIdentity` separately from the peer request. The trusted Host
-sets User identity; clients cannot choose Agent actor/sender fields. `replyTo` addresses the exact
-original peer without guessing its current branch. A send receipt confirms acceptance, while message
-views separately report the actual history delivery Run/cursor and request activation. A bound Run
-is not proof that it completed the requested work. Pending holds and failed/cancelled activation keep
-the original message readable; message views never become another execution owner.
-
-Read calls accept AbortSignal and all calls keep the existing runtime endpoint-generation checks.
-A lost send response must be retried with the same original key and intent. Aborting the transport or
-closing a UI does not retract a message already accepted by the Catalog. A request can enter the
-current Run or admit a new root/child execution through its existing owner. Manual pauses, unanswered
-questions and Goal limits remain effective. Receipt `acceptedAtMs` is the original committed time.
-
-`answerQuestion` submits an `answers` array to the original question Operation. Each entry carries
-`questionId`, `selectedOptionIds`, `text` and optional `skipped`; the native Catalog validates this against
-the immutable `ask_user` question set before appending user history and continuing the Run. It is a
-whole-request submission, including optional questions, with the original answer receipt reused for
-equal retries. Cancellation uses `cancelOperation`, not a fabricated answer string. Permission decisions
-remain separate: `allow_always` asks the authenticated Host to save the displayed capability rule through
-its settings owner, then resolve the original one-action permission. The renderer cannot supply rules.
-A nullable `replyWait` view reports an Agent's original observation, exact Operation/Run, absolute
-deadline, winning reply/expiry/cancellation and actual lifecycle-history delivery. These are projections,
-not client timers or execution state. User sends have no observation owner and do not accept `wait`.
-The UI can end its own Agent observation through the existing Operation control; this never withdraws
-the original message, changes a won result or hides a late linked reply.
-
-## Delegated execution continuation
-
-`ThreadsAPI.collaboration.continueChild` submits an explicit User continuation on the original child
-Thread/branch with a stable key, exact previous Run and expected head. It returns durable execution
-acceptance, which may precede source preparation and Run creation. Retry an uncertain response with
-the original intent; do not select a later Run or new key automatically. Configuration and source are
-derived by the owning runtime, not supplied by this API.
-
-`ThreadSnapshot.delegatedExecutions` and `collaboration.executions` expose each execution separately.
-`readExecutionReport` reads the specified execution's original report item; the returned execution
-and item identities must match the request. Parent access retains the existing same-Thread historical-fork read scope, while the
-child snapshot lists only its own original execution branch; reading does not grant continuation or control. All reads accept AbortSignal and preserve endpoint-generation
-checks. The original ChildTask and `readReport` remain the dispatch-round view; they never silently
-switch to the latest continuation. Active child boundary/interrupt input uses the ordinary queue;
-its next Run must use the dedicated continuation admission.
+- `getThreadObservationBus(api)` owns one shared transport per selected Host/API. Subscribers pass
+  optional thread, branch, and exact or namespace (`run.*`) kinds. Host enforces authorization
+  (global cursor gaps ≠ lost authorized events).
+- Reconnect replays the durable cursor; live progress-interest changes coalesce via
+  `updateObservationInterests` (connection-scoped observation ID) without disrupting other views.
+- Disconnects, cursor resets, and kernel epoch changes emit `resync`; initial connection emits a
+  ready resync (`onReady` fires after response headers). Endpoint switches close the old bus.
+- `snapshot(identity, signal, { afterHeadId })` permits delta merge only when returned
+  `historyPage.afterHeadId` matches; omission means full history replacement (non-history fields
+  are always complete).
 
 ## Agent profile settings
 
-`AgentProfilesAPI` reads and revision-checks the original user Agent profile settings for
-`runtime: 'agent'`. The Host returns editable configuration separately from tool selection
-(`default`, `explicit`, or `unconfigured`) and the actual capability directory. A `null` directory
-means observation is unavailable, not an empty list. Raw persisted settings do not become a second
-client authority. Save omits tools to preserve them, sends `[]` for no tools, or `null` to reset.
-Creation requires a custom config with an empty key and explicit tools; the Host allocates its
-identity. Removing a custom profile removes its shared definition. The HTTP client preserves the
-Host's safe failure code/message and rejects late responses after Host changes or cancellation.
+- `AgentProfilesAPI` (`src/agent-profiles.ts`, `src/agent-profiles-http.ts`) edits revision-checked
+  user profiles for `runtime: 'agent'`, separating editable config, tool selection (`default` /
+  `explicit` / `unconfigured`), and the live capability directory (`null` = unavailable, not empty).
+- Save omits tools to preserve them, sends `[]` for none, or `null` to reset. Custom creation uses
+  an empty key and explicit tools (Host allocates identity). Accepted Runs keep their frozen profile.
+- Built-in `contextCompaction` includes a native `automation` descriptor (defaults to conversation
+  model; filtered out of role/mention pickers; timing/capacity remain in context settings).
+- Model/auth, MCP connections, and user/project skills live in `src/model-connections.ts`,
+  `src/mcp-connections.ts`, and `src/resource-management.ts` (Host resolves project trust/paths;
+  edits do not alter frozen Run checkpoints).
 
-The built-in `contextCompaction` profile includes an `automation` descriptor from the native runtime:
-default instructions, the output-format suffix, request/budget template and read-only tools. Its model
-defaults to the conversation model. The editor changes work instructions and model parameters; tools
-and workspace controls apply to delegated profiles. Role/mention consumers filter automatic profiles
-out of ordinary conversation selection. Timing and capacity remain in context settings. Manual and
-automatic ContextJobs consume the same profile and retain their admitted choices across recovery.
+## Host Connections, Plugin Center & Standalone Clients
 
-Model/authentication and MCP connections have separate Host APIs in `model-connections.ts` and
-`mcp-connections.ts`. `resource-management.ts` manages current user/project skills using a saved
-navigation project and revision-checked commands. The Host resolves project trust and source paths;
-renderer paths do not grant access. Editing these defaults does not replace resources already frozen
-into a Run checkpoint.
+- **Host-owned connections** (`createHostConnectionsHttpAPI`, `src/host-connections.ts`): Always
+  uses the selected Agent Host's authenticated HTTP transport—even inside Electron, never desktop
+  IPC—for saved resource addresses, SSH processes, localhost probes, and logs. Fences endpoint
+  generation; stopping UI SSH observation does not disconnect Host processes.
+- **Plugin center** (`ExtensionsAPI.pluginCenter`, `src/plugin-center.ts`;
+  `src/plugin-install-intent.ts`): Uses the authenticated Application Host transport with
+  response-body generation fencing. Listing reads cached public catalogs; refresh, release preview,
+  and installed update checks (by extension ID) are explicit separate requests; archive imports
+  upload to the same Host. Install binds retained preview ID, expected Host, and catalog revision
+  (never resolves `latest` post-review; source replacement is an explicit flag).
+  `plugin-install-intent` parses public npm/GitHub release links only (no local paths/credentials;
+  grants no trust or permission).
+- **Standalone Host clients** (exported from package root, not on `RuntimeAPIs`):
+  - `createExternalAgentsHttpAPI` (`src/external-agents.ts`) — `/api/external-agents/*` with
+    Harness/session/turn identities (not fabricated native Runs).
+  - `createUsageHttpAPI` (`src/usage.ts`) — `/api/usage/summary` with explicit date boundaries.
+  - Both fence endpoint generation and reject stale results after Host switches.
 
-## Host-owned connections
+## Shared Conversation Organization & Project Bindings
 
-`createHostConnectionsHttpAPI` uses the selected Agent Host's authenticated HTTP transport, even
-inside Electron. It never falls back to desktop IPC: saved resource addresses, SSH processes,
-localhost probes and logs belong to that Host. The client captures endpoint generation before
-request dispatch and rejects late responses after authentication or Host replacement. The UI's
-separate owner-scoped SSH projection can stop observation without disconnecting its processes.
+`RuntimeAPIs.conversationOrganization` (`src/conversation-organization.ts`,
+`src/conversation-organization-http.ts`) owns the authenticated principal's Catalog navigation
+space (mixed project/group containers + native/external conversation positions; not a history or
+execution owner):
 
-## Typed output media
-
-`ThreadsAPI.mediaRead` reads one byte chunk through its original history item, queued-input revision,
-Operation completion/result/external receipt, policy evidence, or fixed family-view holder. The caller's
-Thread identity stays separate from a family target. `expectedContentRef` checks the image displayed by
-that holder; it never authorizes a bare content-object read. Requests use the existing authenticated Host
-transport and AbortSignal/endpoint-generation checks.
-
-`readThreadMedia` captures that exact selection, reads its chunks, verifies the media/source identity,
-ordinal, chunk sequence/count, byte total and base64, and returns ephemeral bytes. It owns no cache,
-content service or permissions. It rejects cancellation and Host replacement before publishing bytes.
-Stored `OutputBody.parts` retain text/media order; `data` remains opaque, including media-looking JSON.
-Operation results have explicit `control.value` and `output.output` variants. For input edits, omitted
-images preserve original accepted media, `[]` removes it, and newly uploaded inline images replace it;
-public StoredMedia hashes cannot be submitted as replacement-image authority.
-
-Child report reads return `ChildReportPage` with an original-owner `format` of `text` or `output_body`.
-`text` contains the requested UTF-8 byte page, including when its content is the Stored OutputBody JSON;
-callers cannot choose or reinterpret that format. Both original-dispatch and explicit-execution readers
-accept AbortSignal. Report media uses the `child_report` holder with its original dispatch, returned
-execution identity and report item; it never borrows a latest Run or a family-view anchor.
-
-
-## Composer resource selections
-
-`ThreadSubmit`, queued input and child continuation share `skills` selectors: stable `resourceId`,
-captured `version`, and UTF-16 `start`/`end` offsets identifying the exact visible `/skill:name` text.
-The Host prepares multiple selections in text order and deduplicates repeated effective identities.
-Manual leading `/skill:name` still uses the original parser. Raw selectors participate in durable input
-identity, so an uncertain retry must retain them alongside the original text and request key.
-
-`ThreadsAPI.resources.skills(identity, { source? }, signal?)` reads metadata for the real branch
-checkpoint or its explicit pending source. Candidate IDs never come from cwd/project-name equality.
-`threads.sources.files(identity, options?, signal?)` returns metadata-only file/directory candidates from the
-branch's actual Source or an explicitly prepared replacement. `draftFiles({ source: { resourceOwner, path },
-query?, type?, limit?, cursor? }, signal?)` queries a selected pending source without creating a Thread.
-Paths are Source-relative, including managed Hosts. `entries` carry `path`, `relativePath`, `name`, and
-`type`; `nextCursor` continues the same Source/query/type. The default page size is 50, not a total
-search limit. Missing source yields an empty page only for a chat-only Thread; failed/revoked/partial
-source reads reject rather than masquerading as no results. File discovery is independent of skills.
-
-`draftSkills(options?, signal?)` discovers global resources or the selected pending source before a Thread exists.
-Pending-source candidates carry a source-owner/workspace/domain/path locator and content version. Submission maps
-that exact locator to the captured source descriptor, rejects drift, and never selects by display name. The
-managed target performs discovery through its authenticated read service. Its response is a
-catalog generation, not permission to read project resources. Both calls reject cancellation and late
-results after Host switching. Changed/missing resource selections fail explicitly rather than switching
-silently to a skill with the same name.
-
-`references` contains exact task/branch or current-source directory locators and text ranges. These add
-context; they never change the message recipient, impersonate an Agent or authorize additional files.
-
-## Plugin center
-
-`ExtensionsAPI.pluginCenter` uses the same authenticated Application Host transport as the extension
-catalog. `createPluginCenterHttpAPI` accepts that transport and fences responses through body parsing
-against endpoint changes. Discovery reads cached public listings; explicit refresh reads only registered
-catalogs. Release preview and installed update checks are separate requests, never side effects of listing
-or searching. Installed update preview sends an extension ID so the Host resolves its saved source without
-exposing private source locators. Archive imports upload bytes to the same Host.
-
-Installation sends a retained preview ID, expected Host and catalog revision; it never resolves `latest`
-after code review. Source replacement is an explicit flag. Preview discard does not cancel an already
-accepted install. The existing extension candidate, capability review and publication APIs remain owners
-of the resulting installation lifecycle.
-
-`plugin-install-intent` parses public npm/GitHub release links and retains navigation until the plugin
-page mounts. It grants no code trust, capability, install or execution permission. Native and web entries
-publish the same intention; local filesystem locations and credentials are not valid public install links.
-
-## Frozen chat quotes
-
-Native submission, queue input, child continuation and User messages accept `contentReferences`
-plus `contentReferenceOccurrences`. Each occurrence binds a quote `ref` or frozen image `reference`
-to an exact UTF-16 range in the original draft. Plain marker-shaped text is not a binding. The Host
-validates selections before asynchronous preparation; source metadata remains history/navigation
-context and never grants file access. Captured images and files use the existing attachment owners.
-Native model projection happens once in Rust and keeps text/media order without exposing source JSON.
-
-Queue edits may supply the replacement quote metadata as the final `editInput` argument. Omission
-keeps frozen objects; changed plain text clears old occurrence positions, so explicitly retained
-objects follow the new body. Navigation preparation returns original quote metadata, file attachments
-and image bindings alongside editable text and inline images. File-backed images are not duplicated
-as new inline uploads. External Harnesses retain the same display metadata and use their existing
-file/image capabilities for the readable projection.
-
-## Shared conversation organization
-
-`RuntimeAPIs.conversationOrganization` reads the authenticated principal's Catalog navigation space.
-It stores mixed project/group containers and typed native/external conversation positions, not another
-history or execution owner. `read` returns the durable cursor, container and parent revisions, original
-Bot provenance and a query-bound continuation. `command` retains an admission key and checks the
-actual affected parents/objects. A failed or cancelled wait is not a reversal of a committed move.
-The HTTP adapter aborts on Host replacement and fences decoded responses before publishing them.
-`observe` subscribes to the shared Host Thread observation bus, including resync notifications,
-without opening another transport or owning another reconnect loop. It forwards organization,
-conversation metadata and activity kinds; loaded navigation windows decide which changes matter.
-
-Use `read({ pageNodes: true, ...query })` for a navigable mixed page. `items` is the authoritative
-ordered page of `{ kind: 'container' | 'native' | 'external', id }` references; `limit` and
-`nextCursor` cover that mixed sequence, not conversations alone. `containers` contains the page's
-container metadata plus necessary ancestors/current query container. Context containers absent
-from `items` are not additional rows and do not consume the page limit. `conversations` contains
-only page conversations. Follow the query-bound cursor with the same filters. Omitted/false
-`pageNodes` retains the legacy full container metadata index and conversation-only pagination,
-without an `items` field. The public query parser rejects unknown fields and non-boolean mode flags.
-
-`metadata` accepts a fixed object selection and returns original-owner outcomes per item. Keep the
-same batch key, revision and patch when retrying unconfirmed items; confirmed successes need not be
-resent. External deletion still waits for its original turn/dispatch lifecycle. `project` coordinates
-an already committed Settings registration/removal with Catalog classification and returns both the
-actual registration state and a completed/pending navigation result. It never removes registered
-assets to pretend a cross-owner failure rolled back.
-
-Creation APIs accept `organization: { containerId }`. Omission preserves the original default/parent
-inheritance; explicit null means root. This placement is committed with the original Catalog admission,
-not assigned later by title. Project-derived draft execution intent is separate from navigation position.
-
-### Project resource bindings
-
-`ProjectEntry.source` freezes a non-secret `SourceResourceOwner` and the target Documents
-`workspaceId`. Omission preserves local-Host projects. Remote paths are resolved only by the
-selected source Host; the coordinating Settings owner validates new registrations through that
-owner and preserves already registered offline projects on metadata edits. Project selection and
-classification do not prepare execution. Files use the original resource/Documents APIs, and new
-work freezes the selected project source before preparation. A same-named path on another Host
-is not the same project.
-
-Model settings requests can carry a registered `projectId`. Local projects retain their original
-trusted `.varin/settings.json` behavior. Remote project defaults belong to the coordinating Host's
-original AgentSettingsService under the stable registered project identity, with its ordinary
-revision checks and global inheritance. This explicitly owned configuration is not a copy of the
-remote machine's settings and never reads the remote path as a local directory.
-
-For native submission, omit `source` to inherit the existing source or the conversation's frozen
-creation default. Pass `source: null` for an explicit chat-only selection. `creationDefaults`
-is a read-only creation intent: moving a conversation does not change its source, and clients
-must not infer execution authority from its current navigation parent.
-
-New project-based drafts and creation receipts freeze `ProjectSourceSelection`. A ready adoption
-records its original workspace, execution workspace, branch and adoption-operation IDs; an unadopted
-project records explicit `live_root`. Later enable/disable changes do not redirect that selection.
-`ThreadPrepareSource.selection` follows the same contract; omission retains legacy automatic source
-selection. Native selections go directly to the selected source Host rather than resolving a mount
-path on the coordinator. Preparation verifies the original committed adoption and physical registration
-before reopening the original native workspace. Explicit source selection and accepted input receipts
-still take precedence over creation defaults.
-
-Remote project file views carry the same logical selection through ResourceFiles requests, uploads
-and transfers. The target opens its original native Documents view, while the UI retains the original
-project path for display. Switching the file browser to an explicitly chosen directory clears that
-selection. File browsing does not mutate any conversation's accepted source or creation defaults.
-
-Remote project resource management keeps the original physical project registration,
-matching local Skills and instruction settings rather than silently switching to an
-adopted workspace mount. Resource targets may carry `expectedSource`; a changed
-owner or workspace is rejected before local path resolution or remote mutation.
-Skills CRUD and prompt/tool previews use the target's original resource owner.
-Project trust reads and revision-checked updates use the target trust store and
-canonical registered path. Paired capabilities and allowed roots still apply;
-Agent/Bot personalization and project model preferences retain their original owners.
-
-## Thread observation
-
-`getThreadObservationBus(api)` owns one observation transport per selected Host/API. The HTTP API is
-shared; consumers subscribe with optional thread, branch and kind interests instead of starting
-independent reconnect loops. Durable scopes come from Catalog, not renderer subject inference.
-Unscoped thread metadata applies to all branches, while a subscription's kind list can name an exact
-kind or namespace (`run.*`). Authorization remains on the Host; a gap in globally allocated cursors
-is not evidence of a lost authorized event.
-
-The bus replays its durable cursor after disconnects. Progress-interest changes use the same live
-subscription through `updateObservationInterests`, identified by its connection-scoped observation ID.
-Updates coalesce in flight and are checked against the original principal by the Host; adding a view
-does not interrupt another view’s provider stream or invalidate its snapshot. A real
-connection loss, restored connection, explicit cursor reset or kernel epoch change sends `resync`;
-progress is disposable and views rebuild without replaying commands. The first successful connection
-also emits one ready resync to cover commits racing the initial parallel snapshot read. `observe`'s `onReady` callback
-runs after successful response headers, so a quiet reconnection can recover even without a new event.
-Endpoint changes close the old bus and prevent cross-Host continuation.
-
-`snapshot(identity, signal, { afterHeadId })` requests append-only history. Only a returned
-`historyPage.afterHeadId` matching that request permits a delta merge; an omitted marker means a full
-replacement (navigation, fork or an unavailable ancestry cut). All non-history fields are complete
-snapshots in either case.
+- **`read`**: Returns durable cursor, container/parent revisions, Bot provenance, and query-bound
+  continuation. Pass `pageNodes: true` for authoritative mixed-node pagination (`items: { kind:
+  'container' | 'native' | 'external', id }[]`, page/ancestor `containers`, page `conversations`);
+  omitted/false keeps legacy full-container index + conversation-only pagination without `items`.
+  Query parser rejects unknown fields and non-boolean flags.
+- **`command` / `observe` / `metadata` / `project`**: `command` uses an admission key + affected
+  revision checks (cancelled waits never reverse committed moves). `observe` shares the Host Thread
+  observation bus. `metadata` returns per-item outcomes for a fixed selection (retry unconfirmed
+  items with same key/revision/patch; external delete waits on turn/dispatch lifecycle). `project`
+  coordinates committed Settings registration/removal with Catalog without faking rollback.
+  Creation APIs accept `organization: { containerId }` (omit = inherit, `null` = root).
+- **Project resource bindings**:
+  - `ProjectEntry.source` freezes non-secret `SourceResourceOwner` + Documents `workspaceId`
+    (omitted = local Host). Remote paths resolve only on the selected source Host; same-named paths
+    on different Hosts are distinct projects; offline registered projects stay editable for metadata.
+  - Model settings with `projectId` use trusted `.varin/settings.json` for local projects and the
+    coordinating Host's `AgentSettingsService` for remote projects.
+  - Native submission omits `source` to inherit or passes `source: null` for chat-only
+    (`creationDefaults` is read-only; moving navigation parent never changes source). Project
+    drafts/receipts and `ThreadPrepareSource.selection` freeze `ProjectSourceSelection` (committed
+    adoption IDs or explicit `live_root`), verified directly on the source Host.
+  - Remote file views carry that logical selection through ResourceFiles/uploads/transfers without
+    mutating conversation source; choosing an explicit directory clears it. Remote resource
+    management (`expectedSource` drift-checked) retains the physical project registration for
+    Skills, instructions, and trust store checks.

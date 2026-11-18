@@ -9,9 +9,10 @@
 | 想做什么 | 对应指南 |
 | --- | --- |
 | 安装并打开 Varin | [安装](content/docs/zh-cn/install.mdx)、[快速开始](content/docs/zh-cn/quickstart.mdx) |
-| 连接模型或本地服务 | [模型渠道](content/docs/zh-cn/providers.mdx) |
+| 使用 Varin 助手、工作台与 IDE | [Varin 助手](content/docs/zh-cn/varin-assistant.mdx)、[视图与 Agent 协作](content/docs/zh-cn/views-and-collaboration.mdx)、[交互内容与引用](content/docs/zh-cn/interactive-content.mdx) |
+| 连接模型或外部 Agent | [模型渠道](content/docs/zh-cn/providers.mdx)、[外部 Agent](content/docs/zh-cn/external-agents.mdx) |
 | 处理项目 | [项目](content/docs/zh-cn/projects.mdx)、[Git](content/docs/zh-cn/git.mdx)、[worktree](content/docs/zh-cn/worktrees.mdx) |
-| 为 Agent 提供上下文和工具 | [上下文](content/docs/zh-cn/context.mdx)、[skills](content/docs/zh-cn/skills.mdx)、[MCP](content/docs/zh-cn/mcp.mdx) |
+| 添加工具、插件、浏览器与桌面控制 | [扩展与插件中心](content/docs/zh-cn/extensions.mdx)、[Computer Use 与浏览器](content/docs/zh-cn/computer-use.mdx)、[skills](content/docs/zh-cn/skills.mdx)、[MCP](content/docs/zh-cn/mcp.mdx) |
 | 安排后续工作 | [定时任务](content/docs/zh-cn/scheduled-tasks.mdx) |
 | 连接另一台设备 | [设备连接](content/docs/zh-cn/connect-devices.mdx)、[移动端](content/docs/zh-cn/mobile.mdx) |
 | 排查问题 | [故障排查](content/docs/zh-cn/troubleshooting.mdx) |

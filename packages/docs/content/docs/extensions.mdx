@@ -1,0 +1,41 @@
+---
+title: Extensions & Plugin Center
+description: Discover, install, configure, and build extensions that add tools, model protocols, views, and event sources to Varin.
+---
+
+# Extensions & Plugin Center
+
+Varin's own **Varin**, **Workbench**, and **IDE** views — along with browser, Office, and language integrations — are built on the same extension system available to third-party authors.
+
+## Discover and install plugins
+
+1. Open **Settings → Plugins** on the Host where you want the extension installed.
+2. Browse **Discover** (backed by the public catalog) or install directly from a GitHub Release, npm package, Git URL, or local archive/folder.
+3. Review the preview: manifest, version, content digest, and requested capabilities.
+4. Confirm installation. Newly installed extensions start **disabled** until you review their capabilities and enable them.
+5. Click **Configure** to open the plugin's own settings page (for example, to connect an external account).
+
+## Trust, permissions, and updates
+
+- Capability grants are reviewed per extension version and realm; upgrades never auto-approve newly added capabilities.
+- Keep in mind that Host-side extensions run as real code under your Host's OS account — only enable extensions you trust.
+- Disabling an extension keeps its saved data; uninstalling lets you choose whether to keep or remove its storage namespace.
+- Under **Advanced**, you can manage custom HTTPS catalogs, service routing (including custom model protocols and run drivers), and workbench composition.
+
+## Build your own extension
+
+Scaffold a new extension with the official CLI:
+
+```bash
+npx @varin/extension-cli init ./my-extension \
+  --id dev.example.my-extension \
+  --name "My Extension"
+```
+
+See the [Extension authoring guide](https://github.com/Astrmira/Varin/blob/main/docs/ops/varin-extension-authoring.md) and [working examples](https://github.com/Astrmira/Varin/tree/main/examples/extensions) in the repository for SDK APIs and conformance testing.
+
+## Related guides
+
+- [MCP Servers](/mcp/)
+- [Skills](/skills/)
+- [Themes](/themes/)

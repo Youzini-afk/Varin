@@ -1,0 +1,34 @@
+---
+title: Views & Agent collaboration
+description: Switch between Varin, Workbench, and IDE views, choose task focuses, delegate to subagents, and exchange code changes.
+---
+
+# Views & Agent collaboration
+
+Choose how closely you want to work with your agents and files. Switching views changes only the interface — your running tasks, selected models, and workspace sources stay untouched.
+
+| View | Best for | What stays in focus |
+| --- | --- | --- |
+| **Varin** | Ongoing conversation & high-level coordination | Assistant chat, work overview, memory, schedules, side file/computer tabs |
+| **Workbench** | Direct task & teammate control | Focused conversation, tool activity, collaboration panel, plans, recovery |
+| **IDE** | Hands-on editing & debugging | Monaco editor groups, diffs, terminals, Git, and agent chat side by side |
+
+## Task focuses
+
+Underneath these views, each conversation uses a **task focus** — **General**, **Coding**, **Research**, or **Office** — which tailors the directly visible tools and available agent presets. Other capabilities remain discoverable on demand.
+
+## Delegating and collaborating
+
+- **Free dispatch or presets**: Agents can delegate subtasks with a specific model, thinking level, task focus, or configured preset. You can also enable an optional **delegation model selector** in Agents settings.
+- **Collaboration panel**: Open the right-side **Collaboration** panel to follow dispatches, messages between teammates, final reports, and code handoffs in one timeline. Click any teammate to open its full conversation, send a follow-up, or stop it.
+- **Workspace modes**:
+  - **Shared** (default): Teammates work directly in the selected directory.
+  - **Isolated write**: Forks an independent workspace (using WinFsp on Windows, FUSE on Linux, or FSKit/macFUSE on macOS) and merges changes back through code exchange (`submit_code` / `update`) with conflict review.
+  - **Read-only**: Removes file mutation tools for safe inspection.
+- **Composer handoff commands**: Use `/` commands in the composer to message a specific teammate directly, prepare a structured handoff, export a conversation as Markdown/JSON, or save a note/memory.
+
+## Related guides
+
+- [Varin assistant](/varin-assistant/)
+- [External Agents](/external-agents/)
+- [Worktree Sessions](/worktrees/)

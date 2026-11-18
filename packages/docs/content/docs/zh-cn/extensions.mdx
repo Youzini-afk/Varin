@@ -1,0 +1,41 @@
+---
+title: 扩展与插件中心
+description: 发现、安装、配置和构建扩展，为 Varin 添加工具、模型协议、视图与事件源。
+---
+
+# 扩展与插件中心
+
+Varin 自身的 **Varin**、**Workbench** 和 **IDE** 视图，以及浏览器、Office 和语言服务集成，均基于向第三方作者开放的同一套扩展系统构建。
+
+## 发现与安装插件
+
+1. 在你希望安装扩展的 Host 上打开 **设置 → 插件**。
+2. 浏览 **发现**（由公开目录提供支持），或直接从 GitHub Release、npm 包、Git URL 或本地压缩包/文件夹安装。
+3. 审阅安装预览：清单元数据（manifest）、版本、内容摘要以及请求的能力权限。
+4. 确认安装。新安装的扩展默认为 **已禁用**，需在你审阅其能力后再手动启用。
+5. 点击 **配置** 打开该插件自带的设置页（例如用于连接外部账号）。
+
+## 信任、权限与更新
+
+- 能力授权按扩展版本和运行域分别审阅；版本升级绝不会自动批准新增的能力。
+- 请注意，Host 端扩展会以你的 Host 操作系统账号身份作为真实代码运行——仅启用你信任的扩展。
+- 禁用扩展会保留其已保存的数据；卸载时你可以选择保留或删除其存储命名空间。
+- 在 **高级管理** 中，你可以管理自定义 HTTPS 目录来源、服务路由（包括自定义模型协议与运行驱动）以及工作台组合。
+
+## 构建你自己的扩展
+
+使用官方 CLI 初始化一个新的扩展项目：
+
+```bash
+npx @varin/extension-cli init ./my-extension \
+  --id dev.example.my-extension \
+  --name "My Extension"
+```
+
+查看仓库中的 [扩展开发指南](https://github.com/Astrmira/Varin/blob/main/docs/ops/varin-extension-authoring.md) 与 [可运行示例](https://github.com/Astrmira/Varin/tree/main/examples/extensions)，了解 SDK API 与一致性测试。
+
+## 相关指南
+
+- [MCP Servers](/zh-cn/mcp/)
+- [技能](/zh-cn/skills/)
+- [主题](/zh-cn/themes/)

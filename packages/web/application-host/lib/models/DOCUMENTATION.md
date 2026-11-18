@@ -1,456 +1,76 @@
 # Model connections, settings and credentials
 
-`ModelsService` owns the Agent runtime's channel catalog, model selections and purpose bindings in
-the Application Host. It serves settings, discovery and authorization without an active conversation.
-Native settings, credentials, resources and context policy share their explicit owners. Old Pi assets
-are neither read nor imported.
+`ModelsService` owns the Agent runtime's channel catalog, model selections, project trust, and purpose bindings in the Application Host. The Host prepares product configuration, tokenizer cache entries, and transient credentials; Rust owns native protocol execution, HTTP/SSE transport, retries, cancellation, and durable request/usage facts. See [runtime ownership](../../../../../docs/runtime.md) and [Rust providers](../../../../../kernel/crates/varin-runtime/src/providers/README.md).
 
-The Host prepares product configuration and authentication. Rust owns native chat protocol execution,
-HTTP/SSE, cancellation and durable request/usage facts. Auxiliary inference uses the existing
-purpose-specific consumers and original inference Operations, rather than another request database.
-Model endpoints may use the executing Host's local, LAN or Docker network in all deployments.
-Discovery uses the same Host egress routing as other HTTP(S) consumers; address classification is
-diagnostic and does not require a desktop transport or a separate private-network setting.
-See [runtime ownership](../../../../../docs/runtime.md) and the
-[Rust adapters](../../../../../kernel/crates/varin-runtime/src/providers/README.md).
+## Entrypoints and storage
 
-Read-only token counting retains the exact captured tokenizer configuration. Its native resource
-binds to the epoch returned by opening it, including a kernel started by that request. After native
-owner loss a later count reopens that resource in the new epoch; concurrent callers share the open,
-and a failed open remains retryable. Released consumers stay closed. This does not replay model
-requests or transfer their original execution/usage owners to another kernel.
-
-Delegation model selection freezes the current user setting and safe enabled-model catalog only at
-first child preparation, not while preparing the parent's dispatch tool. Replay reads the original
-recipe and inference receipts without reacquiring the selector, recounting or regenerating a choice.
-After Host packing, the selected native provider serializer supplies the final capacity estimate,
-including protocol wrappers and the configured output reserve. A rejected request retains a concrete
-not-dispatched capacity failure, and replay reports that same evidence rather than generating again.
-Disabled implicit inheritance keeps the original retained parent binding without inspecting unrelated
-models. Chat completion checks the durable finish reason before accepting JSON; typed classifiers use
-one normal question/readout (llama.cpp requests its existing full probability depth once). Semantic
-invalid-response retries are disabled only for this purpose; ordinary transport retry/accounting
-remains with the shared inference owner. Selected executor capture checks the frozen configuration
-fingerprint before credentials and retains that owner through the original child handoff lifetime.
-
-
-## Entry points and storage
-
-Host-wide `retry` settings live in `agent-settings.json` and are captured in each native model
-configuration. The defaults page edits enabled/maxRetries/initialDelayMs/maxDelayMs and ordered
-status/code/message rules (exact, contains, or regex; retry/stop). `/api/models/retry/test` validates
-and evaluates drafts through `runtime.retry.evaluate` without provider I/O. Native `model_retry.rs`
-owns matching and delay decisions, including the linear-time regex dialect. Execution owners retain
-attempt evidence, cancellation and authority checks; protocol SDKs do not stack another retry loop.
-Conversation and compaction retain separate ModelSteps. Native auxiliary inference retains attempt
-outputs in its original Operation and accounts each attempt against the original Goal before retrying.
-Unknown usage is preserved, and server Retry-After may exceed the configured exponential delay cap.
-
-| Responsibility | Entry |
+| File(s) | Responsibility |
 | --- | --- |
-| Channel types, validation, discovery and captured selections | `channel-types.ts`, `service.ts` |
-| Background directory refresh, service templates, derived cache and metadata normalization | `directory.ts`, `channel-directory.json`, `channel-directory.ts`, `directory-models.ts`, `directory-snapshot.ts` |
-| Credential-free HTTP headers, operation paths and proxy validation | `connection.ts` |
-| Revisioned settings and file observation | `configuration.ts`, `settings.ts` |
-| Model account storage, OAuth and cloud credential sources | `credentials.ts`, `oauth.ts`, `google-auth.ts`, `aws-auth.ts`, `anthropic-auth.ts` |
-| Reviewed extension contributions and exact service pins | `extensions.ts` |
-| Request price snapshots and Host usage projection | `pricing.ts`, `usage-routes.ts`; Catalog remains the durable ledger owner |
-| Authenticated client access | `routes.ts`, `application-client/src/model-connections.ts` |
+| [`service.ts`](service.ts), [`channel-types.ts`](channel-types.ts), [`channel-patch.ts`](channel-patch.ts), [`discovery.ts`](discovery.ts) | Channel catalog, built-in type definitions, CAS patches, model discovery, and captured bindings |
+| [`directory.ts`](directory.ts), [`channel-directory.ts`](channel-directory.ts), [`channel-directory.json`](channel-directory.json), [`directory-models.ts`](directory-models.ts), [`directory-snapshot.ts`](directory-snapshot.ts), [`metadata-match.ts`](metadata-match.ts), [`catalog.ts`](catalog.ts) | Background directory refresh, bundled service templates, offline models.dev snapshot, and metadata matching |
+| [`connection.ts`](connection.ts), [`retry.ts`](retry.ts), [`compaction-settings.ts`](compaction-settings.ts) | Credential-free headers/paths/proxy validation, retry rules, and compaction policy |
+| [`configuration.ts`](configuration.ts), [`settings.ts`](settings.ts), [`project-trust.ts`](project-trust.ts), [`project-settings-scope.ts`](project-settings-scope.ts) | Revisioned settings, file observation, and native project trust |
+| [`credentials.ts`](credentials.ts), [`oauth.ts`](oauth.ts), [`oauth-device.ts`](oauth-device.ts), [`google-auth.ts`](google-auth.ts), [`aws-auth.ts`](aws-auth.ts), [`anthropic-auth.ts`](anthropic-auth.ts) | Account storage, browser/device OAuth, cloud ADC/AWS chains, and Anthropic workload federation |
+| [`tokenizers.ts`](tokenizers.ts), [`tokenizer-metadata.ts`](tokenizer-metadata.ts), [`token-count.ts`](token-count.ts) | Local tokenizer download/cache preparation and read-only native token counting |
+| [`delegation-catalog.ts`](delegation-catalog.ts), [`classifier.ts`](classifier.ts), [`classifier-protocol.ts`](classifier-protocol.ts), [`rerank.ts`](rerank.ts) | Delegation model selection snapshot, decision classifiers, and rerank bindings |
+| [`extensions.ts`](extensions.ts) | Reviewed `varin.models@1` protocol and auth contributions with exact adapter pins |
+| [`pricing.ts`](pricing.ts), [`usage-routes.ts`](usage-routes.ts), [`routes.ts`](routes.ts), [`test-route.ts`](test-route.ts) | Price snapshots, `/api/usage/summary`, authenticated model/trust routes, and `/api/models/test` |
 
-`VARIN_DATA_DIR/models.json` contains channels and their models; `agent-settings.json` contains
-global Agent settings, including purpose selections. Trusted projects may supply
-`.varin/settings.json`. `model-auth.json` holds model credentials separately from MCP's
-`mcp-auth.json`. Both use `@varin/settings-store` locking and atomic replacement. Reads do not create
-or repair files, and unchanged updates do not rewrite them. New files use private permissions;
-existing file/directory permissions are retained by the shared store.
+Client wrapper: [`packages/application-client/src/model-connections.ts`](../../../../application-client/src/model-connections.ts).
 
-Updates check the expected revision. File observation publishes configuration changes, including
-external edits. A malformed document is an error, not an empty replacement; an already accepted
-binding can retain the last valid configuration. Invalid channel entries report their own issues
-without removing independent valid channels. A first invalid load has no invented valid fallback.
+**Storage files** (all use `@varin/settings-store` locking, atomic replacement, private permissions on new files, and revision CAS):
+- `VARIN_DATA_DIR/models.json`: user channels and saved models.
+- `VARIN_DATA_DIR/agent-settings.json` (and trusted `<project>/.varin/settings.json`): global/project purpose selections, `retry`, `compaction` (`reserveRatio` in `[0, 1)`, default `0.1`; legacy `reserveTokens` rejected), and `resources` (roots: `VARIN_DATA_DIR/resources`, `.varin/resources`; see [agent-resources](../agent-resources/DOCUMENTATION.md)).
+- `VARIN_DATA_DIR/model-auth.json`: model credentials (separate from MCP's `mcp-auth.json`).
+- `VARIN_DATA_DIR/project-trust.json`: owned by `ProjectTrustService`; missing entries are untrusted, explicit `true`/`false` inherit along canonical ancestors.
+- `VARIN_DATA_DIR/model-directory.json` & `VARIN_DATA_DIR/cache/tokenizers`: derived caches, never user-config authority.
 
-Agent-facing channel reads redact header values and URL credentials. The provider `patch` action edits declared
-fields against the original stored channel inside the same revision-CAS transaction; omitted fields
-retain their values and `reset` explicitly removes optional fields. Never write a redacted projection
-back as a complete channel. Save/patch receipts describe the exact committed revision, not a later
-read that might belong to another writer. They do not claim background model discovery has completed
-or that previously captured inference bindings changed. Credential-bearing dispatch changes require
-their explicit semantic permission, separate from ordinary cosmetic settings.
+**Storage & trust invariants**:
+- Reads never create or repair files; malformed documents are errors (existing valid bindings may retain last valid state, invalid channels do not drop valid sibling channels).
+- Agent-facing reads redact header values and URL credentials; `patch` edits declared fields against the stored channel in one CAS transaction (`reset` clears optional fields). Never write a redacted projection back as a full channel.
+- `/api/project-trust/read` and `/update` accept an existing workspace ID resolved through Documents admission (never raw paths) and pin both canonical `expectedPath` and file revision. Every new project resource/model/MCP access rechecks current trust; revocation broadcasts `project-trust` invalidation without rewriting immutable input history.
 
-`ProjectTrustService` owns native `VARIN_DATA_DIR/project-trust.json` through the same locked revision-CAS
-file transaction. Missing decisions are untrusted. Explicit true/false decisions inherit along canonical
-ancestors; deleting a direct decision exposes the ancestor decision, if any. The authenticated
-`/api/project-trust/read` and `/update` routes accept an existing workspace ID, resolve it through
-Documents admission, and never grant trust to a raw request path. Updates pin both the reviewed canonical
-`expectedPath` and file revision, so reassigning a workspace while confirmation is open cannot transfer
-approval to another root. Change subscribers observe committed writes, external revocation and invalid
-files; the Host broadcasts `project-trust` invalidations through its existing settings event stream.
-Bad trust files are errors and remain
-untouched. `~/.pi/agent/trust.json`, Pi environment variables and legacy files have no native authority.
-Every new project resource/model/MCP access consults current trust; revocation does not rewrite accepted
-immutable input history. The settings, MCP and resource panels expose an asynchronous trust review.
-Changing Host/project, dismissal or invalidation retires pending approvals and stale callbacks.
-Revocation freezes cached project capabilities while re-reading the owner; dirty resource/MCP text
-remains available read-only when its original source is no longer admitted. A lost save response
-invalidates cached trust instead of claiming the write was rolled back.
+## Channels, metadata and connection options
 
-`agent-settings.json` and trusted `.varin/settings.json` also own the typed `compaction` and `resources`
-fields. Context policy is derived from a settings snapshot with its revisions and trusted project
-selection. `compaction.reserveRatio` defaults to 0.1 and applies to the selected model's context window;
-global, trusted project and per-model ratios use the same precedence. Ratios are finite numbers from
-0 to less than 1; the former `reserveTokens` setting is rejected rather than silently ignored.
-Token counts require non-negative safe integers, including every model override; explicit zero remains
-distinct from the default. Resource file roots are `VARIN_DATA_DIR/resources` and
-`.varin/resources`; see [resource admission](../agent-resources/DOCUMENTATION.md).
+- **Identity**: A channel is one stable user connection; each model has a stable catalog ID and optional `requestModelId` for upstream wire routing and thinking-dialect selection (opaque Bedrock IDs fall back to the configured model-name hint). Display names are never routing keys.
+- **Mixed & specialized protocols**: Mixed-API channels (e.g., OpenCode, Command Code) declare `protocols` and `modelBasePaths` so one connection serves multiple codecs. Decision models declare `decision` + `decision.api` (`typesafe-system-one`, Cloudflare System One, or multi-route `llama.cpp` with `tokenize`/`applyTemplate`/`completion` relative to root without trailing `/v1`). Image models declare `image.api` and `image.paths.{generation,editing}`. Capabilities (`contextWindow`, `image`, `thinking`, `thinkingLevelMap`, `compat`) are explicit, never guessed from aliases.
+- **Directory & overrides**: `ModelDirectory` loads `model-directory.json` and refreshes `channel-directory.json`, models.dev, and public lists in the background (6h freshness, conditional HTTP; dispatch never waits on it). Precedence: user overrides > live service facts > models.dev / canonical-model metadata. `model.catalog.overrides` tracks explicit field edits (including explicit empty `description` strings); directory refreshes never rewrite `models.json`, enable discovered models, or alter captured bindings.
+- **Discovery & test**: Discovery (`discover-draft` or saved connection) is read-only; Gemini/Anthropic pagination aborts cleanly without publishing partial lists. `/api/models/test` sends one short request via the standalone `ModelTextService`/Catalog inference owner without saving drafts or creating a conversation.
+- **Connection options (credential-free)**:
+  - `headers`: non-sensitive headers only; auth/transport headers are rejected and overridden case-insensitively at dispatch (`anthropic-beta` appends).
+  - `paths`: same-origin subpaths under the configured base path; traversal, query strings, and fragments are rejected (safe base-URL queries survive).
+  - `proxy`: omitted (Host egress policy), `direct`, or credential-free HTTP(S) proxy origin; explicit overrides never silently fall back to direct. Model endpoints may target local, LAN, or Docker networks using standard Host egress routing.
+- **Retry**: Host-wide `retry` settings in `agent-settings.json` are evaluated in Rust `model_retry.rs` (linear-time regex dialect; `/api/models/retry/test` validates via `runtime.retry.evaluate` without I/O). Protocol SDKs do not add a second retry loop.
 
 ## Tokenizer metadata and cache
 
-`ChannelModel.tokenizer` accepts a tiktoken encoding, a Hugging Face repository/revision, a public
-`tokenizer.json` URL, or an explicit absolute Host file path. Discovery propagates precise tokenizer
-metadata and Hugging Face repository IDs through directory defaults and saved overrides. Family labels
-such as “GPT” or “Llama” remain insufficient to identify a particular vocabulary; remote metadata never
-selects local files. The advanced model editor exposes the same source choices.
+- `ChannelModel.tokenizer` accepts a tiktoken encoding, Hugging Face repo/revision, public `tokenizer.json` URL, or explicit absolute Host file path. Remote metadata never selects local files.
+- `ModelTokenizers` caches gzip-compressed files under `VARIN_DATA_DIR/cache/tokenizers` keyed by SHA-256 of uncompressed bytes (coalescing concurrent downloads, using Host egress without model credentials). Floating repo refs pin to first cached content; local file changes create a new immutable cache entry.
+- Conversation preparation uses cached entries immediately, downloads missing ones in the background, and falls back to reference-tokenizer estimation when uncached/unsupported.
+- Prepared file hashes/encodings freeze into `ModelSessionConfiguration` and `RequestBinding`. Rust loads tokenizer JSON without executing repo code or downloading on the counting path, shares parsed vocabularies via weak references across live counters, and reopens read-only token-counting resources across kernel epochs while keeping released consumers closed.
+- Cache GC runs after config changes or binding release, preserving configured heads, active Host leases, and native Catalog roots (active/queued Runs, latest branch Run, pending selections, frozen child directories, unfinished compaction/delegation).
 
-`ModelTokenizers` prepares resources under `VARIN_DATA_DIR/cache/tokenizers`. Downloads use the Host's
-egress policy without model credentials. Concurrent preparation for the same source shares one job;
-files are gzip-compressed and published atomically under the SHA-256 of their uncompressed bytes,
-and source references persist across restarts. Captured raw `.json` paths also resolve the compressed
-representation. Source files are left untouched.
-Floating repository references are pinned to the first cached content; select a new revision to update.
-Local file changes are detected from filesystem metadata and create a new immutable cache file.
-Conversation preparation uses available cache entries and starts missing downloads in the background.
-Failures appear in model settings; an uncached request continues with reference-tokenizer estimation.
+## Delegation model selection
 
-The prepared file hash/path or encoding is frozen in `ModelSessionConfiguration` and `RequestBinding`.
-Configuration edits/download completion affect subsequent bindings, while queued/recovered requests
-keep their original reference. Rust loads tokenizer JSON data, disables padding/truncation, shares it
-across models and caches fragment counts. It never executes repository code or downloads on the counting
-path. Unsupported or unavailable tokenizer files retain reference counting and identify it in estimate
-metadata. Existing provider-usage calibration remains separate from local text token counts.
-
-Parsed vocabularies (including tiktoken encodings) are shared by live counters. The Run compiler retains
-its lazy counter across tool steps; the last counter releases the vocabulary. The registry holds weak
-references, so idle model configurations do not keep parsed vocabularies resident.
-
-Cache collection runs after source/configuration changes and the release of an obsolete binding.
-It retains configured source heads, Host model-binding leases and native execution/continuation roots.
-The native reference read includes active/queued Runs, the latest ordinary branch Run, pending model
-selections, frozen child directories and unfinished compaction/delegation. Terminal internal jobs and
-superseded terminal Runs no longer pin versions. Metadata/content reads run off the Catalog lock;
-the Host serializes publication, binding acquisition and cache removal. Collection never walks user
-directories, expires by age/count, or changes durable conversation metadata.
-
-## Channels and model selection
-
-A channel type declares its protocol, operation support, authentication options, parameter schema,
-display metadata and optional discovery/catalog candidates. A channel is one stable user-selected
-connection. Multiple channels may use the same type. Each channel model has a stable catalog ID;
-`requestModelId` supplies the actual model/deployment identifier. Display names are not routing keys.
-Protocol-specific thinking options follow that upstream identifier, so a local catalog alias does
-not change the selected model's wire dialect or token budget.
-Opaque Bedrock resource/profile IDs retain the configured model-name hint; a recognizable upstream
-model ID always takes precedence over that hint.
-
-OpenAI-compatible and local services can host decision models alongside chat, embedding and rerank
-models. Mark the classifier model with the `decision` operation and select its `decision.api`
-(System One, Cloudflare System One or llama.cpp). An unset value inherits the channel's
-`parameters.decisionApi`, then the installed type default (`typesafe-system-one` for compatible/local
-services). Each decision model can select its own protocol without changing sibling models or the
-channel default. Decision requests use that classifier protocol and its routes; conversation requests
-retain their chat protocol. `decision.paths.classify` overrides the channel's decision path. llama.cpp
-instead uses `decision.paths.tokenize`, `applyTemplate` and `completion`, relative to the server root
-with a trailing `/v1` removed. It retains separate preparation/compute routes and does not accept a
-single decision-path override. An explicit purpose endpoint remains the highest-priority override.
-
-Image protocol selection belongs to each model's `image.api`. An unset value inherits the channel's
-`parameters.imageApi`, then its installed OpenAI Images/OpenRouter default. Model edits preserve other
-image capabilities and do not rewrite sibling models or the channel default. Prepared image bindings
-retain their original protocol and route. `image.paths.generation` and `image.paths.editing` override
-the respective channel paths. Image and single-call decision paths append to the configured service
-base URL's existing path and preserve its validated, non-secret query parameters. Custom path values
-keep the same origin and reject traversal, query strings and fragments.
-The model editor always shows editable paths. Choosing a protocol preset fills its standard paths;
-clearing a path restores its inherited/default value. Request formats stay with the selected protocol.
-
-All model editors expose `contextWindow`, including embedding, rerank and decision models. Auxiliary
-bindings capture the configured capacity with their model identity. Remote embedding uses an explicit
-`harness.embedding.maxTokens` input budget first, then the model context capacity, then the existing
-unspecified-capacity default. Changing capacity affects newly prepared bindings and vector spaces.
-
-UI and execution consume the same type definitions. `channel-types.ts` is the current built-in
-support list; a provider name does not imply every protocol option is supported. Unknown model
-names can be explicitly configured under a compatible type. Operations and image capabilities
-remain explicit: image input alone does not enable image generation, editing or masks.
-
-`catalog.ts` supplies reviewed protocol hints; `directory-snapshot.ts` supplies offline models.dev
-metadata and public service lists. `ModelDirectory` loads `model-directory.json`, then refreshes in
-the background using conditional HTTP requests. The normal freshness interval is six hours; settings
-also offer an explicit refresh. Initial settings contain only service descriptions; the selected
-service's model catalog is fetched separately. Conversation creation, model capture and dispatch never
-wait for directory network requests. A failed refresh retains the prior source. This cache is derived
-data and can be replaced; user configuration and credentials retain their separate owners.
-
-`channel-directory.json` is the bundled standard-service directory and is also fetched from Varin's
-main branch. Reviewed vendor, agent-service and local entries select existing protocol implementations;
-ordinary new service templates can therefore arrive without a client release. Specialized channels
-such as OpenCode, Command Code and Cline remain installed behavior. Remote directory data cannot
-replace an installed channel's protocol, introduce OAuth implementations or execute SDK packages.
-Magpie is also an installed channel and uses the OpenAI compatible type's operations and parameters.
-Its editable default address, `http://127.0.0.1:3425/v1`, refers to the machine running the Host.
-Missing later entries retain their known descriptors so saved connections remain usable. Generic
-aggregator/reseller expansion is deferred. The channel directory, models.dev and activated public
-service lists refresh independently, with per-source in-flight reuse and atomic cache replacement.
-
-An installed channel definition owns protocols, authentication and special behavior. Directory SDK
-labels map to installed codecs, without loading packages or executable remote configuration. Public
-lists determine advertised models; connected account discovery is cached separately under the exact
-connection fingerprint and credential scope. User overrides win over service facts, which win over
-models.dev provider metadata and explicitly identified canonical-model metadata. Display-name guessing
-is not used. Directory membership does not establish account entitlement.
-
-Metadata lookup uses `requestModelId` when supplied, otherwise the saved model ID. It normalizes case
-and separators, recognizes complete ID segments inside channel prefixes and suffixes, and prefers the
-most specific known variant. Numeric dots remain version boundaries, and fine-tune IDs use their base
-model rather than organization/job labels. Ambiguous multi-model names do not receive inferred defaults.
-The index is built per directory generation and lookup results are cached; lookup never fetches the network.
-Custom/compatible channels use the same path. Their exact account facts take precedence; cross-provider
-matches prefer the canonical model owner's metadata and otherwise inherit only agreeing facts. Lookup
-does not change the request ID, endpoint, authentication, protocol or enabled operations. Model-specific
-wire hints transfer only between matching protocols.
-
-New starter/candidate models follow directory defaults through `model.catalog`. Its `overrides` list
-marks explicit field choices, including clearing a field. The settings editor can restore each field
-or the whole model to the current defaults. Service-discovered models retain their service snapshot
-until a matching account directory is available. Existing manual fields remain explicit while missing
-metadata can be filled from a unique match. The shared `applyModelDirectoryDefaults` merge is used by
-Host capture and settings draft previews; the latter request metadata for unsaved IDs without sending
-credentials. `catalog.match` records the upstream ID/protocol behind inferred fields. Changing that
-identity clears inherited facts until the new identity matches, while explicit overrides survive.
-Each channel model also has one optional free-text `description`. Discovery preserves an actual
-string supplied by the service (including OpenRouter and Gemini); metadata matching can share a supplied
-introduction only through the existing confirmed identity match. The bundled models.dev snapshot has no
-introductions, so missing descriptions remain absent rather than being generated from names. Description
-edits, including an explicit empty string, use the same catalog override tracking as other fields and
-survive refreshes independently in each channel. Settings provider actions accept descriptions in full-channel
-saves and narrow `models.<literal model ID>.description` patches. The latter retain hidden original fields
-and unrelated overrides through the model owner’s CAS; IDs containing dots, slashes or colons are literal.
-Setting an empty string explicitly clears the introduction; resetting the path resumes directory defaults.
-Changing the upstream identity clears only inherited
-descriptions. Descriptions are guidance, never protocol, tool or environment authority.
-
-Account caches retain only service-supplied facts, so inferred defaults can follow future refreshes.
-Refreshing never rewrites `models.json`, enables newly
-discovered models, removes configured references or changes purpose selections. Captured execution
-bindings retain their original configuration. A model missing from a later directory keeps its saved
-metadata. Model catalogs and user configuration have independent revisions.
-
-`harness.delegationModelSelection` is a user-owned, disabled-by-default purpose setting. Enabling it
-requires an explicit `{providerId, modelId}` selection; its optional `thinkingLevel` belongs to the
-selector itself, not its executor. Projects cannot enable or redirect the selector. Settings receipts label
-this `next-request`: the consumer boundary is the next free delegation’s model preparation, including
-within an existing Run. Accepted delegation recipes/bindings and the current Run model remain unchanged. The Agent settings
-sidebar exposes this purpose separately from saved Agent profiles. Chat and decision models are available;
-`decision` takes precedence for a model declaring both operations and has no chat thinking control.
-
-`delegation-catalog.ts` takes one resolved model snapshot without capturing candidate execution owners,
-credential leases, tokenizers or workspaces. It publishes opaque channel/model IDs and only selection
-facts: names, descriptions, declared inputs, capacity, pricing/billing and effective thinking options.
-Native `modelOptions` validates eligible options; a fixed opaque model reference filters before
-validation so unrelated invalid configurations cannot block an explicit dispatch. An invalid eligible
-configuration fails specifically rather than silently dropping a candidate; an unknown fixed reference
-keeps an empty candidate set, never a fallback. Disabled thinking-only dispatch uses that same identity
-helper to restrict validation to the original inherited provider/catalog model, while enabled
-thinking-only selection keeps all eligible models. Connection/authentication metadata stays behind a configuration hash.
-Presentation edits leave the hash stable, while native options retain execution-significant protocol
-hints. The selected chat or decision binding rechecks that hash on its captured configuration before
-acquiring credentials, avoiding a metadata-check/binding race. Accepted bindings retain their snapshots.
-
-Mixed-API channels declare supported `protocols` and optional relative `modelBasePaths`; a model's
-protocol chooses both the installed codec and the corresponding path beneath the saved service root.
-This allows one OpenCode connection and credential to serve Responses, Chat, Messages and Google
-models. Command Code uses its advertised `supported_endpoints`. Saved service origins are not changed
-by a directory refresh. The advanced model editor exposes protocol selection.
-
-Discovery and extension catalog candidates are read-only material. Applying a selection requires a
-configuration write; an empty or failed discovery does not delete saved models or purpose bindings.
-Completed saved-connection discovery can update the derived account cache without changing the user
-configuration revision. Draft discovery does not write either the connection or the entered key.
-Configured values, unavailable types, missing credentials and disabled models remain distinguishable.
-Gemini and Anthropic discovery follow their opaque page cursors on the captured connection; cancellation,
-invalid/repeated cursors and later-page failures never publish a partial list as complete. Settings show
-contributed catalog candidates even without network discovery. `discover-draft` captures the displayed
-connection and optional entered key without writing either to storage. Selecting one or many candidates
-changes the editor draft and preserves declared capabilities; Save publishes that selection.
-
-Models declare image input, context capacity, output capacity and reasoning separately. `thinking`
-describes effort levels (including whether Off is allowed), an on/off switch, always-on reasoning, or
-a token budget. `thinkingLevelMap` maps public choices to provider values when their names differ.
-UI previews, chat controls and execution use the same declared choices. A reasoning flag alone does
-not claim support for all effort levels or for disabling reasoning. Providers retain their own wire
-formats and output-budget constraints; this metadata does not add unsupported server capabilities.
-
-Responses/Azure `compat.supportsStrictMode:false` omits the optional strict field; Codex does not expose
-that override. Mistral `compat.thinkingFormat:"mistral-prompt"` requires an on/off thinking choice and
-cannot also map it to reasoning effort. Its optional `compat.promptCacheKey` supplies the native cache
-key and request affinity. Sampling parameters cannot override native history/tool, privacy, streaming
-or output-capacity ownership; Chat accepts only one completion choice. These are explicit capabilities,
-not deductions from model aliases.
-
-The model editor's explicit Test action uses `/api/models/test` and the existing standalone
-`ModelTextService`/Catalog inference owner. It captures the unsaved connection, selected model and
-thinking choice, sends one short request, and retains the ordinary usage receipt. It does not create
-a conversation, publish a temporary channel, store an entered key, or automatically repeat a request.
-Leaving the test signals cancellation; the inference owner retains credentials until actual drain.
-
-Connection options are explicit and credential-free:
-
-- `headers` accepts non-sensitive HTTP headers. Authentication and transport-controlled headers are
-  rejected here; credential/protocol headers take precedence case-insensitively at dispatch and
-  discovery. Channel `anthropic-beta` values append to required features. Harmless names such as
-  `x-max-tokens` remain valid; known compact credential names such as `X-AccessToken` do not.
-- `paths` selects supported operation endpoints beneath the configured base path. Paths cannot
-  change origin, traverse directories, or carry literal/escaped query or fragment data. Safe queries
-  on the base endpoint survive both default and explicit paths, including llama.cpp preparation routes;
-  credential-bearing queries are rejected before settings/discovery/request admission. Azure retains
-  its deployment and API-version binding. The multi-route llama.cpp classifier rejects a single decision-path override.
-- `proxy` is absent for the existing Host policy, `direct` for explicit direct access, or `proxy`
-  with a credential-free HTTP(S) proxy origin. An explicit override cannot silently become direct.
-
-The same captured options reach chat, discovery and supported auxiliary consumers. Normal edits
-affect later preparation; they cannot retarget an accepted Run, queued input or active request.
-Explicit disable/removal or account withdrawal is checked separately and can reject further access.
-Settings HTTP failures retain Host egress classifications with fixed, non-secret messages; a network
-policy denial is not reported as malformed model configuration. Non-desktop Hosts retain private-address
-checks; local model access is supplied by the real Electron network integration, not a model-setting bypass.
+- `harness.delegationModelSelection` is a user-owned, disabled-by-default purpose setting (projects cannot enable or redirect it; `next-request` consumer boundary). Supports chat and decision models (`decision` takes precedence when both are declared).
+- `delegation-catalog.ts` captures one snapshot of opaque IDs, descriptions, capabilities, capacity, pricing, and effective thinking options without acquiring credentials or workspaces; connection/auth facts sit behind a configuration fingerprint hash.
+- Selection freezes only at first child preparation (never during parent tool preparation). Replay reads original recipes/receipts without re-selecting. The selected executor rechecks its config fingerprint before acquiring credentials, and the native provider serializer supplies final capacity checks (rejecting over-budget requests as durable not-dispatched failures).
 
 ## Authentication and retained bindings
 
-Channels reference a stored credential, an explicit environment variable, an allowed cloud source,
-or explicit anonymous access. Cloud libraries are direct dependencies: Google's client owns ADC
-refresh and the AWS/Smithy owners resolve chains and sign native requests. No library is loaded
-through Pi's dependency tree. OAuth authorization uses the existing Host interaction owner with a
-local callback or manual callback response; an unrelated channel does not wait for that interaction.
-
-Model credential resolution accepts OAuth accounts only from issuer IDs declared by the installed
-channel type, before capture, refresh or header generation. The same rule covers direct, draft,
-discovery and auxiliary requests without rewriting stored settings or accounts. Captures retain their
-original issuer policy and implementation across ordinary channel edits; account replacement remains
-invalidating. API keys stay generic. Matching issuer admission permits explicit custom proxy endpoints
-and does not replace the original scope, exact request-target or egress checks.
-
-Kimi Code, GitHub Copilot, xAI and Meta use device codes displayed by the same authorization panel.
-The Host polls at the issuer's interval, observes code expiry and cancels when the user closes sign-in.
-Copilot exchanges the GitHub token for an inference token; Meta exchanges its identity token for an
-API key. Their renewal uses the same credential store and account-generation checks as browser OAuth.
-Copilot's account endpoint is resolved during request preparation and frozen into that request;
-refresh cannot retarget it. Copilot OAuth does not enable Claude's subscription-specific body format.
-
-OpenCode Zen and Go additionally support OpenCode's documented workspace-scoped device flow with
-client ID `varin`. Relative verification URLs resolve against the issuer. Rotating refresh tokens use
-the existing account refresh single-flight and generation checks. The OpenCode request profile is
-selected only by those channel types. Rust derives its session, request and optional project headers
-from the original execution branch/workspace, including auxiliary work; other channels do not receive
-them. Auxiliary purposes have separate stable affinity scopes. No project path or header placeholder
-is sent, and the profile does not change the system prompt or tool list.
-
-Cline and ClinePass retain separate model lists on the same API. Their explicit Chat compatibility
-option retains streamed `reasoning_details`, assembles fragments and replays encrypted blocks only
-under the original connection identity. It does not project encrypted data into visible reasoning.
-
-Anthropic workload identity is an explicit `anthropic-federation` authentication source: an absolute
-Host identity-token file, organization ID and federation rule ID, with optional service-account and
-workspace IDs. The Host exchanges the JWT using the documented JWT-bearer grant against the selected
-channel's `/v1/oauth/token` endpoint. HTTPS is required except for local loopback fixtures; credential
-redirects are rejected. No Pi configuration or ambient Anthropic environment variable is imported.
-Assertions and minted access tokens are never written to the channel catalog or credential store.
-The Host coalesces exchanges and refreshes cached tokens before expiry. It rechecks the identity file
-before and after resolving even a cached token; principal changes, withdrawal and channel revocation
-invalidate old handles. JWT rotation for the same issuer, subject and audience preserves identity.
-Federation uses bearer authentication and the OAuth API beta, but does not enable subscription-only
-Claude Code request decoration. Token exchange errors never publish remote bodies or secrets.
-
-`CredentialScope` binds authority, reference, account/source and generation without storing the
-secret as identity. Normal token rotation preserves the account. Replacement, relink, sign-out and
-changed dynamic sources invalidate affected selections. Refresh is coalesced per account; cancelling
-one waiter does not cancel another waiter or abandon persistence of a rotated token. An old refresh
-cannot overwrite a subsequently replaced account.
-
-Captured model and authentication implementations have real leases. Preparation, queued Run
-handoff, continuation and child selections retain their original owner dependencies. Background
-embedding, rerank, decisions, memory and retrieval retain their own stage/request lifetimes. A caller
-leaving releases its observation; the owner retains active resolution and callbacks until they really
-settle. Failed, replaced and late preparations release their exact captures.
-
-Before Catalog accepts a delegated child, the existing private child handoff acknowledges its exact
-model retention and the original dispatch catalog dependency graph, including model-only children.
-Nested children can still select another captured preset after their ancestor terminates. This
-child-operation hold survives parent completion
-and cold source/context preparation until the child adopts its own registration, or the original
-rollback/report releases it. Terminal Run notifications retire Run admissions without requiring a UI
-inspection; independent operation/child duties and real authentication drain remain owned.
-
-Dispatch rechecks the original scope and target before returning transient headers. Missing or
-failed selected credentials never fall through to another account. Secrets stay out of public DTOs,
-configuration identities, prompt snapshots, history and logs. The private wire and signing contract
-is documented in [credential ownership](../../../../../kernel/crates/varin-runtime/src/providers/AUTH.md).
+- **Sources**: stored credential (`model-auth.json`), explicit env var, direct cloud SDKs (Google ADC, AWS/Smithy signing), Anthropic workload identity (`anthropic-federation` JWT-bearer exchange against `/v1/oauth/token`, HTTPS except loopback, no credential redirects, never persisted to disk), or explicit anonymous access.
+- **OAuth & device flows**: Issuer IDs must match those declared by the installed channel type (checked before capture, refresh, or header generation). Browser OAuth uses Host interaction callbacks; Kimi Code, GitHub Copilot, xAI, Meta, and OpenCode Zen/Go (client ID `varin`) use device-code polling. Copilot resolves and freezes its account endpoint at request preparation. OpenCode derives session/request/project affinity headers in Rust from the execution branch/workspace.
+- **`CredentialScope` & leases**: Binds authority, reference, account/source, and generation without storing secrets as identity. Token refresh is single-flight per account; normal rotation preserves identity while replacement, sign-out, or changed dynamic sources invalidate affected bindings. Missing credentials never fall back to another account.
+- **Retention**: Captured model and auth handles hold real leases across preparation, queued Run handoff, continuation, auxiliary stages, and delegated child handoffs (including model-only nested children) until actual drain. Dispatch rechecks original scope and target before returning transient headers; secrets never enter DTOs, snapshots, history, or logs. See [AUTH.md](../../../../../kernel/crates/varin-runtime/src/providers/AUTH.md).
 
 ## Extension protocol and authentication contributions
 
-`varin.models@1` and the SDK's `provideModels` use the existing reviewed extension service and
-composition lifecycle. The Host validates a complete candidate, publishes its adapter set to the
-Rust registry, then commits channel/authentication contributions. Failed or superseded preparation
-leaves the prior generation selected; it does not partly publish a new catalog.
+- `varin.models@1` (`provideModels`) validates a complete candidate, publishes its adapter set to the Rust registry, then commits channel/auth contributions atomically (failed/superseded loads keep the prior generation).
+- `adapterIdentity` pins verified artifact/composition + metadata identity; `adapterBindingId` pins one live instance. Live pins are never replaced by logical-name lookup; recovery requires exact content identity.
+- Brokered protocol contract is chat over SSE: extension callbacks serialize/parse typed payloads without seeing credentials while Rust owns HTTP/SSE, usage, cancellation, and the request ledger. Kernel disconnect cancels and drains callbacks before releasing pins. See [extension SDK](../../../../extension-sdk/README.md) and [model protocol example](../../../../../examples/extensions/model-protocol/README.md).
 
-`adapterIdentity` is the durable verified artifact/composition plus adapter metadata identity.
-`adapterBindingId` selects one actual running implementation. Unchanged providers can reuse a live
-binding; reactivation of identical code gets a new binding ID. A live original pin is never replaced
-by a lookup of today's logical service name. Recovery without that handle requires the exact same
-content identity, not merely the same extension/version label.
+## Purpose inference and usage accounting
 
-The current brokered protocol contract is chat over SSE. Extension callbacks serialize typed input
-and parse typed events; Rust still owns HTTP, SSE framing, usage, cancellation and the request ledger.
-Callbacks receive no credentials. Authentication contributions use a separate call-scoped client and
-reviewed token endpoint. Their captured implementation survives ordinary replacement until its
-consumers and refreshes drain. Kernel disconnect cancels and drains the actual callbacks before
-pins are released; observer cancellation alone is not drain evidence.
-
-See the [SDK](../../../../extension-sdk/README.md) and the executable
-[model protocol example](../../../../../examples/extensions/model-protocol/README.md).
-
-## Purpose inference and accounting
-
-Conversation, embedding, rerank, decision and image operations retain their own typed input/output
-and original request receipts. Image generation and editing have independent global model settings;
-an unconfigured tool is absent from the Agent tool collection. The original image binding and schema
-remain fixed through an accepted call. Result media, subsequent editing and project saves use the
-existing resource/file owners; see [runtime image tools](../../../../../docs/runtime.md#图像工具与媒体).
-
-Provider usage belongs to its original ModelStep or inference Operation. Repeated history, recovery
-or parent/child projections do not create another consumption record. Actual, estimated, missing
-and pending measurements stay distinct; cancellation is not zero usage. Context capacity uses full
-request tokenizer counts and eligible prior actual usage. The native runtime selects the tokenizer
-from frozen model metadata (then tiktoken's model mapping), labels unmatched models as reference-tokenizer estimates, and
-keeps conversation retention counts separate from the compaction model input. Retrieval uses
-tokenizer/chunk estimates, and
-Goal budgets retain their existing output-token scope. These are different consumers of evidence,
-not interchangeable counters. Raw non-token image usage is preserved without inventing token costs.
-
-`usage-routes.ts` serves authenticated `/api/usage/summary` via `runtime.usage.summary`, not a
-Host-side usage database. `pricing.ts` freezes catalog/custom prices and billing class with the actual
-model binding. The route supplies current prices only as labeled estimates for previously unpriced
-receipts; ambiguous same-model price candidates are omitted, and original snapshots remain authoritative.
-The client supplies local-day boundaries; the Settings consumer refreshes on `usage.updated`. Native
-ledger totals and external Harness self-reported turn/cumulative values remain separate.
-
-## Rationale and support boundaries
-
-The new-api comparison informed channel fields, discovery and model management. Varin calls the
-selected protocol directly; it does not adopt gateway forwarding, automatic channel failover,
-balances or settlement. Discovery is deliberately separate from writes, and malformed configuration
-is never repaired by clearing user data. The comparison did not copy new-api code; repository and
-dependency license obligations remain in [LICENSE](../../../../../LICENSE) and
-[THIRD_PARTY_NOTICES](../../../../../THIRD_PARTY_NOTICES.md).
-
-Local protocol/configuration tests establish specific behavior, not live account or deployment
-support. Provider accounts, OAuth interaction, proxy/DNS environments, cloud credential chains,
-headless/remote use and installed-product packaging still require their relevant acceptance.
+- Conversation, embedding, rerank, decision, and image (`generation`/`editing`, independently configured; unconfigured tools stay absent) retain typed I/O and original Catalog receipts.
+- Provider usage belongs to its original ModelStep or inference Operation (actual, estimated, missing, and pending stay distinct; cancellation is not zero usage; raw non-token image usage is preserved).
+- `usage-routes.ts` serves `/api/usage/summary` from Rust `runtime.usage.summary` (no Host usage DB). `pricing.ts` freezes prices/billing class on each binding and only supplies labeled current-price estimates for unpriced receipts. Native ledger totals stay separate from external Harness self-reported counts. See [runtime image tools & usage](../../../../../docs/runtime.md#providers-usage-ledger--image-tools).

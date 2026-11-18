@@ -1,51 +1,24 @@
-# 运行时验收边界
+# Runtime Acceptance Boundaries
 
-下列真实环境证据仍需与[当前实现](runtime.md)分别核验。按实际修改和目标环境选择场景，
-不把整份清单作为每次提交的固定门禁；没有运行的部分保持未验证。
+Portable unit tests, mocked providers, and in-memory fixtures prove local logic — not packaged installers, real OS mounts, desktop drivers, or physical multi-Host networks. Select relevant checks below based on what changed; leave unrun scenarios explicitly unverified.
 
-## 安装产物与外部环境
+## Real-Environment Checklist
 
-| 场景 | 要确认的事实 |
+| Area | What must be verified on real targets |
 | --- | --- |
-| 输入框浏览器、触屏与读屏 | 验证真实 IME、焦点、移动键盘 viewport、滑动不误选、退出动效中断及扩展子视图；portable DOM／类型检查不能代替这些环境证据 |
-| 安装包流式会话断线、重开与停止 | 原历史、usage、工具回执追平，不重复执行；旧 Run 回执不能清算新 Run |
-| 原生进程和输出 | 对应平台 shell、PTY、后代停止、回执丢失与原输出恢复；PowerShell 5.1 等具体组合独立判断 |
-| Native Workspace 挂载 | Windows WinFsp、Linux FUSE、macOS FSKit/macFUSE 分别核验实际挂载、普通进程 I/O、checkpoint/fork、缓存／可写 mmap 边界、重启重新绑定、打开句柄排空和失败卸载；组件探测成功不等于挂载或数据恢复成功 |
-| 存储打开与升级 | 真实旧 Catalog 78/79 升至 80 后身份、原正文、队列与回执不变，用量账本从升级时开始；未知格式保留资产。Storage 是独立格式域，不由 Catalog 升级链代证 |
-| 文件来源、草稿和恢复 | 真正的多根、不同文件版本、编辑器冲突、当前 Registry 与真实 Host/Rust 组合 |
-| 多 Host | 真实认证连接、原 Source 路由、恢复参与者、项目排程、服务转发、断线后的原始回执与清理 |
-| Computer Use / VM | 各平台真实观察与输入、控制交还、Linux 应用桥、KVM/libvirt、安装和升级；实现缺口见[资源](resources.md#computer-use-与平台边界) |
-| 模型与认证 | 实际 provider/云账号、OAuth、代理/DNS/TLS、取消和未知 usage；模拟请求不证明资格、计费或模型质量 |
-| 本地 embedding | 已安装 Bekko/ONNX 组件、实际硬件、真实权重和检索质量，不从受控 worker 结果外推 |
-| 性能 | 同源码/构建下冷、热、并发和更新场景；受影响文件恢复不递归扫描项目需直接观察真实 owner 的文件访问，不能由内存替身代证；编译复用与 provider 缓存、价格、延迟分别测量 |
+| Composer, touch & screen reader | Real IME composition, focus retention, mobile keyboard viewport, swipe vs selection, exit-motion interruption, extension subviews |
+| Packaged streaming & reconnect | Disconnect/reopen/stop catches up original history, usage, and tool receipts without replaying work or settling a new Run with an old receipt |
+| Native processes & PTY | Platform shells (including PowerShell 5.1), PTY output, descendant tree kill, lost-receipt recovery |
+| Native Workspace mounts | WinFsp (Windows), FUSE (Linux), FSKit/macFUSE (macOS): real mount, normal process I/O, checkpoint/fork, writable mmap limits, restart rebind, open-handle drain, failed unmount. Opt-in real-mount tests live in [kernel/README.md](../kernel/README.md) |
+| Storage open & Catalog upgrade | Real older Catalog upgrades preserve identity, bodies, queues, and receipts; unknown/corrupt stores fail closed read-only. Storage is verified independently |
+| Files, drafts & recovery | Multi-root workspaces, concurrent external edits, editor conflict prompts, real Document Registry + Host + Rust |
+| Multi-Host | Authenticated cross-machine connections, Source routing, remote recovery participants, project scheduling, disconnect cleanup |
+| Computer Use & VM | Real per-platform observe/query/act/wait, control handback, signed Windows `VarinComputer.exe`, Linux app bridge, KVM/libvirt lifecycle |
+| Models & auth | Real provider/cloud accounts, OAuth flows, proxy/DNS/TLS, mid-stream cancellation, unknown usage |
+| Local embeddings | Installed Bekko/ONNX runtime, real hardware/weights, actual retrieval quality |
+| Interactive content | Real iframe layout/focus/IME/touch, streaming-to-inline handoff without rerunning scripts, real Host/Rust revision conflicts, branch snapshot isolation, and deletion GC |
+| Performance | Cold/warm/concurrent runs on identical builds; targeted recovery must observe real file I/O (no full-project recursive scans) |
 
-Managed 文件恢复与 Source Host 项目排程已有实现，物理双机仍需独立验证。固定来源执行 cwd、
-多来源组合等当前边界见[运行时](runtime.md)与[资源](resources.md)。压缩 DAG 已按依赖并发调度，
-真实 provider 的并发容量、延迟和计费仍需相应环境验证。
+## Recording Evidence
 
-## 如何记录证据
-
-产品已经切换到原生 Agent runtime；这与安装包、物理双机和外部账号的验收是不同事实。历史资产不自动迁移。
-
-检查以原 owner 和真正的产品消费者为入口。记录所用 commit/产物、平台、来源、实际步骤与结果，区分通过、失败、跳过和未运行。
-受控 provider、真实 kernel、Host IPC、UI、安装包和物理双机证明的是不同层次；不能把测试数量相加成全局验收结论。
-挂载的 opt-in 实机入口见 [kernel README](../kernel/README.md)；它不在默认 Rust 测试中执行。
-命令与验证选择见[开发指南](development.md)。
-
-## 聊天交互内容
-
-正文片段、草稿事务、共享引用、宿主动作和作品位置已有受控 DOM／单元测试，Host 领域也有替身存储验证。
-原生单元测试另覆盖 Catalog 的共享历史／队列保留根与 Storage 的 UI 记录、回执和共享对象释放。
-这些证据不代表真实 iframe 排版、焦点、中文组词、触屏阅读或实际 Host IPC 链路已经验收。
-
-此次实现所用开发环境在创建 native socket 及启动 Chromium 所需 socket 时返回 `EPERM`，因此未取得该环境上的
-真实浏览器与 native suite 成功证据。这是环境阻塞，不是测试通过或功能正常的替代结论。
-后续应在允许相应 socket 的环境运行原 native 入口，并用真实浏览器核验：
-
-- 长选项、亮暗主题、窄屏、键盘和中文输入；选择后插入已有草稿与撤销不破坏组词。
-- 流式工具视图转到正文引用时 iframe 不重跑脚本、焦点不跳、会话阅读锚点不被拖走；多次引用只显示一个完整内联实例。
-- 实际 Host／Rust 下的片段登记、状态保存、修订冲突、重新打开、声明式与 HTML 分支切点快照继承／隔离和断连后的 lease 替换。
-- 删除父会话时保留活跃家族与共享历史来源；最后持有者删除、在途 UI 写入停止及重启后，记录／原回执／非共享对象沿原生命周期释放。
-- 平台发送按钮沿原输入／排队 owner 处理双击和不确定重试，期间新写的草稿与附件保留。
-
-核验时记录对应提交、构建和平台，不用受控 DOM 或内存存储的通过代替这些结果。
+When reporting acceptance results, record the commit/artifact, OS/arch, source configuration, exact commands/steps, and clearly separate **passed**, **failed**, **skipped**, **blocked (e.g. sandbox EPERM)**, and **not run**. Never combine portable test counts into a global release sign-off. See [development.md](development.md#verification) for test entrypoints.

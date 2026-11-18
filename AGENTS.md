@@ -68,12 +68,12 @@ resource reason; defaults, warnings and budgets are often the better tool.
 
 ## Working here
 
-- Main engineering docs are in Chinese; source-adjacent docs keep their existing language. Docs describe the
-  current system and age at different speeds: this guide rarely changes, domain and module docs change with
-  their features, and numbers, method lists and constants are best linked to the code rather than copied.
-  The doc nearest the changed code is the natural one to update in the same change. Finished design plans
-  fold into the domain docs and are deleted. Parallel bilingual copies, permanent cleanup logs and doc
-  governance add weight without value.
+- Engineering docs and source-adjacent docs are in English (user guides under `packages/docs/` carry
+  translations). Docs describe the current system and age at different speeds: this guide rarely changes,
+  domain and module docs change with their features, and numbers, method lists and constants are best linked
+  to the code rather than copied. The doc nearest the changed code is the natural one to update in the same
+  change. Finished design plans fold into the domain docs and are deleted. Parallel bilingual copies,
+  permanent cleanup logs and heavy doc governance add weight without value.
 - Name modules and APIs after their responsibility, not after the migration that produced them.
 - Pick verification that could actually change your conclusion, and report what ran and what did not.
   Tests are most useful when they observe product behavior, not source text or DTOs built inside the test.

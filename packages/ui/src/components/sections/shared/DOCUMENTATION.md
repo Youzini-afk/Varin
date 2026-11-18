@@ -42,7 +42,7 @@ required syntax, dynamic state, and active wizard instructions—remains visible
 `SettingsPageLayout showSaveStatus` observes the shared persistence state. Successful owner acknowledgments
 briefly show Saved, slower writes show the delayed saving indicator, and failures remain visible. Settings saved
 through the shared persistence path get this behavior automatically; a page-specific authority reports
-its state through `@/lib/persistence` rather than inventing a second success/error badge system.
+its state through `packages/ui/src/lib/persistence.ts` rather than inventing a second success/error badge system.
 
 Drafted units use `SettingsActionBar` for fixed save/cancel controls and real dirty/saving/error state.
 Its dock occupies layout space and animates open; `placement="inline"` keeps memory and retry actions
@@ -57,11 +57,12 @@ only after the draft decision. Runtime endpoint guards complete before teardown 
 
 Settings search is an explicit projection, not a scrape of rendered JSX:
 
-- `src/lib/settings/search.ts` owns stable searchable items and conditional item availability.
-- `src/lib/settings/metadata.ts` owns page metadata and page-level availability.
+- `packages/ui/src/lib/settings/search.ts` owns stable searchable items and conditional item availability.
+- `packages/ui/src/lib/settings/metadata.ts` owns page metadata and page-level availability.
 - A rendered target exposes the matching `data-settings-item`; the shared primitives accept this as
   `settingsItem`.
-- `SettingsView.tsx` owns navigation order, while `MobileApp.tsx` owns the mobile page set.
+- `packages/ui/src/components/views/SettingsView.tsx` owns navigation order, while
+  `packages/ui/src/apps/MobileApp.tsx` owns the mobile page set.
 
 Static controls, section headings, and predictable create/connect actions are useful search targets.
 Rows for dynamic agents, projects, providers, hosts, sessions, or packages are normally discovered
@@ -69,6 +70,7 @@ inside their page instead of becoming an unbounded global index. When a result r
 entity state or a draft editor, `prepareSettingsSearchTarget` prepares that state before highlight.
 Availability in the registry should describe the same runtime/platform condition as the rendered
 control.
+
 ## Context boundaries and explicit policies
 
 `ContextBudgetSettings` renders the entire model window. Replacement is `1 - reserveRatio`;

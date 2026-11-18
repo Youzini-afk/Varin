@@ -109,7 +109,7 @@ Exact branch/pin blob reads use the actual path state as proof, rather than deri
 indexes that GC may release. These are namespace primitives, not mounted filesystem or open-handle APIs.
 
 Native filesystem implementation is split by owner; product behavior and current support are in
-[resources](../docs/resources.md#不可变工作状态与物理目录), rather than a second feature list here.
+[resources](../docs/resources.md#immutable-workingstate--native-workspaces), rather than a second feature list here.
 
 | Entry | Responsibility and non-obvious boundary |
 | --- | --- |
@@ -247,7 +247,7 @@ shared strict codec catalog, aliases, detection and serialization. Documents and
 that catalog rather than maintaining encoding whitelists. Pure text RPCs use the existing body workers
 and streaming transport; they are neither a second writer nor a whole-file frame limit.
 
-The [file representation contract](../docs/resources.md#文件准入与观察) describes detection priority,
+The [file representation contract](../docs/resources.md#file-admission-text-encoding--observation) describes detection priority,
 version binding, paging and conversion. A guess must decode the entire stream. Encoders reject
 unmappable characters; edits preserve original raw segments, codec, BOM and line endings where possible.
 A bounded diff may coarsen a replacement, never truncate or silently substitute text. Stateful and

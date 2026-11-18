@@ -1,180 +1,50 @@
-# 外部 Agent
-
-Varin 可以连接执行 Host 上的 Codex、Claude Code、Pi，以及支持 ACP 的程序。产品目录提供 20 个产品，Codex、Claude Code、Pi 保留原生适配，其余复用 ACP。DeepSeek 的官方接口与社区桥接是同一产品下的独立配置。外部程序继续使用自己的模型、账号、工具和项目配置；Varin 提供会话界面、工作区关联与派发协作。
-
-## 使用入口
-
-设置先展示实际发现或明确配置的程序，停用项可折叠，未安装的自动发现项留在“添加 Agent”目录。详情标题旁直接启用或停用；目录可搜索、筛选“可添加 / 全部”，并提供自定义 ACP。启动参数逐项编辑，模型与思考默认值来自真实连接的能力目录。登录和账号配置继续由原程序负责。
-
-输入框的执行 Agent 列表可按名称搜索。可选项包括 Varin、明确启用的外部配置，以及在当前执行设备上找到启动程序的自动发现项。打开列表时只定位程序文件，版本检测与协议握手沿用各自的入口。
-
-设备列表来自工作连接，可选择本机或已连接设备，无需先建项目。检测、配置、安装和日志都由所选 Host 的同一外部 Agent owner 处理；远端管理沿用现有 Host 配置/执行权限及目录范围。检测解析程序并查询版本，不调用模型；Antigravity 版本由真正连接时的握手报告，设置只确认其文件存在。
-
-支持 npm 分发的产品安装到目标 Host 的私有数据目录，使用该设备已有的 Node.js/npm 及原有 registry 配置，并遵守包声明的 Node 版本要求。Cursor、Antigravity 从 ACP 官方分发目录取得完整发行包，包含配套运行时；其他产品可连接已有程序或打开官方安装说明。安装不会迁移凭据或改写用户的全局程序。
-
-新程序先在独立目录准备，成功后才更新 Catalog 的启动配置；失败和取消保留上一版本，取消状态等待原生进程退出。更新后的新连接使用新程序，旧连接继续使用原目录。卸载通过 Rust 文件 owner 执行，运行中进程及未确认结束的进程仍占用其程序目录，跨工作区也不能删除。卸载仅删除 Varin 管理的程序，保留外部配置和历史。进度采用变化通知，安装继续运行不依赖设置页是否打开；日志按需读取。
-
-Windows 上，默认的 Codex 和 Claude Code 命令优先按 Host 的 PATH 解析。找不到时，Varin 会检查 Codex 桌面版解包的 CLI 和 Claude Code 原生安装的用户启动器。使用 `claude-agent-acp` 时，在自定义 ACP 条目中填写该命令，参数留空即可。
-
-Windows 的 npm 启动器可直接使用 JS 入口及配套 Node；其他 `.cmd`/`.bat` 由原生进程 owner 按命令脚本规则运行，保留参数边界。会话准备负责实际协议握手与恢复，具体能力由该版本协商。
-
-| 预设 | 协议启动参数 | 账号与平台要求 |
-| --- | --- | --- |
-| OpenCode | `opencode acp` | 在该 Host 用 `opencode auth login` 登录；上游提供 Windows，建议 WSL |
-| Gemini CLI | `gemini --acp` | 先在该 Host 的交互式 CLI 完成登录和项目信任；不添加 `--skip-trust` |
-| Kimi Code | `kimi acp` | CLI 内 `/login`；Windows 需要 Git for Windows / Git Bash |
-| Cursor Agent | `cursor-agent acp` | 使用提供 ACP 子命令的 Cursor CLI；不依赖含糊的 `agent` 别名 |
-| Qoder | `qoder --acp` | 使用 CLI 自身账号；Windows 上游仅提供 x64 |
-| Grok | `grok agent stdio` | `grok login` 或 CLI 已有凭证；版本查询为 `grok version`，不添加自动批准参数 |
-| DeepSeek Harness | `dsh --profile acp` | 在该 Host 完成 dsh 登录，或让其 `acp` profile 指向网关；版本查询为 `dsh --version`，不写入凭证或改写 dsh 的模型/provider 配置 |
-| Cline | `cline --acp` | 官方 npm 包，沿用 CLI 的配置与后端 |
-| CodeBuddy | `codebuddy --acp` | 官方 npm 包 |
-| OpenClaw | `openclaw acp` | CLI 可托管安装，Gateway 使用已有部署 |
-| Hermes Agent | `hermes acp` | 官方安装；先在目标设备用 `hermes gateway ensure` 准备共享 Gateway |
-| Google Antigravity | 官方 ACP server | 与 `localharness_external` 一起安装；Linux 使用上游要求的 `--uid=` |
-| Kiro CLI | `kiro-cli acp` | 官方安装器；从 `_kiro.dev/metadata` 映射思考开关与实际 effort 档位 |
-| ZCode | `zcode-acp-server server` | 社区桥接可托管安装，另需官方 ZCode 运行时 |
-| TRAE CLI | `traecli acp serve` | 官方安装器与已有程序 |
-| Command Code | `command-code acp` | 官方 npm 包，避免 Windows 的系统 `cmd` 别名 |
-| MiniMax Code | `mcode acp` | 官方安装器与已有程序 |
-
-DeepSeek 社区路线安装 `deepseek-acp`，独立保留配置和版本；不把官方会话自动迁移给桥接。完整发行平台、安装包与启动参数见 [`profiles.ts`](../packages/web/application-host/lib/external-agents/profiles.ts)。产品 Logo 跟随实际后端与配置身份，包含历史会话保存的产品身份；自定义显示名称不会改变标识。
-
-ACP 文件回调使用原执行 Source 的文件 owner，本地与远端均保留原有路径范围和版本冲突：读后被用户修改的文件必须重新读取再写。只有接上读写 owner 时才向后端声明该能力。
-
-Hermes 的 `gateway attach --json` 提供现有 Gateway 的一次性连接票据。Varin 立即连接该 endpoint，以本机字节通道供 ACP viewer 使用；票据不写入设置、会话或日志。每个 viewer 只关闭自己的连接，共享 Gateway 不进入会话的进程树，也不会随该会话强制停止。OpenClaw 同样使用原有 Gateway 配置。
-
-新会话输入框中原来的 Varin 位置可选择执行后端；默认后端位于“对话默认”。正文、图片和各后端的下一条请求选项保留在当前草稿中，不作为下次新会话的偏好。模型、思考和模式默认沿用 Agent 自己的配置；如需固定默认值，可在“外部 Agent”设置的对应条目中选择，候选来自该 Host 上次实际连接的能力目录。更改默认值不改写已有会话或已受理输入。
-
-切换到外部后端、聚焦或输入、打开模型或模式菜单会自动准备连接。纯聊天使用 Host 为会话创建的私有工作目录；选了工作区时，使用其实际执行设备与目录。仅打开或浏览默认后端为外部 Agent 的草稿不会启动程序。首次发送等待同一份准备完成。准备失败或取消保留原受理键和绑定；更换后端或目录前只删除已确认没有输入的准备绑定。输入受理后固定后端。
-
-思考、模型和模型参数位于工具栏右侧，后端自己的模式及其他选项位于左侧。左侧空间不足时折叠。控件显示下一条请求的覆盖值，菜单可恢复“沿用会话配置”。这些选择随下一条输入耐久受理，在投递前交给外部 Agent。`/model`、`/thinking`、`/mode` 使用同一组能力；后端同名命令独立保留在后端分组，只插入草稿而不自动执行。
-
-回复抬头显示这一轮收到的模型和思考强度，两项各自按后端实报情况展示。记录随轮次保存，切换模型或思考档位后，旧回复仍显示当时的值。此前未记录这些信息的回复继续显示 Agent 名称。
-
-Codex 从 app-server 查询协作模式与各模型的思考档位，模式和显式模型、思考强度随同一次请求提交。Claude Code 使用 SDK 的权限模式，模型与思考档位来自连接初始化。Pi 从原生模型目录读取每个模型的思考能力，当前模型以 RPC 返回的档位为准。ACP 使用会话返回的标准选项，Cursor 同时协商模型参数，Kiro 的可用思考档位可以早于当前档位出现。只报告当前模型选项的 ACP 后端会在模型切换生效后提供新模型的选项。
-
-Codex 的盾牌菜单读取当前目录的原生权限档位，保留其允许使用的内置档位和自定义档位。用户的选择从下一条消息起应用，由 Codex 执行原审批规则。沿用会话权限时省略覆盖。执行者工具的模型和模式参数不包含此权限选项。
-
-Host 按启动配置和程序版本保存真实能力目录。准备期间可选择标为“上次”的缓存值；实时连接完成后校验，已失效的值清除并提示，缓存不构成可发送状态。Codex/Pi 的模型目录失败可单独重试原生元数据查询，不重启进程、不调用模型。Claude SDK 的目录来自连接初始化，重新获取须实际重连，不把缓存读取伪装成刷新。
-
-项目与目录移到输入框下方左侧，连接状态在右侧。状态区显示准备、连接、回收、登录或失败，并可查看后端、版本、目录、原生会话 ID，以及取消准备或重连。图片和文件入口按实际能力启用，缺少能力时说明原因；Varin 的权限、目标、计划与压缩操作不约束外部循环，因此不显示。
-
-会话使用当前聊天排版、三种显示模式、思考摘要、工具展开、文件写入预览、工作概览、图片附件和协作气泡。每轮用量仍在消息底部显示，缓存读取、创建与缓存率只在有数据时出现。Codex 无法提供恢复前的计费基数时，首次统计标为会话累计。
-
-外部会话有窗口占用数据时，在桌面顶栏、Bot 外部任务标签区和移动端会话信息中展示上下文。窗口占用来自 ACP 的 `usage_update`、Codex 的窗口用量、Claude 或 Pi 的上下文报告。外部轮次结束时保存已有测量，打开历史会话或重新连接后尚无实时数据时标为“上次记录的上下文”。详情中的计费用量保留“会话累计 / 最近一次模型请求”的口径，消息底部也会显示该轮已有的用量。
-
-## 执行和持久化
-
-- [`application-client/src/external-agents.ts`](../packages/application-client/src/external-agents.ts) 是公开、带类型的 API。Host 的 `lib/external-agents` 解析协议、运行进程和协调交互。
-- Rust Catalog 的 `external_*` 表保存配置、外部会话、输入、轮次和交办关系；正文沿不可变 ContentStore 保存。独立执行不创建虚假的原生 Thread、branch 或模型 Run。
-- Codex 使用 app-server，并分别核对连接、thread、turn 与交互请求身份；Claude 使用 SDK core，通过 Rust 跟踪的桥接进程连接用户指定的 CLI，以输入 UUID 和原生工具身份关联批准；Pi 使用独立 RPC 进程；ACP 在初始化时协商能力。
-- Pi 目前接入稳定版 `>=1.5.0 <2.0.0` 的 RPC 合同：用 `agent_settled` 确认最终结算，处理原生 handled disposition 与 delta-only 消息。旧版、预发布版或无法明确解析的版本会说明不兼容，不靠超时或轮询猜测完成。Claude 桥接报告执行端固定的 SDK 版本，与用户 CLI 的版本分开。已关联轮次中的原生 hook 警告仅作为提示显示，不代表工具被拒绝或已获批准；用户指定的 CLI 独立安装，必须提供原生 `user_message_uuid` 与 tool-use 身份。SDK 回调可能先于异步消息消费，桥接会等待同一输入的精确证据再请求批准，而不是误拒绝正常工具。无法关联的输出/完成不归入当前轮次；缺少证据时明确提示等待、升级或停止。原生中断、结束、外来轮次证据和关闭会撤销原等待，不把旧批准交给下一轮。没有根据版本号虚构“所有 Claude CLI 都兼容”的保证。
-- 进程树、来源捕获、目录物化与文件回收继续由 Rust Storage 管理。关闭面板只取消观察，停止操作作用于实际轮次；删除会话先关闭受管连接，再清理其拥有的目录和内容引用。
-
-输入在投递前耐久受理，同一请求键不能产生第二次模型调用。准备与队列按真实状态推进；进程或 Host 中断后保留未确认轮次；“重连”只恢复原会话和查看能力，“继续”才明确确认检查过中断状态并推进尚未投递的队列，不自动重放上一条有副作用的输入。迟到事件不能改写已结束轮次。
-
-普通停止先撤销待答交互，再发送原生取消，并等待协议确认，不能用 HTTP 返回或取消意图冒充实际停止。若协议不响应，可明确“强制停止”：Rust 所有者终止并等待原进程树退出；此前副作用仍可能已经发生，轮次保持未确认/中断语义，不宣称回滚。取消尚未发送输入的连接准备也等待受管进程退出，但保留会话绑定供重试。
-
-观察使用已认证的 SSE，并接入现有观察复用通道。首次连接和断线重连读取快照，正文与工具内容随后按增量更新；慢视图重新读取当前快照，不拖住外部执行。流式内容在内存中合并，完成条目及正常结束、断线边界保存当前内容，避免每个 token 都写一份越来越大的全文。突然终止 Host 时，最近尚未保存的增量可能缺失；原生续聊历史仍由外部程序管理。
-
-## 预设、派发与消息
-
-`dispatch` 可直接选择 `executor: "codex"` 等当前来源 Host 的配置别名，或 `executors` 返回的 `exec:` 配置引用，无需建立外部角色预设。选择顺序是本次明确执行者、所选预设绑定、Varin；`executor: "varin"` 明确改回原生执行。自由派发不会跟随手动新会话的默认后端。
-
-预设仍保留角色名称、用途、头像和指令。执行者变更后，不把旧原生模型渠道和工具清单转成外部参数；外部 `executorOptions` 只填写本次明确的 `model`、`thinking`、`mode`、`config`。同一执行者的预设选项、当前连接配置默认和程序自身默认按顺序补足遗漏项，`tools`／`workFocus` 只用于原生执行。
-
-`executors` 的 `list`、`inspect`、`detect` 共用现有配置和能力 owner。可按名称、`projectId`、`sourceAgent` 或返回的 Host 引用查询；当前范围包含本地、当前来源和已注册项目的托管 Host。列表读取当前配置，首次缺少安装事实时探测已启用或自动发现的程序，后续使用带检测时间的结果；明确 `detect` 才重新探测。停用配置在普通列表／检查中不启动探测，明确检测也不重新启用。能力标明来自连接、缓存或尚未知，不为列目录打开所有 Harness 会话，也不把版本查询当作已登录。模型目录不披露程序路径、启动参数或凭据。
-
-执行者配置引用固定 Host 与配置身份，真正连接时由实际 Host 解析当前启动配置。已受理输入、原生 session 和已投递 turn 的身份不变；配置更新或重启不会要求旧启动参数永久相等，也不以新 session 冒充恢复。新增配置可以由发现入口选择，并在派发受理边界固定本次配置身份。
-
-文件来源与执行者必须处于同一可执行 Host。当前支持沿当前来源或明确项目／来源 Agent 选择远端执行；二者不匹配时返回来源与执行者的 Host 引用，不照搬协调机路径。只指定另一 Host 执行者而不选择其文件来源的自动私有目录配置仍未接通，需选择目标 Host 的项目或明确使用既有目标会话。
-
-`dispatch` 异步返回原操作标识和外部 `conversationId`。`child_status`、`child_report`、`wait_child`、`child_cancel` 沿现有协作入口控制同一执行。报告记录真实结束状态，进入协作面板；等待结果以带发送者身份的 Agent 消息进入父会话。
-
-`threads` 可发现同一认证范围内手动创建或由其他任务派出的外部会话；`read_thread` 的 `overview` 显示原目录、后端、创建来源与活动执行，`recent`、`range`、`search` 和 `item` 读取 Catalog 已保存的原 turn/item 正文与附件。返回的 `nextRead` / item 引用固定原读取版本，翻页不会重连程序、启动候选会话或改成原生 Run。
-
-`send` 的 `targetThreadId` 可以使用已有外部会话的稳定短码、会话标识或执行引用，不再要求同一派发家族。归档目标需先恢复，删除目标明确报错，不重定向到新会话：
-
-- `inform` 留给下一次正常输入，不额外唤醒模型。
-- `request` 在支持原生插话的活动连接中可补充本轮；`afterCurrent: true` 或不支持插话时排入下一轮。各请求保留独立输入与报告身份，实际共用一轮时引用同一执行，不改写原派发回执。
-- `wait` 等待对应外部轮次结果；结束等待不撤回已受理消息，联系独立会话不取得停止其整个执行的权限。
-
-本次请求的报告回到实际发送会话和分支，原创建来源、session、目录及资源 owner 不变。手动会话只增加请求记录，不补造首次派发；用户自己续聊也不会改写其他请求的报告。普通 Agent 的不等待报告保持被动，Bot 可沿原工作事件接续；等待与通知消费同一报告，不重复交付。
-
-`executorOptions` 可为下一轮明确指定实际支持的 `model`、`thinking`、`mode` 或 `config`；有选项的请求使用下一轮队列，不覆盖当前活动执行。省略选项保留原会话配置，而不是恢复首次派发的模型。外部会话没有 Varin 原生 branch 和 `replyTo` 消息身份，也不在 `send` 中更换文件来源。通信不产生隔离文件基线、树取消或目录回收权限；协议无法表达的参数会明确报错。
-
-## 运行中补充
-
-Codex 的活动连接接通正式 `turn/steer`，以 `expectedTurnId` 固定原生轮次。输入框可选择“本轮补充”或“下一轮”；正文、图片和原文件使用同一附件准备链，本轮补充不覆盖活动模型、思考、模式或配置。普通 Agent / Bot 的 `send` 复用此路径，显式 `afterCurrent: true` 始终保留下一轮队列。
-
-每条补充先保存自己的输入身份，再保存投递意图；只有原生确认相同 turn ID 后才建立 `consumedByTurnId`。多条补充共享真实轮次的输出和结果，不重复启动或伪造完成。界面区分耐久受理、投递中、原生追加和结果不明；追加成功不表示模型已经读到。原轮结束与回执交错时仍绑定原轮，不改投后继。
-
-明确拒绝保留输入及原因；丢失回执或连接中断保留未确认状态，重试原请求键只读取同一回执，不自动另起一轮。恢复后也不重播已投递输入。已追加消息不支持单条撤回，停止整个执行仍通过原执行身份；撤回等待或发送方结束不会停止另一个会话。
-
-Pi 适配层已实现原生 `steer` 的 `queued` / `handled` 回执，但该版本的事件不携带对应输入身份，队列确认本身也不证明消费，尚不在产品中声明插话能力。Claude 的 `priority: "next"` 可以跨原生结果边界进入下一轮，当前桥接尚未完成此关联；它和 ACP 继续展示真实下一轮队列。Claude 已接受复数 UUID 的原生关联证据，但这不等于启用插话。这些边界不把上游已有接口误称为永久不支持。
-
-## 安排与事件续接
-
-Bot 的来源关注和来源对象关联可以选择同一用户已经建立的外部会话。安排仍保存真实的原生归属会话，
-外部 `conversationId` 独立保存；Native workspace 的 branch 只是文件来源，不充当对话身份。
-直接创建的外部会话保存认证 principal，历史归属只由 Catalog 升级和首次明确认领策略转换。
-
-主动事件在原 Catalog 事务中固定 occurrence 与外部 turn，Host 唤醒原发送队列；不创建假的 Thread、Run、
-派发 Operation 或第二份待办。被动事件保存为 `awaiting_input`，只附随下一次真实输入。Begin 固定这次携带的
-被动材料，真正发送前再核验暂停、Bot 休眠、目标及材料是否被撤回。暂停的安排不会阻挡同一普通任务的用户输入。
-
-尚未发送的失败保持原 turn 和具体原因，重新处理沿原身份重试；已发送而结果不明的输入保留 interrupted，
-不会包装成新请求重播。存活连接可以继续发送，即使后端没有声明断线后的 resume；实际恢复失败、认证和配置改变
-保留待办，不换会话或账号。每次真实完成由原 Bot 工作事件输入送回交办位置，不冒用旧派发的已发布报告回执。
-正文、图片和原文件沿原 ContentStore、typed attachment delivery 与执行 Host 文件 owner 保留及读取。
-
-## 文件附件
-
-直接聊天、派发与后续消息接受统一附件选择，只有原件准备并耐久保留后才受理完整输入。
-外部会话使用自身身份和原输入键，不创建伪原生 Run；重试复用固定回执，不重读同路径的新版本。
-上传与下载沿认证二进制流；图片原件依然可以转发和下载。
-
-转换在真实连接能力协商后、原生投递意图之前完成。支持的图片走各 Harness 原生图片块；
-其他文件在当前执行 Host 准备只读路径。Codex、Claude、Pi 获得文件描述和真实路径，ACP 使用原生 `resource_link`。
-缺少原生输入及可用执行路径时明确失败，保留原选择，不转换为虚构的文字描述或另开会话。
-持久消息只保存稳定引用，路径在当前 Kernel generation 重新准备。删除会话先确认原连接及进程停止，再释放该会话路径和捕获记录；
-已转交给存活接收者的对象继续保留。
-
-## 文件来源与交换
-
-默认共享实际目录；新 `isolated_write` 使用 Native workspace 分叉、内容对象和保留基线，真实进程 cwd 为当前挂载路径。保存的是逻辑来源，重启重挂原 branch；旧 Materialized 会话保留原目录合同。`sourcePath` 沿原来源映射处理。当前外部派发不宣称拥有只读沙箱，`read_only` 会在派发前指出能力缺口。
-
-共享同一来源时，`update` / `submit_code` 返回 `shared_source`。隔离来源通过实际文件快照与保留基线交给既有 Integration 服务，支持选择文件、三方合并、接收方修改冲突和原回执恢复。接收目标保存外部来源身份，不伪造 native Run。原文件交换通知在实际执行回调结束后发布，避免回调内提前结算自身。
-
-正常完成保留外部会话的来源和绑定，用户可以继续工作。仍有客户端观察草稿或会话时不进行空闲回收，也不为此引入独立心跳。没有观察者之后，未发送过输入的准备默认闲置 5 分钟回收，已开始会话默认 15 分钟；活动轮次、待答交互、未结算投递、队列和协议报告的后台子任务均阻止回收。后端未声明原会话恢复能力时不自动回收，也不通过“重连”关闭仍可用的连接，以免无法恢复原生会话。回收由 Rust 进程所有者真正停止并等待原进程树退出，只释放连接，不删除绑定或历史；再次聚焦或发送恢复原会话，不自动重放已投递输入。这两个时长是可调整的服务默认值，不是产品硬限制。
-
-删除先等待原进程和连接释放，再释放原 handoff；仍被原生会话、其他外部会话或编辑器引用的 Native 分支继续保留。最终回收由原 Source 与 Storage 生命周期完成，共享项目、外部账号配置和外部原生历史独立保留。准备失败且尚未投递的临时来源也归原会话清理。
-
-## 当前能力边界
-
-本轮交付直接聊天与跨 Harness 派发。Varin CLI、Skill、MCP 对外能力共享按产品决定暂缓；不会写入外部程序的全局配置。ACP 没有声明尚未连接的文件或终端回调。
-
-直接聊天当前选择本 Host 的实际目录；远端客户端使用其所连接 Host 的程序。托管来源的跨资源 Host 派发需要在来源所在 Host 执行。普通图片及文件附件已接通；从外部程序导入已有会话、接管其他终端的活跃进程、边界恢复点增强和原生上下文专属操作仍保留为后续能力。已在 Varin 内建立的外部会话在后端支持恢复时可以重连并继续原生会话。
-
-ACP 的图片能力取 `promptCapabilities.image`；恢复取 `sessionCapabilities.resume` 或 `loadSession`，优先无历史重放的 resume，其次 load。未声明恢复、恢复失败或返回不同原生 ID 都明确失败，不另建会话替代。初始化中的认证方法可由用户明确选择；需要终端的认证仅显示原生指引，不自动启动登录或保存凭证。
-
-模型、思考、模式与其他 select/boolean 配置以实时会话选项为准；能力缓存只用于准备期间的显示和候选选择。配置更新会刷新界面，实际设置成功后才耐久记录输入投递意图。斜杠命令来自原生能力，仅插入草稿而不自动执行。权限、普通问题与可表示的原始类型表单有单独取消响应；无法正确表达的 schema/URL elicitation 不假装支持。ACP 不把上下文占用或未知累计口径当作每轮计费 token。Codex、Claude、Pi 的模型目录失败保留 `modelsError`，不把空目录解释为连接失败或自动更换后端。
-
-私有协议版本由生成的 [kernel 协议](../kernel/crates/varin-kernel/src/protocol_generated.rs) 定义，Catalog 格式与支持的升级链由
-[Catalog upgrade owner](../kernel/crates/varin-runtime/src/catalog_upgrade.rs) 管理。支持的旧格式在打开时事务升级，保留原会话身份、正文和回执；
-未知、更新或结构损坏的格式拒绝打开，不覆盖用户资产，也不重放外部输入。
-
-## 产品身份与会话图标
-
-外部会话沿 Catalog 的 `configurationId` 与 `harness` 保留执行产品身份，交办记录也投影原配置 ID；
-任务标题、用户配置名称和预设角色头像不用于猜测品牌。ACP 仅是协议，只有已关联的产品 profile／配置
-选择对应 Logo，其余连接使用通用终端图标。原生任务仍使用 Agent 头像，Bot 直接会话与交办来源保留原位置。
-
-设置、执行者选择、分类／最近／搜索、会话切换、外部任务概览及协作消息的双方头像共用 `HarnessIcon`。
-任务主图标已是产品 Logo 时不重复放小 Logo；忙碌、等待、失败与置顶仍由原状态位表达。会话切换保留
-外部配置 ID，并使用原外部会话导航，不把外部 ID 当作原生 Thread。
-
-随包资源与来源说明见 [harness-logos/README](../packages/ui/src/assets/harness-logos/README.md)。Codex 使用
-专用产品标识，Pi 使用官方矢量轮廓而不是系统字体字符；彩色 Gemini CLI／Kimi 图标保持原色，Cursor
-使用官方深浅版本。Qoder 与 Grok 在可再分发资源尚未核验完成时保留通用图标，不再用首字母伪装品牌。
+# External Agents
+
+Varin connects to external CLI/SDK agents running on an execution Host — **Codex**, **Claude Code**, **Pi** (native adapters), and **ACP-compatible** programs (20 product profiles total; full catalog in [profiles.ts](../packages/web/application-host/lib/external-agents/profiles.ts)). External agents keep their own models, accounts, tools, and project configs; Varin provides the conversation UI, workspace binding, attachment delivery, and cross-agent delegation.
+
+## Discovery, Installation & Device Scope
+
+- **Settings & Picker**: Settings lists detected/configured agents per connected Host (local or remote managed Host via Work Connections); "Add Agent" shows the full catalog plus custom ACP entries. The composer picker lists Varin, enabled configs, and auto-detected executables on the active execution Host without triggering model calls.
+- **Managed installs**: npm-distributed products install into the target Host's private data dir (using its existing Node/npm/registry); Cursor and Antigravity fetch official ACP distribution bundles. Installs stage into an isolated dir and atomically swap Catalog launch config on success; running/undrained processes pin their program dir against uninstall. Uninstalling removes only Varin-managed binaries, preserving user configs and history.
+- **Windows launch**: Default Codex/Claude lookup checks `PATH`, then falls back to unpacked Codex Desktop CLI / native Claude Code user launcher. `.cmd`/`.bat` scripts run via the native process owner with argument boundaries preserved.
+- **ACP / Gateway specifics**:
+  - ACP file callbacks route through the executing Source's file owner (preserving root scope and version conflicts) and are advertised only when wired.
+  - Hermes (`gateway attach --json`) and OpenClaw attach to existing shared gateways; one-time tickets are never persisted/logged and shared gateways stay outside the session's process tree.
+  - Authentication always happens via the external program itself on the target Host; Varin never harvests or writes external credentials.
+
+## Composer, Capabilities & Context Display
+
+- **Lazy preparation**: Selecting an external backend and focusing/typing or opening its model/mode menus prepares the connection (pure chat uses a private Host working dir; workspace chat uses the selected Host/dir). Opening a default draft without interaction does not spawn a process. Backend locks once the first input is admitted.
+- **Capability cache**: Host caches real model/thinking/mode catalogs per launch config + version for display during preparation, then validates once live; stale cached choices are cleared rather than assumed sendable. Codex/Pi support metadata refresh without restart; Claude requires reconnect.
+- **Per-turn overrides**: Model, thinking, mode, and Codex native permission shield choices are durably admitted with the next input and recorded on each reply header. Slash commands from the backend insert into the draft only (never auto-execute).
+- **Context & usage**: Context window occupancy (`usage_update`, Codex window usage, Claude/Pi reports) displays when reported, marked as last-recorded on history reopen. Billing usage stays separate from window occupancy.
+
+## Execution, Persistence & Stopping
+
+- **Owners**: [application-client/src/external-agents.ts](../packages/application-client/src/external-agents.ts) (client API) · `packages/web/application-host/lib/external-agents/` (protocol adapters & lifecycle) · Rust Catalog `external_*` tables + ContentStore (bindings, inputs, turns, delegation — never fake native Threads/Runs).
+- **Adapter contracts**:
+  - **Codex**: `app-server`, matching connection/thread/turn/interaction IDs; supports native `turn/steer` (pinned by `expectedTurnId`).
+  - **Claude Code**: Official Agent SDK via Rust-tracked bridge process; requires native `user_message_uuid` + tool-use correlation; uncorrelatable output never merges into the active turn.
+  - **Pi**: Independent RPC process (`>=1.5.0 <2.0.0`); final settlement via `agent_settled`.
+  - **ACP**: Capability-negotiated (`promptCapabilities.image`, `sessionCapabilities.resume` / `loadSession`, standard options).
+- **Durability & Recovery**: Inputs are durably admitted before delivery (idempotent by request key). After crash/disconnect, **Reconnect** restores observation/session while **Continue** explicitly confirms recovery and advances queued inputs — never auto-replaying an already-dispatched turn with unknown side effects.
+- **Stop vs Force Stop**: Normal stop revokes pending prompts, sends protocol cancel, and waits for confirmation. **Force Stop** terminates the Rust-tracked process tree and marks the turn interrupted/unconfirmed without claiming rollback.
+- **Observation**: Authenticated SSE over the shared observation mux; snapshots on connect/resync, deltas in-memory, persisted at item/turn/disconnect boundaries.
+- **Idle reclamation**: With zero active observers, idle prepared sessions reclaim after ~5 min and started sessions after ~15 min (blocked by active turns, pending interactions, queues, or reported background subtasks; skipped if backend lacks native resume). Reclamation stops only the process, preserving bindings and history.
+
+## Delegation, Cross-Session Messaging & Steering
+
+- **Free dispatch**: `dispatch` accepts `executor` aliases (e.g. `"codex"`) or `exec:` refs from `executors` (`list`/`inspect`/`detect`) without requiring a preset. `executorOptions` passes explicit `model`/`thinking`/`mode`/`config` (precedence: call → preset → config default → CLI default).
+- **Host matching**: File source and executor must reside on the same execution Host (auto-provisioning a private dir on a remote Host without a selected source is not yet wired).
+- **Cross-session access**: `threads` and `read_thread` read Catalog-persisted turns/items/attachments without reconnecting the CLI. `send` accepts any accessible external conversation ID (`inform` queues passively; `request` steers an active Codex turn or queues next turn; `wait` awaits that turn's report without gaining cancel authority over the whole session).
+- **In-turn steering status**:
+  - **Codex**: Live `turn/steer` wired; tracks durable admission → dispatching → native append (`consumedByTurnId`).
+  - **Pi / Claude / ACP**: Next-turn queue in product UI (Pi's `steer` lacks input-ID correlation; Claude's `priority: "next"` cross-turn correlation is not yet wired).
+- **Bot schedules & events**: Bot event watches and source-object links can target an existing external conversation (active events create durable external turns; passive events attach as `awaiting_input` on next real turn).
+
+## Attachments, Sources & Current Limits
+
+- **Attachments**: Prepared and durably retained before admission. Supported images use native image blocks; other files materialize read-only paths on the execution Host (or ACP `resource_link`). Missing capability fails explicitly without fabricating text summaries.
+- **Sources & code exchange**: Default is shared live directory. `isolated_write` uses Native Workspace fork/mount + three-way Integration merge (`read_only` sandbox is not claimed for external CLIs and rejects before dispatch).
+- **Current limits**: Exposing Varin's CLI/Skills/MCP to external harnesses is deferred; importing pre-existing external CLI history or attaching to outside terminals is not supported.
+- **Brand identity**: `HarnessIcon` resolves by Catalog `configurationId` + `harness` (never title/avatar guessing). Assets in [harness-logos](../packages/ui/src/assets/harness-logos/README.md).

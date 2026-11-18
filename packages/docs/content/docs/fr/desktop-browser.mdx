@@ -1,16 +1,18 @@
 ---
 title: Navigateur desktop
-description: Affichez des pages dans le desktop, inspectez les éléments et contrôlez l’accès de l’Agent.
+description: Naviguez dans l’application de bureau, inspectez des éléments, connectez des onglets CDP/Chrome et contrôlez l’accès des agents.
 ---
 
 # Navigateur desktop
 
-L’application desktop peut afficher une page à côté de la conversation. Ouvrez-la depuis un résultat d’outil navigateur lorsque vous êtes connecté au Host desktop local, ou utilisez une [action de projet](/fr/project-actions/) avec ouverture automatique d’URL. La page possède une barre d’adresse et des commandes précédent, suivant et rechargement.
+L’application de bureau intègre une vue navigateur à côté de votre conversation, aux côtés des points de terminaison CDP configurés et des onglets partagés via l’extension Chrome/Edge **Browser Connector** (gérés dans **Paramètres → Browser** ; voir [Contrôle d’ordinateur et ressources navigateur](/fr/computer-use/)).
 
-## Inspecter et annoter
+Ouvrez une page depuis un résultat d’outil navigateur lorsque vous êtes connecté au Host desktop local, ou depuis une [action de projet](/fr/project-actions/) dotée d’une URL à ouverture automatique. La vue dispose de sa propre barre d’adresse et de commandes de navigation.
 
-Sélectionnez une conversation, activez **inspect**, puis cliquez sur un élément. Varin ajoute ses détails et une capture d’écran au brouillon de cette conversation ; vérifiez-le avant l’envoi. L’inspection suspend le contrôle de cette page par l’Agent.
+## Inspecter et citer
+
+Sélectionnez une conversation, activez **Inspect**, puis cliquez sur un élément. Varin ajoute les détails de l’élément et sa capture d’écran à votre brouillon afin que vous puissiez vérifier avant d’envoyer. L’inspection suspend les écritures de l’agent sur cette page.
 
 ## Prendre la main et reprendre
 
-Le bouton de contrôle de la page permet de prendre la main ou de rendre le contrôle à l’Agent. Fermer ou masquer le panneau ne signifie pas arrêter la tâche de l’Agent. Cette vue ne possède pas de panneau de filtrage de la console.
+Utilisez le bouton de contrôle de la page pour prendre la main sur l’agent ou lui rendre le contrôle. **View browser** change uniquement ce que vous observez ; **Use for current task** assigne ce navigateur à la conversation en cours. Fermer ou masquer le panneau n’annule jamais la tâche de l’agent.

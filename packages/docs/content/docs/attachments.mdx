@@ -1,15 +1,17 @@
 ---
-title: Images and PDFs
-description: "Attach images and retain original PDFs in a conversation."
+title: Attachments, images & PDFs
+description: Attach arbitrary files, annotate images, and retain original PDFs across conversations and agents.
 ---
 
-# Images and PDFs
+# Attachments, images & PDFs
 
-Use **Attach images** or **Attach PDFs** in the conversation composer. Pasting or dropping supported files also works. Images require a model that accepts image input.
+Use the composer's attach menu, paste from the clipboard, or drag and drop files directly into a conversation.
 
-A PDF upload keeps the original PDF as a retained Thread material. Open its attachment chip to read it, browse pages and select a region to add to your draft when image input is supported. The original is available in the reader; an extracted representation does not replace it.
+- **Arbitrary files**: Varin stores uploaded files as immutable, version-pinned attachments without format whitelists. Agents can read them directly or forward the exact original version to delegated teammates without copying file text into prompts.
+- **Images & annotation**: Vision-capable models receive attached images natively (if your current model does not accept images, Varin warns you before sending and lets you switch models or send the image as a readable file). Click any attached image to annotate it with arrows, shapes, text, numbered callouts, or opaque redactions before sending.
+- **Original PDFs & Office files**: Uploaded PDFs and Office documents keep their original bytes so agents can inspect text, structure, or rendered pages without replacing the original file.
+- **Idempotent delivery**: Sending, queueing, and retries carry the exact frozen attachment snapshot; later changes on disk never alter already-submitted input. If delivery status is uncertain, use **Retry delivery** rather than re-uploading.
 
-Sending, all three queue modes and child continuation carry the selected material snapshot. Later file changes do not change that input. If delivery is unconfirmed, use **Retry delivery** for the same request rather than uploading again. You cannot change pending attachments until the original outcome is resolved. Changing Host, Thread or branch never transfers a pending upload to the new selection.
-
+- [Interactive content & quoting](/interactive-content/)
 - [Projects](/projects/)
 - [Context](/context/)

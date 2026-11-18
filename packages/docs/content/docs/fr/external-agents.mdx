@@ -1,0 +1,28 @@
+---
+title: Agents externes
+description: Connectez Codex, Claude Code, Pi et les agents compatibles ACP pour le chat direct ou la délégation de sous-tâches.
+---
+
+# Agents externes
+
+Varin peut exécuter des agents CLI et SDK externes — dont **Codex**, **Claude Code**, **Pi** et les outils **compatibles ACP** (tels qu’OpenCode, Gemini CLI, Cursor Agent, Cline, Kiro CLI et d’autres) — directement dans votre espace de travail tout en conservant leurs propres comptes, modèles et outils.
+
+## Activer et connecter un agent externe
+
+1. Ouvrez **Paramètres → External Agents** et choisissez le Host (cet appareil ou un Host distant connecté) sur lequel l’agent doit s’exécuter.
+2. Activez un programme détecté automatiquement ou cliquez sur **Add Agent** pour en choisir un dans le catalogue ou configurer une commande ACP personnalisée.
+3. Pour les produits prenant en charge une installation gérée (paquets npm ou bundles ACP officiels), vous pouvez installer directement dans le répertoire Host privé de Varin sans modifier votre environnement global.
+4. Connectez-vous à l’aide de la commande de connexion propre au programme externe sur l’appareil cible ; Varin ne stocke ni ne modifie jamais les identifiants des agents externes.
+
+## Chat direct et délégation
+
+- **Chat direct** : Choisissez un agent externe activé dans la zone de saisie d’une nouvelle conversation. Le backend démarre à la demande lorsque vous commencez à taper ou ouvrez son sélecteur de modèle/mode, puis se verrouille une fois votre premier message envoyé.
+- **Options par tour** : Sélectionnez les modèles, niveaux de réflexion, modes et (pour Codex) niveaux de permissions natifs directement dans la barre d’outils de la zone de saisie.
+- **Délégation** : Demandez à Varin ou à un agent principal de confier une tâche à un agent externe (par exemple « demande à Codex de corriger cela ») sans créer de préréglage au préalable. Les tâches externes apparaissent dans le même aperçu et le même panneau de collaboration, prennent en charge les pièces jointes (fichiers et images) et peuvent utiliser des espaces de travail isolés.
+- **Reconnect et Continue** : Si une connexion est interrompue en plein tour, **Reconnect** rétablit l’observation tandis que **Continue** confirme explicitement la reprise et envoie les suivis en file d’attente sans rejouer silencieusement un tour incertain.
+
+## Guides associés
+
+- [Vues et collaboration d’agents](/fr/views-and-collaboration/)
+- [Canaux de modèles](/fr/providers/)
+- [Connecter un appareil](/fr/connect-devices/)

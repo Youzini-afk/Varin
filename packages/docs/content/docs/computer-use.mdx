@@ -1,0 +1,31 @@
+---
+title: Computer Use & Browser Resources
+description: Let agents observe and operate connected desktops and browser tabs with explicit control and takeover.
+---
+
+# Computer Use & Browser Resources
+
+Varin separates **desktop control** and **browser access** from your file workspace so you can choose exactly which machine or browser a task uses.
+
+## Computer Use (Desktop control)
+
+- Agents can observe windows, query native UI controls (Windows UIA, macOS Accessibility, Linux X11 AT-SPI), take screenshots, send keyboard/mouse input, and wait for UI conditions.
+- Each physical desktop allows **one active controller** at a time and multiple read-only observers.
+- Open the **Computers** tab beside your conversation to watch live activity, take over control immediately, or hand control back when ready. Closing the viewer stops observation only — it does not cancel the task.
+- Remote desktops connected through [Work Connections](/connect-devices/) run their own local platform driver on the target device.
+
+## Browser Resources
+
+Open **Settings → Browser** to manage available browsers on the current or connected Host:
+
+- **Embedded desktop browser**: Built into the Varin desktop app (see [Desktop Browser](/desktop-browser/)).
+- **CDP connections**: Connect to existing Chromium instances over Chrome DevTools Protocol with optional headers and file-handoff directory.
+- **Your everyday Chrome / Edge**: Download the opt-in **Browser Connector** extension from Settings, pair it with your Host, and explicitly share the tabs you want Varin to see or operate.
+
+In the browser view, **View browser** changes only what you watch; **Use for current task** assigns that browser to the active conversation. You can pause agent writes and take over a shared tab from either the workbench or the browser extension.
+
+## Related guides
+
+- [Desktop Browser](/desktop-browser/)
+- [Connect a Device](/connect-devices/)
+- [Security](/security/)

@@ -1,15 +1,17 @@
 ---
-title: Images et PDF
-description: "Joignez des images et conservez les PDF originaux dans une conversation."
+title: Pièces jointes, images et PDF
+description: Joignez n’importe quel fichier, annotez des images et conservez les PDF originaux à travers vos conversations et agents.
 ---
 
-# Images et PDF
+# Pièces jointes, images et PDF
 
-Utilisez **Attach images** ou **Attach PDFs** dans le champ de conversation. Vous pouvez aussi coller ou déposer les fichiers pris en charge. Les images nécessitent un modèle acceptant l’entrée visuelle.
+Utilisez le menu de pièce jointe de la zone de saisie, collez depuis le presse-papiers ou glissez-déposez des fichiers directement dans une conversation.
 
-Le PDF original est conservé comme matériau du Thread. Ouvrez sa pièce jointe pour lire les pages et sélectionner une région à ajouter au brouillon si le modèle accepte les images. La représentation extraite ne remplace pas l’original disponible dans le lecteur.
+- **Fichiers arbitraires** : Varin stocke les fichiers téléversés sous forme de pièces jointes immuables et épinglées par version, sans liste blanche de formats. Les agents peuvent les lire directement ou transmettre la version originale exacte à des coéquipiers délégués sans copier le contenu du fichier dans les prompts.
+- **Images et annotation** : Les modèles dotés de capacités visuelles reçoivent nativement les images jointes (si votre modèle actuel n’accepte pas les images, Varin vous avertit avant l’envoi et vous permet de changer de modèle ou d’envoyer l’image comme fichier lisible). Cliquez sur n’importe quelle image jointe pour l’annoter avec des flèches, des formes, du texte, des repères numérotés ou des masquages opaques avant l’envoi.
+- **PDF originaux et fichiers Office** : Les PDF et documents Office téléversés conservent leurs octets d’origine afin que les agents puissent examiner le texte, la structure ou les pages rendues sans remplacer le fichier original.
+- **Livraison idempotente** : L’envoi, la mise en file d’attente et les nouvelles tentatives transportent exactement l’instantané figé de la pièce jointe ; les modifications ultérieures sur le disque n’altèrent jamais une entrée déjà soumise. Si le statut de livraison est incertain, utilisez **Retry delivery** plutôt que de téléverser à nouveau.
 
-L’envoi, les trois modes de file d’attente et la continuation d’un enfant transmettent l’instantané sélectionné. Les modifications ultérieures du fichier ne le changent pas. Si la livraison est incertaine, utilisez **Retry delivery** sans nouveau téléversement. Les pièces jointes restent bloquées jusqu’à résolution du résultat initial. Changer de Host, Thread ou branche ne transfère pas un téléversement en cours.
-
+- [Contenu interactif et citations](/fr/interactive-content/)
 - [Projets](/fr/projects/)
 - [Contexte](/fr/context/)

@@ -1,330 +1,45 @@
 # Knowledge storage
 
-Ordinary Agent notes and editable system instructions use the Rust typed-record authority
-described in [Memory ownership](../memory/DOCUMENTATION.md). They bypass semantic recall and
-background memory organization. This module still owns plans, symbol indexes,
-and Bot/user long-term knowledge; these are separate from ordinary Agent notes.
+This module owns **plans**, **symbol indexes**, and **Bot/user long-term knowledge** backed by TriviumDB 0.9.1. Ordinary Agent notes and editable system instructions live in the Rust typed-record owner described in [memory/DOCUMENTATION.md](../memory/DOCUMENTATION.md); new environment observations live in the native Catalog/ContentStore via [`environment-observations`](../environment-observations/README.md). See [retrieval.md](../../../../../docs/retrieval.md) for cross-domain retrieval behavior.
 
-The KnowledgeStore authority, derived vector stores and inference ledger use TriviumDB 0.9.1.
-Before upgrading, stop all writers and [back up the complete file group](../../../../../docs/ops/cold-backup.md).
-The new writer publishes v13 checkpoints and v6 WAL. To roll back to 0.9.0, restore the **pre-upgrade**
-backup instead of reopening an upgraded store. The native engine recovers supported nonempty
-0.8 checkpoints and 0.9.0 v10 checkpoints with their pending WAL; node IDs, payloads, graph links and business receipts retain their identity.
-Read-only and immutable opens do not upgrade files.
+## Entrypoints and process architecture
 
-`database.ts` owns the shared native open. An old WAL-only database has no typed base
-checkpoint and cannot be opened directly by 0.9. For that specific native diagnostic,
-the storage owner starts a short-lived process using the pinned `triviumdb-upgrade-0.8`
-(0.8.10) package to recover the original WAL and close a complete checkpoint, then opens
-the same files with 0.9. Complete legacy WAL frames are CRC-checked in bounded buffers
-before starting the old writer; bad frames preserve the original files and report failure.
-Physically incomplete tails retain the original engine's recovery semantics. This helper
-does not run for ordinary opens, read-only readers or other corruption, and does not serve
-business requests. It exits before the current writer opens; no parallel writer, replacement
-database or in-main fallback is introduced. No full backup copy is made during normal opens.
+| File(s) | Responsibility |
+| --- | --- |
+| [`store.ts`](store.ts), [`store-contract.ts`](store-contract.ts), [`store-protocol.ts`](store-protocol.ts) | Async Host facade, DTOs/errors (no native addon load), and typed IPC protocol |
+| [`store-process.ts`](store-process.ts), [`store-worker.ts`](store-worker.ts), [`store-engine.ts`](store-engine.ts) | Private Node storage child-process launcher, worker entry, and native engine |
+| [`database.ts`](database.ts), [`persistence.ts`](persistence.ts) | Shared native open (incl. 0.8 WAL-only checkpoint upgrade) and WAL/checkpoint scheduler |
+| [`plan-store.ts`](plan-store.ts) | Native Thread/branch plan versions, fork captures, and atomic mutation receipts |
+| [`symbols.ts`](symbols.ts), [`association-refresh.ts`](association-refresh.ts), [`file-purge.ts`](file-purge.ts), [`file-purge-engine.ts`](file-purge-engine.ts), [`import-resolve.ts`](import-resolve.ts), [`index-scope.ts`](index-scope.ts) | Workspace symbol graph, cooperative association refresh, and stepped catalog purge |
+| [`context-publication.ts`](context-publication.ts), [`context-runtime.ts`](context-runtime.ts), [`recall-material.ts`](recall-material.ts) | Read-only legacy event-journal importer and recall material helpers |
+| [`semantic/DOCUMENTATION.md`](semantic/DOCUMENTATION.md), [`vectors/DOCUMENTATION.md`](vectors/DOCUMENTATION.md) | Derived semantic vector storage, inference adapters, and Bot knowledge vector index |
 
-Native checkpoints retain their previous committed files behind a `.publish`
-undo journal until the new `.tdb/.vec/.pld/.flush_ok` generation commits. A writable
-open restores an interrupted publication before replaying its WAL; read-only opens
-report recovery-required while that restoration is pending. Successful commit or
-recovery removes the journal and its temporary copies. These files belong to the
-native writer and must remain intact during active writes or a failed close.
-Pre-existing damage without such a journal continues to surface as a storage error;
-opening a failed store never deletes or replaces its data.
+- **Two private storage workers per Host generation** (`store-process.ts`): one for authoritative workspace/user `.tdb` stores (plans, Bot/user knowledge, symbol graph) and one for derived semantic vector stores so vector builds cannot block plan/memory IPC. Electron runs its own executable in Node mode; production builds emit `store-worker.js` next to the facade (`app.asar.unpacked` on desktop).
+- **IPC & teardown invariants**: Exhaustive method allowlist; one transport batch in flight per owner (64-request scheduling batch, not a rejection limit); contiguous store groups flush before returning. Closing rejects new calls, drains admitted work, and awaits child exit (releasing Windows mmap handles). Process loss rejects pending calls as unknown outcome (never auto-replays writes or falls back in-process). Shutdown collects errors across workers so a semantic close failure never skips durable authority close. Native `TDB_CORRUPTED_FILE` codes survive IPC; corrupt stores are never deleted or auto-recreated.
 
-Windows ARM64 builds the missing 0.9.1 addon and the checkpoint helper addon from
-their exact release commits. Only the old helper needs the historical loader repair;
-0.9's public loader already selects ARM64. Varin's production graph and knowledge
-reads continue to use `indexedLookup` and `substringLookup`; its existing exact/scoped
-semantic queries and generation manifests retain their native owners.
+## Storage engine, upgrades and checkpoints
 
-The authority and derived semantic stores retain `payloadCacheMb: 0` to avoid retaining
-parsed payloads in every open catalog. Version 0.9 uses the process-default shared resource
-runtime inside each existing storage process; no new application memory or concurrency
-quota is imposed. Existing indexed and exact/scoped vector queries keep their own owners.
+- **Format & backup**: TriviumDB 0.9.1 writes v13 checkpoints and v6 WAL (`payloadCacheMb: 0`; unused full-text sidecar is not loaded/rebuilt — reads use property/ngram indexes and payloads). Stop all writers and [back up the full file group](../../../../../docs/ops/cold-backup.md) before upgrading; rollback to 0.9.0 requires restoring the pre-upgrade backup.
+- **Upgrade & publish safety**: `database.ts` opens 0.8/0.9.0 checkpoints natively; for legacy WAL-only stores without a base checkpoint, it CRC-checks complete WAL frames and runs a short-lived `triviumdb-upgrade-0.8` helper to close a checkpoint before reopening with 0.9.1 (never for read-only opens or corruption). Native checkpoints retain prior committed files behind a `.publish` undo journal until `.tdb/.vec/.pld/.flush_ok` commit; writable opens restore interrupted publications before WAL replay.
+- **Durability (`persistence.ts`)**: Authoritative user writes (plans, memories) use `syncMode: "full"` and fsync incremental WAL before acknowledging; derived symbol callbacks temporarily use `normal` WAL mode and restore `full` before another op enters. Full snapshots run on a 30s deadline and at close (closing an unchanged current-format store skips an extra checkpoint). Failed checkpoints retain dirty state, schedule bounded-backoff retry, and must recover before subsequent admitted ops (including reads).
+- **Cooperative graph maintenance**:
+  - `association-refresh.ts` steps one file per IPC call (`begin/step/releaseAssociationRefresh`, protocol v4) so plan/memory ops interleave freely; only connection-row or candidate-file changes invalidate a pass.
+  - `file-purge*.ts` removes file owners before symbols/links in descending ID order in stepped batches so unrelated plan/memory ops continue; directory removal reports per-domain cleanup phases and continues across independent domain errors.
+- **Legacy environment-observation import**: `context-publication.ts` is read-only, paging existing stores by numeric ID into native Catalog import transactions without modifying original `observation:<run>:<node>` IDs or creating stores when absent.
 
-## Execution ownership
+## Bot memory storage boundary
 
-Bot memory sources can retain multiple original spans and exact same-scope memory dependencies
-(`sources.memories`). Updates and retirement invalidate dependent accounts in the same KnowledgeStore
-transaction. `invalidAt` represents no longer applicable; `forgottenAt` additionally excludes original
-source material and dependent revisions from future model use. Archive/forget/correct keep the original
-Knowledge mutation receipt and CAS. These optional properties do not create a new database or writer.
+- Bot and Thread scopes use filename-safe hashed keys via [`../harness/owner-scope.ts`](../harness/owner-scope.ts) inside the authority storage worker. `user.tdb` is opened exclusively through the Host's user store owner (never reopened by workspace directory discovery).
+- Memories carry original-source ranges (HistoryItem, event, or Run report + revision + UTF-16 offsets) and exact same-scope dependencies (`sources.memories`). Updates/retirement invalidate dependent accounts in the same transaction; `invalidAt` archives while `forgottenAt` excludes original spans and dependents from future model reads.
+- Organizer progress (`OrganizerProgress.workId`) references Catalog `MemoryWork` stages (the KnowledgeStore is not an inference scheduler). Covered/retired ranges exclude rediscovery; explicit selection preview/save uses [`../memory/thread-memory.ts`](../memory/thread-memory.ts) and [`../memory/thread-memory-routes.ts`](../memory/thread-memory-routes.ts). See [Bot background inference](../memory/DOCUMENTATION.md#bot-background-inference).
 
-`store.ts` is the async Host facade; `store-contract.ts` owns its existing DTOs and
-error classes without loading a native addon. `store-process.ts` lazily starts private
-Node storage owners per Host module generation: one for authoritative workspace/user
-stores and another for derived semantic stores and their maintenance. Semantic vector
-work cannot occupy the plan/memory owner's IPC queue. The symbol graph still shares the
-authority store and uses the cooperative association refresh below. `store-worker.ts` is their entry; `store-engine.ts`
-contains the native implementation. `semantic/store.ts` orchestrates embeddings
-through the semantic owner; `semantic/store-engine.ts` owns its native generations.
-Opening, indexed reads, graph/vector computations, user writes, checkpoints and
-closing run in the corresponding owner. Cache maintenance uses the semantic owner.
-Electron uses its own executable in Node mode for this storage process.
-The Web Host uses the same component. No renderer API or public server is added.
+## Native Thread plans (`plan-store.ts`)
 
-The last successful store close disconnects the process and waits for its exit,
-including release of Windows mmap handles. Parent disconnect drains admitted work
-and closes the remaining handles. A native close failure retains the handle for
-retry. New calls are rejected while a facade is closing; previously admitted calls
-are drained first. A lost process rejects pending operations with an unknown-outcome
-error and never automatically replays writes or silently switches storage backends.
-Host shutdown collects each owner's errors while continuing its ordered teardown;
-a failed semantic-index close cannot skip the authority stores' durable close.
-Deferred checkpoint and disconnect-close diagnostics retain the original storage error.
-Observation preparation classifies native `TDB_CORRUPTED_FILE` by its structured code, preserved across
-private IPC, rather than localized diagnostic text. I/O, closed-owner and unknown failures remain
-unavailable; neither case recreates the store or discards original events. Public warnings keep a
-fixed message while the original cause remains available to the trusted owner.
+- Native Agent and Bot (main and child) Thread plans are stored in the shared user store under dedicated record types (excluded from knowledge lists, recall, and vector indexing) keyed by explicit Thread/branch identity.
+- **Atomic CAS & receipts**: Updates check `expectedRef` and commit immutable version, branch pointer, and mutation receipt in one `commitTransaction`. Tool receipts match persistent Operation ID + tagged `ToolOrigin` (no fabricated IDs); user command keys scope to `(Thread, branch)` so lost responses replay the original version even after later edits.
+- **Fork captures**: Before creating a Catalog branch, the Host captures the visible plan state (including explicit absence); Catalog stores only the capture ref. Historical resolution walks `previousRef` using epoch-bound Catalog parent cursors (≤256 steps/call) outside locks, rechecking the pointer in-transaction. `expectedHeadId` is an HTTP Catalog admission check, not a cross-store transaction.
+- **Cancellation & deletion**: Cancellation detaches the observer before the transaction settles; same-epoch receipt lookup checks durable receipts first, then transient stopping evidence (restart loses transient evidence, so absence never proves no-effect; lookup never repeats a mutation). Deleting a Bot removes its Catalog relations and dedicated Bot knowledge store, while historical native plan records in the shared user store remain inaccessible via public APIs (retention boundary, not physical purge).
 
-Directory removal reports its current resource-release, vector-cache, inference-receipt,
-symbol-catalog or compaction phase. Independent cleanup domains continue after a failure
-and return their original errors together. Closing the Host stops future catalog-purge
-steps, after the admitted native write has completed, leaving the deletion intent retryable.
+## Verification
 
-Catalog purge selects graph rows once by source scope, including orphaned rows from an
-interrupted attempt. Its private begin/step/release owner removes file owners
-before their symbols and links, avoiding a global label-index scan per symbol. Descending
-IDs keep sorted native property/ngram postings from repeatedly shifting their remaining
-tails. Queue steps permit unrelated plan and memory operations between writes; preserved subdirectories and
-non-graph rows retain their original identities. Native compaction is acknowledged as the
-completed checkpoint instead of scheduling another full snapshot. This does not delete,
-replace or migrate the shared knowledge database.
-
-The private IPC contract has an exhaustive method allowlist, response validation,
-advanced serialization for existing Set/Date values, and reconstruction of block
-conflict/knowledge mutation errors. Only one transport batch per owner is in flight.
-Completed contiguous store groups return after their own durability boundary, before later
-groups in that batch. The
-64-request scheduling batch is not a data rejection limit: additional requests
-remain queued. The boundary snapshots arguments on admission. `removeFileSymbols`
-cancellation applies before dispatch; after dispatch the caller receives the actual
-native result, not a false cancellation of an already-committed mutation.
-
-## Environment observations: legacy import only
-
-New environment facts belong to the native Catalog and ContentStore, not this writer.
-[The environment coordinator](../environment-observations/README.md) receives committed
-Documents changes, tagged user-terminal completions and Git status samples. It owns only
-bounded volatile admission/reconciliation; native receipts own durability and model delivery.
-Bot knowledge recall and plans retain their existing KnowledgeStore ownership.
-
-`context-publication.ts` is a read-only importer for original event journals. It reads
-existing stores in numeric-ID pages, filters metadata before loading payloads, and submits
-each page plus its scanned prefix to one native import transaction. Agent-origin records
-are skipped without losing prefix progress. Original `observation:<run>:<node>` IDs and
-stored text/data remain unchanged; the importer never applies today's new projection to
-an old fact or treats a changed digest as a duplicate. New captures never write this log.
-
-Recovery runs independently of request preparation. An absent store stays absent; a failed
-open or event read retains its original files and reports unavailability. No empty store,
-automatic replacement or synthetic replay is substituted. Ambiguous native acknowledgement
-is reconciled against original import progress and exact idempotent page admission, not
-against a different current Source. Cancellation of a request does not cancel accepted
-storage work, and no database writer is killed to satisfy a caller timeout.
-
-## Checkpoints and acknowledgement
-
-`persistence.ts` tracks native data mutations and owns the checkpoint schedule.
-Authoritative stores use TriviumDB `syncMode: "full"` for user state: payload/edge writes
-fsync their incremental WAL before returning. Derived symbol callbacks keep their
-existing `normal` WAL mode and deferred snapshot; the synchronous writer restores
-`full` before another operation can enter. Plans and memories are
-acknowledged on that durable write, without rewriting the entire symbol catalog.
-Full snapshots run on the existing 30-second deadline and at close. Contiguous
-requests in a store group publish notifications at the end of the group; a batch
-is not a rollback transaction.
-
-Authority readers use property/ngram indexes, payload text and graph edges.
-The unused full-text/keyword sidecar is neither loaded nor rebuilt. Its text
-already exists in payloads; semantic recall continues through derived vectors.
-This also keeps acknowledged changes recoverable from WAL without an unlogged
-text-index mutation. No user database is deleted or replaced.
-
-A successful complete checkpoint also covers and cancels any pending graph
-checkpoint. No-op recall updates/deletions/retention do not request another full
-snapshot. A close uses TriviumDB's own final checkpoint rather than calling flush
-before native close. Successful authoritative writes require completed WAL fsync;
-scheduling a future snapshot alone never acknowledges data.
-
-A failed checkpoint retains the dirty version and pending notifications, reports
-its failure and schedules a bounded-backoff retry. The next admitted request must
-first recover that checkpoint, including reads and duplicate-write fast paths.
-This retries persistence of already-applied state, not the original mutations.
-Notifications are observational: observer errors cannot undo a durable write.
-
-The derived semantic and knowledge-vector stores use this checkpoint scheduler
-in the separate semantic process, with their existing snapshot acknowledgements
-and retryable close/final-flush semantics.
-Embedding/provider callbacks and the vector reuse cache stay in the Host.
-During an ongoing build, provider gaps do not count as a quiet period: checkpoints
-use the existing 30-second deadline, and build completion commits the pending
-snapshot. Ordinary incremental updates retain the quiet-period schedule.
-New databases recover an uncheckpointed WAL even before the first base file exists.
-Version 0.9 closes a current-format unchanged store without another full checkpoint;
-explicit flush/publication still follows the existing checkpoint schedule.
-
-Source watch bursts keep one latest-state collection per path. Symbol mutation
-admission applies the same Git eligibility as inventory, including unknown file
-types; ignored outputs cannot create graph file rows by bypassing structure reads.
-After a burst, relation candidates reconcile once per workspace, with another
-pass only when new changes arrive during reconciliation.
-
-Association refresh uses one connection-literal set and follows each file's own
-association edges. It does not run a global index intersection for every candidate
-literal or consumer path. The private `beginAssociationRefresh` / `stepAssociationRefresh` /
-`releaseAssociationRefresh` protocol (version 4) processes one file per IPC step, then
-returns to the ordinary queue. Plans, context reads and other requests can complete
-between files; no full-workspace pass occupies one in-flight transport batch.
-Each file's association changes remain a native transaction.
-
-Only changes to connection rows or candidate-bearing file generations invalidate the
-completed pass. Ordinary symbol-only files, notes, plans and unchanged repeated requests
-do not trigger another scan. If relevant source facts change between steps, the job
-refreshes its captured set and file IDs before proceeding. File payloads are read inside
-the writer, so a removed/replaced generation cannot be restored by an older snapshot.
-Already admitted passes drain before store close; their private state is released after
-success/failure and at native close. This changes neither the database format nor its
-single-writer ownership, and adds no candidate limit or longer tool timeout.
-
-## Build and verification
-
-### Bot memory implementation boundary
-
-Bot and Thread scopes use hashed filename-safe keys through `../harness/owner-scope.ts`;
-these identities are not document workspace roots. They share this storage worker,
-not a new database owner. Automatic memory enabled by the user commits effective
-`accepted` rows; claim nature and source still distinguish inference from explicit
-user requirements. Acceptance is not a persistence receipt or an authority level.
-
-The organizer enumerates registered Bots and discovers their existing source events. `user.tdb`
-is the shared memory destination and is opened exclusively through the Host's user
-store owner; directory discovery must not reopen it as a workspace event store.
-Narration receives the actual source scope and available destination scopes; the user
-scope is offered only while automatic user memory is enabled. This metadata is included
-in the same context-budget calculation as the source and existing memory list. The
-preliminary fast-decision filter sees source fragments only, so duplication against
-existing memories is handled by narration and storage.
-
-New organizer proposals can supply the knowledge revision they observed. The
-single writer checks both committed and pending mutations before inserting them.
-Explicit and automatic memories carry the same original-source ranges (native HistoryItem,
-event or Run report, revision and text offsets). A paraphrased explicit
-record cites `sourceText`; the Host resolves that exact passage on the caller's
-branch. Automatic proposals also cite a narrow quote. Covered and retired ranges
-are excluded before narration, and the storage writer checks late inferred
-proposals against explicit/forgotten evidence. Explicit remembering can
-intentionally create a new active row.
-
-Organizer progress retains reviewed ranges, including empty judgments, across all
-native Thread branches. List cursors are presentation only; changed source revisions
-reopen their ranges. Prepared proposals and their source ranges survive restart;
-committed provenance reconciles a crash between memory and coverage writes. This
-is recoverable progress, not a cross-store rollback transaction.
-
-The original narrator and optional decision now execute as Catalog `MemoryWork` stages. Their whole
-fixed recipe, output, transport/finish evidence and usage live in the existing ContentStore/inference
-owner; `OrganizerProgress.workId` is only a reference. An unknown old source range cannot refresh the
-failure backoff for every newer entry in the same session, and an old work cannot overwrite another
-work's prepared row. Recovery uses original prepared proposals and committed provenance; it never
-turns the KnowledgeStore into a second inference scheduler or creates an incidental paid request.
-See [Bot background inference](../memory/DOCUMENTATION.md#bot-background-inference) for admission,
-Sleep and explicit Retry.
-
-Explicit chat selection extraction uses `../memory/thread-memory.ts` and `../memory/thread-memory-routes.ts`. Preview validates native
-branch text and exact offsets, calls the existing organizer narrator without automatic coverage/commit,
-and returns editable drafts with source revisions. Save resolves the Thread's real owner (including
-Bot/Thread scopes), validates the frozen owner and original revisions, then uses MemoryService.remember.
-Source ranges and `user-extracted` provenance use the same memory authority and original-source reader.
-Undo verifies the saved row revision and originating Thread before retiring it. An empty extraction is
-a valid result; unconfigured models, invalid envelopes/citations and changed sources remain failures.
-
-`memory get` with `includeSource` and the settings original-passages view read only
-the persisted ranges authorized by the selected memory. They report changed or
-missing originals instead of presenting another revision as the cited evidence.
-Current cross-domain behavior is summarized in [context and knowledge](../../../../../docs/retrieval.md).
-
-### Runtime build
-
-The production Host TypeScript build emits `store-worker.js` next to its facade.
-The literal worker URL participates in `scripts/host-production-boundary.mjs`'s
-runtime graph. Desktop resolves the physical `app.asar.unpacked` Host entry;
-packaged execution needs neither TypeScript source nor a TS loader. Source-development
-children explicitly load the repository's tsx package and do not inherit the parent
-process's debugger/test-runner arguments.
-
-`store.test.ts` exercises the native implementation directly, including payload-read
-complexity instrumentation. Existing context, route, observer, relation and recall
-tests exercise its Host consumers. `store-persistence.test.ts` counts real native
-checkpoints and injects checkpoint failure; `persistence.test.ts` covers scheduling
-and failure-state transitions. `store-process.test.ts` exercises the production
-facade/child path, error identity, batching, Set/Date transport, cancellation,
-close ordering and recovery of acknowledged data after a real process kill.
-Process-kill recovery is not equivalent to a power-loss guarantee.
-
-## Native Thread plans
-
-Native Agent and Bot main and admitted child Thread plans use this same private KnowledgeStore writer, in the existing
-user store as a physical home. `plan-store.ts` records explicit Thread/branch identities;
-it does not invent session IDs or duplicate plans by Bot. Version bodies, branch
-current references, fork captures and reference-only mutation receipts live here. Native records
-have their own types and no legacy session identity, so block queries, user knowledge lists,
-recall and semantic knowledge indexing exclude them through their existing type filters.
-
-A native update uses exact `expectedRef` CAS. One `commitTransaction` writes the immutable
-version, branch pointer and original receipt together; notifications follow commit. Tool receipt
-lookup uses the real persistent Operation ID, then checks its complete frozen origin and intent.
-Tool origins carry the existing tagged `ToolOrigin`: either the actual model request/call or policy
-action/node, plus its Run and original effect epoch. There is no fabricated request ID or legacy
-flat-origin fallback. The Kernel captures the original invocation's history range and schemas before
-the private bridge query. A reopened receipt lookup does not resolve today's plan ancestry or reapply
-the update; a later user edit stays current.
-User command keys are scoped to the authenticated Thread and branch. Replaying a lost response
-returns the original version, even after a later user edit, without another mutation. Storage
-failure remains unknown until the original receipt can be queried.
-
-The Host verifies native Catalog identity and captures a fork at the chosen real history cut
-before creating the Catalog branch. Catalog stores only the immutable capture reference/basis.
-Knowledge verifies a new fork's complete captured identity, including captured absence; an
-orphan capture never grants a branch or poisons an existing root. Historical selection follows one immutable candidate at a time through `previousRef`, including
-nested earlier-head forks. Catalog membership uses authenticated, epoch-bound parent cursors
-with at most 256 metadata steps per call; neither IPC nor a lock holds the complete ancestry.
-The owner rechecks the current pointer against temporary selection evidence in its transaction.
-Selection never enters semantic receipt identity. Explicit precommit stale-selection errors may
-restart pure resolution; unknown mutations never automatically retry. Same-head siblings edit
-separate branch owners. This captures a visible version, not an arbitrary earlier wall-clock
-instant within one history head.
-
-`expectedHeadId` is a Catalog admission check for HTTP edits, not a cross-store transaction.
-A later history-only advance can leave the admitted edit valid; a later plan change fails the
-KnowledgeStore latest-reference CAS. Native tool reads, user edits and the native plan card
-consume the same body and reference. The card refreshes from the owner after a mutation and on
-matching plan-change/reconnect events; it preserves a conflicting draft for explicit resolution.
-
-Native HTTP reads/edits and tool admission check the real persisted context, Catalog Bot binding,
-and child relationship. A Bot keeps mode `bot` and its original Thread owner. Child tools retain
-their actual frozen selection and Operation contract. A `read_only` file source does not forbid
-updates to the child's selected plan capability; authenticated user edits retain their existing
-authority. An uninitialized context is not-ready and a fabricated mode/role is unsupported,
-never a successful empty plan. Existing conversation forks for unsupported scopes retain their
-previous no-plan path; a storage or Catalog failure cannot silently downgrade a supported plan-aware
-fork. The card separates these states and refreshes after context admission.
-
-Cancellation ends the caller's observer before the original Knowledge transaction may settle.
-Bot drain waits for that original owner promise. A same-kernel-epoch receipt lookup first reads the
-durable mutation receipt; only when it is absent can the bridge return the exact original owner’s
-stopping fact. An original mutation that never entered the writer, or was explicitly rejected before
-commit by the existing stale-selection check, is Failed/None. A settled writer with no confirmed
-result remains Indeterminate/Unknown with its executor stopped. Restart loses transient
-stopping evidence, so absence alone never proves None. Receipt lookup never repeats a mutation.
-
-Bot deletion removes its Catalog relations and separately owned knowledge stores. The shared user
-store currently retains native plan versions, pointers, fork captures and receipts, as it does for
-other deleted Thread owners; there is no plan-history purge API. Deleted Catalog identity cannot
-expose those records through the public plan service. This is a retention boundary, not a claim
-that deleting a Bot erases all historical plan bytes.
-
-Focused plan tests exercise the real KnowledgeStore/worker, original receipts, fork identity and stale
-selection, with separate Catalog ancestry fixtures and UI consumers. They do not establish power-loss
-or packaged cross-platform behavior. See [development](../../../../../docs/development.md) for check selection.
+Focused suites (`store.test.ts`, `store-persistence.test.ts`, `persistence.test.ts`, `store-process.test.ts`) exercise the native engine, checkpoint failure/retry, IPC batching, and process-kill recovery. See [development guide](../../../../../docs/development.md).

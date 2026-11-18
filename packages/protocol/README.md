@@ -22,7 +22,7 @@ protocol is version 80, as declared by [the schema](../../kernel/protocol/schema
 independent of kernel resource storage format 22 (SQLite `user_version` 16) and Agent Catalog format 86.
 A wire version is not a database migration version: Catalog upgrades supported older stores through its
 original writer and ordered conversion chain; Storage currently accepts only its own current format. Unsupported
-stores fail without rebuilding user assets. See [storage ownership](../../docs/architecture.md#状态归属).
+stores fail without rebuilding user assets. See [storage ownership](../../docs/architecture.md#state-ownership).
 
 ## Domain contracts
 

@@ -216,7 +216,7 @@ prompt without guessing provenance from edited text. Refresh is serialized per b
 post-admission check for concurrent first-input edits; failures remain visible and later admission retries.
 Catalog CAS rejects stale candidates. Already dispatched model requests retain their original bytes;
 only later compilation sees the new checkpoint. Compaction based on a superseded checkpoint must retry.
-Detailed context composition and publication belong to [runtime](../../../../../docs/runtime.md#上下文准备与压缩).
+Detailed context composition and publication belong to [runtime](../../../../../docs/runtime.md#context-preparation--compaction).
 
 ## User clarification
 

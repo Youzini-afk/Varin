@@ -1,0 +1,41 @@
+---
+title: 擴充功能與外掛中心
+description: 探索、安裝、設定與建置擴充功能，為 Varin 新增工具、模型協定、檢視與事件來源。
+---
+
+# 擴充功能與外掛中心
+
+Varin 自身的 **Varin**、**Workbench** 與 **IDE** 檢視，以及瀏覽器、Office 和語言服務整合，都建置在向第三方作者開放的同一套擴充系統之上。
+
+## 探索與安裝外掛
+
+1. 在你希望安裝擴充功能的 Host 上開啟 **設定 → 外掛**。
+2. 瀏覽 **探索**（由公開目錄提供支援），或直接從 GitHub Release、npm 套件、Git URL 或本機封存檔／資料夾安裝。
+3. 審查安裝預覽：清單元資料（manifest）、版本、內容摘要與請求的能力權限。
+4. 確認安裝。新安裝的擴充功能預設為 **已停用**，需在你審查其能力後再手動啟用。
+5. 點擊 **設定** 開啟該外掛自帶的設定頁（例如用於連接外部帳號）。
+
+## 信任、權限與更新
+
+- 能力授權依擴充功能版本與執行域分別審查；版本升級絕不會自動核准新增的能力。
+- 請注意，Host 端擴充功能會以你的 Host 作業系統帳號身分作為真實程式碼執行——僅啟用你信任的擴充功能。
+- 停用擴充功能會保留其已儲存的資料；解除安裝時你可以選擇保留或移除其儲存命名空間。
+- 在 **進階管理** 中，你可以管理自訂 HTTPS 目錄來源、服務路由（包括自訂模型協定與執行驅動）以及工作台組合。
+
+## 建置你自己的擴充功能
+
+使用官方 CLI 建立一個新的擴充功能專案：
+
+```bash
+npx @varin/extension-cli init ./my-extension \
+  --id dev.example.my-extension \
+  --name "My Extension"
+```
+
+檢視儲存庫中的 [擴充功能開發指南](https://github.com/Astrmira/Varin/blob/main/docs/ops/varin-extension-authoring.md) 與 [可執行範例](https://github.com/Astrmira/Varin/tree/main/examples/extensions)，了解 SDK API 與一致性測試。
+
+## 相關指南
+
+- [MCP Servers](/zh-tw/mcp/)
+- [技能](/zh-tw/skills/)
+- [主題](/zh-tw/themes/)

@@ -1,9 +1,8 @@
 # Varin Computer Use drivers
 
 Windows uses the build-time Rust `VarinComputer.exe` helper. Production startup does not load
-PowerShell/C# driver sources, start an interpreter or compile code. Source and cross-target checks
-are separate from real Windows desktop and signed-package acceptance; see the
-[delivery and verification boundary](../../docs/design/native-computer-helper.md).
+PowerShell/C# driver sources, start an interpreter or compile code. Source and cross-target checks are separate from real Windows desktop and signed-package acceptance;
+see [runtime acceptance](../../docs/runtime-acceptance.md).
 
 Resident platform helpers for Computer Use (BC4). A driver runs inside the
 target desktop session and speaks a line-delimited JSON protocol on

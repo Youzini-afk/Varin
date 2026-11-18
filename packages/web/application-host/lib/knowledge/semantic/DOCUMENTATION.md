@@ -15,7 +15,7 @@ native Catalog admission, credential owner, egress, ordinal and receipt. Provide
 original data. Cancellation detaches observation separately from actual request stop; an
 unknown dispatched result is not automatically replayed. Embedding tokenization, context
 headroom and batching remain shared consumers' contracts.
-`vectors/embedding-owner.ts` owns Bot knowledge embedding selection.
+[`../vectors/embedding-owner.ts`](../vectors/embedding-owner.ts) owns Bot knowledge embedding selection.
 
 Decision and rerank adapters remain for explicit supported consumers. Quick code retrieval
 does not use them; invalid ordinary-model configuration does not fall back to these paths.
@@ -40,7 +40,7 @@ a concurrent fallback. Process disconnect, mutation outcome and confirmed close 
 
 ## Embedding request settings
 
-`vectors/request-settings.ts` owns Host-wide concurrency and background request spacing for
+[`../vectors/request-settings.ts`](../vectors/request-settings.ts) owns Host-wide concurrency and background request spacing for
 memory and Bot knowledge vectors. The selected model remains in the existing Harness settings.
 Unconfigured recall stays text-only. Scheduler changes take effect at the next Host startup.
 The settings page does not scan source directories or manage retired code indexes.

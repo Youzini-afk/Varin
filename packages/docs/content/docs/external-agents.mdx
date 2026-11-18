@@ -1,0 +1,28 @@
+---
+title: External Agents
+description: Connect Codex, Claude Code, Pi, and ACP-compatible agents for direct chat or delegated subtasks.
+---
+
+# External Agents
+
+Varin can run external CLI and SDK agents — including **Codex**, **Claude Code**, **Pi**, and **ACP-compatible** tools (such as OpenCode, Gemini CLI, Cursor Agent, Cline, Kiro CLI, and more) — directly inside your workspace while keeping their own accounts, models, and tools.
+
+## Enable and connect an external agent
+
+1. Open **Settings → External Agents** and pick the Host (this device or a connected remote Host) where the agent should run.
+2. Enable an auto-detected program or click **Add Agent** to pick from the catalog or configure a custom ACP command.
+3. For products with managed installs (npm packages or official ACP bundles), you can install directly into Varin's private Host directory without modifying your global environment.
+4. Sign in using the external program's own login command on the target device; Varin never stores or modifies external agent credentials.
+
+## Direct chat and delegation
+
+- **Direct chat**: Choose an enabled external agent in the new-conversation composer. The backend starts lazily when you begin typing or open its model/mode picker, and locks once your first message is sent.
+- **Per-turn options**: Pick models, thinking levels, modes, and (for Codex) native permission levels directly in the composer toolbar.
+- **Delegation**: Ask Varin or a lead agent to hand off work to an external agent (for example, "have Codex fix this") without creating a preset first. External tasks appear in the same overview and collaboration panel, support file/image attachments, and can use isolated workspaces.
+- **Reconnect vs Continue**: If a connection drops mid-turn, **Reconnect** restores observation while **Continue** explicitly confirms recovery and sends queued follow-ups without silently replaying an uncertain turn.
+
+## Related guides
+
+- [Views & Agent collaboration](/views-and-collaboration/)
+- [Model channels](/providers/)
+- [Connect a Device](/connect-devices/)

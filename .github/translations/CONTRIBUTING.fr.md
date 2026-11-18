@@ -54,7 +54,7 @@ Suivez la responsabilité existante du comportement : le runtime Rust gère les 
 
 Gardez un problème cohérent par pull request. Lisez l'implémentation et ses appelants, suivez le style existant, utilisez les composants UI partagés et actualisez la documentation du comportement.
 
-Choisissez les vérifications adaptées au changement. Réutilisez les tests existants ; ajoutez un test de régression ciblé pour un comportement important ou un bug reproduit. Le [guide de développement](../../docs/development.md#修改与验证) répertorie les vérifications par type de modification. Pour les documents et les liens, utilisez `bun run docs:validate`.
+Choisissez les vérifications adaptées au changement. Réutilisez les tests existants ; ajoutez un test de régression ciblé pour un comportement important ou un bug reproduit. Le [guide de développement](../../docs/development.md#verification) répertorie les vérifications par type de modification. Pour les documents et les liens, utilisez `bun run docs:validate`.
 
 Pour l'interface, joignez une capture ou une vidéo de l'état concerné. Pour les performances, fournissez une mesure représentative. Indiquez les commandes exécutées, leurs résultats et les comportements pertinents que votre environnement n'a pas permis de vérifier.
 

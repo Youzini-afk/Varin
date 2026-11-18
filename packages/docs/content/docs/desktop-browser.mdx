@@ -1,16 +1,18 @@
 ---
 title: Desktop Browser
-description: Browse pages inside the desktop app, inspect elements, and control agent access.
+description: Browse pages inside the desktop app, inspect elements, connect CDP/Chrome tabs, and control agent access.
 ---
 
 # Desktop Browser
 
-The desktop app can show a browser page beside your conversation. Open a page from a browser-tool result when connected to the local desktop Host, or use a [project action](/project-actions/) with an auto-open URL. The page has its own address bar, back, forward and reload controls.
+The desktop app includes an embedded browser view beside your conversation, alongside configured CDP endpoints and tabs shared through the Chrome/Edge **Browser Connector** (managed under **Settings → Browser**; see [Computer Use & Browser Resources](/computer-use/)).
 
-## Inspect and annotate
+Open a page from a browser-tool result when connected to the local desktop Host, or from a [project action](/project-actions/) with an auto-open URL. The view includes its own address bar and navigation controls.
 
-Select a conversation, turn on **inspect**, and click an element. Varin adds element details and a screenshot to that conversation’s draft; review the draft before sending. Inspection pauses agent control of the page.
+## Inspect and quote
+
+Select a conversation, turn on **Inspect**, and click an element. Varin adds the element details and screenshot to your draft so you can review before sending. Inspection pauses agent writes on that page.
 
 ## Take over and resume
 
-Use the page’s control button to take over from the agent or resume agent control. Closing or hiding the panel is not the same as stopping the agent’s task. There is no console-filter panel in this browser view.
+Use the page's control button to take over from the agent or hand control back. **View browser** changes only what you observe; **Use for current task** assigns that browser to the current conversation. Closing or hiding the panel never cancels the agent's task.

@@ -4,9 +4,9 @@
 ComputerService. It does not link the resource kernel or Agent runtime. The shared toolchain and
 Cargo.lock govern its four direct dependencies: serde, serde_json, base64 and Windows bindings.
 
-The [driver contract](../../../packages/computer-driver/README.md) is the protocol authority;
-[implementation and acceptance](../../../docs/design/native-computer-helper.md) describes delivery
-and the remaining platform evidence. From the repository root on Windows:
+The [driver contract](../../../packages/computer-driver/README.md) is the protocol authority, and
+[runtime acceptance](../../../docs/runtime-acceptance.md) tracks remaining real-device platform evidence.
+From the repository root on Windows:
 
 ```sh
 bun run computer:build

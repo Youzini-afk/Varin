@@ -4,348 +4,157 @@
 
 `packages/ui/src/stores` contains app-level Zustand stores for persistent UI state, runtime state, and feature caches.
 
-Not all state in the UI belongs here.
-
 Use a store when state is:
 
 - shared across distant parts of the app
 - needed outside a single component subtree
-- cache-like and keyed by runtime identity (for example directory, branch, Thread identity)
+- cache-like and keyed by runtime identity (directory, Host, branch, Thread)
 - updated imperatively from multiple surfaces
 
 Do not put high-frequency local component state here just because it is convenient.
 
 ## Architecture
 
-There are multiple store categories in this directory.
-
 ### Feature cache / query stores
 
-These are the most performance-sensitive.
+Performance-sensitive centralized keyed caches — consume narrow slices instead of re-fetching in multiple places:
 
 - `useGitStore.ts`
 - `useGitRepositorySelectionStore.ts`
 - `useGitHubPrStatusStore.ts`
-- `useFileSearchStore.ts`
-
-These stores act like centralized keyed caches. UI should consume narrow slices from them instead of re-fetching the same data in multiple places.
+- `useFileSearchStore.ts` — cache and in-flight keys include Host + directory and clear on endpoint reset
 
 ### UI state stores
 
-Examples:
+Coordinate visible app state, navigation, selected tabs, dialogs, and lightweight feature flags:
 
 - `useUIStore.ts`
 - `useDirectoryStore.ts`
 - `useFeatureFlagsStore.ts`
 - `useUpdateStore.ts`
-
-These stores coordinate visible app state, navigation, selected tabs, dialogs, and lightweight feature flags.
-
-`useWorkOverviewStore` retains explicit panel/disclosure choices by runtime and conversation ID.
-Plan, task and other content updates do not write these preferences. Consumers choose display defaults
-for missing preferences; this store does not own plan, task, source or execution state.
+- `useWorkOverviewStore.ts` — retains explicit panel/disclosure choices by runtime and conversation ID; plan/task updates never write preferences, and this store owns no execution/source state
+- `usePreferencesStore.ts` — owns speech preferences (default Whisper large-v3 Turbo when unset); recording start reads model/provider/language here while the Host supplies downloadable STT models and languages
 
 ### Thread / project coordination stores
 
-- `useProjectsStore.ts` owns navigation-project metadata.
-- `useThreadStore.ts` owns the selected native Thread/branch and rebuildable Catalog summaries.
-- `useThreadDraftStore.ts` owns in-memory composer drafts and pending input receipts.
-- `useMultiRunStore.ts` owns the UI's explicit multi-run launch intent and per-attempt status.
+- `useProjectsStore.ts` — navigation-project metadata
+- `useThreadStore.ts` — selected native Thread/branch and rebuildable Catalog summaries
+- `useThreadDraftStore.ts` — in-memory composer drafts and pending input receipts
+- `useMultiRunStore.ts` — explicit multi-run launch intent and per-attempt status
+- `useConversationOrganizationStore.ts` — active Host's Catalog organization tree projection and cursor observation
 
-`threadHostKey` includes both endpoint and selected Host identity. `threadIdentityKey` adds the real
-Thread and branch. Catalog binding captures an epoch, aborts observation on Host replacement and
-rejects stale requests. Selected branches are validated against the actual Catalog; a remembered label
-or previous Host's ID is insufficient. Metadata revisions, activity/read cursors and tombstones merge
-monotonically so an original command receipt cannot overwrite a newer event projection.
+Key invariants across these stores:
 
-`ThreadSidebar` filters Bot-owned conversations using each authoritative summary's `bot_id`, and
-sorts visible conversations by pin, update time and identity. Archive and delete are different commands.
-Deletion hides navigation through a retained tombstone; accepted execution and resource cleanup remain
-with their original owners. `markRead` acknowledges only the cursor actually presented.
-The shared sidebar catalog shows passive completion/failure reminders only for root conversations.
-Child unread cursors remain intact; their work stays visible without a completion bell in navigation.
-
-The store's creation key survives an uncertain response. Creating a Thread does not itself start a Run.
-A selected workspace path is staged on the new Thread draft; actual source resolution/preparation uses
-its authenticated Host and Documents owner. `ThreadProjection` owns live snapshot/progress observation,
-not the Catalog summary array.
-
-`useThreadDraftStore` retains text, images, PDF snapshot references, model/thinking choice, delivery mode,
-prepared source and the exact pending input. It is never persisted. Draft keys include Host and
-Thread/branch. Submission and retry ownership are documented in
-[Composer](../components/chat/composer/DOCUMENTATION.md); a failed observation cannot erase an accepted
-input or restore already-acknowledged draft material.
-
-`useMultiRunStore` retains stable command keys and prepared source identities for each selected model.
-Stopped launching, failed preparation and unknown delivery keep existing Threads and worktrees.
-Unconfirmed worktree creation is not automatically replayed. A retry must preserve the original launch
-intent rather than deleting resources and recreating an apparently clean batch.
-
-Permission grants remain authoritative in the Application Host; renderer preferences are not a second
-permission store. See [the security contract](../../../../docs/security.md).
-
-Shared safe storage treats durable failures per key. A quota or access failure creates an ephemeral
-override or tombstone for that key without disabling unrelated reads and writes. Later writes retry the
-durable backend. Deferred adapters retain failed operations for a later flush; malformed Zustand JSON
-is removed and treated as missing so hydration can recover.
-
-Project and UI settings use successful settings synchronization as authority. Omitted fields in a
-complete snapshot reset to canonical client defaults, including an omitted project list becoming empty.
-Transport or load failure dispatches no synchronization event and preserves current state. Partial save
-responses do not clear unrelated in-memory preferences or local mirrors.
-
-Directory restoration runs after authentication/settings synchronization. Web, mobile and remote
-desktop take their navigation home from the active Host's WorkspaceAPI root, not the OS home or a
-browser cache from another Host. Local desktop retains its preload-provided home. Selected projects
-keep their own directory; leaving a project returns to that same Host-owned navigation home.
-
-`usePreferencesStore` owns speech preferences for Settings and dictation. Recording start reads the
-current model/provider/language from that store; the Host supplies the downloadable STT catalog and
-supported languages. Shared defaults select Whisper large-v3 Turbo without replacing a saved choice.
-
-Inline-comment drafts, resource-library views and other scoped stores retain their own persistence
-contracts. File-search cache and in-flight keys include Host plus directory and are cleared on endpoint
-reset. Do not infer that every chat-related store has the same persistence or lifecycle behavior.
+- **Host & identity fencing**: `threadHostKey` includes endpoint + selected Host identity; `threadIdentityKey` adds real Thread and branch. Catalog binding captures an epoch, aborts observation on Host replacement, and rejects stale requests. Selected branches validate against the live Catalog. Metadata revisions, activity/read cursors, and tombstones merge monotonically so an older receipt never overwrites a newer event projection.
+- **Catalog & sidebar**: `ThreadSidebar` filters Bot-owned conversations by authoritative `bot_id` and sorts by pin, update time, and identity. Archive and delete are distinct; deletion hides navigation via a retained tombstone without owning execution/resource cleanup. `markRead` acknowledges only the presented cursor; passive completion/failure bells show for root conversations only (child unread cursors stay intact without a navigation bell).
+- **Thread creation & live projection**: Creation keys survive uncertain responses; creating a Thread does not start a Run. Staged workspace paths resolve through the authenticated Host and Documents owner. `ThreadProjection` (`packages/ui/src/lib/agent-runtime/thread-projection.ts`) owns live snapshot/progress observation, not the Catalog summary array.
+- **In-memory drafts** (`useThreadDraftStore.ts`): Retains text, images, PDF snapshot refs, model/thinking choice, delivery mode, prepared source, and exact pending input, keyed by Host + Thread/branch, and is never persisted. Submission and retry ownership live in [Composer](../components/chat/composer/DOCUMENTATION.md); a failed observation never erases accepted input or restores acknowledged draft material.
+- **Multi-run intent** (`useMultiRunStore.ts`): Retains stable command keys and prepared source identities per model. Stopped launches, failed preparation, and unknown delivery keep existing Threads/worktrees; unconfirmed worktree creation is never auto-replayed, and retries preserve the original intent.
+- **Scoped native catalog & organization observation**:
+  - The native sidebar subscribes to the shared Host observation bus: initial load/resync reads the full catalog, while scoped durable changes batch dirty Thread IDs through `inspectMany`, preserve untouched summary references, and re-sort only the result. Missing/hidden/deleted results remove only requested IDs; failed delta reads keep current rows and retry.
+  - `useConversationOrganizationStore.ts` shares that bus over HTTP: classification/metadata changes refresh loaded windows, native activity invalidates loaded recent-sort windows only, and token progress / read acks / unrelated operation events do not reload the tree. Refreshes coalesce and stop at the loaded window; failed pages keep their prior view and retry only that page.
+  - `useConversationOrganization()` manages shared binding lifetime without subscribing callers to every store field; rendering views pass a shallow selector for only the fields they display.
+- **Native submission & connection recovery**:
+  - `packages/ui/src/lib/agent-runtime/threadInputDelivery.ts` keeps one observation per Host generation, Thread/branch, and original command key. Submission, enqueue, and child continuation retain exact captured input while delivery is unknown; only an explicit first-attempt pre-admission rejection releases that intent.
+  - `ThreadProjection` rebuilds snapshots from the durable event cursor. Transient stream progress scopes to the active Run + stream sequence; gaps or closed connections clear transient UI and refresh history without resending input, stopping the Run, or fabricating idle state.
+- **Persistence, settings sync & directory home**:
+  - Permission grants remain authoritative in the Application Host ([security contract](../../../../docs/security.md)).
+  - `utils/safeStorage.ts` isolates quota/access failures per key with ephemeral overrides/tombstones, retries durable storage on later writes, queues deferred flushes, and clears malformed Zustand JSON so hydration recovers.
+  - Successful settings synchronization is authoritative: omitted fields in a complete snapshot reset to client defaults (including an empty project list), transport/load failure dispatches no sync and preserves state, and partial save responses do not clear unrelated preferences.
+  - Directory restoration runs after auth/settings sync: web, mobile, and remote desktop use the active Host's `WorkspaceAPI` root (never OS home or another Host's cache); local desktop keeps its preload-provided home. Inline-comment drafts, resource-library views, and other scoped stores keep their own persistence contracts.
 
 ### `useTerminalStore.ts`
 
 `useTerminalStore` owns terminal tab arrangement per directory plus PTY scrollback.
 
-Scrollback is deliberately **not** stored on the tab. `buffers` is a separate map keyed by
-directory and tab id, and `getBuffer()` returns a shared frozen empty buffer for tabs that
-have produced no output. PTY output arrives at streaming frequency, so keeping it inside
-`sessions` made every output chunk allocate a new tab, a new directory entry and a new
-`sessions` map. That invalidated every tab-strip subscription, re-ran the project-action
-run monitor, and made Zustand persist rewrite the session-storage snapshot per chunk.
+Scrollback is deliberately **not** stored on the tab. `buffers` is a separate map keyed by directory and tab id, and `getBuffer()` returns a shared frozen empty buffer for tabs with no output. Keeping streaming PTY chunks outside `sessions` prevents every chunk from invalidating tab-strip subscriptions, re-running project-action monitors, and triggering Zustand persist writes.
 
-Invariants to preserve when editing:
+Invariants:
 
-- Output actions (`appendToBuffer`, `replaceBuffer`) must leave `sessions` referentially
-  unchanged; only `buffers` and `nextChunkId` may change.
-- Buffer entries are owned by their tab. `closeTab`, `removeDirectory`, `clearAll`, and
-  rebinding a tab to a different terminal session must drop the entry.
+- Output actions (`appendToBuffer`, `replaceBuffer`) must leave `sessions` referentially unchanged; only `buffers` and `nextChunkId` may change.
+- Buffer entries belong to their tab: `closeTab`, `removeDirectory`, `clearAll`, and rebinding a tab to another terminal session must drop the entry.
 - Output for an unknown tab is ignored rather than creating an orphan buffer.
-- Only `sessions` and `nextTabId` are persisted. `partialize` reuses its previous
-  projection while both are referentially unchanged, and the storage adapter skips a write
-  for an unchanged projection, so streaming output performs no persistence work.
-- Consumers that react to output must subscribe to `buffers`, not `sessions`.
+- Only `sessions` and `nextTabId` are persisted; `partialize` reuses its previous projection while both are referentially unchanged, and the storage adapter skips unchanged writes.
+- Consumers reacting to output must subscribe to `buffers`, not `sessions`.
 
 ## Git / PR Stores
 
-The Git and PR stores are the most important stores to understand before editing this directory.
-
 ### `useGitStore.ts`
 
-`useGitStore` is a centralized active-runtime, per-directory Git cache.
+Centralized active-runtime, per-directory Git cache.
 
-Core model:
-
-- active runtime owns one `directories` map keyed by directory
-- each directory entry contains:
-  - repo detection
-  - status
-  - branches
-  - log
-  - identity
-  - diff cache
-  - per-directory loading flags
-  - freshness timestamps
-
-Important properties:
-
-- `directories: Map<string, DirectoryGitState>` is the source of truth
-- loading state is per-directory, not global
-- `ensureStatus()` and `ensureAll()` are the preferred entry points for consumers
-- in-flight dedupe exists for status and `ensureAll()`
-- runtime reset replaces all live entries with that runtime's persisted branch seeds and invalidates old completions
-- status, branches, log, identity, repository probes, and prefetch diffs commit through runtime and per-channel generations
-- status mutations advance a revision so older refreshes cannot undo optimistic or confirmed index changes
-- branch persistence is versioned, bounded, runtime-scoped, and claims the ambiguous legacy cache once
-- diff data has per-directory and aggregate count/UTF-8-byte limits; oversized single entries are rejected
+- Source of truth: `directories: Map<string, DirectoryGitState>` holding repo detection, status, branches, log, identity, diff cache, per-directory loading flags, and freshness timestamps.
+- Prefer `ensureStatus()` and `ensureAll()` (both dedupe in-flight requests); loading state is per-directory, never global.
+- Runtime reset replaces live entries with that runtime's persisted branch seeds and invalidates old completions.
+- Status, branches, log, identity, repository probes, and prefetch diffs commit through runtime + per-channel generations; status mutations advance a revision so older refreshes cannot undo optimistic or confirmed index changes.
+- Branch persistence is versioned, bounded, runtime-scoped, and claims the legacy cache once.
+- Diff cache enforces per-directory and aggregate count/UTF-8-byte limits and rejects oversized single entries.
 
 ### `useGitRepositorySelectionStore.ts`
 
-The IDE's selected repository is a workspace-scoped view preference, separate from the product
-workspace and from a Thread Run’s source directory. It stores the resolved Git top-level directory by
-opaque workspace identity, so choosing a nested repository never switches the Explorer, editor, terminal,
-or execution source. The IDE validates that a restored or newly selected repository remains inside
-the active workspace before using it. Git diff paths are repository-relative and must be rebased
-through that selected repository root before becoming workspace resource IDs.
+- Stores the IDE's selected Git top-level directory by opaque workspace identity as a workspace-scoped view preference — separate from the product workspace and from a Thread Run's source directory.
+- Choosing a nested repository never switches the Explorer, editor, terminal, or execution source; restored/selected repos are validated to stay inside the active workspace.
+- Git diff paths are repository-relative and must be rebased through the selected repository root before becoming workspace resource IDs.
 
 ### `useGitHubPrStatusStore.ts`
 
-`useGitHubPrStatusStore` is a centralized PR cache keyed by a collision-safe tuple of runtime, directory, branch, and requested remote.
+Centralized PR cache keyed by a collision-safe tuple of runtime, directory, branch, and requested remote.
 
-Core model:
-
-- each entry stores:
-  - current PR status payload
-  - loading / error state
-  - whether initial status was resolved
-  - refresh timestamps
-  - watch count
-  - runtime params
-  - resolved identity
-
-Important properties:
-
-- `ensureEntry()` initializes a key lazily
-- `setParams()` attaches runtime context
-- parameter changes advance an entry revision; stale queued, successful, and failed requests cannot update a newer authority
-- `startWatching()` / `stopWatching()` are for true live PR consumers only
-- `refreshTargets()` supports one-shot multi-target bootstrap without turning on live watching
-- runtime reset disposes timers, watchers, API references, and request ownership while inert namespaced snapshots remain isolated
-- persisted cache is versioned, TTL-filtered, and bounded for page refresh continuity, not broad background syncing
-
-### Native submission and connection recovery
-
-`lib/agent-runtime/threadInputDelivery.ts` keeps one observation per Host generation, Thread/branch and
-original command key. Submission, enqueue and child continuation retain their exact captured input
-while delivery is unknown. Only an explicit first-attempt pre-admission rejection releases that intent;
-a timeout, lost response or view closure is not execution failure.
-
-`ThreadProjection` reconstructs snapshots from the original durable event cursor. Transient stream
-progress is scoped to the active Run and stream sequence. A gap or closed connection clears that
-presentation and refreshes history; it never resends input, stops the Run or manufactures idle state.
+- Each entry stores PR status payload, loading/error state, initial-resolution flag, refresh timestamps, watch count, runtime params, and resolved identity.
+- `ensureEntry()` initializes lazily; `setParams()` attaches runtime context and advances entry revision so stale queued/successful/failed requests cannot overwrite a newer authority.
+- `startWatching()` / `stopWatching()` are for live visible PR consumers only; `refreshTargets()` handles one-shot multi-target bootstrap without enabling live watches.
+- Runtime reset disposes timers, watchers, API refs, and request ownership while keeping inert namespaced snapshots isolated.
+- Persisted cache is versioned, TTL-filtered, and bounded for page-refresh continuity only (not background syncing).
 
 ## Ownership Rules
 
-These rules are important. Breaking them tends to reintroduce idle CPU churn, stale UI, or rerender fanout.
+Breaking these rules reintroduces idle CPU churn, stale UI, or rerender fanout:
 
-1. No broad `directories` or `entries` subscriptions in normal UI components.
-2. No root pollers for Git or PR.
-3. No broad idle sweeps across many directories.
-4. Prefer store `ensure*` methods over direct runtime API calls from views.
-5. Visible consumers should drive refresh. Hidden consumers should not.
-6. Header should not depend on PR store.
-7. A closed context panel (or hidden git surface) should not create live PR work.
-8. File tree Git status should update only when the file tree is visible.
-9. Thread Catalog refresh must preserve Host and request-generation ownership.
-10. Catalog summaries must not replace authoritative Run, history or submission state.
+1. No broad `directories` or `entries` subscriptions in feature components.
+2. No root pollers for Git or PR, and no broad idle sweeps across many directories.
+3. Prefer store `ensure*` actions over direct runtime API calls from views.
+4. Visible consumers drive refresh; hidden consumers do not (closed context panel / hidden sidebar / hidden file tree must not run live Git/PR work).
+5. Header must not depend on the PR store.
+6. Thread Catalog refreshes preserve Host + request-generation ownership; Catalog summaries never replace authoritative Run, history, or submission state.
 
 ## Selector Rules
 
-Use leaf selectors.
+Use leaf selectors so Zustand's per-`set` selector checks stay referentially stable:
 
-Good:
-
-- `useGitStatus(directory)`
-- `useGitBranches(directory)`
-- `useGitBranchLabel(directory)`
-- `useGitRepoStatusMap(directories)`
-- `usePrVisualSummaryByKeys(keys)`
-
-Bad:
-
-- `useGitStore((state) => state.directories)` in feature components
-- `useGitHubPrStatusStore((state) => state.entries)` in feature components
-- render-time scans over every PR entry for a single project badge
-
-Why this matters:
-
-- Zustand reruns selectors on every `set`
-- rerenders are avoided only if the selected result stays referentially stable
-- broad subscriptions magnify fanout even when only one directory changed
+- **Good**: `useGitStatus(directory)`, `useGitBranches(directory)`, `useGitBranchLabel(directory)`, `useGitRepoStatusMap(directories)`, `usePrVisualSummaryByKeys(keys)`
+- **Bad**: `useGitStore((s) => s.directories)`, `useGitHubPrStatusStore((s) => s.entries)`, render-time scans over all PR entries for one project badge
 
 ## Performance Rules
 
-### 1. Preserve references for unaffected entities
-
-If directory `A` changes, directory `B` should keep the same derived reference where possible.
-
-### 2. Keep loading state per entity
-
-Do not add new global `isLoadingWhatever` flags for keyed cache work.
-
-### 3. Avoid hidden work
-
-If a surface is not visible, it should not keep refreshing Git/PR state.
-
-Examples:
-
-- `PullRequestSection` may watch a PR while visible
-- hidden sidebar should not watch PRs
-
-### 4. Prefer one-shot event hints over polling
-
-Refresh the actual affected directory after an authoritative mutation result. A tool argument or
-streaming preview is not proof that files changed. Prefer one-shot invalidation with a visible consumer
-over a new background polling loop.
-
-### 5. Treat `diffStats` carefully
-
-`GitStatus.diffStats` may be omitted by light status fetches.
-
-Rules:
-
-- do not erase richer existing `diffStats` with a lighter payload
-- if a UI surface requires per-file `+/-` stats, it must ensure a full enough status payload exists
-
-### 6. Keep diff cache bounded
-
-Diff cache has explicit limits because large repos can otherwise blow up memory.
-
-Do not raise limits casually.
+1. **Preserve unaffected references**: Updating directory `A` must keep derived references for directory `B` stable where possible.
+2. **Per-entity loading state**: Never add global `isLoading*` flags for keyed cache work.
+3. **Avoid hidden work**: Only visible surfaces (e.g., `PullRequestSection`) acquire watches; hidden sidebars do not.
+4. **One-shot hints over polling**: Refresh the affected directory after an authoritative mutation result (never on streaming previews/arguments).
+5. **Preserve `diffStats`**: Light status fetches may omit `GitStatus.diffStats`; never erase richer existing `diffStats`, and ensure a full status fetch when a view needs per-file `+/-` stats.
+6. **Keep diff cache bounded**: Do not raise diff-cache limits casually.
 
 ## Refresh Model
 
-### Git
-
-Expected model:
-
-- `GitView` / `DiffView` ensure current-directory Git state when visible
-- explicit Git actions refresh status/branches/log as needed
-- successful file-mutating tools can issue a one-shot Git refresh hint
-- no root-level background Git polling
-
-### PR
-
-Expected model:
-
-- real visible PR consumers acquire and release their own watch
-- one-shot discovery does not establish a background watch
-- no live PR work for header
-- no background PR sweeps outside visible demand
+- **Git**: `GitView` / `DiffView` ensure current-directory state when visible; explicit Git actions refresh status/branches/log; successful file-mutating tools issue a one-shot refresh hint; no root polling.
+- **PR**: Visible PR consumers acquire/release their own watch; one-shot discovery never starts a background watch; header does no live PR work; no background sweeps outside visible demand.
 
 ## When Editing These Stores
 
-Before changing store shape or selectors, ask:
+Before changing store shape or selectors, verify:
 
-1. Is this keyed by the right identity (Host, directory, Thread/branch, root)?
-2. Will this force unrelated consumers to rerender?
-3. Should this be visible-demand-driven instead of background-driven?
-4. Is there already a store cache for this data?
-5. Am I duplicating fetch ownership in a component when it should live in a store action?
+1. Keyed by the right identity (Host, directory, Thread/branch, root)?
+2. Forces unrelated consumers to rerender?
+3. Visible-demand-driven rather than background-driven?
+4. Existing store cache already covers this data?
+5. Fetch ownership lives in a store action rather than duplicated in a component?
 
 ## Validation Checklist
 
-After meaningful Git/PR store changes, verify manually:
+After meaningful Git/PR or Thread store changes, verify manually:
 
 1. Idle desktop app stays quiet on draft/chat screen.
-2. Git view still loads status, branches, log, identity.
-3. Diff view still opens the correct file and stays in sync.
+2. Git view loads status, branches, log, and identity.
+3. Diff view opens the correct file and stays in sync.
 4. Thread navigation preserves the actual Host and branch.
 5. Failed or unknown multi-run attempts retain their Threads and worktrees.
 6. Hidden surfaces do not reintroduce live background work.
-
-### Scoped native catalog and organization observation
-
-The native sidebar subscribes to the shared Host observation bus. Initial load and
-resync read the complete catalog; scoped durable changes batch dirty Thread IDs
-through `inspectMany`, retain untouched summary references, and re-sort only the
-resulting catalog. Missing/hidden/deleted results remove only requested identities.
-Archive receipts, branch fallback, activity/read clocks and Host fencing retain their
-existing semantics. Creation and navigation resolve only the affected identities.
-Failed delta reads preserve current rows and retry; they are not empty successes.
-
-Organization navigation uses that same observation bus through its HTTP API.
-Classification/metadata changes refresh loaded query windows; native activity only
-invalidates loaded recent-sort windows. Neither token progress, read acknowledgements
-nor unrelated operation events reload the tree. Refreshes coalesce, and continuation
-reads stop once the already-loaded window has been reconstructed. Explicit action
-scope reads still follow all continuations when the selected operation requires them.
-A failed page retains its previous view and retries that page, not the entire tree.
-
-`useConversationOrganization()` manages shared binding lifetime without subscribing
-the caller to all store fields. Consumers that render data supply a selector; tree
-and detail views use shallow selections of the fields they actually display.

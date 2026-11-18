@@ -1,0 +1,31 @@
+---
+title: Contrôle d’ordinateur et ressources navigateur
+description: Permettez aux agents d’observer et de piloter des bureaux connectés et des onglets de navigateur avec un contrôle et une reprise explicites.
+---
+
+# Contrôle d’ordinateur et ressources navigateur
+
+Varin sépare le **contrôle du bureau** et l’**accès au navigateur** de votre espace de travail de fichiers afin que vous puissiez choisir précisément quelle machine ou quel navigateur une tâche utilise.
+
+## Computer Use (contrôle du bureau)
+
+- Les agents peuvent observer les fenêtres, interroger les contrôles UI natifs (Windows UIA, macOS Accessibility, Linux X11 AT-SPI), prendre des captures d’écran, envoyer des entrées clavier/souris et attendre des conditions d’interface.
+- Chaque bureau physique autorise **un seul contrôleur actif** à la fois et plusieurs observateurs en lecture seule.
+- Ouvrez l’onglet **Computers** à côté de votre conversation pour suivre l’activité en direct, reprendre le contrôle immédiatement ou le rendre lorsque vous êtes prêt. Fermer la visionneuse arrête uniquement l’observation — cela n’annule pas la tâche.
+- Les bureaux distants connectés via [Work Connections](/fr/connect-devices/) exécutent leur propre pilote de plateforme local sur l’appareil cible.
+
+## Ressources navigateur
+
+Ouvrez **Paramètres → Browser** pour gérer les navigateurs disponibles sur le Host actuel ou connecté :
+
+- **Navigateur desktop intégré** : Intégré à l’application de bureau Varin (voir [Navigateur desktop](/fr/desktop-browser/)).
+- **Connexions CDP** : Connectez-vous à des instances Chromium existantes via Chrome DevTools Protocol avec des en-têtes optionnels et un répertoire de transfert de fichiers.
+- **Votre Chrome / Edge habituel** : Téléchargez l’extension opt-in **Browser Connector** depuis les Paramètres, appairez-la à votre Host et partagez explicitement les onglets que vous souhaitez laisser Varin consulter ou piloter.
+
+Dans la vue navigateur, **View browser** modifie uniquement ce que vous observez ; **Use for current task** associe ce navigateur à la conversation active. Vous pouvez suspendre les écritures de l’agent et reprendre la main sur un onglet partagé depuis le workbench ou depuis l’extension de navigateur.
+
+## Guides associés
+
+- [Navigateur desktop](/fr/desktop-browser/)
+- [Connecter un appareil](/fr/connect-devices/)
+- [Sécurité](/fr/security/)

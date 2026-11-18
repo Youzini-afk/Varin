@@ -1,0 +1,34 @@
+---
+title: Vues et collaboration d’agents
+description: Basculez entre les vues Varin, Workbench et IDE, choisissez un mode de tâche, déléguez à des sous-agents et échangez des modifications de code.
+---
+
+# Vues et collaboration d’agents
+
+Choisissez le degré de proximité souhaité avec vos agents et vos fichiers. Changer de vue modifie uniquement l’interface : vos tâches en cours, les modèles sélectionnés et les sources d’espace de travail restent intacts.
+
+| Vue | Idéale pour | Ce qui reste au premier plan |
+| --- | --- | --- |
+| **Varin** | Discussion continue et coordination globale | Chat avec l’assistant, aperçu du travail, mémoire, planifications, onglets latéraux fichiers/ordinateurs |
+| **Workbench** | Contrôle direct des tâches et coéquipiers | Conversation dédiée, activité des outils, panneau de collaboration, plans, reprise |
+| **IDE** | Édition directe et débogage | Groupes d’éditeurs Monaco, diffs, terminaux, Git et chat d’agent côte à côte |
+
+## Orientations de tâche
+
+Sous ces vues, chaque conversation utilise une **orientation de tâche** — **General**, **Coding**, **Research** ou **Office** — qui adapte les outils directement visibles et les préréglages d’agents disponibles. Les autres capacités restent accessibles à la demande.
+
+## Délégation et collaboration
+
+- **Dispatch libre ou préréglages** : Les agents peuvent déléguer des sous-tâches avec un modèle précis, un niveau de réflexion, une orientation de tâche ou un préréglage configuré. Vous pouvez également activer un **sélecteur de modèle de délégation** optionnel dans les paramètres Agents.
+- **Panneau Collaboration** : Ouvrez le panneau **Collaboration** sur la droite pour suivre dans une seule chronologie les délégations, les messages entre coéquipiers, les rapports finaux et les transferts de code. Cliquez sur n’importe quel coéquipier pour ouvrir sa conversation complète, lui envoyer un suivi ou l’arrêter.
+- **Modes d’espace de travail** :
+  - **Shared** (par défaut) : Les coéquipiers travaillent directement dans le répertoire sélectionné.
+  - **Isolated write** : Crée un espace de travail indépendant (via WinFsp sous Windows, FUSE sous Linux ou FSKit/macFUSE sous macOS) et fusionne les modifications via l’échange de code (`submit_code` / `update`) avec revue des conflits.
+  - **Read-only** : Retire les outils de modification de fichiers pour une inspection sans risque.
+- **Commandes de transfert dans la zone de saisie** : Utilisez les commandes `/` dans la zone de saisie pour envoyer un message direct à un coéquipier précis, préparer un transfert structuré, exporter une conversation en Markdown/JSON ou enregistrer une note/mémoire.
+
+## Guides associés
+
+- [Assistant Varin](/fr/varin-assistant/)
+- [Agents externes](/fr/external-agents/)
+- [Sessions worktree](/fr/worktrees/)

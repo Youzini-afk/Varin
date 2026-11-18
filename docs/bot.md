@@ -1,332 +1,70 @@
-# 长期总助手
-
-Bot 是与用户持续交流的助手，执行仍由原生 Agent runtime、外部 Harness 和各资源 owner 负责。
-模式入口使用「Varin」名称和品牌标志，新配置默认进入此模式；已有配置保留用户的模式选择。
-侧栏「设置」打开通用设置并保留上次访问的页面，与普通工作台使用同一入口行为。
-默认入口在没有现有 Bot 时创建一个总助手；已有其他 Bot 保留各自身份、家目录、记忆与访问入口。
-档案中的模型和合作指令由用户设置，编辑与保存共用原档案草稿。
-专属模型可同时设置其支持的思考等级，省略时沿用该模型支持的对话默认思考设置，再采用模型首个可用档位。
-未设专属模型的新 Bot 对话先继承同一 Host 上工作台／IDE 当前选择的模型与思考等级；没有可继承选择时，使用共享对话默认配置，
-再按配置顺序选择启用服务下首个已启用、可用于对话的模型。Host 后台执行使用同一默认配置与候选回退规则。
-已有会话选择保留；确实没有可用模型时保持原来的未选择状态。
-模型与思考修改共同保存，并在 Bot 各直接会话的下一次模型请求边界更新。正在进行的请求和派发任务保留自身配置。
-空闲唤醒、恢复和排队续轮在执行准备时重新读取当前 Bot 档案；已有新选择且上一次模型交换已闭合时，
-直接准备新模型，不先恢复已删除的旧服务。未闭合的原调用仍保留实际记录与恢复语义。
-设置页使用顶部 Bot 切换与单层档案／工作／记忆导航，不内嵌另一套目录侧栏。指令整行编辑，记忆在原页查看和修改；
-切换页签保留编辑草稿，工作列表和记忆按需加载，切换 Bot 前确认尚未保存的档案修改。
-
-职责提示说明长期合作、直接工作与协作的能力，不规定固定流程、记忆分类或汇报栏目。
-Bot 可以更主动地使用正文选择、可编辑结果、比较和真实任务引用；普通 Agent 保持通常的文字密度。
-这一倾向由真实 Bot 身份注入，与当前查看会话的 Shell 无关，用户本轮要求的直接答复或特定格式优先。
-用户可以随时进入原工作台，与执行者交流、查看文件或停止任务。
-
-## 会话
-
-### Bot 分类
-
-侧栏支持用户自建分组、重命名、移动和排序；分组以轻量可折叠标题呈现，Bot 下方仍展示其会话与分支。
-可使用拖动手柄、键盘拖动，或菜单中的移动与排序操作。置顶 Bot 在各自分组内优先显示。
-未分组 Bot 直接列出；删除分组会将成员移回未分组，保留 Bot、会话和正在执行的工作。
-归档保留分组归属，恢复后回到原分组。搜索匹配 Bot、分组名称及当前 Bot 的会话，临时展开结果所在分组，
-清空搜索后恢复折叠选择。分组和 Bot 的折叠偏好按 Host 保存在客户端。
-
-分类通过 BotService 的 `organization` API 存入 Rust Storage 的 `bot.organization:sidebar` 记录，
-与 Bot 档案、执行 gate 和记忆分开。更新检查原记录 revision，整个分组及成员排列一次提交；
-`varin:bot-organization-changed` 通知同一 Host 上的桌面端和 Web 刷新，设置中的 Bot 选择器使用同一分类。
-新 Bot 自动显示在未分组，已删除 Bot 的残余导航引用在下一次分类写入时清理。
-
-### 会话与分支
-
-一个 Bot 可以有多个会话，每个会话都是 Bot 名下独立的原生 Thread，可以再分支。所有会话共用同一身份、
-档案、家目录、记忆和日程。档案入口是第一个会话；未命名会话在侧栏、顶部和返回入口统一使用 Bot 名称，
-默认总助手显示“Varin”，已有的会话标题照常显示。其余会话由
-`POST /api/harness/bots/:botId/sessions` 在 Bot 醒着时创建，标识为 `thread:bot:<botId>:<uuid>`。
-`GET` 同一路径按创建顺序列出会话，与 Catalog `bot_scope.sessions` 一致。
-
-左侧会话与分支提供右键及省略号菜单。会话可重命名、恢复自动标题、置顶；分支可打开、查看会话树、
-从当前历史位置继续分支或复制分支标识。右键不改变当前聊天，操作绑定点中的对象；置顶会话在本 Bot 的列表内排在前面。
-分支也可单独删除。删除当前分支后回到主会话。其他分支仍可查看共享历史，分支上的工作结束或停止后即可删除。
-归档会话收进本 Bot 的「已归档会话」，可以查看、恢复或删除。删除前需要确认。
-归档或删除当前会话后，入口会打开仍可使用的会话。没有可用会话时，处于唤醒状态的 Bot 会打开一个新的空会话。
-档案中的原入口身份保留；`POST /api/harness/bots/:botId/entry` 返回的 `entry` 是 Catalog 解析出的实际导航目标，
-可以与 `bot.entry` 不同。聊天直接接纳该目标，不等待会话列表追平；安排列表、事件来源和管理入口使用当前已解析的会话，
-未取得入口时不发起这些读取。
-菜单关闭后再打开编辑窗口，避免焦点被退场菜单抢回。
-
-用户输入、观察和导航事件沿 `child_tasks` 找到直接绑定的会话，回到发起派发的那个会话；
-会话不会收到自己活动的副本。被跟进普通会话的事件和事项变化仍进入档案入口。
-任一会话都可以更新本 Bot 的事项，家族检查以调用方所在会话为准。
-修改档案模型时，Host 更新各直接会话中仍活跃的分支；已结束的 Run 保留历史记录，由后续执行准备应用当前档案。
-非入口会话按普通规则自动起标题。
-
-Bot 自己的会话在 Bot 外壳中打开；它派发的子任务仍是原来的执行 Thread。
-聊天中的任务入口、概览中的工作和待处理请求先在旁边打开详情。完整执行过程可再进入原工作台，并保留返回 Bot 会话的位置。
-`/work` 列出派发的工作和跟进的会话，会话本身只在带有桌面或产物时出现。
-
-### 持续交流与工作空间
-
-Varin 的直接会话使用独立的 `botFollowUpBehavior`，默认 `steer`；普通 Agent 沿用 `followUpBehavior`。
-判定依据 `bot_id` 与父会话关系，打开哪个外壳不改变发送语义。发送按钮旁的单次操作及 Alt+Enter
-可把本条消息排到本轮之后，既有排队消息也可以立即发送。队列分别显示待接收和后续排队；
-只有原输入从 queued 变为 delivered，才短暂显示已接收。新输入复用运行时已有的观察等待唤醒，
-不会取消被观察的子任务、命令或日程。
-
-概览默认展示当前会话，能切换该 Bot 的全部工作。事项使用原 matter 关联；直接交办的负责人在主列表，
-其下的分工在详情查看，主动关注的任务单独标明。一次 Run 结束只表示本轮结束。
-详情直接观察原 Thread，复用原提问、权限、回复、产物和投递身份。给执行者的消息沿原队列或续接入口提交，
-文件进入该执行者的草稿，不向其他工作广播。
-
-电脑、独立文件空间和工作详情共用可关闭的页签，聊天保持挂载。隐藏电脑视图只结束观察；操作者名称来自真实控制权记录。
-文件来源独立于聊天的项目与执行来源，文本编辑继续使用 Document Registry、Monaco／移动端 CodeMirror 和 Documents 保存协议。
-手机顶部胶囊先展开实际待处理与当前工作，再打开详情或完整面板；展开、收起和页签切换复用可打断动效。
-
-## 安排与关注
-
-「安排与关注」在原定时与接续入口聚合 Bot 日程、持续事件关注与原任务等待；Bot 侧面板显示紧凑摘要。
-完整列表可选本会话／该 Bot 并搜索。切换范围只影响查看，不修改接收位置。尚无首轮 Run 的 Bot 会话也能创建关注，
-不需要先发一条占位用户消息。模型通过 `follow_up` 的 `sources`、`arrange`、`route`、`backlog` 和原有读取、控制动作管理同一份记录。
-模型修改已有安排时，省略接收位置会保留原目标；明确指定新位置才改投，`externalConversationId: null` 表示切回原生接收。
-
-事件关注保存名称、处理意图、原插件连接及实际账号、条件、原生 Thread/branch 或真实外部 Harness 会话目标，以及处理时机。
-来源目录按需查询，不把所有插件条件加入每轮提示。条件编辑使用来源声明的 schema；当前匹配语义是事件属性的精确子集，
-不存在隐含语义打分或通用筛选操作符。语义要求留在处理意图中，由接收模型结合真实材料判断。
-
-- 到来即处理：在目标可接收边界追加输入；空闲或尚无首轮 Run 的 Bot 会话沿原激活路径启动。
-- 汇集后处理：窗口从第一条待处理变化计时，不被后续到达无限延期；界面展示实际待处理数量和截止时间。
-- 到约定时间处理：选用指向相同 Thread/branch 的实际 Bot Calendar 定义。到期选择待处理事件，空批次按「无新增也执行」选项处理。
-- 留待下次处理：只排队，不凭这条输入启动模型；用户也可明确「现在处理」。
-
-修改处理时机后，尚未消费的事件按新时机重新安排；已进入执行的输入与结果保留原归属。
-「现在处理」也会记录到因 Bot 休眠等原因暂未交付的批次，目标恢复后执行，不绕过休眠状态。
-创建和编辑表单沿原展开／收起动效保留草稿；保存成功后收起，下一次编辑重新读取实际定义。
-
-同一接收边界内，多条关注共用一份事件正文，同时保留各自的处理意图与交付回执。已进入模型的内容保持不变，
-后到事件进入下一批；暂停、取消或修改某条关注仍只影响它自己的未消费输入。
-普通聊天、邮件和评论保留原顺序与正文。插件可将完整状态快照明确标为可覆盖，提供状态组、来源顺序与状态名称；
-尚未消费的同组通知展开最新正文，并保留期间状态变化，例如「失败 → 恢复」。乱序补拉按来源顺序处理，
-筛选条件不同的关注分别计算自己的状态范围。原文与附件仍可通过该次 occurrence 回读。
-
-来源对象可以显式关联现有原生或外部 Harness 任务，之后该对象的变化沿原任务继续。映射不创建另一份任务池，也不更改原任务的可见范围。
-原生接收位置还可明确启用「首次联系时创建 Bot 会话」，默认关闭。首次收到有真实 objectId 的来源对象时，
-由原身份 owner 创建该 Bot 的真实会话并保存普通对象关联；重试和后续事件复用该关联。没有对象身份的事件仍走原默认位置，
-切换账号不会复用旧账号的对应关系，也不会因为创建会话而取得个人发送者信任。
-明确移除某对象的关联后，该对象回到默认接收位置；之后的新事件不会悄悄恢复已移除的关联。
-外部材料默认是环境输入。只有已认证用户明确保存该来源对象与精确 sender 的个人聊天对应关系，匹配消息才沿用户输入处理；
-插件提供的文字、用户名称或任意事件字段不会自行取得用户身份。关联可以修改和删除，切换来源账号会移除旧对应关系。
-外部目标复用已有连接、原 session 和串行 turn；存活连接无需先断开再恢复。不能恢复、需要复核或配置已停用时保留待办并显示真实原因，不另开一个会话冒充续接。
-实际投递和结果按原 external turn 导航，不跳到该任务的最新一轮；结果沿原交办关系进入 Bot 工作回报。
-
-暂停关注保留定义、同步位置与已收内容；共享连接仍可为其他关注接收。恢复从原位置继续，不能补拉的来源显示实际覆盖范围。
-休眠 Bot 只阻止模型准入，不关掉其他关注使用的账号同步。停止本轮不删除长期关注，也不把已停止批次自动包装成新输入重跑。
-取消关注撤销未来触发及尚未交付输入，已交付任务与结果仍属于原会话。「仅从现在继续」丢弃已接收的未交付内容，并按来源真实发生时间忽略之后补拉的旧变化；不推进其他关注的水位，也不删除会话历史。
-
-展开条目可原位编辑、查看最近触发与原处理会话、暂停、恢复、现在处理或清理积压。草稿不因来源状态刷新而覆盖；
-保存结果未知时保留原请求身份，不自动新建另一条。目标被删除或不可用时显示具体问题并保留内容，重新选目标只影响未交付部分，
-旧回执仍跳转到原 Thread/branch 或原 external turn。账号切换、插件停用或连接断开不会悄悄改投其他账号；未知来源状态不显示为健康。
-账号登录与配置仍在插件自身页面完成，Web、桌面和移动端共用 Host 接口，关闭页面不结束监听。
-
-接收、批次、恢复与跨 Host 合同见[运行时](runtime.md#长期事件安排与接收)，插件接入见[扩展](extensions.md)。
-
-## 附件与交办
-
-用户可上传任意格式的原文件，也可只发送附件。Bot 用同一 `attachments` 选择把文件随新任务派发，
-或补发给已有 Agent；不必让用户选择存储位置，也不把文件全文塞进交办正文。
-接收任务可直接读取、按需取得执行路径或继续转发已获准的固定版本。文件回传与最终报告保留同次交付身份。
-
-聊天和协作面板在正文后显示紧凑附件入口，收起长正文后仍可预览、下载或复制引用。
-准备失败保留草稿、原 Blob 与重试键；多目标部分成功不会再次交办已确认的目标。具体合同见[Agent 协作](collaboration.md#文件交接)。
-
-## 界面
-
-每个 Bot 可单独选择内置配色或导入图片、状态形象包，形象与构图通过 Host 在各端共享。
-设置档案和右侧档案提供同一选择入口；文件格式与呈现规则见 [Bot 形象](bot-appearances.md)。
-
-Bot 外壳（`packages/ui/src/workbenches/bot/`）只负责交流和统筹：左侧是 Bot → 会话 → 分支，
-中间是当前会话，右侧面板是 Bot 区加概览、动态、记忆、日程四个页签和档案页。派发的工作及其权限、问题在旁侧详情中处理，
-也可进入完整工作台的原会话；工作台标题栏提供回到原 Bot 会话的按钮。面板只读取投影，不另存状态；布局偏好（侧栏、面板宽度与页签）只保存在本机。
-
-Bot 会话可以从项目分类中新建，项目只提供这次工作采用的默认环境；Bot 身份、档案、记忆和家目录资产不迁移。
-明确选择的执行来源优先，分类移动不改写已经固定的来源。切换已有 Bot 会话保留普通工作台原有的目录选择，
-不因为读取历史启动资源设备。派发任务进入原工作台后继续使用原有来源、工作概览和编辑能力。
-
-- **动态**：`GET /api/harness/bots/:botId/activity?before=&limit=` 透传 Catalog 的 `runtime.bot.activity.read`。
-  它按原始事件 cursor 从新到旧分页，覆盖所有会话的派发与回报、用户在 Bot 关注的工作里的输入 / 工作区改动 / 历史调整、
-  没有用户输入且结束时没有可见回复的后台回合（附带它消费的输入），以及会话上的日程触发。被投递去重或来源失效而压下的工作事件不列出。
-  这些事实的时间来自事件里的 `atMs`；早于该字段的旧事实时间为 null，界面按原顺序显示、不补时间。
-  默认每页 30 条，与消息流一致。记忆没有 cursor，由界面按已加载窗口的最早时间并入时间线。
-- **形象状态**：`GET /api/harness/bots/:botId/presence` 从 `bot_scope` 投影出等用户处理的权限 / 问题、
-  正在运行的派发工作和正在回复的会话。Host 在工作变化后约 250ms 重算所有未归档 Bot，只在结果改变时推送
-  `varin:bot-presence`；读取失败不推送，客户端保留上一份。休眠、归档和最终形象仍由 Bot 记录与界面决定；
-  投影到达前，选中的 Bot 暂用 Thread 目录和 `/work` 推算。
-
-桌宠读取同一 Catalog 的 attention 快照：每个分支带 Bot 归属和所属会话，派发关系带再次交办与实际送回报告的游标，
-另有事项的明确关注。它与 Bot 面板共用这些归属、工作状态和待处理来源，陪伴哪个 Bot 由用户在桌宠菜单选择，
-不由工作台壳决定；见[主管式桌宠](design/desktop-companion-director.md)。
+# Long-Lived Assistant (Varin Bot)
 
-界面与动效依据见 [Bot 工作台设计](design/bot-ui.md)和[总助手聊天、工作概览与设备空间](design/varin-conversation-and-workspaces.md)。独立消息发送默认、旁侧工作详情、电脑与文件空间已接入，当前行为见上文。
+A **Bot** is a persistent assistant that coordinates work across conversations and devices. Execution still belongs to the native Rust Agent runtime, external harnesses, and existing resource owners — there is no separate Bot executor.
 
-## 休眠、唤醒与归档
+New configs open in the `varin.bot` shell ("Varin") and auto-create a default general assistant when none exists; multiple Bots remain supported with separate identities, home dirs, memory, schedules, and appearances ([bot-appearances.md](bot-appearances.md)).
 
-Bot 休眠不同于关闭工作台或让桌宠沉睡：它先关闭本 Bot 的新执行准入，再由原 owner 停止并排空执行、
-远端工作、记忆、脚本、转发和电脑操作。`sleeping`、`asleep`、`sleep-failed` 与唤醒中的状态分别保留；
-停止请求不算停止确认，失败可从原生命周期操作重试。未知副作用和未结算模型请求继续可见，唤醒不会自动重发。
+## Profile, Model Resolution & Sessions
 
-只有确认专属该 Bot 的 VM 才进入关机流程。承载协调 Host、与其他工作共享或由用户控制的机器保留运行；
-原本已关机的机器也不因唤醒而启动。关机等待实际停止，启动等待 guest ready，再继续原本可恢复的工作。
+- **Model & thinking precedence** for a new Bot conversation:
+  1. Bot profile's dedicated model/thinking (if set; omitted thinking falls back to conversation default → model's first supported level).
+  2. Current Workbench/IDE selection on the same Host.
+  3. Shared conversation default → first enabled chat-capable model.
+- Updating a Bot's model/thinking updates active direct sessions at the next model-request boundary; in-flight requests and dispatched tasks keep their frozen configs. Idle wake/resume re-reads the current Bot profile when the last exchange is closed.
+- **Sessions & branches**: A Bot owns multiple independent native Threads (`thread:bot:<botId>:<uuid>`, created via `POST /api/harness/bots/:botId/sessions` while awake) sharing identity, profile, home dir, memory, and schedules. `POST /api/harness/bots/:botId/entry` resolves the actual active entry Thread atomically in Catalog.
+- **Sidebar organization**: Bot folders live in Rust Storage (`bot.organization:sidebar`, CAS-checked, pushed via `varin:bot-organization-changed`), separate from shared conversation organization (`organization` tool / Catalog).
+- **Direct follow-up default**: Bot direct sessions use `botFollowUpBehavior` (default `steer`), determined by `bot_id` + parent relation (shell-independent). `Alt+Enter` / button action queues after the current turn.
 
-归档先执行休眠，确认 `asleep` 后才完成归档。恢复归档只恢复入口，不等于唤醒；休眠、归档或删除中的 Bot
-不能创建新会话。实现与失败边界见 [Bot service](../packages/web/application-host/lib/bots/bot-service.ts) 和
-[生命周期 owner](../packages/web/application-host/lib/bots/bot-lifecycle-runtime.ts)。
+## Schedules, Event Watches & Follow-Ups
 
-## 事项和原工作
-
-`matters` 维护事项的自由描述和原 Thread/branch 引用，支持分页发现、读取与 revision/CAS 更新。
-它保存理解和关联；Run、文件、进程和日程的状态继续从原所有者读取。
-一次 Run 结束不会自动把事项标成完成。
-
-用户从任务聊天菜单或 `/bot` 交接工作时，选择具体 Bot 和接收会话，填写自定义消息。
-消息框默认留空，平台附带原任务引用，沿接收会话的正常用户输入路径提交。
-运行中的会话使用 Varin 的插队或排队设置，未确认的发送保留原请求以供重试。
-交接只发送这条消息，原任务保留其模型、历史、来源和所有者。
-
-Bot 直接会话通过 `threads` 和 `read_thread` 发现并读取当前 Host 上具有相同可信认证主体的产品会话：
-普通工作台／IDE 会话、自己的其他直接会话、其他 Bot 的直接会话、委派任务和原适配器允许的外部会话。
-目录、正文、固定续页、媒体与背景引用使用同一读取判定，并在读取完成时重新核验。归档仍可读；
-内部整理／记忆运行和已删除内容继续沿原领域规则，不因目录开放而成为公开会话。
-
-可访问产品范围内的 Bot 会话可以直接联系。`send` 固定原收件分支，实际执行仍遵守 Bot 的睡眠、暂停和模型条件；联系不会扩大长久记忆写入或任务管理权限。
-普通执行子 Agent 也不继承 Bot 的全目录读取权；明确选取的背景仍经原固定引用 owner 核验。
-事项继续保存长期工作的描述和引用，长期记忆沿用原记忆处理机制。
-
-任务复用有三个实际入口：
-
-- `send` 向原 Agent 补充或再次交办。`afterCurrent: true` 表示顺序排队的新工作，沿原 ingress 等待，
-  不把它混成当前工作的 steering。每次请求与结果各有原身份，名称变化不改写历史交办。
-- `dispatch.background` 按 `read_thread` 的固定 head 与原 item IDs 选取相关背景。
-  两者使用相同的可读范围，已能读取的产品会话可以直接选作背景。
-  引用不携带旧角色的系统指令、私有推理或文件权限，原 ToolCall/ToolResult 作为引用资料交接。
-- 独立 `dispatch` 从本次任务开始。`inheritContext` 仍只表示派发方当时的有效背景，
-  `sourceAgent` 则只选择文件来源，三者的含义分别保留。
-
-外部 Harness 继续使用自身原生会话和真实 resume 能力。不支持某项接续或媒体背景时返回实际错误，
-不会另开一个同名会话冒充恢复。
-
-## 共享会话分类
-
-Varin 的助手分组继续整理 Bot 身份；会话分类是另一套共享 Catalog 导航，不把助手分组转换成任务分组。
-助手列表保留 Bot 身份、原助手分组与会话分支。“会话与工作”进入当前 Bot 的导航，
-提供最近／分类、搜索、归档及整理动作。
-返回助手列表保留原聊天；打开派发工作使用现有旁侧详情，当前 Bot 的对话和草稿继续保留。
-共享导航中新建默认使用当前 Bot，也可明确选择普通会话或其他 Bot；分类记录与工作台、IDE 相同。
-工作台与 IDE 展示普通会话和所有派发任务；与助手直接交流的会话留在 Varin 模式。
-派发来源不影响任务的显示资格，Bot 的目录读取与管理能力也保持不变。
-
-Bot 默认可发现按操作披露的 `organization` 工具，按需查询容器、创建／修改分组、移动／排序／解散、
-创建空原生会话或真实 Bot 新会话，以及调用原会话元数据 owner 改名、置顶、归档、恢复与删除。
-稳定引用不会因改名或移动而指向其他对象；模型读取携带的版本由可信调用桥转成 CAS，不要求填写用户 ID 或数据库 revision。
-目录默认按混合根节点分页，搜索只返回命中节点与必要祖先；跨页移动可组合原读取 observation，
-不会把未读分支当成空组，也不为操作补造最新版本。无文件来源的聊天同样可以查询与整理：
-Host 桥校验原 Run、origin、调用及冻结输入，不要求虚构文件 checkpoint；文件工具的原授权不变。
-项目登记仍归 Host Settings，工具不能通过创建一个项目名取得目录权限。一次查询或整理也不会写入 Bot 长期记忆。
-提示只说明可用能力，不要求每轮查目录、先建组或采用固定分类体系。
-
-## 项目、文件来源和日程
-
-Bot 的家目录承载自身资产，任务可以在已登记项目中执行。`matters` 的 `projects` 动作读取本次冻结目录，
-`dispatch.projectId` 选择其中的项目，不能与 `sourceAgent` 同时选择。显式来源选择优先；
-明确指定分类容器而未选择来源时，采用该容器最近项目的默认环境，否则沿原来源。
-
-目录只冻结项目 ID、路径和资源 Host，不提前扫描或准备所有项目。真正派发后，Host 重查该项目的登记，
-经原 SourceDirectory、Documents 和 Thread source preparer 解析实际来源。Shared/read-only 使用项目当前来源，
-`isolated_write` 才准备独立原生工作区，沿原平台依赖检查、基线、执行与回收合同处理。
-新上下文的项目与实际资源来源分别固定；不借用家目录的文件 grant。
-跨设备项目引用完整 managed-host 连接身份与 Documents 登记，资源离线不移除分类入口。
-项目的远端文件页与普通 Files 主界面共用资源／文档 owner；协调端保存的项目模型默认值不等于读取或修改
-目标设备的 `.varin/settings.json`，也不把 Bot 专属模型或家目录配置搬到那个目录。
-
-原项目配置的 workspace MCP 不跨项目搬运。派发保存目标项目的配置来源意图；实际 Source 准备后，
-按目标项目自己的登记、信任和执行目录发现 MCP，再于首个模型请求前由 Catalog 固定工具代与 Host 租约。
-显式工具列表仍收窄到原选中名称。重启只恢复已经固定的绑定，不重新套用另一项目或更新后的配置。
-目标项目的技能、指令和资源也按实际上下文准备，后续工具使用仍受原权限与来源准入约束。
-
-Bot 日程的配置资产位于其家目录，使用 `bot:<id>` 资产命名空间。GUI 可选择 Bot，默认指向它的原入口会话；
-时间计算、触发、错过执行和重复请求回执仍归原 Calendar，没有 Bot 专用计时器。
-
-## 任务无活动提醒
-
-执行中的工作默认 20 分钟没有新的模型请求或工具调用时，向负责它的 Bot 原会话投递一次工作事件。聊天设置可调整时间或关闭；同一段无活动去重，有新动作后重新计时。暂停、等待用户和条件等待保持原状态。提醒包含真实执行状态与无活动时长，后续处理交给 Bot。
-
-提醒只扫描有会话分支的普通 Run；标题生成与知识推理等独立辅助任务由自己的执行 owner 管理。提醒、Wait、follow-up 与日程分别读取截止时间，并由同一原生时钟唤醒。某个 owner 失败会保留阶段与原始错误，不停止其他 owner 的到点处理；失败的到期事实等待新的事件唤醒后再协调，避免过期计时器空转。
-
-原生任务以请求与调用的实际派发事件计时。外部 Harness 以其实际提供的回合开始和新工具记录计时，不把文本增量猜成模型请求。运行时复用原 continuation 计时源与持久工作事件；意外执行中断和重启恢复等待也回报。任务已经结束、恢复活动或取消时，未消费的旧提醒不再激活 Bot。
-
-普通等待可在原管理条目中修改后续指令、时间条件和文件触发条件，保存校验原版本。来源路径和执行资源仍属于原登记；修改保留原触发与交付历史。右侧关注摘要包含 Bot 工作中的普通等待，点击进入其实际来源会话管理。
-
-## 回报、介入和静默处理
-
-子任务发布终态报告后，Catalog 保存面向本次请求者的待处理关系。首次派发回到派发者，
-再次交办按该 MessageRequest 的实际请求者和分支路由，原报告正文仍由原任务保存和读取。
-准备失败与取消同样保留原结果。内部快速检索沿自己的工具结果路径返回。
-
-向用户创建的普通会话发送工作请求时，接收 Run 完成、失败或取消后也会沿原消息队列回复本次请求的具体 Bot 会话与分支，
-并关联原请求消息。回复保留实际 Run、最后一段公开答复与附件，失败信息读取原执行记录；不伪造子任务或工具调用。
-同一 Run 同时被该 Bot 跟进时，不再向默认入口重复投递完成通知。重启继续交付未送达结果，已交付回复不重复发送。
-
-主动回报和 `wait_child` 共用原结果与消费身份。已经入队的同一报告可由 Wait 消费，
-不会再追加一份报告正文。Host 重启后从持久记录继续，不重新执行旧工具。
-
-用户直接在子任务中发言、在工作台编辑相关文件、完成用户终端命令、切换工作区 Git 分支、恢复任务历史、
-明确修改跟进关系、被跟进普通任务完成或外部任务回报时，系统追加带原来源的增量事件。
-文件和环境变化沿 Knowledge 观察、Catalog 原始来源回执和工作队列投递；不等待任务下一次请求才回到 Bot。
-历史恢复直接关联原 navigation 回执。重启补读已保存观察，取消跟进或删除来源会重新核验待投递事件。
-观察保留实际操作 owner，未知外部写入不会标成用户指令；文件正文仍按原文件工具读取。
-共享目录中的同一次文件/终端动作向同一 Bot 只投递一次。Git 初次清单与普通脏文件计数保留为原任务的观察，
-普通进度和百分比更新界面投影，均不逐条唤醒 Bot。
-事件经原 ingress、输入队列、原生执行闸门与接续机制处理；Host 只做来源、模型与上下文准备。
-Bot 尚无首轮 Run 时，同一入口也能从真实后台事件启动，不制造用户消息。
-
-处理结果与通知分别成立。后台回合可以继续协作、更新记忆或没有公开回复；
-空结果不生成气泡、不触发完成通知，也不把 Bot 的纯内部处理标成用户未读。
-真实失败、需要用户回答或权限决定仍保留原提示。
-
-## 连续上下文与记忆
-
-请求仍由原 RequestSnapshot 固定。基础指令与已接受 checkpoint 稳定，变化在合法请求边界追加。
-压缩沿原准备线、替换线和原子发布机制，保留准备期间的新尾部；取消或候选失败保留原有效版本。
-摘要目的为保持理解连续，正文组织由模型判断，原文可保留或按引用回读。
-
-召回依据最近真实交流、实际 incoming 回报与事件，以及关联事项的描述、相关项目的登记信息。
-回报的原任务身份、当前任务及明确提到的事项用于选择背景；总助手入口不把所有历史子任务都视作当前关联。
-被跟进普通会话的记忆关联仍需显式开启。事项修订、关联和项目信息变化参与召回缓存身份。
-这些信息作为检索线索，不授予文件或会话权限，也不增加固定的模型汇报格式。
-既有召回按稳定身份保留，再合并新增相关材料；没有变化时不反复重排整个记忆前缀。
-
-记忆正文可以是自由叙事，`nature` 可选，一条内容可以引用多处原文。
-用户编辑、主动记忆和后台整理共用 MemoryService/KnowledgeStore 的原写入回执与 revision/CAS。
-后台 MemoryWork 保存固定来源、模型和已生成结果，响应丢失后继续原提交，不重新生成另一份答案。
-
-整理按每个分支实际处理过的原始位置推进。元数据用于发现新增范围，正文按实际模型预算分批读取；
-无新增来源时不调用模型。普通任务不会因此新增一套后台提炼流程。
-跟进的普通会话只有明确开启记忆关联后才纳入 Bot 整理；不复制整份历史到第二个库。
-
-派生概述引用底层记忆的确切版本。修订或不再适用会使相关概述退出默认召回；
-遗忘进一步使其来源范围和派生内容不能进入后续请求、引用读取或重新补记。
-原 checkpoint 已吸收相关内容时，从仍允许的原始引用重建有效上下文；已发送给 provider 的请求保留真实在途语义。
-原始用户聊天作为资产保留，模型侧过滤不会删除界面历史。
-
-既有记忆也能独立整理：相关写入触发局部后台维护，Bot 可用 `memory.organize` 主动交办，
-或通过 `rewrite` 按已读版本直接合并、拆分、修订和形成概述。需要更多依据时维护者可继续搜索、
-回读记忆和来源；同版本无需修改会结算，过程不阻塞主聊天。
-初始候选与续读共用明确的记忆材料投影，保留正文、适用条件、性质、有效性、时间与补充／派生／替代关系；
-内部来源键、执行身份、版本哈希与召回统计不进入整理正文。原始记录仍冻结在维护任务内供冲突校验，
-再次读取不会把已观察输入静默换成新版本。完整续读返回结构化材料，分片保持原文和连续读取位置。
-联合变更在原 KnowledgeStore 内原子发布。整理前版本与概述的有效依赖分别记录，
-合并不使自身失效，真实纠正和遗忘仍传播到后继；拆分形成的多份内容都能进入后续上下文。
-
-记忆管理支持当前/历史查看、搜索、编辑、不再适用与遗忘，以及主动整理、查看结果、取消和将历史理解恢复为新修订。
-可以清理选中的已退役正文；原身份、来源排除及仍被其他 owner 使用的记录按实际引用保留。
-后台任务提交并确认执行者结束后，显式释放冗余输入和推理正文，由原 ContentStore 回收；清理失败可继续，已提交内容仍可使用。
-关闭嵌入后，原正文、引用与文本检索仍可使用。
-详见[记忆](../packages/web/application-host/lib/memory/DOCUMENTATION.md)和[Knowledge](../packages/web/application-host/lib/knowledge/DOCUMENTATION.md)。
-
-具体视觉、外部消息渠道、多 Bot 长期协作、跨用户共享记忆和向其他 Harness 暴露 Varin 能力另行设计。
+Aggregated under **Schedules & Watches** (`follow_up` tool: `sources`, `arrange`, `route`, `backlog`, plus existing read/control actions). Watches can be created even before a Bot session has its first Run.
+
+- **Event watch**: Stores name, intent, plugin connection + account, exact-subset attribute filter (semantic judgment stays in intent for the model), target (native Thread/branch or external conversation), and delivery timing:
+  - **Immediate**: Appends at next admissible boundary (wakes idle/fresh Bot session).
+  - **Batch window**: Timer starts on first pending event (no infinite pushback).
+  - **Scheduled**: Bound to a Bot Calendar definition on the same Thread/branch.
+  - **Passive**: Queues until next normal turn (or manual "Process now", which still respects Bot sleep).
+- **State snapshots & routing**: Plugins may mark events replaceable by state group (collapsing unread updates into latest body + state transition summary while keeping raw occurrences readable). Source objects can map explicitly to an existing native/external task, or opt into creating a new Bot session on first contact.
+- **Trust boundary**: External events enter as environment input by default. Only an explicit authenticated user mapping for `(sourceObject, exactSender)` promotes messages to user-input semantics — plugin text/names never self-grant user identity.
+- **Bot Calendar**: Assets live in the Bot's home dir under namespace `bot:<id>`, executed by the shared native Calendar (no Bot-specific timer).
+- See [runtime.md](runtime.md#long-lived-event-watches) and [extensions.md](extensions.md).
+
+## Task Inactivity Watchdog
+
+- Running tasks with no new model request or tool dispatch for **20 min** (configurable/disableable in Chat settings) emit a deduplicated work event to the owning Bot session with actual status and idle duration.
+- Scans conversational branch Runs only (excludes auxiliary runs like title/knowledge inference). Shared native clock wakes watchdogs, Waits, follow-ups, and schedules independently so one failure never stalls others.
+
+## Reports, User Intervention & Silent Background Turns
+
+- **Report routing**: Terminal child reports route back to the actual requester Thread/branch (first dispatch → dispatcher; re-delegation → `MessageRequest` requester). User-created threads that receive a work request also reply back on completion/failure/cancel without duplicating notifications if already followed. Active reports and `wait_child` share the same consumption identity.
+- **Live intervention events**: User messages in child tasks, workbench file edits, finished user terminal commands, Git branch switches, history recovery, follow changes, or external reports append incremental events to the Bot's work queue (deduplicated per Bot in shared dirs; progress % stays UI-only).
+- **Silent handling**: Background turns may update memory or delegate without producing a public reply; empty results create no chat bubble, unread badge, or completion toast. Real failures, questions, and permission prompts still surface.
+
+## Sleep, Wake & Archive
+
+- **Sleep** (`bot-lifecycle-runtime.ts`) is distinct from closing the UI or putting the desktop companion to sleep: it closes new admission first, then stops and drains native Runs, remote work, memory jobs, scripts, forwards, and Computer Use (`sleeping` / `asleep` / `sleep-failed` / `waking`). Unknown side effects remain visible and are never auto-replayed on wake.
+- Only VMs verified as exclusive to that Bot shut down on sleep; shared or coordinator Hosts stay running.
+- **Archive** sleeps the Bot to `asleep` first; unarchiving restores entry without waking.
+- Entrypoints: [bot-service.ts](../packages/web/application-host/lib/bots/bot-service.ts) · [bot-lifecycle-runtime.ts](../packages/web/application-host/lib/bots/bot-lifecycle-runtime.ts).
+
+## Matters, Cross-Session Access & Projects
+
+- **`matters`**: Free-form descriptions + Thread/branch links (CAS-updated). Holds understanding/association only — live Run/file/process state is always read from authoritative owners.
+- **Cross-session visibility**: Bot direct sessions can discover and read all product conversations belonging to the same authenticated principal (`threads` / `read_thread`), and message them via `send` (subject to sleep/pause/model gates; never expands memory-write or child-cancel authority). Regular child agents do not inherit Bot-wide visibility.
+- **Task reuse**: `send` (`afterCurrent: true` for sequential next work), `dispatch.background` (pinned `read_thread` head + item IDs; strips system prompts/thinking/file grants), or fresh `dispatch` (`inheritContext` for dispatcher context, `sourceAgent` for file source).
+- **Projects**: `dispatch.projectId` freezes the project ID; actual Source, workspace MCP, skills, and instructions resolve on the target project's real Host/trust boundary (never copying the Bot's home dir grants or local `.varin/settings.json`).
+
+## Continuous Context & Memory
+
+- **Recall**: Driven by recent conversation, incoming reports/events, linked matters, and project metadata — as retrieval cues only (no file/thread grants). Stable recall IDs avoid reshuffling the memory prefix when unchanged.
+- **Incremental organization**: Advances per-branch from the last processed position within model budget (skips model calls when nothing new arrived). User edits, active saves, and background organizer share KnowledgeStore CAS receipts (`MemoryWork` preserves frozen sources/results so lost responses resume commit without regenerating).
+- **Derived overviews & forgetting**: Overviews pin exact source memory revisions; edits/obsolescence drop stale overviews from default recall. **Forgetting** additionally excludes source spans from future requests/citations and rebuilds context checkpoints that absorbed them while leaving visible chat history intact.
+- **Active maintenance**: Local background maintenance triggers on related writes; `memory.organize` / `rewrite` atomically merge, split, revise, or summarize memories in KnowledgeStore. Turning off embeddings falls back cleanly to text search.
+- Details: [memory/DOCUMENTATION.md](../packages/web/application-host/lib/memory/DOCUMENTATION.md) · [knowledge/DOCUMENTATION.md](../packages/web/application-host/lib/knowledge/DOCUMENTATION.md).
+
+## UI Projections & Companion
+
+- Shell: `packages/ui/src/workbenches/bot/` (left: Bots → sessions → branches; center: chat; right: stage + Overview / Activity / Memory / Schedules / Profile). Side tabs handle work details, files, and computers while keeping chat mounted.
+- **Activity**: `GET /api/harness/bots/:botId/activity` proxies Catalog `runtime.bot.activity.read` (cursor-paged, 30/page).
+- **Presence**: `GET /api/harness/bots/:botId/presence` projects pending questions/permissions, running delegated work, and active replies, debounced ~250ms and pushed via `varin:bot-presence`.
+- **Desktop Companion**: Reads the same Catalog attention snapshot; which Bot it accompanies is chosen in the companion menu independently of the active workbench shell.

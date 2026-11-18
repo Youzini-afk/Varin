@@ -54,7 +54,7 @@ Follow the existing owner of the behavior. The Rust runtime manages conversation
 
 Keep one coherent problem in each pull request. Read the implementation and its callers, use the existing style and shared UI components, and update the documentation that describes the behavior.
 
-Choose checks that exercise the affected behavior. Reuse existing tests; add a focused regression test when it protects an important behavior or a reproduced bug. The [development guide](../docs/development.md#修改与验证) lists checks by change type. Documentation and link changes use `bun run docs:validate`.
+Choose checks that exercise the affected behavior. Reuse existing tests; add a focused regression test when it protects an important behavior or a reproduced bug. The [development guide](../docs/development.md#verification) lists checks by change type. Documentation and link changes use `bun run docs:validate`.
 
 For UI work, attach a screenshot or recording of the relevant state. For performance work, include a representative measurement. Record the commands you ran and their results, plus any relevant behavior you could not check in your environment.
 

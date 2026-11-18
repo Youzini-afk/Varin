@@ -40,6 +40,36 @@
           }
         },
         {
+          "label": "Varin assistant",
+          "link": "/varin-assistant/",
+          "translations": {
+            "zh-CN": "Varin 助手",
+            "zh-TW": "Varin 助手",
+            "fr": "Assistant Varin",
+            "ja": "Varin アシスタント"
+          }
+        },
+        {
+          "label": "Views & Agent collaboration",
+          "link": "/views-and-collaboration/",
+          "translations": {
+            "zh-CN": "视图与 Agent 协作",
+            "zh-TW": "檢視與 Agent 協作",
+            "fr": "Vues et collaboration d’agents",
+            "ja": "ビューと Agent 連携"
+          }
+        },
+        {
+          "label": "Interactive content & quoting",
+          "link": "/interactive-content/",
+          "translations": {
+            "zh-CN": "交互内容与引用",
+            "zh-TW": "互動內容與引用",
+            "fr": "Contenu interactif et citations",
+            "ja": "インタラクティブ機能と引用"
+          }
+        },
+        {
           "label": "Environment Variables",
           "link": "/environment/",
           "translations": {
@@ -219,6 +249,36 @@
             "zh-TW": "模型渠道",
             "fr": "Canaux de modèles",
             "ja": "モデルチャネル"
+          }
+        },
+        {
+          "label": "External Agents",
+          "link": "/external-agents/",
+          "translations": {
+            "zh-CN": "外部 Agent",
+            "zh-TW": "外部 Agent",
+            "fr": "Agents externes",
+            "ja": "外部 Agent"
+          }
+        },
+        {
+          "label": "Computer Use & Browser",
+          "link": "/computer-use/",
+          "translations": {
+            "zh-CN": "Computer Use 与浏览器",
+            "zh-TW": "Computer Use 與瀏覽器",
+            "fr": "Contrôle d’ordinateur et navigateur",
+            "ja": "Computer Use とブラウザ"
+          }
+        },
+        {
+          "label": "Extensions & Plugin Center",
+          "link": "/extensions/",
+          "translations": {
+            "zh-CN": "扩展与插件中心",
+            "zh-TW": "擴充功能與外掛中心",
+            "fr": "Extensions et centre de plugins",
+            "ja": "拡張機能とプラグインセンター"
           }
         },
         {

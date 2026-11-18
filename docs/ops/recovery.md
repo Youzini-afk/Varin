@@ -61,5 +61,5 @@ Replacement recovery providers can advertise other storage modes and management 
 shows controls only when the selected provider supports them. The original journal and resource owners
 remain authoritative; a replacement provider does not authorize access to unrelated data.
 
-The [resource contract](../resources.md#受影响文件恢复) explains the mechanism; the
+The [resource contract](../resources.md#affected-file-recovery) explains the mechanism; the
 [Recovery module](../../packages/web/application-host/lib/recovery/DOCUMENTATION.md) maps it to code.

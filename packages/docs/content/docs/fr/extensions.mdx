@@ -1,0 +1,41 @@
+---
+title: Extensions et centre de plugins
+description: Découvrez, installez, configurez et créez des extensions qui ajoutent des outils, protocoles de modèles, vues et sources d’événements à Varin.
+---
+
+# Extensions et centre de plugins
+
+Les vues **Varin**, **Workbench** et **IDE** de Varin — ainsi que les intégrations navigateur, Office et langage — reposent sur le même système d’extensions que celui mis à disposition des auteurs tiers.
+
+## Découvrir et installer des plugins
+
+1. Ouvrez **Paramètres → Plugins** sur le Host où vous souhaitez installer l’extension.
+2. Parcourez **Discover** (alimenté par le catalogue public) ou installez directement depuis une GitHub Release, un paquet npm, une URL Git ou une archive/un dossier local.
+3. Examinez l’aperçu : manifeste, version, empreinte de contenu et capacités demandées.
+4. Confirmez l’installation. Les extensions nouvellement installées démarrent **désactivées** tant que vous n’avez pas examiné leurs capacités et activé l’extension.
+5. Cliquez sur **Configure** pour ouvrir la page de réglages propre au plugin (par exemple pour connecter un compte externe).
+
+## Confiance, permissions et mises à jour
+
+- Les autorisations de capacités sont examinées par version d’extension et par domaine d’exécution ; les mises à niveau n’approuvent jamais automatiquement de nouvelles capacités ajoutées.
+- Gardez à l’esprit que les extensions côté Host s’exécutent comme du vrai code sous le compte OS de votre Host : n’activez que des extensions en lesquelles vous avez confiance.
+- Désactiver une extension conserve ses données enregistrées ; la désinstallation vous permet de choisir de conserver ou de supprimer son espace de stockage.
+- Sous **Advanced**, vous pouvez gérer des catalogues HTTPS personnalisés, le routage des services (notamment les protocoles de modèles personnalisés et les pilotes d’exécution) ainsi que la composition du workbench.
+
+## Créer votre propre extension
+
+Initialisez une nouvelle extension avec le CLI officiel :
+
+```bash
+npx @varin/extension-cli init ./my-extension \
+  --id dev.example.my-extension \
+  --name "My Extension"
+```
+
+Consultez le [Guide de création d’extensions](https://github.com/Astrmira/Varin/blob/main/docs/ops/varin-extension-authoring.md) et les [exemples fonctionnels](https://github.com/Astrmira/Varin/tree/main/examples/extensions) dans le dépôt pour les API du SDK et les tests de conformité.
+
+## Guides associés
+
+- [Serveurs MCP](/fr/mcp/)
+- [Skills](/fr/skills/)
+- [Thèmes](/fr/themes/)

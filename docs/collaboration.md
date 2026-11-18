@@ -1,322 +1,67 @@
-# Agent 协作
-
-Varin 的主代理负责理解用户目标、组织相关工作和判断整体交付。实现、验证和检索角色可以独立启用、选模型或继承主模型；具体分工通过任务正文和消息表达。
-
-`dispatch` 默认使用 Varin，也可直接通过 `executor` 选择[外部 Agent](external-agents.md)，或沿预设绑定选择。`executors` 发现可启动的程序／配置，`threads` 发现已有会话；已知目标可以直接派发，不要求先查目录。显式 `executor: "varin"` 覆盖外部预设，外部选项独立使用 `executorOptions`。状态、报告、等待、取消和 `send` 仍沿原协作入口，外部身份和每次轮次独立保存，不创建假的原生子 Run。隔离文件交换沿原 Integration 服务处理。
-
-## 联系已有会话
-
-同一可访问产品范围内，主任务、子任务和 Bot 直接会话都可以联系彼此，也可以明确选择同一 Thread 的另一分支。
-`threads` 默认列出可访问会话；需要只看派发树时用 `relationship: "family"`。这不改变 `scope: current/history/all` 的执行筛选。
-内部检索、摘要和记忆维护不是协作会话。归档会话可查询历史；发送前须恢复原会话，不改投其他目标。
-
-`inform` 保持被动，`request` 在恰当的输入边界接续。收件分支尚未执行时，沿自己的模型、工作来源和激活条件准备首轮；
-无可用模型、来源未就绪、Bot 暂停时保留原请求并显示原因。`replyTo` 绑定收到消息的原发起分支。
-收到工作请求不改变收件方的任务归属，也不授予发起方停止、管理、读文件或写入记忆的权力。
-
-## 文件交接
-
-`dispatch` 与 `send` 都接受 `attachments`。每项只选择已有 `{ "ref": "attachment:…" }` 或当前可读的 `{ "path": "…" }`；
-不能同时填写两者。正文可以为空，附件顺序与本次选择一致。`send` 的 `inform`、`request`、`replyTo`、
-`afterCurrent` 和等待语义不变；用户输入、首次派发、已有任务补充以及外部 Agent 共用固定文件合同。
-
-文件、文档和 Office 产物沿原工具返回 typed 附件描述，包含稳定引用、文件名、MIME 和字节数。
-模型可直接转发引用，不必先列目录或读取全文；普通文字、Markdown 路径、文件 hash 和他人的引用字符串不会自动建立读取权。
-当前来源中的路径由原文件 owner 一致捕获，已有引用保持其原版本。同目录也不会把可写原路径冒充固定附件，
-发送不会切换接收者的项目、不授予父目录权限、不覆盖目标文件。代码变更仍使用 `update` / `submit_code`。
-
-准备在 Catalog 锁外执行。原操作核验发送者和目标后建立暂时保留，再把完整正文、附件关系与接收者作为一个输入受理。
-一项失败时不投递半条消息；同键重试恢复原固定版本和原受理回执，不重新捕获变动的路径。
-取消观察不撤回已受理输入，准备取消沿真实资源 owner 排空。多目标发送分别保留收件关系，只重试未确认目标。
-
-图片沿真实 typed media 进入视觉模型，首次派发自动纳入图片输入需求；既有非视觉任务仍收到原文件并明确知道没有直接视觉输入。
-`file_read`、`document_read` 和 Office 读取可使用引用；程序需要路径时调用 `resource_read` 的附件 `path` 视图，
-获得当前实际执行 Host 的只读文件。未知格式也可交付和下载，不自动解析、执行或解压。
-
-`read_thread` 与 `child_report` 保留原附件描述。最终报告只引用本次执行已交付给实际请求者的附件，
-不重复复制或通知，不收集最终正文中的路径，也不把发给其他同伴的文件混入报告。
-来源删除、Run 结束、暂停、压缩和模型切换不释放接收者已持有的版本；最后一个真实使用关系消失后才可回收。
-资源与实际路径生命周期见[资源](resources.md#固定附件与读取)。
-
-## 自由派发与模型选择
-
-派发以任务为中心，不要求先选择预制角色。原生 `dispatch` 可独立声明 `model`、`thinking`、`inputTypes`、
-`workFocus`、`workMode` 和工具子集。`model` 引用设置工具 `providers.models` 按需披露的稳定渠道配置 ID，而不是请求模型名；
-同名模型在不同渠道仍是不同目标。目录提供名称、渠道、简介和有效思考选项，不披露地址、认证参数或凭据。
-显式 `preset` 保持其原模型、继承、指令与工具组合，不能同时传自由模型／思考覆盖；外部 Harness 预设不进入原生渠道选择。
-
-`workFocus` 选择目标任务的模式，支持 `general`（通用）、`code`（编程）、`research`（科研）、`office`（办公）。
-省略时继承派发者本轮已固定的模式，没有模式的 Varin 会话使用通用。模式随子任务启动配置保存，重启和续接保留，
-子 Agent 再派发时可以继承或显式改选。它决定工具的直接披露方式，与模型、思考、文件工作方式分别选择，权限和工具子集沿原派发边界检查。
-角色目录保留各预设适用的模式，按目标任务的 `workFocus` 判断，因此通用 Agent 也可以派发科研模式并选择科研搭档。
-外部 Harness 自行管理模式，派发外部预设时省略 `workFocus`。
-
-Agents 设置中的「派发模型选择」默认关闭。关闭且未指定模型或思考时保留原父模型完整绑定；指定模型而省略思考时使用
-该模型自己的默认值。`thinking: "default"` 是已明确选择该配置默认值，与省略不同。只指定思考时不放宽要求来迁就模型。
-启用后，辅助岗位只决定尚未明确的部分；两项已明确或只有一个有效组合时不调用选择模型。选择岗位自身的模型／思考设置
-与执行者选择独立。子 Agent 再派发采用同一机制；给已有 Agent 续接工作不触发自动换模或重建会话。
-
-工具 ACK 先固定本次任务、实际分支和派发位置；异步准备的第一步才受理模型选择，并一次读取当时的全局设置、有效候选和
-选择岗位配置，提交到原 `delegation-model:<executionId>` Operation。父 Run 启动时不提前固定选择设置，也不注入整份目录。
-设置编辑影响尚未进入这一准备受理边界的派发，不能改写已提交的选择配方。候选读取只检查本地配置，不创建所有候选执行者或
-保留所有渠道凭据；选择成功后只沿原模型 authority 绑定所选配置。执行参数发生变化时明确失败，简介等展示编辑不改变绑定身份。
-
-选择输入只包含固定要求、实际可用工具／工作方式／输入类型、有效候选事实与简介、任务正文和短近期原文。
-从派发位置之前的原历史分支取最近三轮真实用户交流：每轮最后一条助手文本与范围内最近两条助手文本的并集，按原身份去重和排序。
-当前未结束的一轮也计入；工具结果、子任务回报、内部通知、压缩摘要和私有思考不算用户消息，也不进入材料。压缩后仍沿原消息身份读取；
-同一次提供商输出中位于派发调用之后的文字不进入选择。原历史引用的稀疏文本索引只读取入选 Unicode 范围，不回读全部工具正文或媒体字节；附件只带已有 MIME 类型，不生成摘要或虚构文件名。
-
-初始单条预览为用户 1,000、最近两条助手各 2,000、其余助手 600 个 Unicode 字符；超过时保留约 30% 开头与 70% 结尾，
-省略标记计入长度。选择请求优先保留协议、完整有效候选身份和思考选项及任务，再保留最近交流；容量不足时可缩短简介、任务预览或较早消息，
-不删除候选来假装它们不存在。完整派发任务和执行者背景不受这些预览限制影响。沿所选 tokenizer／接口容量与输出预留核算，原生聊天路径还在
-实际提供商序列化后检查完整包装；连必要材料也容不下时具体报错，不分组选优、不增加摘要请求。
-
-普通 LLM 复用原无工具辅助推理，一次返回有效配置／思考 JSON；专用决策模型复用 typed-classifier，一次选择有效组合，预算型思考只使用
-用户已有预算，不编造数值档位。正常路径只有一次付费选择，不创建 Agent 会话、工具循环或语义纠错请求；瞬时网络重试沿原策略复用冻结输入。
-未知配置、无效等级、截断输出和超出接口选项数等错误进入原任务准备报告，不静默换渠道或回退继承模型。
-
-选择完成前不准备子任务来源、上下文或执行资源。准备阶段在既有任务进度中显示「选择模型」。原 Operation 与 inference 回执保存输入、结果和真实用量；
-重启恢复原成功回执，未知付费请求不重放。父 Run 完成或单独取消不退休已交接的子任务；子任务／任务树取消会撤销选择发布权限并传播到原推理，
-等待真实结算仍保留其用量。选择配置与凭据实现由原子任务 duty 保留到实际交接／报告，不因观察者停止或父 Run 结束而提前释放。
-
-## 角色与分工
-
-| 角色 | 用途 | 默认文件环境 |
-| --- | --- | --- |
-| 实现 Agent | 实现或修复，理解相关依赖与整体设计 | 默认 Shared；本次派发可选隔离 |
-| 验证 Agent | 独立判断正确性、完整性和设计质量，自主选择验证方法 | 默认 Shared；具备执行能力，本次派发可选隔离 |
-| 检索 Agent | 使用共用搜索、原文与终端调查事实 | 默认 Shared；复用实际目录，固定来源按需准备执行视图 |
-
-主代理可以自己完成任务，也可以让实现和验证并行推进。采用独立验证时，实现方可以专注实现，由验证方按实际需要编写和运行测试。阶段、验证方法和返工安排由 Agent 结合工作决定。
-
-角色开关、实际模型和已准备的能力共同形成可派发目录。默认预设包含原生默认工具及已冻结的扩展、MCP 能力；显式工具选择保留精确子集。提示词按实际可用角色组合，在 Run 准备边界固定。修改开关作用于后续运行，已有任务继续使用自己的绑定。
-
-通用、编程、科研和办公共用协作机制，并按模式提供相应的预设和工具披露。科研搭档、Coding 验证 Agent、共享的 Worker 与调研 Agent 各自按用户配置启用；工具组合与模式边界见[运行时](runtime.md#模式工具披露与协作)，办公文件能力见 [Office](../packages/web/application-host/lib/office/DOCUMENTATION.md)。
-
-## 分类、来源与稳定整理
-
-`dispatch` 的可选容器引用只选择导航位置。显式容器优先，其次显式项目，否则沿发起会话／父任务位置，
-无可继承位置时归根。显式 Source、`sourceAgent` 或项目来源与分类分别表达；目标容器最近项目仅提供未选来源时的默认值。
-Bot 直接交办主任务在原受理事务固定容器，之后移动 Bot 聊天不会搬走已交办任务。内部子任务保存继承意图，
-随父任务整理；显式移动后拥有独立位置。原生及外部产品受理均与分类原子提交，准备失败不丢已受理分类。
-同键重试返回原对象与当时回执，不使用当前目录重新派发；已删除的目标返回冲突而不是悄悄归根。
-
-`threads` 可按容器及后代、来源 Bot、会话类型、执行后端与归档范围筛选；归档与 `current/history/all` 执行范围独立。
-项目筛选明确区分导航最近项目和实际工作来源。精简投影保留可操作引用、位置、真实来源、执行状态与归档／置顶，
-正文仍由 `read_thread` 按需读取，旧工具声明及历史结果不回写。容器发现与整理通过 `organization` 按动作披露，
-稳定对象引用与读版本接受原可信 invocation 校验，不授予跨主体内容或文件权限。
-
-## 身份、命名与复用
-
-`dispatch` 可传 `name`，省略时使用任务首行。新 Thread 有稳定的八位短码，旧库已有短码保持原样，可用于通信、读取、改名、来源选择和代码交换。短码映射到原生 Thread 身份，已发出的短码保持保留；名称可修改。
-
-`agent_rename` 修改用途名。向旧 Agent 发送新的工作请求，或通过 UI 续接时，可以同时指定 `name`；改名本身只改元数据。每轮执行保留受理时的名称。`8F2A6C10/2` 表示同一 Agent 的第二次受理工作；序号跨分支单调分配，改名、排序、恢复和回退不会重新编号。委派准备与随后启动的 Run 共用本次编号，外部 Harness 绑定原交办／turn，不创建原生 Run。
-
-所有职责共用一套平面 SVG 头像库。新 Agent 受理派发时随机选取头像，保存到原生协作身份；复用、改名和恢复继续使用该头像。Agents 设置支持为内置或自定义预设选择固定头像，也可恢复自动分配，设置作用于之后的派发。已有身份缺少头像时，界面依据稳定 Thread ID 映射到固定的基础头像组，无需改写历史。
-
-侧栏、工作概览、协作列表、执行记录和 Agent 消息共用同一头像组件；运行、失败和未读提示独立显示。头像不表达权限、职责或执行状态，也不加入模型提示和工具选择参数。
-
-模型工具 `threads` 默认 `scope: "all"`，分页查询同一可访问范围内进行中和已完成的产品会话。显式 `scope: "current"` 仅查仍活动或等待结果交接的任务；`scope: "history"` 查已结束且完成交接的任务。模型请求不再自动注入临时队友表。目录支持分页、名称／短码／Thread ID、父任务、工作区、更新时间和成果文件路径筛选。目录只读取名称、短码、状态和已有说明，不为每个条目读取完整任务正文、来源或所有分支；UI 保留原详细读取。历史正文、旧轮次和完整报告按需读取。
-
-`read_thread` 的 `overview` 查询按原 Run／Operation 元数据定位最近助手消息、实际等待及正在进行的并行动作，没有在途动作时显示最近完成动作。它也支持用户创建的普通会话与真实外部会话，不要求 Agent 另写进度摘要。`child_status` 的 `target` 可选择 Agent 查看当前工作，或用执行短引用精确查看某次工作；多个活跃执行返回候选，不假定唯一的最新一次。
-
-`wait_child`、`child_cancel` 和 `child_report` 的新 `target` 在受理时固定到原执行，重试不会跟随 Agent 的下一项工作。旧 `operationId` 仍指原派发，旧 `executionId` 仍指原执行。报告可以直接读取原最终答复，历史、媒体及续页可消费原工具返回的 `ref`／`nextRead`，不必再组合内部哈希与锚点。显式范围与 UTF-8 字节偏移仍可用于主动定位。
-
-升级不替换已受理子任务的原工具声明。回执按调用者已冻结的读取契约呈现：支持短引用的调用使用短引用，旧声明继续获得原执行身份、报告条目和分页游标；旧文件写入仍能取得原 `readVersion` 与文本格式，完成版本校验写入。恢复不改写原调用、原回执事实或资源准入，也不会向旧模型提供其声明不允许的续读参数。
-
-`nextRead` 只提供原冻结声明可消费的读取工具；家族 `overview` 对原生执行沿已授权的 `read_thread` 读取原执行历史，不取得 `child_report` 的原派发者权限。准备失败且未创建 Run 的执行不提供虚构的历史续读。
-
-`read_thread` 的完整条目只返回 `body`；仅在正文被截断时返回 `preview`，继续沿原 anchor 读取全文。
-`child_report` 的偏移是 UTF-8 字节位置，续页使用返回的 `next_offset`。越界错误给出实际报告长度；
-落在多字节字符内部时给出前后合法偏移，页面容不下下一个字符时给出所需字节数。
-
-搜索、网页与论文元数据的固定引用沿原 typed 附件链交付。派发和消息显式选择 `attachmentRef`；最终报告只解析
-本轮已取得来源的 `varin-material://` 引用。`read_thread`、报告分页、背景选择与压缩摘要保留对应 descriptor，
-正文 URL/hash 不产生访问权限。接收方首次回读时由原 Catalog 关系恢复其材料读取权，发送方删除不影响存活接收者。
-来源 revision 不随刷新改变，未引用或未授权的材料不会因报告包含同形字符串被交付。
-
-当前任务包括准备、执行、等待，尚未交付结果，以及已有代码交接尚未结束的任务。完成、失败和取消的结果交付后，且已有交接结束，任务退出当前目录和活跃计数，保留在历史。再次接到工作请求后重新出现。单纯保存成果不会一直显示为待合并；无需模型整理或删除任务。
-
-工作概览、右侧协作面板和按需模型查询使用同一组原生事实。已打开的报告在任务收纳后继续可读。未读标记与任务收纳分别处理。
-
-子任务准备失败时保留稳定的错误分类，同时保存失败阶段、原始错误消息及其原因链。来源与上下文准备失败写入子任务报告；
-Run 启动准备失败写入原启动记录，供界面和状态查询读取。成功重新绑定后清除旧失败信息。
-
-## 协作面板
-
-右侧「协作」按原始事件顺序呈现任务家族的派发记录、消息和最终报告，包括子 Agent 之间的交流。派发记录显示交办双方、原任务、
-预设和接收 Agent 的对话入口；成员当前状态与历史交办正文分别显示，后续接续不替换原任务。内部快速检索的派发、结果回传和成员均不进入协作流，
-检索结果仍通过原输入队列交给主 Agent，并在原工具调用中展示；过滤在联合分页前完成，不产生空的中间页或额外成员。
-子 Agent 的最终报告显示为「子 Agent → 原派发 Agent」的任务回复，直接读取原执行保存的最后一段助手答复，保留分段正文、原分支和失败／取消状态。
-每次接续的报告按原 execution ID 分别保留；面板本身只作读取投影，不负责消息投递或模型唤醒。
-原生回报 owner 把新结果送往本次交办请求者及其原接收分支，普通 Agent 与 Bot 共用原报告和 Wait 交付身份。通知引用原最终答复，不调用第二个模型总结；准备失败同样产生原报告。普通 Agent 在原输入边界处理通知，空闲时不因此新开 Run，取消中的工作不会被报告反向启动。Bot 保留报告驱动接续，见[长期总助手](bot.md)。
-通知实际进入接收分支历史，或成功的原报告读取结果提交到该历史后，才记录交付。排队或看目录不算交付；等待、自动通知与明确读取去重，但不同执行各有自己的报告。升级不遍历历史补造通知。
-独立会话接受工作请求后，终态回复关联原请求并返回具体发起会话；协作面板同时展示家族发出与收到的消息，
-外部普通任务的回复沿实际双方身份呈现，内部快速检索仍不作为协作成员出现。
-消息气泡保留发送方与接收方，用户消息靠右，Agent 消息带原头像。长正文根据实际渲染高度收起，可在原位置展开或收回，
-复制始终使用完整原文；展开选择在当前房间内保留，向上翻页和查看成员后不会丢失。头像和用途名打开对应成员的完整对话，
-主会话保持原来的阅读位置。成员对话复用原生历史、流式内容、工具卡片与问题/权限交互，只有选中的成员订阅完整对话。
-成员与收件人菜单使用可滚动列表：打开时补齐可见区域，接近列表末尾时沿原目录游标继续读取当前与已结束成员，
-无需再点击“更多成员”。目录读取不加载各成员的完整聊天记录；同一房间的并发翻页共享一次请求，失败可在列表内重试。
-收件人优先显示其他任务，不默认选择当前主会话；当前正在对话的分支不占候选行，已有明确选择仍可取消。
-已结束成员仍可查看和继续交流，多选结果与原目标分支在翻页、关闭后保留。
-
-聊天中的 Agent 收发消息和最终报告也显示为带双方身份的气泡，三种聊天模式均保留独立入口，默认收起为两行原文预览。
-展开与收起同步过渡预览和正文，长正文在气泡内滚动；手动选择随原消息保留。界面根据原生历史身份拆开消息／报告信封，
-不改写模型上下文或把消息正文中的 JSON 当作结构化报告。报告预览未完整包含正文时，可按需读取原 execution 下的完整报告；
-失败、取消说明和发送回执仍可查看。
-
-用户可选择一位或多位收件人，或引用消息回复。用户消息保留 User 身份；主 Agent 也能接收来自协作输入框的消息。
-运行中的成员使用原有输入边界接收请求，已结束成员由原生接续机制恢复。每位收件人的请求保留独立幂等键，部分成功后
-重试只处理尚未确认的请求。草稿和待确认请求保留在内存中的原会话、目标分支下。
-
-协作输入框可逐条选择「立即补充」或「本轮结束后」。立即补充进入接收方下一次封闭的模型输入边界；
-本轮结束后等待接收方当前整个 Run 结束，再沿原请求接续机制处理。每位收件人分别记录时机和固定附件，
-不以发送者结束、一次工具调用结束或下一次模型请求代替这个边界。尚未处理的消息可立即发送或撤回；
-用户消息也可原位编辑文字，原收件关系、附件版本和幂等身份保持不变。已开始处理的消息不再改写。
-`inform` 同样支持等待本轮结束，但保持被动，只有之后正常处理上下文时才被读取，不自动唤醒模型。
-
-协作流从 Catalog 的消息队列、原派发关系、报告及各自的原始事件按家族联合分页读取，按原消息 ID / 派发 Operation ID / 报告 execution ID 去重，
-共用不可变的事件游标；只含派发或报告的页面也能继续翻页和增量更新。没有新增群聊数据库，也不将可见消息广播给所有模型。
-历史向上滚动时预取；成员目录和消息正文分别读取，关闭面板后停止观察。派发条目的发消息操作定位原接收分支，
-报告的发消息操作定位原子 Agent 分支，不把派发 Operation 或报告 execution 伪造成可引用回复的消息 ID。
-
-代码交换的原始通知显示为文件交接卡片。差异来自 Integration journal 保存的 before/after 对象，后续工作区改动不改变
-旧交接内容。磁盘、编辑草稿和分支目标保留各自的状态；本地与 managed Host 都通过原资源 owner 读取记录和对象。
-
-## 文件来源与阶段交接
-
-`dispatch.projectId` 按本次冻结的已登记项目选择目标来源，不准备全部项目，也不借用父级文件 grant。
-`matters` 的 `projects` 动作可发现项目 ID。明确指定分类容器且没有显式项目、来源 Agent 或来源路径时，
-按最近项目冻结默认来源选择；原请求重试不再次解释已移动的目录。Shared 沿目标项目的实际来源，隔离按需经过原准备与回收 owner；
-原项目专属的 workspace MCP 配置不跨项目搬运。目标项目的配置意图随派发固定，在实际 Source 准备后，
-按该项目自己的信任与执行目录准备 MCP；首轮请求前由原 Catalog 提交，之后恢复精确绑定。
-远端项目的来源绑定包含 Host、connection、endpoint 与 Documents workspace 身份，不能用同名目录替换。
-Shared 和隔离准备都交实际资源 owner；协调 Host 的本机挂载后端不决定远端是否可准备。
-归类与执行来源分别固定，移动已受理任务不改变派发者、文件 grant、工作目录或报告关系。
-显式工具列表仍保持精确。`dispatch.background` 则只按固定历史引用交接背景。
-`send.afterCurrent` 用于在接收方当前 Run 结束后交付消息，普通补充继续使用原输入边界。
-
-来源保留具体 worktree 的身份。工作方式由每次派发的 `workMode` 选择，与角色、模型和工具子集分别解析：
-
-- 省略或 `shared`：复用选定来源的实际工作状态，不建立独立副本；有写权限的修改立即在该来源生效。主 Agent 已在独立副本中时复用该副本；来源只有不可变树时沿原按需执行视图处理。
-- `isolated_write`：实际执行 Host 具备原生文件系统后端时，从选定来源建立固定基线与独立工作状态，修改经代码交换交回。
-- `read_only`：不带可修改文件的工具；省略 `tools` 时从默认能力中去掉物理工具，显式列出的物理工具会被拒绝。
-
-终端、浏览器等物理工具不再自动选择隔离，预设也不再保存工作方式。设置中旧的 `worktree` 值在读取时校验后丢弃，保存 Agent 时不再写回；已受理任务保留当时的工作方式。这里的隔离只针对文件工作状态，不是操作系统沙箱。
-
-`sourcePath` 可选择原来源内的一个子目录，先应用 `sourceAgent`，再解析目录。省略或 `.` 使用完整来源；子 Agent 的文件路径和默认 cwd 从该子目录起算。
-原始 handoff 保留父根到子根的映射，代码交换、界面合并、撤销和恢复定位回对应父路径；无效目录不会退回整个来源。拥有 workspace 与资源 Host 身份保持不变。
-
-固定来源直接保留对应不可变树，子目录只取子树；实时来源通过 Documents 与原生批量捕获形成基线。同一有效观察代的并发准备共用实际捕获，每个子任务独立保留分支。
-取消一个订阅者保留其他订阅者的工作，最后一个取消等待原 worker 停止后释放 scratch 分支和授权。
-原生捕获按文件身份和 change time 复用未变正文，同时确认原内容对象身份；观察不足、对象消失或变化时重新读取。不保留额外完整缓存目录。
-
-新 `isolated_write` 使用 Native workspace，固定来源直接共享原树，已管理来源切分当前命名空间、属性与 dirty 文件范围。父侧继续写入，文件工具、终端、script、workspace MCP 和外部执行者访问同一原生目录；写一个文件不物化整库。普通目录首次捕获仍有真实成本，进度与取消归原操作。
-局部 dirty 文件保留不可变区间，分叉和成果发布仅保存必要变化及元数据，不先复制或哈希整个文件。
-原资源 owner 在来源交接时先检查后端；缺组件、组件不兼容或权限不足返回 `workspace_backend_unavailable`，
-报告保留原 `error.code/message/details`、`stage`、`hostId`、backend 和原因。缺依赖不会先扫目录或创建子 Run，
-不会自动改成 Shared 或安装组件。默认 Shared 和普通会话照常使用；修复执行 Host 后可显式重试。
-来源保存逻辑分支和范围，实际挂载路径与 generation 随 Host 连接重建。旧 Materialized 和显式 FixedBranch 命令视图保留其原合同；Native 失败不静默降为复制或 Shared。
-成果与 baseline 同时保留选定属性，B/S/T 整合能合并独立属性变化。会话删除等待实际准备任务、读写和进程退出，并保留存活子任务、外部会话、编辑器及恢复引用。派生分支、原 pin 和属性根沿原 owner 回收，项目主工作状态独立保留。
-
-`dispatch({ sourceAgent: "短码", ... })` 选择相关 Agent 的阶段成果。运行中的物理工作区捕获为固定阶段；已发布成果直接使用保存的 branch/revision。后续实现推进不改变这次交接版本。
-
-续接支持 `sourceAgent`：保留旧 Agent 的对话，以指定来源更新文件基础，并通过三方合并携带其已有修改。来源变化、固定版本和冲突作为本轮简短环境事实进入历史。带来源的工作请求进入下一轮准备，避免改变正在运行的文件基础。
-
-文本冲突保留合并标记；二进制或目录结构冲突携带原 Agent 的版本，并保留新来源的固定快照供后续处理。来源准备、pin、执行目录和清理由原 Storage 与 Source 所有者负责。
-
-## 双向代码交换
-
-- `submit_code({ target?, files?, afterCurrent? })` 将自己的选定改动交给相关 Agent，默认接收方为直接父任务。
-- `update({ source?, files?, afterCurrent? })` 从相关 Agent 拉取改动，默认来源为直接父任务。
-- `files` 可包含路径或 `{ path, before, after }` 精确片段；省略时选择来源相对基线的改动。
-
-双方是同一个实际可写来源时（同一资源 Host、workspace 与已注册根，或同一 Run 的执行目录），交换返回 `status: shared_source`、`effect: none`：文件已在共享来源生效，不生成合并或恢复点。需要交换但双方都没有可追溯的固定起点时返回 `baseline_unavailable`，说明双方来源与缺少的合并依据。
-
-交换固定原操作的文件快照，复用 Integration 三方合并、Documents 脏缓冲协调和原生恢复 journal。接收方已有修改参与合并；重复请求返回原回执；连续交换同一文件使用已确认的来源版本作为后续基线。
-
-省略 `afterCurrent` 时立即合并；设为 `true` 时先固定本次选中的版本，返回原 Thread-lifetime Job，
-等接收方当前 Run（外部 Agent 为其真实轮次）结束后才实际合并。等待期间不写目标文件，来源后续修改也不改变这次交接。
-协作面板列出排队文件及双方身份，可展开路径、立即发送或撤回；开始合并后收起这两个控制。
-撤回释放待发送快照，不修改目标；已经生效的共享来源仍返回 `shared_source`。
-排队内容、应用边界和实际结果沿原 Catalog Host Job 与 Integration journal 保存；重启复用原快照和操作身份，
-不重新捕获来源或重复写入。模型回执只包含交接状态，内部恢复材料不进入模型上下文。
-
-执行中的接收方使用实际工作目录。已结束 Agent 的固定成果可以直接作为交换来源；向它交付新的实现工作时，先沿续接准备可写目录，也可以在续接时用 `sourceAgent` 更新基础。FixedBranch 保留只读来源语义。
-
-原生回执向另一参与方发送带来源身份的被动通知，调用方从工具结果得到同一交接结果。通知与恢复共用原 operation ID；恢复读取原 journal，不重放已发生的文件效果。
-
-## 稳定角色提示
-
-内置协作提示在运行时使用英文；以下是中文对照，用于说明内容和注入条件。界面名称保持中文，用户自定义指令保留原文。
-
-主代理基础：
-
-> 围绕用户目标推进工作，保持对整体设计、任务关系和当前进展的理解。结合实际实现和验证证据，调整工作并判断整体交付。
-
-实现角色可用时，追加给主代理：
-
-> 你可以委派 Agent 完成实现或修复，按任务需要组织协作。
-
-验证角色可用时，追加给主代理：
-
-> 你可以把验证交给独立的 Agent，与实现并行推进。由验证 Agent 承担验证时，可以让实现方专注实现，将测试编写和运行交给验证方按实际需要处理。
-
-实现 Agent：
-
-> 理解分配任务在整体目标中的作用，完成实现或修复，保持与相关工作的协调和设计一致性。根据实际发现调整做法，交付可供后续工作使用的成果。
-
-验证 Agent：
-
-> 从用户目标和系统整体出发，独立判断实现的正确性、完整性和设计质量，关注相关模块之间的实际行为。自主选择验证方法，依据实际证据形成结论，说明重要发现及其影响。验证以支持判断为度，新增测试和改进建议兼顾实际收益、设计简洁性和维护成本。
-
-具备交流、代码交换能力时，提供共同提示：
-
-> 你可以直接与相关 Agent 交流、查看彼此工作、交换代码改动并协调依赖。
-
-缺少代码交换能力时，共同提示只包含实际可用的交流与查看能力。任务中是否自行验证、何时派发、反馈给谁，由当次分工决定，worker 系统文案保持稳定。
-
-入口：[角色与提示](../packages/protocol/src/harness-presets.ts)、[派发目录](../packages/web/application-host/lib/kernel/child-profiles.ts)、[原生协作](../kernel/crates/varin-runtime/src/catalog_delegated.rs)、[文件交换](../packages/web/application-host/lib/kernel/code-exchange.ts)。动态上下文与摘要见[运行时](runtime.md#上下文准备与压缩)，文件所有权见[资源](resources.md)。
-
-## 输入框中的明确收件人与交接
-
-`/联系 Agent` 读取可访问产品会话的真实成员与分支，不用预设角色代替实际收件人。
-选择后显示独立的「发送给」状态，仍以 User 身份进入原 `messages.send`。
-正文中的 `@任务` 只提供对象定位，不改变收件人。普通对话草稿与每个收件人的定向草稿分别以
-Host、原 Thread/branch 和目标 Thread/branch 保存；切换目标或返回对话不会互相覆盖。
-不确定投递保留原目标、正文、附件和受理键，重试只继续原请求。
-
-`/整理交接` 先编辑说明，再明确选择已有 Agent 或新任务。已有 Agent 路径准备可继续编辑的
-定向草稿，用户仍需发送；新任务使用 Catalog 原生 User 派发入口，不伪造模型工具调用或普通新会话。
-模型和渠道取自原派发目录，项目来源必须明确选择，默认不带项目文件；所选项目的共享、只读或隔离
-修改模式沿原 Source owner。没有可用原生 Run 时明确说明原因，不借其他会话的运行配置。
-
-User 派发先持久化原依赖清理责任，正式受理在同一 Catalog 事务提交子任务关系、Operation 状态和原回执；工具 origin 和 call ID 留空，
-首条子任务历史明确标为用户指令。旧模型派发继续保留真实工具调用和 ACK。原 Host 的 MCP／扩展
-依赖在受理前按原绑定保留，不可用时明确失败；选择模型继续由原 delegated model owner 处理。
-远端保留前先持久化 User preparation 与准确依赖清理身份；保留确认丢失、释放失败、重启或取消仍按原 epoch／MCP 绑定清理，未受理时不创建空子任务。失败的受理键不能重新复用已释放的令牌。
-User 子任务不继承父 Goal／预算，可明确绑定自己的 Goal。Bot 自动报告以真实子 execution／operation 的 AgentReport 身份进入原消息入口，准备失败时不编造尚未存在的子 Run 或模型调用。
-报告、失败、取消和恢复共用原子任务生命周期。来源结算使用真实子 Run 的生命周期上下文，
-仅允许读取停止证据和成果回执，不能伪造模型 origin 或借此调用文件／进程工具。
-
-背景默认为空。用户可在固定历史位置按页选择消息，或明确加入当前草稿的文件；新任务保存原
-Thread、branch、head 和消息 ID，由原 owner 验证所选范围。已有 Agent 的可编辑消息只包含用户明确
-选中的文字。上传部分成功而后续失败时保留已有文件回执，不发送半条交办；再次确认沿原附件与派发
-身份重试。确定未受理的请求可编辑并刷新目录，不确定请求保留原输入。
-可见文件栏中的路径选择和稳定附件引用也属于显式附件输入，不依赖正文中 `@` 文字是否仍存在。
-路径在发送时由原 caller Source 固定，不能按收件人的项目解释；Source 变化时未受理请求保留草稿并要求
-重新选择。部分上传保留回执，已开始且结果未知的投递只重试原请求，不以新 Source 重新构造。
-
-记忆和交接的「请 Agent 整理」是独立、显式的正常任务：用户选择实际模型并确认后，才提交当前展示
-文字，没有隐式全历史、文件来源或自动摘要调用。模型用量由原任务记录，读取只接受该派发的原 execution
-及 report。结果先供审阅，只有「采用草稿」才替换编辑内容，不自动保存记忆或交办。关闭菜单只结束观察，
-不会取消已受理任务；重新打开继续读同一回执。明确取消沿原任务取消入口，取消请求与真实执行结束分别展示。
-
-`/导出对话` 固定当前分支和可选消息范围，提供 Markdown／JSON，并明确选择是否包含工具详情与文件附件。
-公开文本优先使用原始 `userText`，不导出 Host 增强资料、provider 私有续接或 checkpoint。历史与原件由原 owner
-分页、流式读取，浏览器使用磁盘后备的写入路径；取消或失败不提交半份产物。导出是本地下载，不创建分享链接。
-
-`/记住这件事` 以当前草稿或明确选中的交流为起点，展示实际 Bot／用户／原有笔记作用域，允许编辑后保存。
-写入仍使用原 MemoryService／KnowledgeStore 或 personalization record 的版本与回执；未知结果重试原保存键。
-撤销只补偿自己刚写入且未被后来修改的记录，不覆盖别人的后续编辑，不建立命令专用记忆库。
+# Agent Collaboration
+
+The lead agent coordinates goals, delegates focused work, and judges overall delivery. Roles (Implementation, Verification, Research, etc.) can be enabled independently and inherit or override models.
+
+- `dispatch` defaults to native Varin, or targets an [External Agent](external-agents.md) via `executor` (alias or `exec:` ref from `executors`) or preset binding.
+- Known targets can be dispatched or messaged directly without querying catalogs first.
+- Core entrypoints: [harness-presets.ts](../packages/protocol/src/harness-presets.ts) · [child-profiles.ts](../packages/web/application-host/lib/kernel/child-profiles.ts) · [catalog_delegated.rs](../kernel/crates/varin-runtime/src/catalog_delegated.rs) · [code-exchange.ts](../packages/web/application-host/lib/kernel/code-exchange.ts).
+
+## Cross-Session Messaging
+
+- Within the same authenticated principal scope, lead tasks, child tasks, and Bot direct sessions can discover (`threads`, default all accessible; `relationship: "family"` for delegation tree only) and message each other (`send`), including specific branches.
+- Internal fast retrieval, compaction, and memory maintenance runs are excluded from collaboration directories. Archived sessions are readable but must be unarchived before receiving new work.
+- `inform` queues passively; `request` resumes/continues at the next valid boundary (`afterCurrent: true` waits for the recipient's full Run to settle); `replyTo` binds to the initiating branch. Messaging another session never grants cancel, file, or memory-write authority over it.
+
+## File Handoff (Attachments)
+
+- Both `dispatch` and `send` accept `attachments`: each entry is either `{ "ref": "attachment:..." }` (existing immutable ref) or `{ "path": "..." }` (readable path in the caller's Source), never both. Text body may be empty.
+- File/document/Office tools return typed attachment descriptors (`ref`, filename, MIME, bytes). Plain text paths, hashes, or another thread's ref string never grant read access.
+- **Atomic preparation**: Runs outside the Catalog lock. Captures paths consistently via the caller's file owner, establishes temporary retention, and admits body + attachment links as one input (no half-delivered messages; same-key retry reuses the original capture and receipt).
+- **Consumption**: Vision-capable dispatches receive images as typed media blocks; tools read refs via `file_read` / `document_read` / Office tools, or materialize a read-only file on the executing Host via `resource_read` (`path` view). See [resources.md](resources.md#immutable-attachments).
+- **Retention**: Attachments stay readable by surviving recipients even if the sender or source file is deleted, until the last real reference drops. Final reports include only attachments actually delivered to that requester.
+
+## Free Dispatch & Model Selection
+
+- Native `dispatch` accepts `model` (stable channel-config ID from `providers.models`, not raw model name), `thinking`, `inputTypes`, `workFocus` (`general` | `code` | `research` | `office`), `workMode`, and `tools`. Explicit `preset` cannot combine with free `model`/`thinking` overrides.
+- **Delegation model selector** (optional, off by default in Agents settings):
+  - When off, omitted model/thinking inherits the parent's full binding.
+  - When on, runs asynchronously as the first step of `delegation-model:<executionId>` (after tool ACK, before preparing child source/context) to pick only unspecified fields from enabled local channel configs.
+  - Input packs fixed requirements, enabled candidates + descriptions, task text, and a bounded preview of the last 3 user turns before the dispatch point (no tool outputs, thinking, or summaries). Uses one tool-free LLM or typed-classifier call (no agent loop, no silent fallback to another channel on error; retries reuse frozen inputs).
+
+## Identity, Short Codes & Lifecycle
+
+- Every Thread has a stable 8-char short code; executions increment monotonically across branches as `<shortCode>/<N>` (e.g. `8F2A6C10/2`), preserved across renames, restores, and restarts.
+- `agent_rename` updates metadata only; avatars assign randomly from the flat SVG pool (or preset override) and stay purely visual.
+- **Tool queries**:
+  - `threads`: Paged lightweight catalog (`scope: "all" | "current" | "history"`, filterable by container, bot, backend, archive, workspace, artifact path). Does not load full histories.
+  - `read_thread`: On-demand `overview`, `recent`, `range`, `search`, `item` (returns `body`, plus `preview` only when truncated).
+  - `child_status` / `wait_child` / `child_cancel` / `child_report`: `target` pins a specific execution on admission (UTF-8 byte offsets for `child_report`).
+- **Active vs History**: A task leaves `current` once terminal (completed/failed/canceled), its report is delivered, and any pending code exchange finishes; re-engaging it via `send` brings it back.
+- **Frozen compatibility**: Restarts/upgrades preserve each admitted child's frozen tool schema and read contract (e.g., short refs vs legacy offsets).
+
+## File Sources, Isolation & Code Exchange
+
+`workMode` is chosen per dispatch (independent of role/model/tools):
+
+| `workMode` | Behavior |
+| --- | --- |
+| `shared` (default) | Shares the selected live/working source directly; edits take effect immediately |
+| `isolated_write` | Forks a Native Workspace (WinFsp/FUSE/macFUSE) with a pinned baseline; changes merge back via code exchange. Fails fast with `workspace_backend_unavailable` if backend is missing — never silently downgrades to `shared` |
+| `read_only` | Strips file/physical mutation tools (explicitly requesting them fails) |
+
+- **`sourcePath`**: Scopes the child to a subdirectory of the source; handoff preserves parent ↔ child path mapping for merges and recovery.
+- **`sourceAgent`**: Captures a running agent's current working state or reuses a finished agent's published revision as the starting point (also supported on continuation via three-way merge).
+- **`dispatch.projectId`**: Resolves the target project's real Host, Source, trust, and workspace MCP at preparation time without borrowing the parent's grants or copying MCP across projects.
+- **Bidirectional code exchange**:
+  - `submit_code({ target?, files?, afterCurrent? })` pushes changes (default: direct parent); `update({ source?, files?, afterCurrent? })` pulls changes.
+  - Same writable source returns `status: shared_source, effect: none`.
+  - Isolated sources snapshot files and run three-way merge via Integration + Documents dirty-buffer coordination + native recovery journal. `afterCurrent: true` pins the snapshot as a Thread-lifetime Job and applies it once the recipient's active Run settles (cancellable/send-now in the Collaboration panel).
+
+## Collaboration Panel & Composer Handoff
+
+- **Collaboration panel** (right sidebar): Unified chronological projection of family dispatches, messages, reports, and code-exchange cards directly from Catalog (excludes internal `code_retrieval`). Read-only projection — does not own delivery or model wakeups. Supports per-message "Immediate" vs "After current turn" timing and editing/retracting unconsumed user messages.
+- **Composer commands**:
+  - `/contact` (`/联系 Agent`): Targets real accessible member/branch with per-recipient isolated drafts and idempotent send keys.
+  - `/handoff` (`/整理交接`): Creates either an editable directed draft to an existing agent or a native **User dispatch** (empty tool origin/callId, user instruction history, explicit project/source selection, optional paged background messages). Optional "Ask agent to draft" runs an explicit normal task whose result is reviewed before applying.
+  - `/export` (`/导出对话`): Streams Markdown or JSON (preferring raw `userText`, excluding Host augmentations/private continuations) to a local download.
+  - `/remember` (`/记住这件事`): Writes directly to the relevant Bot KnowledgeStore or personalization record with CAS revision checks.
