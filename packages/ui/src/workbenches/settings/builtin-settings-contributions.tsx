@@ -1,3 +1,4 @@
+import { WorkspaceLocationsPage } from '@/components/sections/workspaces/WorkspaceLocationsPage';
 import { WorkConnectionsPage } from '@/components/sections/connections/WorkConnectionsPage';
 import { BrowserSettingsPage } from '@/components/sections/browsers/BrowserSettingsPage';
 import { ExternalAgentsPage } from '@/components/sections/external-agents/ExternalAgentsPage';
@@ -46,6 +47,7 @@ const implementationFor = (spec: BuiltinSettingsPageSpec): SettingsPageImplement
       case 'history': implementation = { renderContent: () => <HistorySettingsPage /> }; break;
       case 'storage': implementation = { renderContent: () => <StorageSettingsPage /> }; break;
       case 'usage': implementation = { renderContent: () => <UsageSettingsPage /> }; break;
+      case 'workspaces': implementation = { renderContent: () => <WorkspaceLocationsPage /> }; break;
       case 'work-connections': implementation = { renderContent: () => <WorkConnectionsPage /> }; break;
       case 'browsers': implementation = { renderContent: () => <BrowserSettingsPage /> }; break;
       case 'network': implementation = { renderContent: () => <NetworkSettingsPage /> }; break;

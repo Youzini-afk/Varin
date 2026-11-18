@@ -915,6 +915,7 @@ export const settingsDict = {
   'settings.view.nav.group.general': "Preferences",
   'settings.view.nav.group.projects': "Development and projects",
   'settings.view.nav.group.harness': "Agent",
+  'settings.page.workspaces.title': 'Workspaces',
   'settings.page.projects.title': 'Projects',
   'settings.page.remoteInstances.title': 'Remote Instances',
   'settings.page.knowledge.title': 'Knowledge',

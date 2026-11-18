@@ -12,6 +12,7 @@ registerBuiltinSettingsWorkbench();
 const { getSettingsPageMeta, getSettingsPageMetadata, resolveSettingsSlug } = await import('./metadata');
 const {
   ensureBuiltinSettingsContributions,
+  getSettingsPageRegistrations,
   varinSurfaceRuntime,
   setBuiltinSettingsContributionsEnabled,
 } = await import('./surface-registry');
@@ -42,6 +43,19 @@ const runtimeContext = (mcpInstalled: boolean): SettingsRuntimeContext => ({
 
 describe('settings metadata', () => {
 
+
+  test('the workspace settings route resolves to its service-owned page on desktop, web and mobile', async () => {
+    const { isValidElement } = await import('react');
+    const { WorkspaceLocationsPage } = await import('@/components/sections/workspaces/WorkspaceLocationsPage');
+    expect(resolveSettingsSlug('workspaces')).toBe('workspaces');
+    const page = getSettingsPageRegistrations().find(entry => entry.meta.slug === 'workspaces');
+    expect(page?.meta).toMatchObject({ titleKey: 'settings.page.workspaces.title', kind: 'single' });
+    const element = page?.implementation.renderContent();
+    expect(isValidElement(element) && element.type === WorkspaceLocationsPage).toBe(true);
+    for (const surface of ['isMobile', 'isDesktop', 'isWeb'] as const) {
+      expect(page?.meta.isAvailable?.({ ...runtimeContext(false), isWeb: false, [surface]: true }) ?? true).toBe(true);
+    }
+  });
 
   test('exposes native MCP independently of plugin installation', async () => {
     await ensureBuiltinSettingsContributions();

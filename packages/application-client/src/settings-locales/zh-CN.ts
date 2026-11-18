@@ -915,6 +915,7 @@ export const settingsDict = {
   'settings.view.nav.group.general': "使用偏好",
   'settings.view.nav.group.projects': "开发与项目",
   'settings.view.nav.group.harness': "Agent",
+  'settings.page.workspaces.title': '工作区',
   'settings.page.projects.title': '项目',
   'settings.page.remoteInstances.title': '远程实例',
   'settings.page.knowledge.title': '知识',

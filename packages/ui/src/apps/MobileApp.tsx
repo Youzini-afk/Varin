@@ -89,7 +89,7 @@ import { useNativePushRegistration } from './useNativePushRegistration';
 const MOBILE_SETTINGS_PAGES = [
   'general', 'appearance', 'chat', 'sessions', 'notifications', 'voice', 'storage', 'history',
   'model-connections', 'usage', 'agents', 'harness-bots', 'agent-prompt', 'agent-memory',
-  'harness-tools', 'harness-web', 'images', 'harness-computers', 'harness-permissions', 'harness-context',
+  'harness-tools', 'harness-web', 'images', 'workspaces', 'harness-computers', 'harness-permissions', 'harness-context',
   'projects', 'editor', 'terminal', 'git', 'harness-retrieval', 'harness-embeddings', 'language-support',
   'work-connections', 'remote-instances', 'network', 'access', 'tunnel', 'mcp-connections',
   'skills', 'commands', 'extensions', 'about',
