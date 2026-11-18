@@ -110,7 +110,7 @@ import { createFollowupEventOwner } from './lib/kernel/followup-event-owner.js';
 import { createLiveSourceOwner } from './lib/kernel/live-source.js';
 import { createNativeWorkspaceOwner, type NativeWorkspaceOwner } from './lib/kernel/native-workspaces.js';
 import { registerNativeWorkspaceRoutes } from './lib/workspace/native-workspace-routes.js';
-import { listWorkLocations, preferredWorkLocation, prepareWorkLocation } from './lib/kernel/default-work-location.js';
+import { listWorkLocations, createConversationWorkLocation } from './lib/kernel/default-work-location.js';
 import { registeredModelSettingsScope } from './lib/models/project-settings-scope.js';
 import { createThreadSourcePreparer, createThreadSourceAdmission, createThreadSourceDirectory, parseSourceResourceOwner } from './lib/kernel/thread-sources.js';
 import { createManagedSourceConsumers } from './lib/kernel/managed-source-consumers.js';
@@ -124,7 +124,7 @@ import { createManagedChildSourceService } from './lib/kernel/managed-source-col
 import { createManagedIntegrationService, createManagedIntegrationOwner } from './lib/kernel/managed-source-integration.js';
 import { createThreadIntegrations, createUserIntegrationService } from './lib/kernel/thread-integrations.js';
 import { createThreadCodeExchangeReader, createManagedCodeExchangeReader } from './lib/kernel/thread-code-exchange.js';
-import { createThreadContext, resourceThreadSource } from './lib/kernel/thread-context.js';
+import { createThreadContext } from './lib/kernel/thread-context.js';
 import { createThreadResourceScope } from './lib/kernel/thread-resource-scope.js';
 import { createThreadSkillInputPreparer } from './lib/kernel/thread-skill-input.js';
 import { createResourceOwner } from './lib/kernel/resource-owner.js';
@@ -2515,41 +2515,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   threads.bindSourceDirectory(sourceDirectory);
   threads.bindCreationDefaults((identity, signal) => agentRuntime.organizationCreationDefaults(identity.threadId, signal));
   threads.bindOrganizationCreation((identity, placement) => conversationOrganization.creationDefaults(currentRequestPrincipal() ?? null, identity.threadId, placement));
-  threads.bindDefaultDeviceSource(async identity => {
-    const thread = await agentRuntime.thread(identity.threadId);
-    const latest = thread.branches.find(branch => branch.branch_id === identity.branchId)?.latest_run;
-    const checkpoint = await agentRuntime.context(identity.branchId);
-    const inherited = checkpoint?.resources ? checkpoint.resources.source : (latest ? (await agentRuntime.launch(latest.id))?.selection.source : null);
-    if (inherited) {
-      const source = resourceThreadSource(inherited);
-      if (!source) throw new Error('The inherited execution source is unavailable');
-      return { ...source, tools: await agentRuntime.sourceTools(source.mode) };
-    }
-    // A completed source-less round (including explicit chat only) is itself an
-    // execution choice. Creation defaults are only for a genuinely empty branch.
-    if (latest || checkpoint?.resources) return null;
-    // An empty/checkpoint-less child is not a new ordinary conversation, and a
-    // host-wide preference can never grant a guest use of the Host's resources.
-    if (thread.parent_thread_id || !await agentRuntime.principalCanUseHostResources!(thread.principal_id)) return null;
-    const defaults = await agentRuntime.organizationCreationDefaults(identity.threadId);
-    const prepare = (input: Parameters<typeof prepareThreadSource>[0], signal?: AbortSignal) => threads.prepareSource(input, signal);
-    const key = `creation-location:${identity.threadId}:${identity.branchId}`;
-    if (defaults?.source) return prepareWorkLocation(identity, key, defaults.source, sourceDirectory, prepare);
-    if (defaults?.projectId) {
-      const project = (sanitizeProjects((await readSettingsFromDisk()).projects) ?? []).find(project => project.id === defaults.projectId);
-      if (!project) throw new Error('The conversation’s original default project is no longer registered. Select a source explicitly.');
-      return prepareWorkLocation(identity, key, { path: project.path, resourceOwner: project.source?.resourceOwner ?? { kind: 'local' },
-        ...(project.source ? { workspaceId: project.source.workspaceId } : {}), selection: freezeProjectSourceSelection(project) }, sourceDirectory, prepare);
-    }
-    if (thread.bot_id) {
-      const bot = await botService.get(thread.bot_id);
-      if (!bot) throw new Error('The original Bot workspace is unavailable');
-      return prepareWorkLocation(identity, key, { resourceOwner: { kind: 'local' }, path: bot.homeDir }, sourceDirectory, prepare);
-    }
-    const saved = await readSettingsFromDisk();
-    const preferred = preferredWorkLocation(saved, sanitizeProjects(saved.projects) ?? []);
-    return prepareWorkLocation(identity, key, preferred ?? { resourceOwner: { kind: 'local' }, path: workspaceConfig.root }, sourceDirectory, prepare);
-  });
+  threads.bindDefaultDeviceSource(createConversationWorkLocation({ agentRuntime, sourceDirectory, servicePath: workspaceConfig.root,
+    prepare: (input, signal) => threads.prepareSource(input, signal), getBot: id => botService.get(id),
+    readWorkspaceSettings: async () => { const saved = await readSettingsFromDisk(); return { ...saved, projects: sanitizeProjects(saved.projects) ?? [] }; },
+  }));
   const threadSourceFiles = createThreadSourceFiles({ kernel: kernelClient, documents: documentsAuthority,
     validateLiveSource: liveSources.validate, compute: kernelCompute, remote: managedSourceConsumers.files });
   threads.bindSourceFiles(threadSourceFiles);

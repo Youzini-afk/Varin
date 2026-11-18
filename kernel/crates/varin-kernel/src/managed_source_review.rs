@@ -340,6 +340,15 @@ fn managed_source_original_effects_survive_epoch_fence_and_reject_foreign_author
 }
 #[test]
 fn managed_source_two_hosts_original_storage_and_direct_router() {
+    two_managed_hosts(false);
+}
+
+#[test]
+fn admitted_workspace_operation_survives_a_different_conversation_default() {
+    two_managed_hosts(true);
+}
+
+fn two_managed_hosts(work_location_only: bool) {
     let root = std::env::temp_dir().join(format!(
         "varin-managed-source-host-{}",
         uuid::Uuid::new_v4()
@@ -393,7 +402,7 @@ fn managed_source_two_hosts_original_storage_and_direct_router() {
     let mut host = Host::with_script(
         "packages/web/application-host/lib/harness/managed-source-host.test-helper.ts",
     );
-    host.send(json!({"kind":"fixture-init","root":root,"storageRootA":a.root,"storageRootB":b.root,"epochA":a.epoch,"epochB":b.epoch,"runId":submitted.run_id}));
+    host.send(json!({"kind":"fixture-init","root":root,"storageRootA":a.root,"storageRootB":b.root,"epochA":a.epoch,"epochB":b.epoch,"runId":submitted.run_id,"workLocationOnly":work_location_only}));
     let release_attempts: Arc<Mutex<HashMap<String, usize>>> = Default::default();
     let mut released_hashes = std::collections::HashSet::new();
     let (send, completed) = mpsc::channel();
@@ -507,6 +516,19 @@ fn managed_source_two_hosts_original_storage_and_direct_router() {
     assert_eq!(result["ok"], true, "{result}");
     assert!(a.tasks.lock().unwrap().is_empty());
     assert!(b.tasks.lock().unwrap().is_empty());
+    if work_location_only {
+        assert_eq!(result["checks"], json!(["original-receipt", "separate-physical-files"]));
+        assert_eq!(std::fs::read_to_string(root.join("a-project/source.txt")).unwrap(), "A_PRIVATE_SOURCE\n");
+        assert_eq!(std::fs::read_to_string(root.join("b-project/source.txt")).unwrap(), "B_CHANGED_SOURCE\n");
+        assert!(!release_attempts.lock().unwrap().is_empty());
+        bridge.close();
+        drop(host);
+        drop(a);
+        drop(b);
+        drop(catalog);
+        std::fs::remove_dir_all(root).unwrap();
+        return;
+    }
     {
         let _owner = b.storage.lock().unwrap();
         let db = rusqlite::Connection::open_with_flags(

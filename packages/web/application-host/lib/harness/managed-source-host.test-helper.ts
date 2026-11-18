@@ -556,6 +556,14 @@ async function runWithHosts(frame: Record<string, unknown>, a: KernelClient, b: 
   assert.equal(await readFile(join(bRoot, 'source.txt'), 'utf8'), 'B_CHANGED_SOURCE\n');
   const search = data(await execute('file_search', { query: 'B_CHANGED_SOURCE', maxResults: 10 }));
   assert(JSON.stringify(search).includes('source.txt'), JSON.stringify(search));
+  if (frame.workLocationOnly) {
+    await service.release({ ...address, mode: 'retire' });
+    await packageQueries.dispose();
+    await storage.dispose();
+    await Promise.all(documents.map(item => item.dispose()));
+    write({ kind: 'fixture-result', ok: true, checks: ['original-receipt', 'separate-physical-files'] });
+    return;
+  }
   const spawn = call('process_spawn', { cwd: '', command: process.execPath, mode: 'pipe', args: ['-e',
     'const fs=require("node:fs");fs.appendFileSync("spawn-count","1");process.stdout.write("B_PROCESS_OUTPUT");setInterval(()=>{},1000);'] });
   await service.authorize({ ...address, call: spawn });

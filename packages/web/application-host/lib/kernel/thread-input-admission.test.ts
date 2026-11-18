@@ -3,6 +3,8 @@ import request from 'supertest';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createThreadsHttpAPI, ThreadRequestError, type ThreadSubmit } from '@varin/application-client';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
+import { createConversationWorkLocation } from './default-work-location.js';
+import { resourceSource } from './thread-context.js';
 import { ThreadAdapter } from './thread-adapter.js';
 import { registerThreadRoutes } from './thread-routes.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
@@ -182,7 +184,6 @@ it('accepts the selected organization placement through the public create HTTP a
   expect(f.runtime.createThread).toHaveBeenCalledTimes(2);
 });
 
-
 it('checks the branch revision and Host authority before consulting a live workspace, and uses only the acknowledged default on the next send', async () => {
   const f = fixture();
   const source = { resourceOwner: { kind: 'local' as const }, workspaceId: 'registered', executionWorkspaceId: 'registered',
@@ -212,4 +213,55 @@ it('checks the branch revision and Host authority before consulting a live works
   await f.api.submit({...input,key:'chat-next'});
   expect(f.runtime.submit).toHaveBeenLastCalledWith(expect.objectContaining({expectedWorkspaceRevision:2,launch:expect.objectContaining({source:null,enabledTools:[]})}));
   expect(fallback).not.toHaveBeenCalled();
+});
+
+it('uses the saved original Host on first native admission, retains inherited/chat-only choices and never prepares a replacement registration', async () => {
+  const f = fixture();
+  const a = { kind: 'local' as const }, b = { kind: 'managed_host' as const, hostId: 'b', connectionId: 'paired-b', endpointIdentity: 'endpoint-b' };
+  const rows = [a, b].map((resourceOwner, index) => ({ kind: 'folder' as const, resourceOwner, path: '/project', workspaceId: 'same',
+    id: String(index), name: index ? 'Remote project' : 'Local project' }));
+  let preferred = '1', workspaceId = 'same', principalAllowed = true, botId: string | null = null;
+  let checkpoint: {resources: {source: ReturnType<typeof resourceSource>}} | null = null;
+  const readWorkspaceSettings = vi.fn(async () => ({ projects: [], workspaceLocations: rows, defaultWorkspaceLocationId: preferred }));
+  const runtime = { thread: async () => ({ branches: [], principal_id: 'owner', bot_id: botId }), context: async () => checkpoint,
+    launch: async () => null, sourceTools: async () => ['file_read'], principalCanUseHostResources: async () => principalAllowed,
+    organizationCreationDefaults: async () => null } as unknown as Parameters<typeof createConversationWorkLocation>[0]['agentRuntime'];
+  const resolve = vi.fn<Parameters<typeof createConversationWorkLocation>[0]['sourceDirectory']['resolve']>(async input => ({ ...input, workspaceId }));
+  const prepare = vi.fn<Parameters<typeof createConversationWorkLocation>[0]['prepare']>(async input => ({
+    path: '/project', source: { resourceOwner: input.resourceOwner, workspaceId: input.workspaceId, executionWorkspaceId: input.workspaceId,
+      mode: 'live_root', liveRoot: { hostId: input.resourceOwner.kind === 'local' ? 'a' : input.resourceOwner.hostId,
+        rootId: 'original-root', canonicalRoot: '/project' }, tools: ['file_read'] },
+  }));
+  f.adapter.bindDefaultDeviceSource(createConversationWorkLocation({ agentRuntime: runtime, readWorkspaceSettings,
+    prepare, sourceDirectory: { resolve }, getBot: async () => ({ homeDir: '/bots/home' }), servicePath: '/service' }));
+  await f.adapter.submit(input);
+  expect(f.runtime.submit).toHaveBeenLastCalledWith(expect.objectContaining({ launch: expect.objectContaining({
+    inheritSource: true, source: expect.objectContaining({ resourceOwner: b, workspaceId: 'same' }), enabledTools: ['file_read'],
+  }) }));
+  const selected = (await prepare.mock.results[0]!.value).source;
+  checkpoint = { resources: { source: resourceSource(selected) } }; preferred = '0';
+  await f.adapter.submit({ ...input, key: 'successor' });
+  expect(f.runtime.submit).toHaveBeenLastCalledWith(expect.objectContaining({ launch: expect.objectContaining({
+    source: expect.objectContaining({ resourceOwner: b }),
+  }) }));
+  checkpoint = { resources: { source: null } };
+  await f.adapter.submit({ ...input, key: 'source-less-successor' });
+  expect(f.runtime.submit).toHaveBeenLastCalledWith(expect.objectContaining({ launch: expect.objectContaining({ source: null }) }));
+  checkpoint = null;
+  await f.adapter.submit({ ...input, key: 'explicit-none', source: null });
+  expect(readWorkspaceSettings).toHaveBeenCalledTimes(1);
+  expect(prepare).toHaveBeenCalledTimes(1);
+  principalAllowed = false;
+  await f.adapter.submit({ ...input, key: 'guest' });
+  expect(readWorkspaceSettings).toHaveBeenCalledTimes(1);
+  principalAllowed = true; botId = 'bot';
+  await f.adapter.submit({ ...input, key: 'bot-default' });
+  expect(resolve).toHaveBeenLastCalledWith({ resourceOwner: a, path: '/bots/home' }, undefined);
+  expect(readWorkspaceSettings).toHaveBeenCalledTimes(1);
+  botId = null; preferred = '1'; workspaceId = 'replacement';
+  const admitted = f.runtime.submit.mock.calls.length;
+  await expect(f.adapter.submit({ ...input, key: 'replaced' })).rejects.toThrow();
+  expect(resolve).toHaveBeenLastCalledWith({ resourceOwner: b, path: '/project' }, undefined);
+  expect(prepare).toHaveBeenCalledTimes(2);
+  expect(f.runtime.submit).toHaveBeenCalledTimes(admitted);
 });
