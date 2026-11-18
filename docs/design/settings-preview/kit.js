@@ -22,7 +22,12 @@ window.K = (() => {
     opts[k]._cur = cur;
     const item = opts[k].find(x => x.v === cur) || { l: cur };
     const lead = item.logo ? logo(item.logo) : item.icon ? ic(item.icon, 'sm') : '';
-    return `<button class="dd ${o.w || 'w'} ${o.plain ? 'plain' : ''}" data-dd="${k}"${o.re ? ' data-re' : ''}${o.unit ? ` data-unit="${o.unit}"` : ''} aria-haspopup="listbox"${item.meta ? ` title="${esc(item.l + ' · ' + item.meta)}"` : ''}>${lead}<span class="lbl">${esc(o.show ? o.show(item) : item.short || item.l)}</span>${item.meta ? `<span class="via">${esc(item.meta)}</span>` : ''}${ic('updown', 'xs chev')}</button>`;
+    const description = attrs({
+      'aria-label': o.label && `${o.label} · ${item.l}`,
+      'data-tip': o.label,
+      title: item.meta && `${item.l} · ${item.meta}`,
+    });
+    return `<button class="dd ${o.w || 'w'} ${o.plain ? 'plain' : ''}" data-dd="${k}"${o.re ? ' data-re' : ''}${o.unit ? ` data-unit="${o.unit}"` : ''} aria-haspopup="listbox"${description}>${lead}<span class="lbl">${esc(o.show ? o.show(item) : item.short || item.l)}</span>${item.meta ? `<span class="via">${esc(item.meta)}</span>` : ''}${ic('updown', 'xs chev')}</button>`;
   };
   const seg = (k, list, d, o = {}) => {
     const cur = get(k, d ?? norm(list[0]).v);
@@ -82,7 +87,7 @@ window.K = (() => {
     }
     return dd(k, options, DATA.model(d)?.ref ?? d, { w: o.w || 'wl', re: o.re });
   };
-  const thinkDD = (k, d = '默认') => dd(k, ['默认', '关闭', '低', '中', '高', '最高'], d, { w: 'ws' });
+  const thinkDD = (k, d = '默认') => dd(k, ['默认', '关闭', '低', '中', '高', '最高'], d, { w: 'ws', label: '思考等级' });
   /* 功能页和模型分工共用选项与保存键。 */
   const roleRef = (role, none, o = {}) => {
     const entry = DATA.roles[role];

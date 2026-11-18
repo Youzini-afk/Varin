@@ -77,12 +77,13 @@
     desc: '每件事交给哪个模型。这里只分配已接入的模型，接入新模型请去「模型服务」。',
     render() {
       const emb = K.get('emb.mode', '模型服务');
+      const compact = DATA.agents.find(a => a.id === 'compact');
       return header(this, { acts: btn('模型服务', { k: 'ghost', sm: true, icon: 'cloud', go: 'models' }) }) +
         sec('对话', roleRow('default') + roleRow('assist') + row('标题自动更新', num('roles.title', 5, { unit: '轮' }), { desc: '前几轮对话结束后由辅助模型重拟标题。填 0 表示只在开头起一次标题。' }), { desc: '项目可以单独设置默认模型和思考等级，在「项目」里修改。' }) +
         sec('工作中的判断', roleRow('decide') +
           disc('按用途单独指定快速判断', ['网页搜索结果', '学术检索结果', '整理记忆', '召回记忆'].map(l => row(l, K.modelDD('decide.' + l, '', { w: 'wl', none: '和「快速判断」相同' }), { sub: true })).join('')) +
           roleRow('retrieval') + roleRow('searchPick') + roleRow('readPick') + roleRow('dispatch') + roleRow('permJudge') +
-          row('上下文整理', agentRef('compact'), { desc: '对话太长时整理摘要。它是一个内置 Agent，模型、思考等级和工作指令都在「Agents」里设置。', item: '上下文整理' }),
+          row('上下文整理', agentRef(compact) + thinkDD('ag.compact.think', compact.think), { desc: '对话太长时整理摘要。' }),
         { desc: '这些模型在后台做小而频繁的决定，选快一些、便宜一些的通常更合适。' }) +
         sec('生成', roleRow('next') + roleRow('imageGen', { none: '不使用' }) + roleRow('imageEdit', { none: '不使用' })) +
         sec('检索', row('向量化', seg('emb.mode', ['本机组件', '模型服务', '关闭'], '模型服务', { re: true }), { desc: emb === '关闭' ? '记忆和 Bot 知识改用文本检索。' : emb === '本机组件' ? '在 Varin 服务上本地计算，不需要外部服务。' : '记忆和 Bot 知识的语义检索。' }) +
@@ -93,9 +94,9 @@
     },
   });
   /* 由内置 Agent 负责的工作：显示它当前的模型，点开去那个 Agent */
-  function agentRef(id) {
-    const a = DATA.agents.find(x => x.id === id); const m = K.get('ag.' + id + '.model', a.model); const md = DATA.model(m);
+  function agentRef(a) {
+    const m = K.get('ag.' + a.id + '.model', a.model); const md = DATA.model(m);
     const provider = md && DATA.isSharedModel(md.id) ? `<span class="via">${esc(md.service.name)}</span>` : '';
-    return `<button class="dd" data-go="agents" data-sel="${id}" data-tip="在「Agents · ${esc(a.name)}」中更改">${md ? logo(md.service.logo) : ic('users', 'sm')}<span class="lbl">${esc(md?.id || m || '沿用当前对话')}</span>${provider}${ic('ext', 'xs chev')}</button>`;
+    return `<button class="dd" data-go="agents" data-sel="${a.id}" data-tip="在「Agents · ${esc(a.name)}」中更改">${md ? logo(md.service.logo) : ic('users', 'sm')}<span class="lbl">${esc(md?.id || m || '沿用当前对话')}</span>${provider}${ic('ext', 'xs chev')}</button>`;
   }
 })();
