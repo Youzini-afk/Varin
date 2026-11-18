@@ -1,9 +1,13 @@
 export type FlashState = 'idle' | 'saving' | 'saved' | 'error';
-const flashListeners = new Set<(state: FlashState) => void>();
-/** Pages whose owner does not report through the shared persistence state call this after an acknowledged save. */
-export function flashSettingsSaved(state: Exclude<FlashState, 'idle'> = 'saved') { flashListeners.forEach(listener => listener(state)); }
 
-export function subscribeToSettingsFlash(listener: (state: FlashState) => void) {
-  flashListeners.add(listener);
-  return () => { flashListeners.delete(listener); };
+const listeners = new Set<(state: FlashState) => void>();
+
+export function subscribeSettingsSavedFlash(listener: (state: FlashState) => void) {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
+/** For owners that save without publishing through the shared persistence state. */
+export function flashSettingsSaved(state: Exclude<FlashState, 'idle'> = 'saved') {
+  listeners.forEach(listener => listener(state));
 }

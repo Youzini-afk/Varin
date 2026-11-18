@@ -7,8 +7,8 @@ import { getSettingsSaveState, subscribeToSettingsSaveState } from '@/lib/persis
 import { cn } from '@/lib/utils';
 import { SettingsNavigationContext } from '../settings-context';
 import { Btn, Ic, Info, Tip } from './controls';
-import { subscribeToSettingsFlash, type FlashState } from './saved-feedback';
 import { useSettingsShell } from './shell-context';
+import { subscribeSettingsSavedFlash, type FlashState } from './saved-feedback';
 
 /* ── Saved feedback: instant-save pages flash "Saved" in the header ── */
 function SavedIndicator() {
@@ -30,7 +30,7 @@ function SavedIndicator() {
     else if (shared === 'error') show('error');
   }, [shared, show]);
   React.useEffect(() => {
-    const unsubscribe = subscribeToSettingsFlash(show);
+    const unsubscribe = subscribeSettingsSavedFlash(show);
     return () => { unsubscribe(); window.clearTimeout(timer.current); };
   }, [show]);
   if (state === 'error') return <span className="sk-saved err" role="alert"><Ic name="error-warning" size="xs" />{t('settings.common.status.saveFailed')}</span>;

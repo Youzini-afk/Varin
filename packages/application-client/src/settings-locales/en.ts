@@ -3028,7 +3028,7 @@ export const settingsDict = {
   "settings.page.harness.localSemantic.stage.extracting": "Unpacking",
   "settings.page.harness.localSemantic.stage.verifying": "Verifying",
   "settings.page.harness.localSemantic.progress": "{downloaded} / {total}",
-  "settings.page.harness.localSemantic.install": "Install",
+  "settings.page.harness.localSemantic.install": "Download and install",
   "settings.page.harness.localSemantic.import": "Import package",
   "settings.page.harness.localSemantic.cancel": "Cancel",
   "settings.page.harness.localSemantic.retry": "Retry installation",

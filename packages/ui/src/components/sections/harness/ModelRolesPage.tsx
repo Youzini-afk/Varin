@@ -73,11 +73,10 @@ export function ModelRolesPage() {
           status={status(props.harness.nextStep.enabled && props.harness.models.nextStep?.enabled !== false, t('settings.page.chat.title'), () => shell.openPage('chat', { item: 'harness.next-step' }))} />
         <ImageToolsSettings {...props} embedded />
       </Section>
-      <Section title={t('settings.roles.retrieval')}>
-        <InferenceSettings {...props} kind="embedding" embedded />
-        <InferenceSettings {...props} kind="rerank" embedded />
+      <InferenceSettings {...props} kind="embedding">
         <LinkRow lead="database-2" label={t('settings.page.harness.embeddings.requests.title')} onClick={() => shell.openPage('agent-memory', { item: 'harness.embeddingRequests' })} />
-      </Section>
+      </InferenceSettings>
+      <InferenceSettings {...props} kind="rerank" />
       <Section title={t('settings.page.extensions.title')}>
         <HarnessModelField {...props} slot="agentPlanning" enableControl={false}
           status={<button type="button" className="sk-link" onClick={() => shell.openPage('extensions', { item: 'extensions.routing' })}>{t('settings.varin.extensions.driver.title')}</button>} />

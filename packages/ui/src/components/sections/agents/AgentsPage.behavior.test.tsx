@@ -151,7 +151,8 @@ test('keeps draft revisions across refresh; conflicts do not silently retry or o
   const before = await owner.read({ runtime: 'agent' });
   const external = before.profiles.find(profile => profile.id === 'varin:custom:legacy')!;
   if (external.config.kind !== 'custom') throw new Error('Expected custom fixture');
-  await owner.save({ runtime: 'agent', expectedRevision: before.revision, id: external.id, config: { ...external.config, agent: { ...external.config.agent, description: 'External change' } } });
+  const config = { ...external.config, agent: { ...external.config.agent, description: 'External change' } };
+  await act(async () => { await owner.save({ runtime: 'agent', expectedRevision: before.revision, id: external.id, config }); });
   await click(button('Refresh'));
   await act(async () => selectAgentProfile('varin:custom:legacy')); await settle();
   expect(container.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('false');

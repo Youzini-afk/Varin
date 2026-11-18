@@ -4,7 +4,8 @@ import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { DesktopLocalHostMode } from '@varin/application-client';
 const fixture = vi.hoisted(() => ({ invoke: vi.fn(), fetch: vi.fn(), translate: (key: string) => key, mode: {} as DesktopLocalHostMode }));
-vi.mock(import('@varin/application-client'), async importOriginal => ({ ...await importOriginal(), registerRuntimeEndpointSwitchBlocker: vi.fn(), runtimeFetch: fixture.fetch }));
+vi.mock('@varin/application-client', async importOriginal => ({ ...await importOriginal<typeof import('@varin/application-client')>(),
+  registerRuntimeEndpointSwitchBlocker: vi.fn(), runtimeFetch: fixture.fetch }));
 vi.mock('@/lib/desktop', () => ({ invokeDesktop: fixture.invoke, hasDesktopInvoke: () => true, isDesktopShell: () => true, restartDesktopApp: vi.fn(), startDesktopWindowDrag: vi.fn() }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: fixture.translate }) }));
 vi.mock('@/components/ui/button', () => ({ Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => <button {...props} /> }));

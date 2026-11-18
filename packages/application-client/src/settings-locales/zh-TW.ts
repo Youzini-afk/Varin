@@ -2660,7 +2660,7 @@ export const settingsDict = {
   "settings.page.harness.localSemantic.stage.extracting": "解壓縮中",
   "settings.page.harness.localSemantic.stage.verifying": "驗證中",
   "settings.page.harness.localSemantic.progress": "已下載 {downloaded} / {total}",
-  "settings.page.harness.localSemantic.install": "安裝",
+  "settings.page.harness.localSemantic.install": "下載並安裝",
   "settings.page.harness.localSemantic.import": "匯入本機套件",
   "settings.page.harness.localSemantic.cancel": "取消",
   "settings.page.harness.localSemantic.retry": "重試安裝",

@@ -7,7 +7,8 @@ const fixture = vi.hoisted(() => ({
   fetch: vi.fn(), restart: vi.fn(), translate: (key: string) => key,
   settings: { desktopLanAccessEnabled: false, desktopUiPassword: '', desktopLanAccessActive: false },
 }));
-vi.mock(import('@varin/application-client'), async importOriginal => ({ ...await importOriginal(), runtimeFetch: fixture.fetch, getRuntimeApiBaseUrl: () => 'http://127.0.0.1:57123', registerRuntimeEndpointSwitchBlocker: vi.fn() }));
+vi.mock('@varin/application-client', async importOriginal => ({ ...await importOriginal<typeof import('@varin/application-client')>(),
+  runtimeFetch: fixture.fetch, getRuntimeApiBaseUrl: () => 'http://127.0.0.1:57123', registerRuntimeEndpointSwitchBlocker: vi.fn() }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: fixture.translate }) }));
 vi.mock('@/lib/desktop', () => ({
   isDesktopShell: () => true, isDesktopLocalOriginActive: () => true, restartDesktopApp: fixture.restart,

@@ -1,6 +1,5 @@
 import * as React from 'react';
 import { getRuntimeApiBaseUrl, runtimeFetch } from '@varin/application-client';
-import { useI18n } from '@/lib/i18n';
 import {
   getDesktopLanAddress,
   getDesktopKeepAwake,
@@ -13,9 +12,12 @@ import {
   setDesktopLaunchAtLogin,
   setDesktopMinimizeToTray,
 } from '@/lib/desktop';
+import { useI18n } from '@/lib/i18n';
+
+export type DesktopNetworkSection = 'general' | 'access' | 'all';
 
 /** Desktop startup, LAN access and interface password, owned by the local desktop Host and shell. */
-export function useDesktopNetwork(section: 'general' | 'access' | 'all' = 'all') {
+export function useDesktopNetwork(section: DesktopNetworkSection = 'all') {
   const { t } = useI18n();
   const isLocalDesktop = isDesktopShell() && isDesktopLocalOriginActive();
   const isMacDesktop = isLocalDesktop

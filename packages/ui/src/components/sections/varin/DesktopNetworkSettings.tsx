@@ -5,7 +5,7 @@ import { SettingsActionBar } from '@/components/sections/shared/SettingsActionBa
 import { Icon } from '@/components/icon/Icon';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/lib/i18n';
-import { useDesktopNetwork } from './useDesktopNetwork';
+import { useDesktopNetwork, type DesktopNetworkSection } from './useDesktopNetwork';
 import {
   SettingsSection,
   SettingsCheckboxRow,
@@ -14,7 +14,7 @@ import {
   SETTINGS_ICON_BUTTON_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 
-export const DesktopNetworkSettings: React.FC<{ section?: 'general' | 'access' | 'all' }> = ({ section = 'all' }) => {
+export const DesktopNetworkSettings: React.FC<{ section?: DesktopNetworkSection }> = ({ section = 'all' }) => {
   const { t } = useI18n();
   const {
     isLocalDesktop, isMacDesktop, isLoading, isSaving, error, setError, isDirty, saveDisabled, lanUrl, passwordlessLanAccess,
