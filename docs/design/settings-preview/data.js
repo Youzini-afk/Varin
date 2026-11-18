@@ -49,7 +49,7 @@ window.DATA = {
     searchPick: { l: '选择搜索服务', d: '配置了多个搜索服务时，挑出最适合这次问题的那个。', def: 'jev-1.14', toggle: true },
     readPick: { l: '挑选原文段落', d: '读网页时按问题挑出相关段落，失败时照常整页阅读。', def: 'jev-1.14', toggle: true },
     dispatch: { l: '派发时选模型', d: '派发任务时，按各模型的简介挑一个合适的。', def: 'claude-haiku-5-5', toggle: true },
-    next: { l: '下一步建议', d: '每轮结束后起草一句你可能想说的话，按 Tab 采用。', def: 'deepseek-v4.1-flash', toggle: true, off: true },
+    next: { l: '下一步建议', d: '每轮结束后起草一句你可能想说的话，按 Tab 采用。', def: 'deepseek-v4.1-flash', think: '默认', toggle: true, off: true },
     imageGen: { l: '生成图片', d: '不指定时，Agent 没有生成图片的工具。', def: 'gpt-image-2.5', cap: '图像生成' },
     imageEdit: { l: '修改图片', d: '不指定时，Agent 没有修改图片的工具。', def: '', cap: '图片编辑' },
     embed: { l: '向量化', d: '记忆和 Bot 知识的语义检索。不指定时使用文本检索。', def: 'qwen3-embedding-0.6b', cap: '嵌入' },
