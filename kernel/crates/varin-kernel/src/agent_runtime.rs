@@ -2599,6 +2599,10 @@ fn dispatch(catalog: &mut Catalog, method: &str, params: Value) -> Result<Value,
         let query: ThreadCatalogQuery = serde_json::from_value(params)?;
         return Ok(serde_json::to_value(catalog.list_thread_catalog(&query).map_err(domain)?)?);
     }
+    if method == "runtime.branch.workspace.set" {
+        let command: SetBranchWorkspace = serde_json::from_value(params)?;
+        return Ok(serde_json::to_value(catalog.set_branch_workspace(command).map_err(domain)?)?);
+    }
     if method == "runtime.thread.update" {
         let command: ThreadMetadataUpdateParams = serde_json::from_value(params)?;
         return catalog.update_thread(&command).map_err(domain);

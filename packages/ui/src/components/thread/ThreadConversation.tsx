@@ -520,8 +520,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   // The empty home animates away only when this view is sending; arriving history or a switch replaces it at once.
   const sendDeparts = Boolean(snapshot && (pending || draft.pendingInput || draft.firstSend || firstMessage.message));
   // undefined: no choice yet; null: a confirmed chat-only choice. This is not an executor binding.
-  const branchDefault = branch && 'workspace_default' in branch
-    ? branch.workspace_default as { source: NonNullable<ThreadSnapshot['launch']>['selection']['source'] } | null : null;
+  const branchDefault = branch?.workspace_default ?? null;
   const confirmedWorkspaceSource = branchDefault ? branchDefault.source : launch ? launch.selection.source ?? null : undefined;
   const emptyWorkspacePath = preparedSource?.path ?? workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot;
   const localWorkspacePath = preparedSource?.source.resourceOwner.kind === 'local' ? preparedSource.path
@@ -546,6 +545,13 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     details={{
       goals: !readOnly && snapshot ? <ThreadGoal api={api.goals} identity={identity} goals={snapshot.goals} sourceRunId={run?.id} refresh={async () => { await projection.current?.refresh(); }} /> : undefined,
       sources: <>{!readOnly && !delegated && <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={draft.sourceSelection?.path ?? draft.workspacePath ?? initialWorkspacePath} draftSelection={draft.sourceSelection} chatOnly={draft.sourceDisabled}
+      {...(api.sources.setDefault && branch && !snapshot?.thread.parent_thread_id && !active && !pending && !draft.pendingInput
+        && (!launch?.selection.source || launch.selection.source.mode === 'live_root') ? { onSaveDefault: (source: import('@varin/application-client').ThreadSource | null) => act(async () => {
+          await api.sources.setDefault!(identity, { expectedRevision: branch.workspace_default?.revision ?? 0, source });
+          if (host === getRuntimeEndpointGeneration() && currentViewScope.current === viewScope)
+            useThreadDraftStore.getState().patch(draftKey, { preparedSource: null, workspacePath: undefined, sourceSelection: undefined,
+              projectId: undefined, sourceDisabled: false, creationDefaultsApplied: true });
+        }, false, true) } : {})}
       onUseChatOnly={() => { useThreadDraftStore.getState().patch(draftKey, { workspacePath: undefined, projectId: undefined, creationDefaultsApplied: true, preparedSource: null, sourceSelection: undefined, sourceDisabled: true }); }}
       active={active || pending} launch={snapshot?.launch ?? null} prepared={preparedSource} onPrepared={source => useThreadDraftStore.getState().patch(draftKey, { preparedSource: source, projectId: undefined, workspacePath: undefined, sourceSelection: undefined, ...(source ? { sourceDisabled: false } : {}), creationDefaultsApplied: true })} onPreparingChange={setPreparingSource} />}</>,
       context: <button type="button" onClick={() => openThreadContext(identity, initialWorkspacePath, undefined, readOnly)}>{t('harness.overview.contextDetails')}</button>,

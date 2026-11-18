@@ -170,6 +170,8 @@ export interface ThreadResolvedSource {
   path: string;
 }
 export interface ThreadSourcesAPI {
+  /** Confirm the default for subsequent native work. A conflict requires a fresh branch view. */
+  setDefault?(identity: ThreadIdentity, request: { expectedRevision: number; source: ThreadSource | null }, signal?: AbortSignal): Promise<import('@varin/protocol').BranchWorkspace>;
   /** Metadata only from the current branch Source or an explicitly prepared replacement. */
   files(identity: ThreadIdentity, options?: import('./thread-source-files.js').ThreadSourceFilesOptions, signal?: AbortSignal): Promise<import('./thread-source-files.js').ThreadSourceFilePage>;
   /** Explicit pending source discovery before Thread creation. */

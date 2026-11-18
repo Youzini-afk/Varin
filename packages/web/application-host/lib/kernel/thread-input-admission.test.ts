@@ -16,6 +16,9 @@ function fixture() {
   const credentialOwner = new ExistingHostCredentialOwner({ runtime: { getAuth: async () => undefined }, providerId: 'provider', providerFamily: 'fixture',
     currentScope: async () => ({ reference: 'fixture', authority: 'fixture', account: 'fixture', generation: 1 }), endpoint: configuration.endpoint, allowAnonymous: true });
   const runtime = {
+    setBranchWorkspace: vi.fn<AgentRuntimeClient['setBranchWorkspace']>(),
+    principalCanUseHostResources: vi.fn(async () => true),
+    sourceTools: vi.fn(async () => ['file_read']),
     createThread: vi.fn<AgentRuntimeClient['createThread']>(async (threadId, branchId) => ({ threadId, branchId })),
     inputReceipt: vi.fn<AgentRuntimeClient['inputReceipt']>(async () => null),
     inheritedInputReceipt: vi.fn<AgentRuntimeClient['inheritedInputReceipt']>(async () => null),
@@ -177,4 +180,36 @@ it('accepts the selected organization placement through the public create HTTP a
   expect(f.runtime.createThread.mock.calls.at(-1)?.[4]).toEqual({ containerId: null });
   await expect(f.api.create('malformed', { organization: { containerId: 'group', principalId: 'forged' } as never })).rejects.toMatchObject({ status: 400 });
   expect(f.runtime.createThread).toHaveBeenCalledTimes(2);
+});
+
+
+it('checks the branch revision and Host authority before consulting a live workspace, and uses only the acknowledged default on the next send', async () => {
+  const f = fixture();
+  const source = { resourceOwner: { kind: 'local' as const }, workspaceId: 'registered', executionWorkspaceId: 'registered',
+    mode: 'live_root' as const, liveRoot: { hostId: 'test', canonicalRoot: '/same/path', rootId: 'test-root' }, tools: ['file_read'] };
+  const wire = { resource_owner: source.resourceOwner, workspace_id: source.workspaceId, execution_workspace_id: source.executionWorkspaceId,
+    branch_id: null, revision: null, mode: source.mode, live_root: source.liveRoot };
+  const summary = (workspace: { revision: number; source: typeof wire | null } | null) => ({ thread_id: identity.threadId, principal_id: null, parent_thread_id: null,
+    branches: [{ branch_id: identity.branchId, active_run_id: null, latest_run: null, workspace_default: workspace }] });
+  f.runtime.thread.mockImplementation(async () => summary(null) as never);
+  f.runtime.principalCanUseHostResources.mockResolvedValueOnce(false);
+  await expect(f.api.sources.setDefault!(identity, { expectedRevision: 0, source })).rejects.toMatchObject({status:403});
+  expect(f.source).not.toHaveBeenCalled();
+  f.source.mockRejectedValueOnce(new SourceAdmissionError('source_authority_denied'));
+  await expect(f.api.sources.setDefault!(identity, { expectedRevision: 0, source })).rejects.toMatchObject({status:403});
+  expect(f.runtime.setBranchWorkspace).not.toHaveBeenCalled();
+  f.runtime.setBranchWorkspace.mockResolvedValueOnce({revision:1,source:wire});
+  await expect(f.api.sources.setDefault!(identity, {expectedRevision:0,source})).resolves.toMatchObject({revision:1});
+  expect(f.runtime.setBranchWorkspace).toHaveBeenCalledWith({threadId:identity.threadId,branchId:identity.branchId,expectedRevision:0,source:wire},expect.any(AbortSignal));
+  f.runtime.thread.mockImplementation(async () => summary({revision:1,source:wire}) as never);
+  await expect(f.api.sources.setDefault!(identity, {expectedRevision:0,source:null})).rejects.toMatchObject({status:409});
+  const fallback = vi.fn(async (): Promise<never> => { throw new Error('Creation defaults do not apply'); });
+  f.adapter.bindDefaultDeviceSource(fallback);
+  await f.api.submit(input);
+  expect(f.runtime.submit).toHaveBeenLastCalledWith(expect.objectContaining({expectedWorkspaceRevision:1,launch:expect.objectContaining({
+    inheritSource:true,source:expect.objectContaining({workspaceId:'registered'}), enabledTools:['file_read']})}));
+  f.runtime.thread.mockImplementation(async () => summary({revision:2,source:null}) as never);
+  await f.api.submit({...input,key:'chat-next'});
+  expect(f.runtime.submit).toHaveBeenLastCalledWith(expect.objectContaining({expectedWorkspaceRevision:2,launch:expect.objectContaining({source:null,enabledTools:[]})}));
+  expect(fallback).not.toHaveBeenCalled();
 });

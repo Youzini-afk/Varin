@@ -14,7 +14,7 @@ it('prepares the original cold collaboration ingress using the receiving thread 
   const credentialOwner = { scope: vi.fn(async () => credentialScope), release } as unknown as ExistingHostCredentialOwner;
   const runtime = {
     pendingBotWork: vi.fn(async () => [work]),
-    thread: vi.fn(async () => ({ principal_id: 'receiver' })),
+    thread: vi.fn(async () => ({ principal_id: 'receiver', branches: [{ branch_id: work.branchId, workspace_default: null }] })),
     principalCanUseHostResources: vi.fn(async () => false),
     admitBotWork: vi.fn(async () => ({ run_id: 'run:receiver' })),
   };

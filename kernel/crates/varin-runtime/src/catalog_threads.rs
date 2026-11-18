@@ -524,7 +524,7 @@ fn inspect_selected<P: rusqlite::Params>(db: &Connection, filter: &str, paramete
         terminal.bot_id,terminal.memory_scope,terminal.known,terminal.cycle,
         (SELECT json_group_array(json(branch)) FROM (
             SELECT json_object('branch_id',b.id,'head',b.head,'active_run_id',b.active_run,'latest_run',
-                json(latest.body)) AS branch
+                json(latest.body),'workspace_default',json((SELECT json_object('revision',w.revision,'source',json(w.source)) FROM branch_workspaces w WHERE w.branch_id=b.id ORDER BY w.revision DESC LIMIT 1))) AS branch
             FROM branches b LEFT JOIN latest_runs latest ON latest.branch_id=b.id AND latest.position=1 WHERE b.thread_id=t.id AND NOT EXISTS(SELECT 1 FROM events e WHERE e.subject=b.id AND e.kind='branch.deleted') ORDER BY b.rowid)),
         (SELECT json_group_array(project_id) FROM (SELECT DISTINCT c.project_id FROM runs r JOIN branches b ON b.id=r.branch_id
             LEFT JOIN context_checkpoints c ON c.id=r.context_checkpoint_id WHERE b.thread_id=t.id ORDER BY c.project_id))

@@ -35,7 +35,7 @@ import { botModelMatches } from '../bots/bot-model.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { ContextPreparer } from './thread-context.js';
 import { parseThreadSkills, type ThreadSkillInputPreparer } from './thread-skill-input.js';
-import { resourceThreadSource } from './thread-context.js';
+import { resourceSource, resourceThreadSource } from './thread-context.js';
 import { parseExplicitSkillCommand } from '../agent-resources/activation.js';
 import { KernelClientError, KernelRequestError } from './kernel-error.js';
 import { ResourceScopeError } from './thread-resource-scope.js';
@@ -229,12 +229,16 @@ export class ThreadAdapter {
           let source: ThreadSource | null = null;
           let initialContext: InitialContext;
           try {
-            if (bot) {
+            const thread = await this.requireIdentity(identity, signal);
+            const workspace = thread.branches.find(b => b.branch_id === identity.branchId)?.workspace_default;
+            if (workspace) {
+              if (!await this.runtime.principalCanUseHostResources?.(thread.principal_id)) throw new Error('Host source access is unavailable');
+              source = await this.workspaceSource(workspace, signal);
+            } else if (bot) {
               const location = await this.resolveSource(identity, { resourceOwner: { kind: 'local' }, path: bot.homeDir }, signal);
               source = (await this.prepareSource({ ...identity, key: work.inputId, resourceOwner: location.resourceOwner,
                 workspaceId: location.workspaceId, mode: 'live_root', content: { mode: 'saved-files' }, captureScopes: [] }, signal)).source;
             } else {
-              const thread = await this.runtime.thread(identity.threadId, signal);
               const canUseHostSources = await this.runtime.principalCanUseHostResources?.(thread.principal_id) ?? true;
               if (canUseHostSources) source = await this.defaultDeviceSource?.(identity) ?? null;
             }
@@ -262,6 +266,24 @@ export class ThreadAdapter {
       }, signal).catch(error => { if (!signal.aborted) this.onLaunchError(work.inputId, error); })
         .finally(() => this.coldWorkPreparations.delete(work.inputId));
     }
+  }
+  async setBranchWorkspace(identity: ThreadIdentity, expectedRevision: number, source: ThreadSource | null, signal?: AbortSignal) {
+    const thread = await this.requireIdentity(identity, signal);
+    if (!await this.runtime.principalCanUseHostResources?.(thread.principal_id)
+      || thread.parent_thread_id || source && source.mode !== 'live_root') {
+      throw Object.assign(new Error('Workspace switching is unavailable for this task or source'), { code: 'forbidden' });
+    }
+    const branch = thread.branches.find(b => b.branch_id === identity.branchId)!;
+    if (branch.active_run_id || (branch.workspace_default?.revision ?? 0) !== expectedRevision) {
+      throw Object.assign(new Error('Branch workspace or active work changed'), { code: 'thread-conflict' });
+    }
+    if (source) await this.admitSource(source, identity, undefined, signal);
+    return this.runtime.setBranchWorkspace({ threadId: identity.threadId, branchId: identity.branchId,
+      expectedRevision, source: resourceSource(source) }, signal);
+  }
+  private async workspaceSource(selected: import('./protocol.generated.js').BranchWorkspace, signal?: AbortSignal): Promise<ThreadSource | null> {
+    const source = resourceThreadSource(selected.source);
+    return source ? { ...source, tools: await this.runtime.sourceTools(source.mode, signal) } : null;
   }
   bindSourceDirectory(directory: SourceDirectory): void { this.sourceDirectory = directory; }
   private creationDefaults?: (identity: ThreadIdentity, signal?: AbortSignal) => Promise<NonNullable<ThreadSnapshot['creationDefaults']> | null>;
@@ -1119,8 +1141,11 @@ export class ThreadAdapter {
           }
         }
         // Existing branch source wins; a fresh source-less conversation uses its creation default.
-        const candidateSource = input.source === undefined ? await this.defaultDeviceSource?.(input) ?? null : input.source;
+        const workspace = thread.branches.find(b => b.branch_id === input.branchId)?.workspace_default;
+        const candidateSource = input.source !== undefined ? input.source
+          : workspace ? await this.workspaceSource(workspace) : await this.defaultDeviceSource?.(input) ?? null;
         const command: InputSubmitParams = { key: input.key, threadId: input.threadId, branchId: input.branchId,
+          ...(workspace ? { expectedWorkspaceRevision: workspace.revision } : {}),
           expectedHead: input.expectedHead, input: preparedInput, configuration: model.configuration,
           launch: { ...(input.agent ? { agent: { ...input.agent, name: null, tools: null } } : {}), inheritSource: input.source === undefined, source: candidateSource ? {
             resourceOwner: candidateSource.resourceOwner, workspaceId: candidateSource.workspaceId, executionWorkspaceId: candidateSource.executionWorkspaceId,
@@ -1147,11 +1172,13 @@ export class ThreadAdapter {
           }
         }
         await this.refreshContext(input);
-        if (input.source) await this.admitSource(input.source, input);
+        if (candidateSource && (input.source || workspace)) await this.admitSource(candidateSource, input);
         let initialContext: InitialContext | undefined;
         const explicitSkill = Boolean(input.skills?.length) || parseExplicitSkillCommand(input.text) !== null;
         const checkpoint = this.prepareContext || explicitSkill ? await this.runtime.context(input.branchId) : null;
-        const replacingSource = input.source !== undefined || Boolean(candidateSource && !checkpoint?.resources?.source);
+        const replacingSource = input.source !== undefined || (workspace
+          ? !checkpoint?.resources || !isDeepStrictEqual(resourceThreadSource(checkpoint.resources.source ?? null), candidateSource && { ...candidateSource, tools: [] })
+          : Boolean(candidateSource && !checkpoint?.resources?.source));
         const preparesResources = this.prepareContext && (replacingSource || !checkpoint);
         let inputPreparation: InputResourcePreparation | undefined;
         if (preparesResources || explicitSkill || this.prepareChildProfiles || input.agent) {
@@ -1172,8 +1199,8 @@ export class ThreadAdapter {
               initialContext = await this.prepareContext!.forSource(checkpoint, candidateSource);
               command.expectedContextCheckpoint = checkpoint.id;
             } else if (this.prepareContext && !checkpoint) {
-              let source = input.source ?? null;
-              if (!source && input.source === undefined) {
+              let source = workspace ? candidateSource : input.source ?? null;
+              if (!workspace && !source && input.source === undefined) {
                 const latest = thread.branches.find(branch => branch.branch_id === input.branchId)?.latest_run;
                 const previous = latest ? await this.runtime.launch(latest.id) : null;
                 const inherited = previous?.selection.source;

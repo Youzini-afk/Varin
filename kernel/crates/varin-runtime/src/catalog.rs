@@ -53,7 +53,7 @@ pub enum RuntimeError {
     },
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 100;
+pub(crate) const FORMAT: i64 = 101;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -150,6 +150,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
 
 fn check_catalog_schema(db: &Connection, version: i64) -> Result<()> {
     threads::check_format(db)?;
+    if version >= 101 { branch_workspace::check_format(db)?; }
     if version >= 99 { event_scope::check_format(db)?; }
     if version >= 98 { threads::check_hidden_format(db)?; }
     else { threads::check_legacy_hidden_format(db)?; }
@@ -254,6 +255,7 @@ fn initialize_metadata(
         attachments::initialize(&tx)?;
         model_references::initialize(&tx)?;
         organization::initialize(&tx)?;
+        branch_workspace::initialize(&tx)?;
     }
     titles::initialize(&tx)?;
     let epoch = tx.query_row(
@@ -472,7 +474,7 @@ impl Catalog {
         if let Some(operation_id) = child_operation {
             collaboration::validate_submission(&tx, operation_id, &command)?;
         }
-        if let submissions::SubmissionOrigin::User { checkpoint }
+        if let submissions::SubmissionOrigin::User { checkpoint, .. }
         | submissions::SubmissionOrigin::Child { checkpoint, .. }
         | submissions::SubmissionOrigin::ChildContinuation { checkpoint, .. }
         | submissions::SubmissionOrigin::Ingress { checkpoint, .. } = &origin
@@ -518,6 +520,19 @@ impl Catalog {
                 "branch head or execution owner changed".into(),
             ));
         }
+        let branch_default = if matches!(origin, submissions::SubmissionOrigin::User { .. } | submissions::SubmissionOrigin::Ingress { .. }) {
+            branch_workspace::read(tx, &command.branch_id)?
+        } else { None };
+        if let submissions::SubmissionOrigin::User { workspace_revision, .. } = origin {
+            if *workspace_revision != branch_default.as_ref().map_or(0, |d| d.revision) {
+                return Err(RuntimeError::Conflict("branch workspace changed during input preparation".into()));
+            }
+        }
+        if let Some(default) = &branch_default {
+            if launch.as_ref().is_none_or(|l| l.source != default.source) {
+                return Err(RuntimeError::Conflict("launch differs from the confirmed branch workspace".into()));
+            }
+        }
         if let Some((checkpoint, reference)) = initial_context {
             context::publish_metadata(&tx, &checkpoint, &reference)?;
         }
@@ -538,7 +553,9 @@ impl Catalog {
                 // conversation. An existing source (including a remote or isolated
                 // one) always wins; its original tools are inherited with it.
                 let inherits_existing = previous.selection.source.is_some();
-                selection.source = previous.selection.source.or_else(|| selection.source.take());
+                if branch_default.is_none() {
+                    selection.source = previous.selection.source.or_else(|| selection.source.take());
+                }
                 if let Some(source) = selection.source.as_mut().filter(|_| inherits_existing) {
                     if source.mode == crate::SourceMode::Materialized
                         && source.environment_run_id.is_none()
@@ -1932,6 +1949,8 @@ pub mod model_references;
 #[path = "catalog_export.rs"]
 pub mod export;
 
+#[path = "catalog_branch_workspace.rs"]
+pub mod branch_workspace;
 #[path = "catalog_threads.rs"]
 pub mod threads;
 #[path = "catalog_reads.rs"]

@@ -258,7 +258,9 @@ pub(in crate::catalog) fn project(
                     });
                 }
             } else if let Some(run) = latest_run(db, &row.branch_id)? {
-                if goal_hold(db, &run)? {
+                if branch_workspace::requires_preparation(db, &run)? {
+                    hold = Some(MessageActivationHold::SourceUnavailable)
+                } else if goal_hold(db, &run)? {
                     hold = Some(MessageActivationHold::GoalBlocked)
                 } else if let Some(id) = execution_for_run(db, &run.id)? {
                     let previous = delegated::execution(db, &id)?;
@@ -828,7 +830,7 @@ impl Catalog {
                 if ingress::hold(&self.db, &row, Some(&run))?.is_some() {
                     return Ok(());
                 }
-                if !run.state.terminal() || row_goal_hold(&self.db, &row, &run)? {
+                if !run.state.terminal() || row_goal_hold(&self.db, &row, &run)? || branch_workspace::requires_preparation(&self.db, &run)? {
                     return Ok(());
                 }
                 if !branches.insert(row.branch_id.clone()) {
@@ -1037,7 +1039,7 @@ impl Catalog {
                 {
                     return Ok(RequestActivationAdmission::Stale);
                 }
-                if ingress::hold(&self.db, &row, Some(&actual))?.is_some()
+                if branch_workspace::requires_preparation(&self.db, &actual)? || ingress::hold(&self.db, &row, Some(&actual))?.is_some()
                     || row_goal_hold(&self.db, &row, &actual)?
                 {
                     return Ok(RequestActivationAdmission::Held);

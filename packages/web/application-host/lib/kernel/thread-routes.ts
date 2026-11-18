@@ -194,6 +194,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'mcp/interactions/respond': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'response'],
     'mcp/interactions/sampling/request': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'action', 'model', 'editedRequest'],
     'mcp/interactions/sampling/output': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'action'],
+    'source/set-default': ['runtime', 'threadId', 'branchId', 'source', 'expectedRevision'],
     'source/files': ['runtime', 'threadId', 'branchId', 'source', 'query', 'type', 'limit', 'cursor'],
     'source/draft-files': ['source', 'query', 'type', 'limit', 'cursor'],
     'source/list': ['runtime', 'threadId', 'branchId'],
@@ -663,6 +664,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('fork', 'write', (body, signal) => adapter.fork({ ...identity(body), key: text(body.key), headId: body.headId === null ? null : text(body.headId) }, signal));
   post('branch/delete', 'write', (body, signal) => adapter.deleteBranch({ ...identity(body), key: text(body.key) }, signal));
   post('source/list', 'read', (body, signal) => adapter.listSourceTargets(Object.keys(body).length ? identity(body) : null, signal));
+  post('source/set-default', 'write', (body, signal) => adapter.setBranchWorkspace(identity(body),
+    revision(body.expectedRevision), body.source === null ? null : threadSource(body.source), signal));
   post('source/resolve', 'read', (body, signal) => adapter.resolveSource(identity(body), { resourceOwner: parseSourceResourceOwner(body.resourceOwner), path: text(body.path) }, signal));
   post('source/prepare', 'write', (body, signal) => {
     if (body.mode !== 'fixed_branch' && body.mode !== 'materialized' && body.mode !== 'live_root'&&body.mode!=='native_workspace') throw new Error('Invalid source mode');

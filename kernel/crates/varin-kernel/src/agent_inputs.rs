@@ -99,6 +99,7 @@ fn submit_input_with_original_source(
         .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
         .prepare_submission(command, initial, initial_personalization)
         .map_err(domain)?
+        .with_workspace_revision(u64::try_from(p.expected_workspace_revision.unwrap_or(0)).map_err(|_| KernelError::Protocol("workspace revision must be nonnegative".into()))?)
         .with_resources(initial_resources)
         .with_input_preparation(p.input_preparation)
         .with_expected_context_checkpoint(p.expected_context_checkpoint);

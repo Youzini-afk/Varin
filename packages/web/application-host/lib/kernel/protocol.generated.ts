@@ -224,6 +224,7 @@ export type KernelMethod =
   | "runtime.model.presentations"
   | "runtime.thread.catalog.list"
   | "runtime.thread.attention.read"
+  | "runtime.branch.workspace.set"
   | "runtime.thread.update"
   | "runtime.thread.title.prepare"
   | "runtime.thread.title.finish"
@@ -3274,7 +3275,15 @@ export interface ThreadOperationsParams {
   branchId?: string;
 }
 
+export interface BranchWorkspace {
+  revision: number;
+  source: LaunchSource | null;
+}
+
+export interface SetBranchWorkspace { threadId: string; branchId: string; expectedRevision: number; source: LaunchSource | null; }
+
 export interface ThreadBranch {
+  workspace_default?: BranchWorkspace | null;
   branch_id: string;
   head: string | null;
   active_run_id: string | null;
@@ -4102,6 +4111,7 @@ export interface InitialContext {
 }
 
 export interface InputSubmitParams {
+  expectedWorkspaceRevision?: number;
   inputPreparation?: InputResourcePreparation;
   expectedContextCheckpoint?: string;
   initialContext?: InitialContext;
@@ -7781,6 +7791,7 @@ export type KernelMethodParams = {
   "runtime.model.presentations": ModelPresentationParams;
   "runtime.thread.catalog.list": ThreadCatalogQuery;
   "runtime.thread.attention.read": PrincipalQuery;
+  "runtime.branch.workspace.set": SetBranchWorkspace;
   "runtime.thread.update": ThreadMetadataUpdateParams;
   "runtime.thread.title.prepare": ThreadTitlePrepareParams;
   "runtime.thread.title.finish": ThreadTitleFinishParams;
@@ -9967,6 +9978,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.thread.attention.read";
       params: PrincipalQuery;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.branch.workspace.set";
+      params: SetBranchWorkspace;
       epoch?: string;
       grantId?: string;
     }

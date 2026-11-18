@@ -175,6 +175,7 @@ impl Catalog {
             context::publish_metadata(&tx, &checkpoint, &reference)?;
         }
         event(&tx, &target, 1, "branch.created", identity)?;
+        branch_workspace::inherit_at(&tx, &source, &target, head.as_deref())?;
         tx.commit()?;
         Ok(receipt)
     }

@@ -4,6 +4,7 @@ use super::*;
 pub struct SubmissionPreparation {
     input_id: String,
     model_attachments: Vec<super::attachments::Attachment>,
+    expected_workspace_revision: u64,
     existing: Option<(Value, Receipt)>,
     input_preparation: Option<resources::InputResourcePreparation>,
     expected_context_checkpoint: Option<String>,
@@ -31,6 +32,7 @@ pub(super) struct SubmissionIdentity {
 }
 pub(super) enum SubmissionOrigin {
     User {
+        workspace_revision: u64,
         checkpoint: Option<String>,
     },
     Child {
@@ -184,6 +186,7 @@ impl Catalog {
         Ok(SubmissionPreparation {
             input_id,
             model_attachments,
+            expected_workspace_revision: 0,
             existing,
             input_preparation: None,
             expected_context_checkpoint: None,
@@ -207,6 +210,11 @@ impl Catalog {
 }
 
 impl SubmissionPreparation {
+    /// Fence selection as observed by the Host before it staged the new context.
+    pub fn with_workspace_revision(mut self, revision: u64) -> Self {
+        self.expected_workspace_revision = revision;
+        self
+    }
     /// The executable owner supplies today's directory. A new round may refresh
     /// schemas/remove retired tools, but never gain names absent from its predecessor.
     pub fn with_tool_catalog(mut self, tools: Vec<crate::execution::ToolSchema>) -> Self {
@@ -323,6 +331,7 @@ impl SubmissionPreparation {
                 inherited_tools: None,
                 initial: None,
                 origin: origin.unwrap_or(SubmissionOrigin::User {
+                    workspace_revision: self.expected_workspace_revision,
                     checkpoint: self.checkpoint,
                 }),
                 _publication: self.publication,
@@ -355,9 +364,12 @@ impl SubmissionPreparation {
             match (&self.inherited_launch, &self.current_tool_catalog) {
                 (Some(previous), Some(available)) if previous.source.is_some() => {
                     let old: Vec<crate::execution::ToolSchema> = serde_json::from_value(self.content.load(&previous.base_tools_ref)?)?;
-                    let mode = previous.source.as_ref().expect("inherited source").mode;
+                    let mode = if self.expected_workspace_revision > 0 {
+                        launch.as_ref().and_then(|l| l.source.as_ref()).map(|s| s.mode)
+                    } else { previous.source.as_ref().map(|s| s.mode) };
                     let mut tools = available.iter().filter(|tool| old.iter().any(|prior| prior.name == tool.name)
-                        && tool.requirements.as_ref().is_none_or(|requirements| requirements.accepts_mode(mode)))
+                        && tool.requirements.as_ref().is_none_or(|requirements| mode.is_some_and(|m| requirements.accepts_mode(m)))
+                        && (self.expected_workspace_revision == 0 || launch.as_ref().is_some_and(|l| l.tools.iter().any(|t| t.name == tool.name))))
                         .cloned().collect::<Vec<_>>();
                     tools.sort_by(|a,b|a.name.cmp(&b.name));
                     Some((previous.base_tools_ref.clone(), self.content.save(&serde_json::to_value(tools)?)?))
@@ -377,6 +389,7 @@ impl SubmissionPreparation {
             personalization: self.personalization,
             resources: self.resources,
             origin: origin.unwrap_or(SubmissionOrigin::User {
+                workspace_revision: self.expected_workspace_revision,
                 checkpoint: self.checkpoint,
             }),
             epoch: self.epoch,
@@ -442,7 +455,7 @@ impl PreparedSubmission {
             resources::validate_raw_input(&command.input)?;
         }
         let checkpoint = match &origin {
-            SubmissionOrigin::User { checkpoint }
+            SubmissionOrigin::User { checkpoint, .. }
             | SubmissionOrigin::Child { checkpoint, .. }
             | SubmissionOrigin::ChildContinuation { checkpoint, .. }
             | SubmissionOrigin::Ingress { checkpoint, .. } => checkpoint,
@@ -450,13 +463,14 @@ impl PreparedSubmission {
         };
         let active = current.map(context::CheckpointRead::load).transpose()?;
         let selected_source = launch.as_ref().and_then(|launch| launch.source.clone());
-        let context_source = if inherit_source {
+        let branch_default = matches!(&origin, SubmissionOrigin::User { workspace_revision, .. } if *workspace_revision > 0);
+        let context_source = if inherit_source && !branch_default {
             active.as_ref().and_then(|checkpoint| checkpoint.resources.as_ref()).and_then(|resources| resources.source.clone())
                 .or_else(|| selected_source.clone())
         } else { selected_source.clone() };
         let normalized_source =
             super::followups::normalized_source(context_source.clone(), &run_id);
-        if resources.is_none() && !inherit_source && selected_source.is_some() {
+        if resources.is_none() && (branch_default || (!inherit_source && selected_source.is_some())) {
             if let Some(previous) = active
                 .as_ref()
                 .and_then(|checkpoint| checkpoint.resources.as_ref())
