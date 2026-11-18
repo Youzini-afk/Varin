@@ -151,7 +151,16 @@ export interface ThreadSourceTarget {
   label: string;
   capabilities: string[];
 }
+/** Presentation data only: resolution and preparation stay with the selected source owner. */
+export interface ThreadLocationDirectory {
+  servicePath: string;
+  defaultId: string | null;
+  locations: Array<{ id: string; name: string; unavailable: string } | {
+    id: string; name: string; resourceOwner: SourceResourceOwner; path: string; workspaceId?: string; selection?: ProjectSourceSelection;
+  }>;
+}
 export interface ThreadSourceTargets {
+  workspace?: ThreadLocationDirectory;
   targets: ThreadSourceTarget[];
   unavailable: Array<{ connectionId: string; label: string; message: string }>;
 }

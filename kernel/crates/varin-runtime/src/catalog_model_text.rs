@@ -298,6 +298,7 @@ impl Catalog {
             waiting_on: None,
             intent: serde_json::to_value(frozen)?,
             result: Some(OperationResultMetadata::Control { value: Value::Null }),
+            resource_source: None,
             host_job: None,
             mcp_resource_subscription: None,
             managed_process: None,

@@ -249,3 +249,30 @@ it('freezes the managed Host and resolves its Documents workspace once without c
   expect(container.querySelector('[aria-label="Prepared workspace"]')?.textContent).toContain('Remote B');
   expect(container.textContent).toContain('Available source tools: file_read');
 });
+
+it('opens a new draft without overriding its preference and pins the selected saved folder to its original Host', async () => {
+  const f = await fixture();
+  const local = { kind: 'local' } as const;
+  const remote = { kind: 'managed_host', hostId: 'b', connectionId: 'c', endpointIdentity: 'endpoint' } as const;
+  const list = async () => ({ targets: [{ resourceOwner: local, label: 'Dev', capabilities: [] }, { resourceOwner: remote, label: 'Test', capabilities: [] }],
+    unavailable: [], workspace: { servicePath: '/srv', defaultId: 'dev', locations: [
+      { id: 'dev', name: 'Logs', resourceOwner: local, path: '/same', workspaceId: 'a-docs' },
+      { id: 'lab', name: 'Logs', resourceOwner: remote, path: '/same', workspaceId: 'b-docs' },
+    ] } });
+  const api = { ...f.api, sources: { ...f.api.sources, list } };
+  const onDraftSelection = vi.fn();
+  await act(async () => root.render(<ThreadSourcePicker api={api} identity={null} active={false} launch={null}
+    prepared={null} onPrepared={f.onPrepared} onPreparingChange={f.onPreparingChange} onDraftSelection={onDraftSelection} />));
+  expect(onDraftSelection).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('Default for new conversations: Dev · /same');
+  await edit('Saved work locations', 'lab');
+  expect(onDraftSelection).toHaveBeenLastCalledWith(expect.objectContaining({ resourceOwner: remote, expectedWorkspaceId: 'b-docs', path: '/same', locationLabel: 'Test · Logs' }));
+  expect(f.api.sources.resolve).not.toHaveBeenCalled();
+  const selected = onDraftSelection.mock.calls.at(-1)![0];
+  await act(async () => root.render(<ThreadSourcePicker key="known" api={api} identity={identity} active={false} launch={null}
+    draftSelection={selected} prepared={null} onPrepared={f.onPrepared} onPreparingChange={f.onPreparingChange} />));
+  await click('Prepare workspace');
+  expect(f.api.sources.resolve).toHaveBeenCalledWith(identity, { resourceOwner: remote, path: '/same' }, expect.any(AbortSignal));
+  expect(container.textContent).toContain('saved workspace registration changed');
+  expect(f.prepareSource).not.toHaveBeenCalled();
+});

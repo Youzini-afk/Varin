@@ -530,7 +530,9 @@ async function runWithHosts(frame: Record<string, unknown>, a: KernelClient, b: 
     write({kind:'fixture-result',ok:true,reads:(await fixture<{reads:number}>('fixture.file.stats')).reads});return;
   }
   const coordinated = new Promise<Record<string, unknown>>((resolve, reject) => { coordinatorResult = { resolve, reject }; });
-  write({ kind: 'fixture-coordinator-tool', binding, source: selected });
+  write({ kind: 'fixture-coordinator-tool', binding, source: selected,
+    defaultSource: { resource_owner: { kind: 'local' }, mode: 'live_root', workspace_id: workspaceId, execution_workspace_id: workspaceId,
+      live_root: localRoot, branch_id: null, revision: null } });
   const coordinatedResult = await coordinated;
   assert.equal(coordinatedResult.ok, true);
   assert(JSON.stringify(coordinatedResult.result).includes('B_ORIGINAL_SOURCE'));

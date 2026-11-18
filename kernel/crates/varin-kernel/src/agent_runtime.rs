@@ -2736,7 +2736,7 @@ pub(crate) fn record_process_interaction(
             KernelError::Authorization("process input resource identity missing".into())
         })?;
         let target: Vec<Value> = serde_json::from_str(&claim.key)?;
-        let source=catalog.launch_metadata(&operation.run_id).map_err(domain)?.and_then(|l|l.selection.source).ok_or_else(||KernelError::Authorization("Original process source missing".into()))?;
+        let source=catalog.original_operation_source(&operation).map_err(domain)?.ok_or_else(||KernelError::Authorization("Original process source missing".into()))?;
         let (expected_key, expected_method) = match native.executor.as_str() {
             "process_write" => ("process-input", "process.write"),
             "process_resize" => ("process-size", "process.resize"),

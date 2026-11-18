@@ -1,4 +1,4 @@
-import { normalizeThemeLibrary, isChatContentWidth } from '@varin/application-client';
+import { parseWorkspaceLocations, parseDefaultWorkspaceLocationId, normalizeThemeLibrary, isChatContentWidth } from '@varin/application-client';
 import { normalizeOutboundNetwork } from '../harness/egress-settings.js';
 
 export type SettingsRecord = Record<string, unknown>;
@@ -266,6 +266,8 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (typeof candidate.desktopUiPassword === 'string') {
       result.desktopUiPassword = candidate.desktopUiPassword.trim();
     }
+    if (candidate.workspaceLocations !== undefined) result.workspaceLocations = parseWorkspaceLocations(candidate.workspaceLocations);
+    if (candidate.defaultWorkspaceLocationId !== undefined) result.defaultWorkspaceLocationId = parseDefaultWorkspaceLocationId(candidate.defaultWorkspaceLocationId);
     if (Array.isArray(candidate.projects)) {
       const projects = sanitizeProjects(candidate.projects);
       if (projects) {

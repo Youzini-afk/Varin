@@ -1058,7 +1058,7 @@ impl ExecutionBodyPreparation {
                     }
                 }
             }
-            ExecutionRecord::ToolAdmitted { context, tool } => {
+            ExecutionRecord::ToolAdmitted { context, tool } | ExecutionRecord::ResourceToolAdmitted { context, tool, .. } => {
                 let intent = ToolIntent::write(&self.content, &context.origin, tool)?;
                 calls.insert(tool.call.call_id.clone(), intent.call().clone());
                 admitted.insert(tool.call.call_id.clone(), intent);
@@ -1346,7 +1346,7 @@ impl Catalog {
             | ExecutionRecord::ModelDispatched { request_id }
             | ExecutionRecord::ModelFinished { request_id, .. }
             | ExecutionRecord::ToolBatchCommitted { request_id, .. } => Some(request_id.as_str()),
-            ExecutionRecord::ToolAdmitted { context, .. }
+            ExecutionRecord::ToolAdmitted { context, .. } | ExecutionRecord::ResourceToolAdmitted { context, .. }
             | ExecutionRecord::ToolDispatched { context, .. }
             | ExecutionRecord::ToolSettled { context, .. } => match &context.origin {
                 ToolOrigin::ModelStep { request_id } => Some(request_id.as_str()),
@@ -1733,7 +1733,7 @@ impl Catalog {
                     ],
                 )?;
             }
-            ExecutionRecord::ToolAdmitted { context, tool } => {
+            ExecutionRecord::ToolAdmitted { context, tool } | ExecutionRecord::ResourceToolAdmitted { context, tool, .. } => {
                 if context.run_id != run_id
                     || context.operation_id != context.origin.operation_id(&tool.call.call_id)
                 {
@@ -1790,11 +1790,16 @@ impl Catalog {
                         "tool call changed since admission".into(),
                     ));
                 }
+                let resource_source = match record {
+                    ExecutionRecord::ResourceToolAdmitted { source, .. } => { source.validate()?; Some(source) }
+                    _ => None,
+                };
                 let key = &context.operation_id;
                 if let Some(mut previous) = optional_record::<Operation>(&tx, "operations", key)? {
                     if previous.run_id != run_id
                         || previous.phase != OperationPhase::Accepted
                         || previous.effect != Effect::None
+                        || previous.resource_source.as_ref() != resource_source
                         || previous.intent != serde_json::to_value(intent)?
                         || previous.call_completion.is_some()
                     {
@@ -1806,6 +1811,7 @@ impl Catalog {
                     put(&tx, "operations", key, &previous)?;
                 } else {
                     let op = Operation {
+                        resource_source: resource_source.cloned(),
                         host_job: None,
                         mcp_resource_subscription: None,
                         managed_process: None,
@@ -2256,7 +2262,7 @@ impl Catalog {
                 ExecutionRecord::RequestNotDispatched { .. } => "request_not_dispatched",
                 ExecutionRecord::ModelDispatched { .. } => "model_dispatched",
                 ExecutionRecord::ModelFinished { .. } => "model_finished",
-                ExecutionRecord::ToolAdmitted { .. } => "tool_admitted",
+                ExecutionRecord::ToolAdmitted { .. } | ExecutionRecord::ResourceToolAdmitted { .. } => "tool_admitted",
                 ExecutionRecord::ToolDispatched { .. } => "tool_dispatched",
                 ExecutionRecord::ToolSettled { .. } => "tool_settled",
                 ExecutionRecord::ToolBatchCommitted { .. } => "tool_batch_committed",

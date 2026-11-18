@@ -574,6 +574,7 @@ impl Catalog {
             result: Some(OperationResultMetadata::Control {
                 value: serde_json::to_value(State::default())?,
             }),
+            resource_source: None,
             host_job: None,
             mcp_resource_subscription: None,
             managed_process: None,

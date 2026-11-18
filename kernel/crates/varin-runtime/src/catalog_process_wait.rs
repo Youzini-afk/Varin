@@ -202,17 +202,19 @@ pub(super) fn process_observation(
         let original =
             optional_record::<launch_content::LaunchMetadata>(db, "run_launches", &owner.id)?
                 .ok_or_else(|| RuntimeError::NotFound("process source launch".into()))?;
+        let original_source = process.resource_source.clone().or(original.selection.source.clone());
         let current =
             optional_record::<launch_content::LaunchMetadata>(db, "run_launches", &run.id)?
                 .ok_or_else(|| RuntimeError::NotFound("observer source launch".into()))?;
         if !matches!(process.lifetime, Lifetime::Thread | Lifetime::Environment)
-            || original.selection.source.is_none()
-            || (followups::normalized_source(original.selection.source, &owner.id)
+            || original_source.is_none()
+            || (followups::normalized_source(original_source, &owner.id)
                 != followups::normalized_source(current.selection.source, &run.id)
                 && (!process
                     .external_receipt
                     .as_ref()
                     .is_some_and(|r| r.executor_stopped)
+                    || process.resource_source.as_ref().is_some_and(|source| Some(source) != original.selection.source.as_ref())
                     || delegated_source_lineage(db, &owner, run)?.is_none()))
         {
             return Err(RuntimeError::Conflict(
@@ -241,8 +243,7 @@ impl Catalog {
         let owner = self.run(&process.run_id)?;
         let target_run = self.run(run_id)?;
         let source = self
-            .launch_metadata(&owner.id)?
-            .and_then(|v| v.selection.source)
+            .original_operation_source(&process)?
             .ok_or_else(|| RuntimeError::NotFound("process source".into()))?;
         let target = self
             .launch_metadata(run_id)?
@@ -273,7 +274,7 @@ impl Catalog {
         let original=self.operation(operation)?;
         let (kind,owner)=if let Some(managed)=&original.managed_process {
             super::managed_process::require_process(&original)?;
-            let source=self.launch_metadata(&original.run_id)?.and_then(|launch|launch.selection.source)
+            let source=self.original_operation_source(&original)?
                 .ok_or_else(||RuntimeError::NotFound("Original managed process source is unavailable".into()))?;
             (if managed.is_environment(){ReferenceKind::Script}else{ReferenceKind::Process},serde_json::to_string(&source.resource_owner)?)
         } else if let Some(job)=&original.host_job {

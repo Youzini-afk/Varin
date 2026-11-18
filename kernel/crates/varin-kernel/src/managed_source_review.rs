@@ -1210,6 +1210,10 @@ fn coordinator_read(
     ) -> Result<Value, Box<dyn std::error::Error>> {
         let source: varin_runtime::catalog::launches::SourceSelection =
             serde_json::from_value(frame["binding"]["source"].clone())?;
+        let launch_source: varin_runtime::catalog::launches::SourceSelection =
+            serde_json::from_value(frame["defaultSource"].clone())?;
+        assert_eq!(source.workspace_id, launch_source.workspace_id);
+        assert_ne!(source.resource_owner, launch_source.resource_owner);
         let address = &frame["binding"];
         let binding: crate::tools::ToolBinding = serde_json::from_value(
             json!({"resourceOwner":source.resource_owner,"grantId":address["authorityId"],"runId":run,"threadId":"thread:managed-review","workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,"rootId":address["physicalRoot"]["rootId"],"sourceMode":"live_root","liveRoot":source.live_root,"enabledTools":["file_read"],"remoteAuthority":{"authorityId":address["authorityId"],"resourceEpoch":address["resourceEpoch"],"executionOwner":address["executionOwner"]}}),
@@ -1252,7 +1256,7 @@ fn coordinator_read(
                 varin_runtime::catalog::launches::LaunchSelection::from_binding(
                     &request,
                     policy.clone(),
-                    Some(source.clone()),
+                    Some(launch_source.clone()),
                 ),
             )?;
             db.prepare_execution(run, request.clone(), policy.clone(), Value::Null)?
@@ -1330,7 +1334,7 @@ fn coordinator_read(
             origin,
             tool_schema_generation: 1,
             tools: Arc::new(schemas),
-            source: Some(source),
+            source: Some(launch_source.clone()),
         };
         let executor = Arc::new(crate::tools::KernelToolExecutor::new(
             binding,
@@ -1339,17 +1343,12 @@ fn coordinator_read(
         let cancel = CancellationToken::default();
         let bound = executor.clone().bind_call(&call, &frozen, &cancel)?;
         let contract = bound.prepare(&cancel)?;
-        catalog.commit(
-            run,
-            epoch,
-            &ExecutionRecord::ToolAdmitted {
-                context: context.clone(),
-                tool: AdmittedTool {
-                    call,
-                    contract: contract.clone(),
-                },
-            },
-        )?;
+        assert!(bound.requires_operation(), "the remote owner must receive a delivery acknowledgement");
+        let tool = AdmittedTool { call, contract: contract.clone() };
+        let admitted = |source| ExecutionRecord::ResourceToolAdmitted { context: context.clone(), tool: tool.clone(), source };
+        catalog.commit(run, epoch, &admitted(bound.resource_source().unwrap().clone()))?;
+        assert!(catalog.commit(run, epoch, &admitted(launch_source.clone())).is_err(),
+            "an accepted call cannot change target, even with the same path/workspace ID");
         bound.authorize(&context, &contract, &cancel)?;
         let owner = bound.executor_owner();
         catalog.commit(
@@ -1381,6 +1380,7 @@ fn coordinator_read(
             &catalog, &resources, &pending
         )?);
         let operation = catalog.lock().unwrap().operation(&context.operation_id)?;
+        assert_eq!(operation.resource_source.as_ref(), Some(&source));
         assert_eq!(operation.execution_owner, Some(owner));
         assert_eq!(operation.outcome, Some(varin_runtime::Outcome::Succeeded));
         // The production policy runner freezes the original ToolDirectory and
@@ -1410,6 +1410,7 @@ fn coordinator_read(
             .iter()
             .find(|op| op.id != context.operation_id && crate::reconcile::is_managed_read(op))
             .expect("policy read has its actual Catalog Operation");
+        assert_eq!(policy_read.resource_source.as_ref(), Some(&source), "directory forwards the bound physical address");
         assert!(catalog
             .lock()
             .unwrap()

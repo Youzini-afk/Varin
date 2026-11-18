@@ -14,13 +14,7 @@ impl KernelResourceClient {
         // A fixed-source command can produce a working result without admitting
         // any text-mutation journals. Nothing needs physical mutation recovery.
         if operations.is_empty() { return Ok(Vec::new()); }
-        if binding.source_mode == SourceMode::FixedBranch {
-            return Err(KernelError::Authorization(
-                "mutation recovery requires the original physical source".into(),
-            ));
-        }
-        let executor = KernelToolExecutor::new(binding.clone(), self.clone())
-            .map_err(|error| KernelError::Authorization(error.to_string()))?;
+        let mut local_executor = None;
         let cancellation = CancellationToken::default();
         let mut receipts = Vec::new();
         for operation in operations {
@@ -45,7 +39,8 @@ impl KernelResourceClient {
                     "mutation identity differs from its durable origin".into(),
                 ));
             }
-            if !binding.resource_owner.is_local() {
+            let original_source = operation.resource_source.as_ref();
+            if original_source.map_or(!binding.resource_owner.is_local(), |source| !source.resource_owner.is_local()) {
                 if !matches!(admitted.call.name.as_str(), "file_write" | "file_edit" | "file_restore") {
                     return Err(KernelError::Authorization(
                         "Managed receipt is not a text mutation".into(),
@@ -89,6 +84,17 @@ impl KernelResourceClient {
                 }
                 continue;
             }
+            if original_source.is_some_and(|source| Some(source) != binding.source_selection().ok().as_ref()) {
+                return Err(KernelError::Authorization("Original local mutation source is unavailable; its receipt cannot be reconciled here".into()));
+            }
+            if binding.source_mode == SourceMode::FixedBranch {
+                return Err(KernelError::Authorization("mutation recovery requires the original physical source".into()));
+            }
+            if local_executor.is_none() {
+                local_executor = Some(KernelToolExecutor::new(binding.clone(), self.clone())
+                    .map_err(|error| KernelError::Authorization(error.to_string()))?);
+            }
+            let executor = local_executor.as_ref().expect("local executor initialized");
             let original = executor
                 .operation(Some(&context), &admitted.call)
                 .map_err(|error| KernelError::Authorization(error.to_string()))?;

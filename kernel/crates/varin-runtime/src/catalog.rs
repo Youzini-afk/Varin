@@ -906,6 +906,7 @@ impl Catalog {
             return Err(RuntimeError::Invalid("run cancellation pending".into()));
         }
         let op = Operation {
+            resource_source: None,
             host_job: None,
             mcp_resource_subscription: None,
             managed_process: None,

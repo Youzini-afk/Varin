@@ -323,7 +323,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
           sendDisabled={sendDisabled} pending={sending} active={false} retrying={locked} hasInput={hasInput}
           onFiles={files => void addFiles(files)} onAttachImages={() => fileInput.current?.click()} onAttachPdfs={() => pdfInput.current?.click()}
           onGoal={() => { if (!locked) patch({ goalArmed: !draft.goalArmed }); }} goalArmed={draft.goalArmed}
-          onWorkspace={draft.botId ? undefined : () => setWorkspaceOpen(true)} workspaceLabel={sourcePath ? formatDirectoryName(sourcePath) : t('thread.composer.chatOnly')}
+          onWorkspace={draft.botId ? undefined : () => setWorkspaceOpen(true)} workspaceLabel={draft.sourceSelection?.locationLabel ?? (sourcePath ? formatDirectoryName(sourcePath) : t(draft.sourceDisabled || draft.harnessId ? 'thread.composer.chatOnly' : 'chat.modelControls.default'))}
           workspacePath={!draft.sourceSelection || draft.sourceSelection.resourceOwner.kind === 'local' ? sourcePath : undefined}
           imageReferences={draftImageReferences(draft)} attachmentNames={draft.files?.map(item => item.filename) ?? []} skills={[]}>
           <div className="space-y-2 px-3 empty:hidden">
@@ -353,7 +353,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
     <WorkOverviewControl open={workspaceOpen} compactOpen={false} rows={[]} attention={false}
       onOpenChange={setWorkspaceOpen} onCompactChange={() => {}} onSelect={() => {}}>
       {workspaceOpen && <div className="min-h-0 overflow-y-auto"><ThreadSourcePicker api={api} identity={null} initialPath={draft.workspacePath} draftSelection={draft.sourceSelection}
-        onDraftSelection={sourceChanged} active={locked} launch={null} prepared={null} onPrepared={ignorePrepared} onPreparingChange={ignorePrepared}
+        onDraftSelection={sourceChanged} chatOnly={draft.sourceDisabled} onUseDefault={draft.harnessId || draft.botId ? undefined : () => { if (!externalSending.current) void preparation.change({ workspacePath: undefined, projectId: undefined, sourceSelection: undefined, sourceDisabled: false, preparedSource: null }); }} active={locked} launch={null} prepared={null} onPrepared={ignorePrepared} onPreparingChange={ignorePrepared}
         onUseChatOnly={() => { if (!externalSending.current) void preparation.change({ workspacePath: undefined, projectId: undefined, sourceSelection: undefined, sourceDisabled: true, preparedSource: null }); }} /></div>}
     </WorkOverviewControl>
     </div>

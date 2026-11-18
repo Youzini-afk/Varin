@@ -377,6 +377,7 @@ impl Catalog {
         // responsibility now; handed_off does not assert domain acceptance (the ref stays null).
         // This command must never hold the model Run foreground open.
         let op = Operation {
+            resource_source: None,
             managed_process: None,
             mcp_resource_subscription: None,
             host_job: Some(HostJobLink {

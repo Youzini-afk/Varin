@@ -32,7 +32,7 @@ pub(crate) fn reconcile(runtime: &RunSupervisor, resources: &KernelResourceClien
         let catalog = owner.lock().map_err(error)?;
         let operation = catalog.operation(operation_id).map_err(error)?;
         let run = catalog.run(&operation.run_id).map_err(error)?;
-        let Some(source) = catalog.launch_metadata(&run.id).map_err(error)?.and_then(|launch| launch.selection.source) else { return Ok(false); };
+        let Some(source) = catalog.original_operation_source(&operation).map_err(error)? else { return Ok(false); };
         if !matches!(operation.executor.as_deref(), Some("office_write" | "office_export" | "browser_files"))
             || !matches!(operation.execution_owner.as_ref(), Some(ExecutorOwner::External { .. }))
             || expected_owner.is_some_and(|expected| operation.execution_owner.as_ref() != Some(expected)) {

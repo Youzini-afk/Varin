@@ -4661,6 +4661,7 @@ export type OperationCallCompletion<M = StoredMedia> =
   | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime; content?: OutputBody<M> };
 
 export interface Operation {
+  resource_source?: LaunchSource;
   host_job?: HostJobView;
   execution_owner: ExecutorOwner | null;
   external_receipt: ExternalReceiptView | null;

@@ -374,6 +374,7 @@ pub(super) fn hydrate_operation(
         })
         .transpose()?;
     Ok(crate::types::Operation {
+        resource_source: operation.resource_source,
         mcp_resource_subscription: operation.mcp_resource_subscription,
         host_job: operation
             .host_job

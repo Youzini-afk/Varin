@@ -4,9 +4,10 @@ import {
   type SettingsFileStore,
   type SettingsFileStoreOptions,
 } from '@varin/settings-store';
+import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { EXTERNAL_ACCESS_SETTINGS_KEY } from '../tunnels/external-access-config.js';
-import { parseProjectSourceBinding, projectResourceOwnerKey, projectFolders, projectPathKey } from '@varin/application-client';
+import { parseWorkspaceLocations, parseDefaultWorkspaceLocationId, parseProjectSourceBinding, projectResourceOwnerKey, projectFolders, projectPathKey } from '@varin/application-client';
 
 interface ProjectEntry extends Record<string, unknown> {
   id: string;
@@ -158,6 +159,32 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
         next = { ...next, projects: validated };
       }
 
+      // A bookmark is not a project registration, trust change or source grant. Validate only
+      // changed addresses, so an offline owner can still be renamed or removed.
+      const locationsChanged = Object.hasOwn(sanitized, 'workspaceLocations') || removed.has('workspaceLocations');
+      if (locationsChanged || Object.hasOwn(sanitized, 'defaultWorkspaceLocationId')) {
+        const previous = parseWorkspaceLocations(current.workspaceLocations ?? []);
+        const locations = parseWorkspaceLocations(next.workspaceLocations ?? []);
+        const defaultId = parseDefaultWorkspaceLocationId(next.defaultWorkspaceLocationId ?? null);
+        if (defaultId !== null && !locations.some(row => row.id === defaultId)) throw new Error('Choose an existing default workspace location');
+        if (locationsChanged) {
+          for (const location of locations) {
+            const before = previous.find(row => row.id === location.id);
+            if (location.kind === 'project') {
+              if (before?.kind === 'project' && before.projectId === location.projectId) continue;
+              if (!Array.isArray(next.projects) || !next.projects.some(row => row?.id === location.projectId)) throw new Error('The workspace project is not registered');
+            } else {
+              if (before?.kind === 'folder' && before.path === location.path && before.workspaceId === location.workspaceId
+                && isDeepStrictEqual(before.resourceOwner, location.resourceOwner)) continue;
+              if (!deps.resolveProjectSource) throw new Error('Workspace location owner is unavailable');
+              const found = await deps.resolveProjectSource({ resourceOwner: location.resourceOwner, path: location.path });
+              if (found.workspaceId !== location.workspaceId) throw new Error('Workspace location registration changed; select the folder again');
+              location.path = found.path;
+            }
+          }
+          if (!removed.has('workspaceLocations')) next = { ...next, workspaceLocations: locations };
+        }
+      }
       const nextProjects = Array.isArray(next.projects)
         ? next.projects.filter((project): project is ProjectEntry => (
             Boolean(project) && typeof project === 'object'

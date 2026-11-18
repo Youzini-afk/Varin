@@ -1,3 +1,4 @@
+import { registeredModelSettingsScope } from './project-settings-scope.js';
 import type { Express, RequestHandler } from 'express';
 import type { ModelsService } from './service.js';
 import { object, ModelConfigurationError } from './configuration.js';
@@ -32,7 +33,7 @@ export function registerModelRoutes(app: Express, models: ModelsService, require
     if (typeof input.projectId !== 'string' || !input.projectId) throw new ModelConfigurationError('invalid_params', 'A registered project identity is required');
     const project = (await projects?.())?.find(project => project.id === input.projectId);
     if (!project) throw new ModelConfigurationError('project_unavailable', 'The registered project is unavailable', 404);
-    return project.source?.resourceOwner.kind === 'managed_host' ? { registeredProjectId: project.id } : { cwd: project.path };
+    return registeredModelSettingsScope(project);
   };
   const actions = {
     read: () => models.read(),

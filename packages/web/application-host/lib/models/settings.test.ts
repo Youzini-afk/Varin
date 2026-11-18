@@ -1,3 +1,4 @@
+import { registeredModelSettingsScope } from './project-settings-scope.js';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -72,13 +73,16 @@ it('keeps registered remote project defaults independent of one another and of a
   await mkdir(join(directory, '.varin'), { recursive: true });
   await writeFile(join(directory, '.varin', 'settings.json'), JSON.stringify({ defaultProvider: 'local', defaultModel: 'local-model' }));
   const settings = new AgentSettingsService(root, cwd => cwd === directory);
-  const remoteA = await settings.snapshot(directory, 'remote-a');
+  const localScope = registeredModelSettingsScope({ id: 'local', path: directory });
+  const remoteScope = registeredModelSettingsScope({ id: 'remote-a', path: directory,
+    source: { workspaceId: 'remote-a-dir', resourceOwner: { kind: 'managed_host', hostId: 'remote-a', connectionId: 'a', endpointIdentity: 'endpoint-a' } } });
+  const remoteA = await settings.snapshot(remoteScope.cwd, remoteScope.registeredProjectId);
   const remoteB = await settings.snapshot(directory, 'remote-b');
   expect(remoteA.project).toEqual({}); expect(remoteB.project).toEqual({});
   const saved = await settings.update({ registeredProjectId: 'remote-a', scope: 'project', expectedRevision: remoteA.projectRevision,
     set: { defaultProvider: 'provider-a', defaultModel: 'model-a' }, remove: [] });
   expect(saved.project).toEqual({ defaultProvider: 'provider-a', defaultModel: 'model-a' });
-  expect((await settings.snapshot(directory)).project).toEqual({ defaultProvider: 'local', defaultModel: 'local-model' });
+  expect((await settings.snapshot(localScope.cwd, localScope.registeredProjectId)).project).toEqual({ defaultProvider: 'local', defaultModel: 'local-model' });
   expect((await settings.snapshot(directory, 'remote-b')).project).toEqual({});
   await expect(settings.update({ registeredProjectId: 'remote-a', scope: 'project', expectedRevision: remoteA.projectRevision,
     set: { defaultModel: 'stale' }, remove: [] })).rejects.toMatchObject({ code: 'config_conflict' });

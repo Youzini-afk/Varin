@@ -110,6 +110,8 @@ import { createFollowupEventOwner } from './lib/kernel/followup-event-owner.js';
 import { createLiveSourceOwner } from './lib/kernel/live-source.js';
 import { createNativeWorkspaceOwner, type NativeWorkspaceOwner } from './lib/kernel/native-workspaces.js';
 import { registerNativeWorkspaceRoutes } from './lib/workspace/native-workspace-routes.js';
+import { listWorkLocations, preferredWorkLocation, prepareWorkLocation } from './lib/kernel/default-work-location.js';
+import { registeredModelSettingsScope } from './lib/models/project-settings-scope.js';
 import { createThreadSourcePreparer, createThreadSourceAdmission, createThreadSourceDirectory, parseSourceResourceOwner } from './lib/kernel/thread-sources.js';
 import { createManagedSourceConsumers } from './lib/kernel/managed-source-consumers.js';
 import { createSourceQueryService } from './lib/kernel/source-query-service.js';
@@ -2450,7 +2452,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       settings: () => modelsService.readGlobalInferenceSettings(),
       capabilities: signal => agentRuntime.childCapabilities(signal),
     }));
-  const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads });
+  const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads,
+    localLabel: os.hostname(), workspace: async () => {
+      const saved = await readSettingsFromDisk();
+      return listWorkLocations(saved, sanitizeProjects(saved.projects) ?? [], workspaceConfig.root);
+    } });
   projectSourceDirectory = sourceDirectory;
   registerProjectManagementRoutes(app, { requireAuth: uiAuthController.requireAuth,
     authorize: async (req, res) => {
@@ -2492,8 +2498,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const defaults = await agentRuntime.organizationCreationDefaults(identity.threadId, signal);
     const projects = sanitizeProjects((await readSettingsFromDisk()).projects) ?? [];
     const project = defaults?.projectId ? projects.find(value => value.id === defaults.projectId) : undefined;
-    const localProject = project && (!project.source?.resourceOwner || project.source.resourceOwner.kind === 'local') ? project : undefined;
-    const settings = await modelsService.settings.snapshot(localProject?.path, localProject?.id);
+    const scope = registeredModelSettingsScope(project);
+    const settings = await modelsService.settings.snapshot(scope.cwd, scope.registeredProjectId);
     signal.throwIfAborted();
     return defaultConversationModel({ ...settings.global, ...settings.project }, await modelAuthority.listModels());
   });
@@ -2513,7 +2519,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const thread = await agentRuntime.thread(identity.threadId);
     const latest = thread.branches.find(branch => branch.branch_id === identity.branchId)?.latest_run;
     const checkpoint = await agentRuntime.context(identity.branchId);
-    const inherited = checkpoint?.resources?.source ?? (latest ? (await agentRuntime.launch(latest.id))?.selection.source : null);
+    const inherited = checkpoint?.resources ? checkpoint.resources.source : (latest ? (await agentRuntime.launch(latest.id))?.selection.source : null);
     if (inherited) {
       const source = resourceThreadSource(inherited);
       if (!source) throw new Error('The inherited execution source is unavailable');
@@ -2521,36 +2527,28 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }
     // A completed source-less round (including explicit chat only) is itself an
     // execution choice. Creation defaults are only for a genuinely empty branch.
-    if (latest) return null;
-    const firstInput = true;
+    if (latest || checkpoint?.resources) return null;
+    // An empty/checkpoint-less child is not a new ordinary conversation, and a
+    // host-wide preference can never grant a guest use of the Host's resources.
+    if (thread.parent_thread_id || !await agentRuntime.principalCanUseHostResources!(thread.principal_id)) return null;
     const defaults = await agentRuntime.organizationCreationDefaults(identity.threadId);
-    if (defaults?.source) {
-      const selected = defaults.source.selection?.mode === 'native_workspace'
-        ? {resourceOwner:defaults.source.resourceOwner, workspaceId:defaults.source.selection.workspaceId}
-        : await sourceDirectory.resolve({ resourceOwner: defaults.source.resourceOwner, path: defaults.source.path });
-      if (defaults.source.workspaceId && selected.workspaceId !== defaults.source.workspaceId) throw new Error('The conversation’s original project registration changed. Select a source explicitly.');
-      return (await threads.prepareSource({ ...identity, key: `creation-project:${identity.threadId}`,
-        resourceOwner: selected.resourceOwner, workspaceId: selected.workspaceId, mode: defaults.source.selection?.mode ?? 'live_root',
-        ...(defaults.source.selection ? { selection: defaults.source.selection } : {}),
-        content: { mode: 'saved-files' }, captureScopes: [],
-      })).source;
-    }
+    const prepare = (input: Parameters<typeof prepareThreadSource>[0], signal?: AbortSignal) => threads.prepareSource(input, signal);
+    const key = `creation-location:${identity.threadId}:${identity.branchId}`;
+    if (defaults?.source) return prepareWorkLocation(identity, key, defaults.source, sourceDirectory, prepare);
     if (defaults?.projectId) {
       const project = (sanitizeProjects((await readSettingsFromDisk()).projects) ?? []).find(project => project.id === defaults.projectId);
       if (!project) throw new Error('The conversation’s original default project is no longer registered. Select a source explicitly.');
-      const selected = await sourceDirectory.resolve({ resourceOwner: project.source?.resourceOwner ?? { kind: 'local' }, path: project.path });
-      return (await threads.prepareSource({ ...identity, key: `creation-project:${identity.threadId}`,
-        resourceOwner: selected.resourceOwner, workspaceId: selected.workspaceId, mode: 'live_root',
-        content: { mode: 'saved-files' }, captureScopes: [],
-      })).source;
+      return prepareWorkLocation(identity, key, { path: project.path, resourceOwner: project.source?.resourceOwner ?? { kind: 'local' },
+        ...(project.source ? { workspaceId: project.source.workspaceId } : {}), selection: freezeProjectSourceSelection(project) }, sourceDirectory, prepare);
     }
-    // A Bot's home remains its own default; neither opening another Shell nor moving
-    // a classification imports the file browser's current directory into its work.
-    const bot = firstInput && thread.bot_id && !thread.parent_thread_id ? await botService.get(thread.bot_id) : null;
-    const selected = await sourceDirectory.resolve({ resourceOwner: { kind: 'local' }, path: bot?.homeDir ?? workspaceConfig.root });
-    const liveRoot = await liveSources.prepare(selected.workspaceId, selected.workspaceId, identity.threadId);
-    return { resourceOwner: selected.resourceOwner, workspaceId: selected.workspaceId, executionWorkspaceId: selected.workspaceId,
-      mode: 'live_root', liveRoot, tools: await agentRuntime.sourceTools('live_root') };
+    if (thread.bot_id) {
+      const bot = await botService.get(thread.bot_id);
+      if (!bot) throw new Error('The original Bot workspace is unavailable');
+      return prepareWorkLocation(identity, key, { resourceOwner: { kind: 'local' }, path: bot.homeDir }, sourceDirectory, prepare);
+    }
+    const saved = await readSettingsFromDisk();
+    const preferred = preferredWorkLocation(saved, sanitizeProjects(saved.projects) ?? []);
+    return prepareWorkLocation(identity, key, preferred ?? { resourceOwner: { kind: 'local' }, path: workspaceConfig.root }, sourceDirectory, prepare);
   });
   const threadSourceFiles = createThreadSourceFiles({ kernel: kernelClient, documents: documentsAuthority,
     validateLiveSource: liveSources.validate, compute: kernelCompute, remote: managedSourceConsumers.files });

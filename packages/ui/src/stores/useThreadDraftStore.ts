@@ -50,6 +50,8 @@ export interface DraftFileAttachment {
   error?: string;
 }
 export interface DraftSourceSelection {
+  /** Display only; never used to resolve physical ownership. */
+  locationLabel?: string;
   selection?: ThreadPrepareSource['selection'];
   /** Original project registration, checked after resolving the actual owner. */
   expectedWorkspaceId?: string;

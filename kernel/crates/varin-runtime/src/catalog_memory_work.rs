@@ -279,6 +279,7 @@ fn new_operation(
         waiting_on: None,
         intent,
         result: Some(OperationResultMetadata::Control { value: result }),
+        resource_source: None,
         host_job: None,
         mcp_resource_subscription: None,
         managed_process: None,
