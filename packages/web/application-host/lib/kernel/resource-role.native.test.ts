@@ -7,6 +7,7 @@ import express from 'express';
 import { afterEach, expect, it as test, vi } from 'vitest';
 import { createPrincipalStore } from '../ui-auth/principals.js';
 import { createRemoteClientAuthRuntime } from '../client-auth/remote-clients.js';
+import { createDocumentRootGuard } from '../documents/allowed-roots.js';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { createManagedResourceTarget } from '../harness/managed-resource-target.js';
 import { createKernelClient } from './kernel-client.js';
@@ -28,14 +29,19 @@ it('serves only paired resources, retains the storage identity across restart, a
   vi.stubEnv('VARIN_DATA_DIR', dir);
   const hostId = 'paired-test-device';
   const workspace = path.join(dir, 'selected');
+  const configuredRoot = path.join(dir, 'selected-alias');
+  const sibling = path.join(dir, 'selected-copy');
   await fs.mkdir(workspace);
+  await fs.mkdir(sibling);
+  // The configured name need not be the realpath Documents sees (e.g. a Windows short temp path).
+  await fs.symlink(workspace, configuredRoot, process.platform === 'win32' ? 'junction' : 'dir');
   await fs.writeFile(path.join(workspace, 'status.txt'), 'resource owner only\n');
   const storageRoot = path.join(dir, 'kernel', hostId);
   const principals = createPrincipalStore(path.join(dir, 'principals.json'));
   const openClients = () => createRemoteClientAuthRuntime({ crypto, fsPromises: fs, path,
     storePath: path.join(dir, 'clients.json'), principals });
   const issuer = openClients();
-  const reader = await issuer.createClient({ label: 'Local fixture', capabilities: ['filesystem:read'], allowedDirectories: [workspace] });
+  const reader = await issuer.createClient({ label: 'Local fixture', capabilities: ['filesystem:read'], allowedDirectories: [configuredRoot, sibling] });
   await issuer.dispose();
   const { createUiAuth } = await import('../ui-auth/ui-auth.js');
 
@@ -50,8 +56,8 @@ it('serves only paired resources, retains the storage identity across restart, a
     teardown.push(() => kernel.close());
     const handshake = await kernel.start();
     expect(handshake.capabilities).toContain('resourcesOnly');
-    const documents = createDocumentAuthority({ hostId, dataDir: dir, isAllowedRoot: async root => root === workspace,
-      isTrusted: async root => root === workspace });
+    const guard = createDocumentRootGuard({ fsPromises: fs, pathModule: path, workspace: { root: configuredRoot, lockdown: true } });
+    const documents = createDocumentAuthority({ hostId, dataDir: dir, isAllowedRoot: guard, isTrusted: guard });
     const storage = createHostResourceStorage({ kernel, documents: () => documents,
       resolveWorkspaceRoot: async id => (await documents.admitWorkspaceRegistration(id)).canonicalPath });
     teardown.push(() => storage.kernelStorageAdapter.dispose(), () => documents.dispose());
@@ -89,6 +95,10 @@ it('serves only paired resources, retains the storage identity across restart, a
   expect(identity.capabilities).not.toContain('storage'); // no separate Storage routes in this mount
   expect((await first.send('/documents/workspace/resolve', { path: workspace }, reader.token, { 'x-varin-managed-target': 'other-device' })).status).toBe(409);
   expect((await first.send('/documents/workspace/resolve', { path: dir })).status).toBe(403);
+  // Pairing permits the sibling, but the Host deployment boundary does not.
+  const outside = await first.send('/documents/workspace/resolve', { path: sibling });
+  expect(outside.status).toBe(403);
+  expect(await outside.json()).toMatchObject({ reason: 'path-escape' });
   expect((await first.send('/shell/exec', {})).status).toBe(403);
   const registration = await accept(await first.send('/documents/workspace/resolve', { path: workspace }));
   expect(registration.workspaceId).toBeTruthy();
@@ -102,7 +112,7 @@ it('serves only paired resources, retains the storage identity across restart, a
 
   const second = await start();
   expect((await accept(await second.send('/identity'))).hostId).toBe(hostId);
-  expect((await accept(await second.send('/documents/workspace/resolve', { path: workspace }))).workspaceId).toBe(registration.workspaceId);
+  expect((await accept(await second.send('/documents/workspace/resolve', { path: configuredRoot }))).workspaceId).toBe(registration.workspaceId);
   await second.clients.revokeClient(reader.client.id);
   expect([401, 403]).toContain((await second.send('/identity')).status);
   expect(second.errors).toEqual([]);
