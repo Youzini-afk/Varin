@@ -20,6 +20,7 @@ import { registerThreadAttachmentRoutes } from './lib/kernel/thread-attachment-r
 import { createLocalSemanticEmbedder } from './lib/knowledge/semantic/local-embedder.js';
 import { isDeepStrictEqual } from 'node:util';
 import { permissionService } from './lib/kernel/permission-service.js';
+import { createPermissionJudge } from './lib/kernel/permission-judge.js';
 import { createPermissionPersistence } from './lib/kernel/permission-persistence.js';
 import { createLocalSemanticComponentManager } from './lib/knowledge/semantic/local-component.js';
 import { registerLocalSemanticComponentRoutes } from './lib/knowledge/semantic/local-component-routes.js';
@@ -276,7 +277,7 @@ import { createThreadFileTargetResolver } from './lib/kernel/thread-file-target.
 import { createResourceFilesOwner } from './lib/workspace/resource-files.js';
 import { registerResourceFileRoutes } from './lib/workspace/resource-file-routes.js';
 
-import { THINKING_LEVELS, resolveMessageTimeSettings } from '@varin/protocol';
+import { THINKING_LEVELS, resolveHarnessModelSlot, resolveMessageTimeSettings } from '@varin/protocol';
 import { createSettingsService, settingsDocumentRevision } from './lib/harness/settings-service.js';
 
 import { createClientSurfaceBridge } from './lib/harness/client-surfaces.js';
@@ -1940,6 +1941,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const harness = await modelsService.settings.harness(trusted ? cwd : undefined);
     return { mode: harness.permissions?.mode ?? 'normal', rules: harness.permissions?.rules ?? [] };
   };
+  const judgePermission = createPermissionJudge({
+    selectModel: async () => resolveHarnessModelSlot('permissionJudge', (await modelsService.settings.harness()).models, null),
+    generate: input => modelText.generate(input),
+  });
   const globalMcpProcesses = createKernelProcessService({ client: kernelClient, resolveIdentity: async () => {
     const canonicalRoot = await canonicalizePathIdentity(agentMcpDir);
     const workspaceId = `mcp-host:${hostId}`;
@@ -2049,6 +2054,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     admitWorkspaceRegistration: (id, signal) => documentsAuthority.admitWorkspaceRegistration(id, signal),
     projectTrusted: cwd => projectTrust.trusted(cwd),
     currentPolicy: agentMcpPolicy,
+    judgePermission,
   });
   managedMcpOwner.current = createManagedMcpPreparer({ runtime: () => agentRuntime, createLease: input => createManagedMcpLease({ ...input, ...(managedMcpInteractionsOwner.current ? { interactions: managedMcpInteractionsOwner.current } : {}) }),
     changed: runId => { void agentRuntime.refreshMcp(runId).catch(() => console.error('[MCP] Target contribution preparation requires attention')); },
@@ -2118,7 +2124,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       } catch (error) { localLease.release(); targetLease?.release(); throw error; }
     }
     const originalTarget = targetLease;
-    try { return createMcpLease({ lease, kernel: kernelClient, tasks:mcpTaskRuntime,resources:mcpResourceRuntime,
+    try { return createMcpLease({ lease, kernel: kernelClient, tasks:mcpTaskRuntime,resources:mcpResourceRuntime, judgePermission,
       ...(originalTarget ? { retainChild: (binding: import('./lib/kernel/protocol.generated.js').SourceMcpChildBinding,
         selection: import('./lib/kernel/protocol.generated.js').McpBinding) => {
         const selected = selectMcpServers(selection, owner => owner.kind === 'managed_host');
@@ -2147,6 +2153,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // This is a user-scoped role. It does not inherit another Thread model binding.
     settings: async () => ({ global: await modelsService.readGlobalInferenceSettings() }),
   }), liveSources.validate, createExtensionTools({runtime:extensionRuntime,kernel:kernelClient,
+    judgePermission,
     permissionSubjects: createSettingsPermissionSubjects({ models: () => modelsService }),
     subscribeConfiguration: listener => { extensionConfigurationListeners.add(listener); return () => extensionConfigurationListeners.delete(listener); },
     prepareConfiguration: async (run, required) => {

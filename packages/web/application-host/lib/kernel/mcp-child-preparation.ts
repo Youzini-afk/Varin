@@ -10,6 +10,7 @@ import type { McpResourceRuntime } from './mcp-resource-runtime.js';
 import type { McpTaskRuntime } from './mcp-task-runtime.js';
 import type { McpToolLease } from './tool-bridge.js';
 import { createMcpLease } from './mcp-owner.js';
+import type { PermissionJudge } from './permission-judge.js';
 import { derivedChildMcpSelection, type ManagedChildMcpPreparer, type ManagedChildMcpContribution } from './managed-child-mcp-preparation.js';
 import { selectMcpServers } from './managed-mcp-preparation.js';
 
@@ -24,6 +25,7 @@ export function createChildMcpPreparer(owners: {
   admitWorkspaceRegistration(id: string, signal?: AbortSignal): Promise<{ canonicalPath: string }>;
   projectTrusted(cwd: string): boolean;
   currentPolicy(cwd: string, trusted: boolean): Promise<PermissionPolicy>;
+  judgePermission?: PermissionJudge;
   processAdmission?(input: McpPreparation): import('../process/types.js').ManagedProcessAdmission;
 }): (input: McpPreparation, signal?: AbortSignal) => Promise<McpToolLease> {
   owners = { ...owners, agentDir: resolve(owners.agentDir) };
@@ -155,6 +157,7 @@ export function createChildMcpPreparer(owners: {
             ? managed!.lease.retainChild(binding, target) : Promise.resolve({ release: async () => {} });
         } } : {}),
         retarget: Boolean(input.delegatedBinding),
+        ...(owners.judgePermission ? { judgePermission: owners.judgePermission } : {}),
         currentPolicy: async () => {
           assertTrust();
           return owners.currentPolicy(policyConfiguration.config_cwd, policyConfiguration.project_trusted);

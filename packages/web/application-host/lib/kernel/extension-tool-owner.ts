@@ -41,6 +41,7 @@ import {
   type ToolExecutionReceipt,
 } from './tool-bridge.js';
 import { permissionService } from './permission-service.js';
+import type { PermissionJudge } from './permission-judge.js';
 import { withToolConfirmation } from './tool-confirmation.js';
 import { HostToolAdmissionError } from './tool-admission.js';
 import {
@@ -149,6 +150,7 @@ export interface ExtensionToolOwnerOptions {
   runtime: ApplicationExtensionRuntime;
   kernel: KernelClient;
   currentPolicy(runId: string): Promise<PermissionPolicy>;
+  judgePermission?: PermissionJudge;
   /** Trusted domain normalization; batch items and sensitive management targets keep their real scope. */
   permissionSubjects?(tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<PermissionSubject[] | undefined>;
   /** Domain configuration is captured once by the ordinary Run preparation owner. */
@@ -336,7 +338,12 @@ export async function retainExtensionTool(
         )
           throw new Error('extension_tool_permission_changed');
         let permissionSettingsRevision = previous?.permissionSettingsRevision;
-        if (!previous && (descriptor.tool!.confirmation === 'always' || decision.decision === 'ask'))
+        const confirmation = descriptor.tool!.confirmation;
+        const smartAllowed = !previous && !confirmation && !semantic && decision.smartEligible && await options.judgePermission?.({
+          operationId: call.operationId, name: schema.name, description: schema.description,
+          operation: descriptor.tool!.operation, schema: schema.schema, arguments: args,
+        }, combined);
+        if (!previous && (confirmation === 'always' || decision.decision === 'ask' && !smartAllowed))
           permissionSettingsRevision = await permissionService(kernel).authorize(
             call,
             {
@@ -344,10 +351,10 @@ export async function retainExtensionTool(
               ownerGeneration: provider.generation,
               toolSchemaVersion: schema.version,
               policyGeneration: current.identity,
-              reason: descriptor.tool!.confirmation === 'always'
+              reason: confirmation === 'always'
                 ? 'Confirm this exact action and full content once. Saved rules and bypass mode do not approve it.'
                 : decision.reason ?? 'Extension tool permission required',
-              ...(descriptor.tool!.confirmation ? { confirmation: descriptor.tool!.confirmation } : {}),
+              ...(confirmation ? { confirmation } : {}),
             },
             combined,
             { name: call.name, arguments: object(args) ? args : { input: args },

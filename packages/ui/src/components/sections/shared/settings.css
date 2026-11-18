@@ -31,9 +31,8 @@
 .settings-object-list { border-block: 1px solid var(--interactive-border); }
 .settings-rule-editor { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out); }
 .settings-rule-editor[data-open=true] { grid-template-rows: 1fr; opacity: 1; }.settings-rule-editor > div { min-height: 0; overflow: hidden; }
-.settings-permission-modes > button { padding: 12px; border: 1px solid transparent; border-radius: 7px; transition: background 150ms,border-color 150ms; }
-.settings-permission-modes > button[aria-checked=true] { border-color: var(--interactive-border); background: var(--surface-muted); }
-@media (prefers-reduced-motion: reduce) { .settings-rule-editor,.settings-permission-modes > button { transition: none; } }
+.sk .settings-permission-modes .sk-ocard { min-height: 104px; height: auto; }
+@media (prefers-reduced-motion: reduce) { .settings-rule-editor { transition: none; } }
 .settings-object-list > * + * { border-top: 1px solid color-mix(in srgb, var(--interactive-border) 60%, transparent); }
 .settings-nav-group > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; }
 .settings-nav-group > summary::-webkit-details-marker { display: none; }

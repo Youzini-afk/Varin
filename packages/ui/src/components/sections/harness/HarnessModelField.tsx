@@ -28,7 +28,9 @@ export function HarnessModelField({ harness, update, slot, enableControl = true,
   const requiresSelection = slot === 'explore' && requiresRetrievalModelSelection(harness);
   const thinkingLevels = selectedModel ? modelThinkingLevels(selectedModel) : undefined;
   const changeModel = (providerId?: string, modelId?: string) => update({ models: { [slot]: {
-    providerId, modelId, inherit: !modelId, agent: { modelSettings: { thinkingLevel: undefined } },
+    providerId, modelId, inherit: !modelId,
+    ...(slot === 'permissionJudge' && modelId ? { enabled: true } : {}),
+    agent: { modelSettings: { thinkingLevel: undefined } },
   } } });
   return <Row item={`harness.models.${slot}`} label={label} description={<>
     {slot !== 'explore' ? t(`settings.harness.role.${slot}.description`) : null}

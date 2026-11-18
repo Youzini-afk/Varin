@@ -6,12 +6,15 @@ import { requireConfirmedToolInvocation } from './tool-confirmation.js';
 import type { KernelClient } from './kernel-client.js';
 import type { HostToolCall } from './protocol.generated.js';
 
-it.each(['bypass', 'saved-allow'] as const)('requires exact approval despite %s, rejects concurrent execution and keeps lost response unknown', async mode => {
+it.each(['bypass', 'saved-allow', 'smart', 'smart-ordinary'] as const)('preserves dispatch semantics under %s admission', async mode => {
   const owner = { providerId: 'provider', providerKey: 'key', extensionId: 'fixture.effects', extensionVersion: '1', entrypointId: 'host', instanceKey: 'instance', generation: 1 };
   const signal = new AbortController().signal;
-  const descriptor = { id: 'fixture.effect', version: 1, tool: { name: 'fixture_effect', description: 'Send exact content', operation: 'effect', completion: 'result', confirmation: 'always', inputSchema: { type: 'object' }, outputSchema: true } };
+  const ordinary = mode === 'smart-ordinary';
+  const judgePermission = vi.fn(async () => true);
+  const descriptor = { id: 'fixture.effect', version: 1, tool: { name: 'fixture_effect', description: 'Send exact content', operation: 'effect', completion: 'result',
+    ...(!ordinary ? { confirmation: 'always' } : {}), inputSchema: { type: 'object' }, outputSchema: true } };
   const invoke = vi.fn(async (_method: string, args: unknown[], _signal: AbortSignal, scope: HostInvocationScope) => {
-    requireConfirmedToolInvocation({ owner, signal, invocation: scope }, args[0]);
+    if (!ordinary) requireConfirmedToolInvocation({ owner, signal, invocation: scope }, args[0]);
     throw new Error('response lost after dispatch');
   });
   const pin = { assertAvailable() {}, release() {}, revocationSignal: signal, invoke };
@@ -28,13 +31,19 @@ it.each(['bypass', 'saved-allow'] as const)('requires exact approval despite %s,
     if (method === 'runtime.launch.inspect') return { run_id: call.runId, selection: { source: null } };
     throw new Error(method);
   }) } as unknown as KernelClient;
-  const retained = await retainExtensionTool({ runtime, kernel, currentPolicy: async () => ({ mode: mode === 'bypass' ? 'bypass' : 'normal', rules: mode === 'saved-allow' ? [{ tool: 'fixture_effect', decision: 'allow' }] : [] }) }, selected);
+  const retained = await retainExtensionTool({ runtime, kernel, judgePermission,
+    currentPolicy: async () => ({ mode: mode === 'bypass' ? 'bypass' : mode === 'saved-allow' ? 'normal' : 'smart',
+      rules: mode === 'saved-allow' ? [{ tool: 'fixture_effect', decision: 'allow' }] : [] }) }, selected);
   const call = { operationId: 'request:tool:send', runId: 'run', callId: 'send', origin: { kind: 'model_step', request_id: 'request' }, name: 'fixture_effect', schemaVersion: retained.binding.tool.version, arguments: { from: 'sender', to: ['receiver'], body: 'Exact content' } } as HostToolCall;
   const authorization = retained.lease.authorize!(call, signal);
-  await vi.waitFor(() => expect(permissionId).not.toBe(''));
-  expect(invoke).not.toHaveBeenCalled();
-  await permissionService(kernel).decide(call.operationId, permissionId, 'allow_once');
+  if (!ordinary) {
+    await vi.waitFor(() => expect(permissionId).not.toBe(''));
+    expect(invoke).not.toHaveBeenCalled();
+    await permissionService(kernel).decide(call.operationId, permissionId, 'allow_once');
+  }
   await authorization;
+  expect(judgePermission).toHaveBeenCalledTimes(ordinary ? 1 : 0);
+  if (ordinary) expect(permissionId).toBe('');
   const [result, duplicate] = await Promise.all([
     retained.lease.execute(call, signal, executorOwner),
     retained.lease.execute(call, signal, executorOwner),

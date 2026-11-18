@@ -10,19 +10,17 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'varin-agent-settings-')); roots.push(root);
   return { root, settings: new AgentSettingsService(root, () => false) };
 }
-it('rejects new unsupported automation but preserves legacy mode during unrelated writes and supports reset', async () => {
+it('saves Smart, keeps a legacy Accept edits mode across unrelated writes and supports reset', async () => {
   const { root, settings } = await fixture();
   const initial = await settings.read();
-  await expect(settings.updateHarness(initial.revision, () => ({ permissions: { mode: 'smart' } })))
+  const smart = await settings.updateHarness(initial.revision, () => ({ permissions: { mode: 'smart' } }));
+  expect(smart.document).toMatchObject({ harness: { permissions: { mode: 'smart' } } });
+  await expect(settings.update({ scope: 'global', expectedRevision: smart.revision, set: { harness: { permissions: { mode: 'accept-edits' } } }, remove: [] }))
     .rejects.toMatchObject({ code: 'permission_mode_unavailable' });
-  expect(await settings.read()).toEqual(initial);
-  await writeFile(join(root, 'agent-settings.json'), JSON.stringify({ harness: { permissions: { mode: 'smart' } } }));
+  await writeFile(join(root, 'agent-settings.json'), JSON.stringify({ harness: { permissions: { mode: 'accept-edits' } } }));
   const legacy = await settings.read();
   const renamed = await settings.update({ scope: 'global', expectedRevision: legacy.revision, set: { titleUpdateInterval: 5 }, remove: [] });
-  expect(renamed.global).toMatchObject({ titleUpdateInterval: 5, harness: { permissions: { mode: 'smart' } } });
-  await expect(settings.update({ scope: 'global', expectedRevision: renamed.globalRevision, set: { harness: { permissions: { mode: 'accept-edits' } } }, remove: [] }))
-    .rejects.toMatchObject({ code: 'permission_mode_unavailable' });
-  expect((await settings.read()).revision).toBe(renamed.globalRevision);
+  expect(renamed.global).toMatchObject({ titleUpdateInterval: 5, harness: { permissions: { mode: 'accept-edits' } } });
   const reset = await settings.updateHarness(renamed.globalRevision, harness => ({ ...harness, permissions: { mode: 'normal' } }));
   expect(reset.document).toMatchObject({ harness: { permissions: { mode: 'normal' } } });
 });

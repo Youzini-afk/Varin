@@ -15,6 +15,7 @@ import type {
 } from '../mcp/authority.js';
 import type { KernelClient } from './kernel-client.js';
 import { permissionService } from './permission-service.js';
+import type { PermissionJudge } from './permission-judge.js';
 import type {
   HostToolCall,
   HostToolCompletion,
@@ -51,6 +52,7 @@ export interface McpOwnerOptions {
   kernel: KernelClient;
   /** Read current Host settings at authorization and dispatch, never a renderer's policy. */
   currentPolicy(): Promise<PermissionPolicy>;
+  judgePermission?: PermissionJudge;
   /** An admitted workspace exists but no consistent MCP execution view has been prepared. */
   unavailableWorkspaceScope?: { workspaceId: string; reason: string };
   /** Exact visible dependency set. Retargeting changes only the execution owner/resources. */
@@ -320,7 +322,11 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
         let current = await policy();
         const result = decision(current.value, target);
         if (result.decision === 'deny') throw new HostToolAdmissionError('mcp_permission_denied');
-        if (result.decision === 'ask')
+        const smartAllowed = result.smartEligible && target.kind === 'tool' && !target.task && await options.judgePermission?.({
+          operationId: call.operationId, name: target.tool.name, description: target.tool.description,
+          operation: 'mcp', schema: target.tool.inputSchema, arguments: target.args,
+        }, authorizedSignal);
+        if (result.decision === 'ask' && !smartAllowed)
           await permissionService(options.kernel).authorize(
             call,
             {
