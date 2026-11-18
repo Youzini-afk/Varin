@@ -14,7 +14,7 @@
           row('阅读 PDF', sw('t.pdf', true), { desc: '搜索文字、查看指定页面和选区，必要时分析版面结构。' }) +
           row('学术搜索', sw('t.paper', true), { desc: '在 OpenAlex 和 Semantic Scholar 上找论文，查看引用关系。' }) +
           row('资料集', sw('t.materials', true), { desc: '把网页、快照和论文收进有名字的集合，之后在集合里检索；不同对话可以共用。' }), { desc: '关闭后，Agent 在新的请求里就拿不到这个工具。' }) +
-        sec('命令行', link('运行命令使用的命令行', 'workspaces', { desc: '每个工作区单独设置：这台电脑用 Git Bash，Linux 设备用 bash，等等。', end: '自动 · Git Bash' })) +
+        sec('命令行', link('运行命令使用的命令行', 'devices', { lead: 'terminal', desc: '在提供文件的设备详情里，打开「供 Agent 使用」调整命令行。' })) +
         sec('结果展示', row('长结果只预览', num('t.preview', 24, { unit: 'KiB' }), { desc: '超过这个大小的结果只显示开头和结尾，Agent 需要时会继续读全文。指定范围的读取不受影响。' })) +
         sec(`全部工具（${total}）`, `<div style="padding:12px 16px 4px">${K.txt('tools.q', '', { ph: '按名称查找，例如 file_read', w: 'wfull' })}</div>` +
           DATA.toolGroups.map(([g, ts]) => { const list = ts.split(' ').filter(t => !q || t.includes(q)); return list.length ? disc(g, `<div class="toolgrid">${list.map(t => `<span class="tool" data-act="toast" data-v="${t}：查看参数和说明">${t}</span>`).join('')}</div>`, { sum: list.length + ' 个', open: !!q }) : ''; }).join('') +

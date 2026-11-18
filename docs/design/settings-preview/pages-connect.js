@@ -22,10 +22,10 @@
     { id: 'macbook', name: 'MacBook Air', kind: 'laptop', os: 'macOS', addr: '192.168.1.31', of: 1, from: ['已配对的浏览器界面', 'Chrome 扩展'] },
     { id: 'iphone', name: 'iPhone', kind: 'phone', os: 'iOS', of: 1 },
     { id: 'nas', kind: 'drive', os: '远程代理', addr: 'nas.example.com', of: 1 },
-    { id: 'ssh-192', name: '192.168.1.20', kind: 'server', os: 'SSH 主机', addr: 'admin@192.168.1.20', of: 1, mergeInto: 'home-server' },
+    { id: 'ssh-192', name: '测试机', kind: 'server', os: 'SSH 主机', addr: 'admin@192.168.1.20', of: 1, mergeInto: 'home-server' },
   ];
   const SSH_FOUND = [['build-runner', 'ci@10.0.0.12'], ['pi-lab', 'pi@raspberrypi.local']];
-  /* 每台设备的工作区：默认目录、系统（决定可选的命令行）、隔离工作副本的后端 */
+  /* 文件和命令由提供它们的设备执行，多个工作位置共用这份设备配置。 */
   const WS = {
     'studio-pc': { dir: 'C:\\Users\\user', os: 'win', iso: 'missing' },
     'home-server': { dir: '/home/admin', os: 'linux', iso: 'fuse' },
@@ -36,7 +36,7 @@
   const shellOpts = os => (os === 'win'
     ? [{ v: 'auto', l: '自动 · Git Bash' }, { v: 'pwsh', l: 'PowerShell 7' }, { v: 'cmd', l: '命令提示符' }, { v: 'wsl', l: 'WSL · Ubuntu' }]
     : [{ v: 'auto', l: '自动 · bash' }, { v: 'zsh', l: 'zsh' }, { v: 'sh', l: 'sh' }]);
-  /* 设备提供给 Agent 的三项能力。每项可以单独关闭；「能力」里的工作区、电脑操作、浏览器页用同一个开关 */
+  /* 设备能力的开关也决定对应工作位置或操作入口的可用状态。 */
   const CAPS = [
     { k: 'ws', l: '工作区', icon: 'drive', go: 'workspaces', has: a => a.files },
     { k: 'dt', l: '电脑操作', icon: 'pointer', go: 'desktops', has: a => a.desk },
@@ -86,7 +86,6 @@
   ACTS['dev-merge'] = () => { K.set('dev.merge.home', true); S.sel.devices = 'home-server'; S.tab['dev.home-server'] = 'agent'; App.render(); App.toast('已归在同一台设备'); };
   ACTS['dev-split'] = () => { K.set('dev.merge.home', false); S.tab['dev.home-server'] = 'svc'; App.render(); App.toast('已拆开显示'); };
   ACTS['dev-nomerge'] = () => { K.set('dev.merge.no', true); App.render(); App.toast('不再提示'); };
-  ACTS['dev-default'] = el => { K.set('dev.default', el.dataset.v); App.render(); App.flashSaved(); };
   ACTS['dev-open'] = el => { const [id, tab] = el.dataset.v.split(':'); S.sel.devices = id; if (tab) S.tab['dev.' + id] = tab; S.mstage.devices = 'detail'; App.go('devices'); };
   ACTS['dev-add-ssh'] = el => { S.sel.devices = '__add'; S.mstage.devices = 'detail'; K.set('add.intent', 'agent'); K.set('add.how', 'SSH'); K.set('add.host', el.dataset.v); S.unit.add = 'dirty'; App.render(); };
   ACTS['dev-fill'] = el => { K.set('add.host', el.dataset.v); S.unit.add = 'dirty'; App.render(); };
@@ -231,7 +230,6 @@
       : a.via === 'ssh' ? row('SSH', txt(u + '.ssh', a.ssh, { mono: true, unit: u + '.c' }), { desc: `由 ${svc} 发起连接，凭据保存在 ${svc} 上。` }) + row('认证', dd(u + '.key', ['~/.ssh/id_ed25519', '使用 SSH agent', '密码'], '~/.ssh/id_ed25519', { unit: u + '.c' })) + unitbar(u + '.c', { verify: true, save: '测试并保存', busy: '正在连接…', ok: '已连接并保存' })
         : a.via === 'ext' ? row('连接方式', muted('Varin 浏览器扩展'), { desc: '扩展直接连接 Varin 服务，这台设备上不需要再装别的。Agent 只能使用分享出来的标签页。' })
           : row('远程代理', txt(u + '.url', a.url, { mono: true, w: 'wl', unit: u + '.c' }), { desc: '这台设备上运行的 Varin 服务地址。' }) + unitbar(u + '.c', { verify: true, save: '测试并保存', busy: '正在连接…', ok: '已连接并保存' });
-    const isDef = K.get('dev.default', 'studio-pc') === id;
     const capRow = c => {
       const val = c.has(a);
       if (!val) {
@@ -241,12 +239,16 @@
         return `<div class="row link soft" data-go="${c.go}" role="link" tabindex="0" data-item="${c.l}"><span class="lead">${ic(c.icon, 'sm')}</span><div class="rl"><div class="t">${c.l}<span class="faint" style="font-size:12px">不提供</span></div><div class="d">${why}</div></div><div class="rc">${ic('chev', 'sm')}</div></div>`;
       }
       const on = capOn(c.k, id);
-      const desc = c.k === 'ws' ? `读写文件、运行命令 · 默认目录 <span class="mono">${esc(K.get('ws.dir.' + id, w.dir || '~'))}</span>${isDef ? ' · 新工作默认用这里' : ''}` : esc(val);
+      const desc = c.k === 'ws' ? '在这台设备的工作位置读写文件、运行命令。' : esc(val);
       return row(c.l, `${sw(`${c.k}.on.${id}`, true, { re: true, label: '提供' + c.l })}${btn('', { k: 'ghost', sm: true, icon: 'chev', tip: `在「${c.l}」中设置`, go: c.go })}`, { lead: c.icon, desc: on ? desc : '已关闭，新的工作里 Agent 不会用到它。', item: c.l });
     };
     return (a.off ? note(`这台设备${a.off}。Agent 暂时不能使用它，恢复连接后自动可用。`, { k: 'warn' }) + '<div style="height:14px"></div>' : '') +
       sec('提供给 Agent 的能力', CAPS.map(capRow).join(''), { desc: `每项可以单独关闭，关闭后新的工作里 Agent 不会用到它。能提供什么由 Varin 服务 ${svc} 实际检查。` }) +
       sec('连接', via) +
+      (a.files ? sec('文件与命令',
+        row('服务默认目录', txt('ws.dir.' + id, w.dir, { mono: true })) +
+        row('命令行', dd('ws.shell.' + id, shellOpts(w.os), 'auto')) +
+        row('隔离工作副本', w.iso === 'missing' ? btn('安装 WinFsp', { sm: true, act: 'toast', v: '在这台设备上安装 WinFsp' }) : muted(w.iso === 'fuse' ? '可用 · FUSE' : '此设备不支持'))) : '') +
       (a.via === 'ssh' ? sec('', disc('端口转发', row('', btn('添加转发', { sm: true, icon: 'plus', act: 'toast', v: '在这台设备上打开端口转回服务，或把服务的端口转过去' })), { sum: '没有转发' })) : '');
   }
 
@@ -264,15 +266,17 @@
     if (intent === 'use') {
       body = pairing() + note('外出时也想用？在 <span class="linkish" data-go="remote-access">远程访问</span> 里开启 Varin 中继、临时隧道或公网访问。');
     } else if (intent === 'agent') {
-      const how = K.get('add.how', 'SSH');
-      body = sec('', row('方式', seg('add.how', ['SSH', '运行 Varin 服务'], 'SSH', { re: true })) +
+      const how = K.get('add.how', '服务地址');
+      body = sec('', row('连接方式', seg('add.how', ['服务地址', 'SSH'], '服务地址', { re: true })) +
         (how === 'SSH'
           ? row('主机', txt('add.host', '', { ph: 'user@host，或 SSH 配置里的名字', w: 'wl', mono: true, unit: 'add' }), { desc: `在 ${svc} 的 SSH 配置里找到：${SSH_FOUND.map(([n]) => `<button class="chip" style="height:20px;cursor:pointer" data-act="dev-fill" data-v="${n}">${n}</button>`).join(' ')}` }) +
             row('端口', num('add.port', 22, { unit2: 'add' })) + row('认证', dd('add.key', ['~/.ssh/id_ed25519', '使用 SSH agent', '密码'], '~/.ssh/id_ed25519', { unit: 'add' })) +
-            row('显示名称', txt('add.name', '', { ph: '留空使用主机名', unit: 'add' }), { desc: '如果它已经在列表里（比如是另一台 Varin 服务），用同一个名字会合并成一台。' })
+            row('显示名称', txt('add.name', '', { ph: '留空使用主机名', unit: 'add' }))
           : row('服务地址', txt('add.url', '', { ph: 'https://gpu-box.example.com:3902', w: 'wl', mono: true, unit: 'add' }), { desc: '先在那台设备上安装并启动 Varin 服务，再填它的地址。' }) + row('配对码', txt('add.code', '', { ph: '那台服务上显示的配对码', unit: 'add' }))) +
         unitbar('add', { verify: true, save: '测试并添加', busy: '正在连接…', ok: '已添加' }),
-      { desc: `由 Varin 服务 ${svc} 发起连接，凭据保存在 ${svc} 上。只用中继连接的设备暂时不能给 Agent 使用。` });
+      { desc: `由 Varin 服务 ${svc} 发起连接，凭据保存在 ${svc} 上。` }) +
+        sec('', disc('怎样准备资源节点', row('使用机器上的文件和工具', '', { desc: '在目标系统上运行资源节点，使用这台机器的目录和命令行。' }) +
+          row('使用容器工作环境', '', { desc: '在 Docker 中挂载工作目录。Agent 看到容器内的路径，命令使用镜像里的工具链。' })));
     } else {
       const how = K.get('add.svcHow', '地址或配对链接');
       body = sec('', row('方式', seg('add.svcHow', ['地址或配对链接', '通过 SSH 启动'], '地址或配对链接', { re: true })) +
@@ -284,7 +288,7 @@
     }
     return `<div class="oh2"><span class="avatar">${ic('plus')}</span><div class="ttl"><h1>添加设备</h1><div class="sub">先选想做什么。同一台设备可以做好几件事，之后在它的详情里继续添加。</div></div></div>` +
       sec('', cards('add.intent', [
-        { v: 'use', l: '在它上面用 Varin', icon: 'phone', d: '手机、平板或另一台电脑：查看对话、继续工作、接收通知。' },
+        { v: 'use', l: '在它上面用 Varin', icon: 'phone', d: '用网页、手机或桌面轻客户端连接这台服务，继续已有对话。' },
         { v: 'agent', l: '让 Agent 使用它', icon: 'wrench', d: '在另一台电脑或服务器上读写文件、运行命令。' },
         { v: 'svc', l: '连接它上面的 Varin 服务', icon: 'server', d: '那台设备已经运行 Varin 服务，有自己的对话和设置。' },
       ], 'use', { re: true }), { raw: true }) + body +
@@ -401,34 +405,109 @@
     },
   });
 
-  /* ── 能力 · 工作区：按设备分组 ── */
-  ACTS['dev-add-agent'] = () => { S.sel.devices = '__add'; S.mstage.devices = 'detail'; K.set('add.intent', 'agent'); App.go('devices'); };
+  /* 工作位置按连接和目录标识；设备关联只改变展示名称。 */
+  const placeKey = field => `places.${S.host}.${field}`;
+  const savedPlaces = () => K.get(placeKey('added'), []);
+  const locationDevices = () => visible().filter(d => roles(d).agent?.files);
+  function workPlaces() {
+    const devices = locationDevices();
+    const projects = DATA.projects.map(p => ({
+      id: 'project-' + p.id, owner: p.dev, name: p.name, path: p.path, project: p.id,
+    }));
+    const samples = local() ? [
+      { id: 'build-logs', owner: 'ssh-192', name: '构建日志', path: '/srv/build/logs' },
+      { id: 'archive', owner: 'nas', name: '归档资料', path: '/volume1/work/archive' },
+    ] : [
+      { id: 'home-work', owner: 'home-server', name: '开发目录', path: '/home/admin/work' },
+      { id: 'build-logs', owner: 'home-server', name: '构建日志', path: '/srv/build/logs' },
+    ];
+    return [...projects, ...samples, ...savedPlaces()].flatMap(p => {
+      const device = devices.find(d => agentId(d) === p.owner);
+      if (!device) return [];
+      const status = roles(device).agent.off ? '离线' : !capOn('ws', p.owner) ? '已关闭文件与命令' : '';
+      return [{ ...p, device, status }];
+    });
+  }
+  const placeLabel = p => `${p.name} · ${nm(p.device)}`;
+  function placeLine(p) {
+    const actions = (p.project ? btn('项目设置', { sm: true, k: 'ghost', go: 'projects', sel: p.project }) : '') + devBtn(p.device.id);
+    return `<details class="place-line"><summary>${ic('folder', 'sm')}<span class="place-text"><b>${esc(p.name)}</b><small><span>${esc(nm(p.device))}</span><code>${esc(p.path)}</code></small></span>${p.status ? `<small class="place-state">${esc(p.status)}</small>` : ''}${ic('chev', 'xs chev')}</summary><div class="place-links">${actions}</div></details>`;
+  }
+  function placeForm() {
+    const options = locationDevices().map(d => `<option value="${esc(agentId(d))}">${esc(nm(d))}</option>`).join('');
+    return `<form class="place-form" id="add-work-place">
+      <label>设备<select class="field" name="owner">${options}</select></label>
+      <label>目录<input class="field mono" name="path" placeholder="设备上的目录" required></label>
+      <label>名称<input class="field" name="name" placeholder="默认使用文件夹名称"></label>
+      <div class="hstack wrap"><button class="btn sm ghost place-connect" type="button" data-act="place-connect">连接其他设备</button><button class="btn sm ghost" type="button" data-act="place-form">取消</button><button class="btn sm primary" type="submit">保存位置</button></div>
+    </form>`;
+  }
+  ACTS['place-form'] = (el, event) => {
+    event.preventDefault();
+    K.set(placeKey('adding'), !K.get(placeKey('adding'), false));
+    App.render();
+    document.querySelector('#add-work-place [name="path"]')?.focus();
+  };
+  ACTS['place-connect'] = () => {
+    K.set('add.intent', 'agent');
+    S.sel.devices = '__add';
+    S.mstage.devices = 'detail';
+    App.go('devices');
+  };
+  document.addEventListener('submit', event => {
+    if (event.target.id !== 'add-work-place') return;
+    event.preventDefault();
+    const data = new FormData(event.target);
+    const path = data.get('path').trim();
+    if (!path) { event.target.elements.path.focus(); return; }
+    const owner = data.get('owner');
+    const exists = workPlaces().some(p => p.owner === owner && p.path === path);
+    if (!exists) {
+      const name = data.get('name').trim() || path.split(/[\\/]/).filter(Boolean).pop() || path;
+      K.set(placeKey('added'), [...savedPlaces(), { id: crypto.randomUUID(), owner, name, path }]);
+    }
+    K.set(placeKey('adding'), false);
+    App.render();
+    App.toast(exists ? '这个位置已在列表中' : '已保存位置');
+  });
+
+  /* 会话示例独立于普通新会话的起始位置。 */
+  ACTS['place-demo'] = el => {
+    K.set(placeKey('demo'), el.dataset.v);
+    App.render({ enter: true });
+    document.querySelector('#canvas .scroll')?.scrollTo(0, 0);
+  };
+  function demoPlaces(places, stage) {
+    const origin = places.find(p => p.id === (local() ? 'project-launch-site' : 'home-work'));
+    const logs = places.find(p => p.id === 'build-logs');
+    const inspected = stage === 'inspect' || stage === 'move';
+    const current = stage === 'move' ? logs : origin;
+    const message = text => `<div class="pv-user-wrap"><div class="pv-user">${text}</div></div>`;
+    const action = (title, v) => btn(title, { sm: true, act: 'place-demo', v, off: !!logs.status });
+    const body = message(`去 ${esc(nm(logs.device))} 看看最新的构建日志。`) + (inspected ?
+      `<div class="place-observation">${ic('file', 'sm')}<div><strong>读取 build.log</strong><small>${esc(nm(logs.device))} · ${esc(logs.path)}</small></div></div><p>最近一次构建已完成，退出码为 0。</p>` : '') +
+      (stage === 'move' ? message('接下来就在这里工作。') + '<p>后续命令会从构建日志目录开始。</p>' : '') +
+      (logs.status ? muted(`${esc(nm(logs.device))} · ${esc(logs.status)}`) : '') +
+      (stage === 'start' ? action('演示读取', 'inspect') : stage === 'inspect' ? action('接下来就在这里工作', 'move') : btn('重看示例', { sm: true, k: 'ghost', act: 'place-demo', v: 'start' }));
+    return header({ title: '会话示例', desc: '检查最近一次构建' }, { acts: btn('返回工作区', { sm: true, k: 'ghost', icon: 'back', act: 'place-demo', v: '' }) }) +
+      `<div class="place-conversation"><div class="place-dialogue">${body}</div><div class="place-current">${ic('folder','sm')}<span>当前工作位置</span><b>${esc(placeLabel(current))}</b></div></div>`;
+  }
+
   page('workspaces', {
     title: '工作区', icon: 'drive', scope: 'host',
-    keywords: '工作区 文件 命令 目录 默认目录 shell 命令行 Git Bash PowerShell WSL bash zsh 隔离 工作副本 版本化 WinFsp FUSE 远端项目 SSH 默认设备',
-    desc: 'Agent 读写文件、运行命令的地方。每台设备可以提供一个工作区，下面按设备列出。',
+    keywords: '工作位置 文件夹 命令 起始目录 项目 跨设备',
+    desc: '保存常用的设备目录，供会话和任务使用。',
     render() {
-      const list = visible().filter(d => roles(d).agent && roles(d).agent.files);
-      const saved = K.get('dev.default', 'studio-pc'); const def = list.some(d => agentId(d) === saved) ? saved : list[0] && agentId(list[0]);
-      const group = d => {
-        const id = agentId(d); const a = roles(d).agent; const w = WS[id] || { dir: '~', os: 'linux', iso: 'none' }; const on = capOn('ws', id);
-        const projs = DATA.projects.filter(p => (p.dev || 'studio-pc') === id);
-        const viaText = a.via === 'host' ? 'Varin 服务所在的电脑' : a.via === 'ssh' ? 'SSH · ' + a.ssh : '远程代理 · ' + a.url;
-        const iso = w.iso === 'fuse' ? chip('可用 · FUSE', 'ok') : w.iso === 'missing' ? `<span class="hstack">${muted('需要 WinFsp')}${btn('安装', { sm: true, act: 'toast', v: '下载 WinFsp 安装程序，装好后重新检测' })}</span>` : chip('不支持');
-        const isoDesc = w.iso === 'missing' ? '版本化工作区和工作副本需要它，Agent 可以在不改动原文件的情况下工作。不装也能正常读写。' : w.iso === 'fuse' ? '可以给这里的项目开启版本化工作区和工作副本。' : '这台设备不支持，只能直接读写原文件。';
-        const body = (a.off ? note(`${nm(d)}${a.off}，暂时不能使用。`, { k: 'warn', inpanel: true }) : '') +
-          row('提供给 Agent', sw('ws.on.' + id, true, { re: true, label: '提供工作区' }), { desc: viaText }) +
-          (on ? row('默认目录', txt('ws.dir.' + id, w.dir, { mono: true }), { desc: '没有项目时，命令从这里开始。绝对路径仍然可以访问这个账户能访问的其他位置。' }) +
-            row('运行命令使用', `${dd('ws.shell.' + id, shellOpts(w.os), 'auto')}${btn('', { k: 'ghost', sm: true, icon: 'refresh', tip: '重新检测', act: 'toast', v: `已在 ${nm(d)} 上重新检测命令行` })}`, { desc: '修改后从下一次请求开始生效。' }) +
-            row('隔离工作副本', iso, { desc: isoDesc }) +
-            row('在这里的项目', projs.length ? `<span class="hstack wrap" style="justify-content:flex-end">${projs.map(p => `<button class="chip" data-go="projects" data-sel="${p.id}" style="cursor:pointer">${esc(p.name)}</button>`).join('')}</span>` : muted('还没有'), { desc: '添加项目时选择它在哪个工作区。' })
-            : row('', '', { desc: '已关闭。新的工作里 Agent 不会用到这个工作区，项目也暂时打不开。' }));
-        return sec(groupTitle(d.id), body, { acts: `${def === id ? chip('新工作默认', 'primary') : ''}${devBtn(d.id)}` });
-      };
-      return header(this, { acts: btn('添加工作区', { sm: true, icon: 'plus', act: 'dev-add-agent' }) }) +
-        sec('', row('新工作默认使用', dd('dev.default', list.map(d => ({ v: agentId(d), l: groupTitle(d.id), icon: KIND[d.kind] })), def, { w: 'wl', re: true }), { desc: '没有项目、也没有指定时使用。对话里可以随时换；已经开始的工作沿用原来的工作区。' })) +
-        list.map(group).join('') +
-        note('添加工作区就是让 Agent 使用另一台设备：通过 SSH，或者在那台设备上运行 Varin 服务。只通过中继连接的设备不能提供工作区。');
+      const places = workPlaces();
+      const stage = K.get(placeKey('demo'), '');
+      if (stage) return demoPlaces(places, stage);
+      const fallback = `服务默认目录 · ${svcId()}`;
+      const choices = [{ v: '', l: fallback }, ...places.map(p => ({ v: p.id, l: placeLabel(p), d: p.path + (p.status ? ' · ' + p.status : '') }))];
+      return header(this, { acts: btn('会话示例', { k: 'ghost', sm: true, icon: 'play', act: 'place-demo', v: 'start' }) }) +
+        sec('', row('普通新会话的起始位置', dd(placeKey('default'), choices, '', { w: 'wl' }), { desc: '从项目开始时用项目目录。Bot 直接会话从自己的家目录开始。' })) +
+        sec('工作位置', (K.get(placeKey('adding'), false) ? placeForm() : '') + places.map(placeLine).join(''), {
+          acts: btn('添加位置', { sm: true, icon: 'plus', act: 'place-form' }),
+        });
     },
   });
 

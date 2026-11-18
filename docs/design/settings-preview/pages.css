@@ -248,3 +248,27 @@ button.pv-tog:hover { background: var(--hover); color: var(--fg); }
 .vm-bar { flex: 1; height: 4px; border-radius: 4px; background: color-mix(in srgb, var(--foreground) 10%, transparent); overflow: hidden; }
 .vm-bar i { display: block; height: 100%; background: var(--primary); border-radius: 4px; transition: width var(--t-glide) linear; }
 .win[data-size="phone"] .vms { grid-template-columns: 1fr; }
+.place-line + .place-line, .place-form + .place-line { border-top: 1px solid var(--line-soft); }
+.place-line summary { list-style: none; display: flex; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer; }
+.place-line summary::-webkit-details-marker { display: none; }
+.place-line summary:hover { background: var(--hover); }
+.place-line summary > .ic, .place-state { color: var(--muted); }
+.place-line summary .chev { transition: transform var(--t-snap) var(--ease); }
+.place-line[open] summary .chev { transform: rotate(90deg); }
+.place-text { flex: 1; min-width: 0; }
+.place-text b, .place-current b, .place-observation strong { font-weight: 500; }
+.place-text b, .place-text code { overflow-wrap: anywhere; }
+.place-text small { display: flex; align-items: baseline; gap: 2px 10px; flex-wrap: wrap; color: var(--muted); margin-top: 2px; }
+.place-text code { font-family: var(--font-mono); }
+.place-links { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 10px 40px; }
+.place-form { display: grid; gap: 12px; padding: 16px; }
+.place-form label { display: grid; grid-template-columns: 50px minmax(0, 1fr); align-items: center; gap: 8px; }
+.place-form .field { width: 100%; }
+.place-form .hstack { justify-content: flex-end; }
+.place-form .place-connect { margin-right: auto; }
+.place-conversation { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.place-dialogue { padding: 18px; }
+.place-observation, .place-current { display: flex; align-items: center; gap: 9px; color: var(--muted); }
+.place-observation small { display: block; overflow-wrap: anywhere; }
+.place-current { border-top: 1px solid var(--line-soft); padding: 10px 16px; flex-wrap: wrap; background: var(--panel); font-size: 12px; }
+.place-current b { color: var(--fg); }
