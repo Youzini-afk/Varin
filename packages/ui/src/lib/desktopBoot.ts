@@ -24,6 +24,7 @@ export type DesktopBootOutcome =
   // Main screens - CLI or remote connection is working
   | ({ target: 'local'; status: 'ok' } & DesktopBootAvailability)
   | ({ target: 'remote'; status: 'ok'; hostId: string; url: string } & DesktopBootAvailability)
+  | ({ target: 'remote'; status: 'relay-pending'; hostId: string; url: string } & DesktopBootAvailability)
 
   // First launch - user hasn't made a choice yet
   | ({ target: null; status: 'not-configured' } & DesktopBootAvailability)
@@ -56,11 +57,17 @@ export type DesktopBootViewInput = {
 
 // ── Public API ──
 
+// Window-scoped evidence for the initial render only. It is not a credential
+// or authorization and never changes the saved connection or native outcome.
+type VerifiedRelayBoot = { id: string; stillSelected(): boolean };
+let verifiedRelayBootHost: VerifiedRelayBoot | null = null;
+export const setVerifiedRelayBootHost = (host: VerifiedRelayBoot | null): void => { verifiedRelayBootHost = host; };
+
 /** Valid target values */
 const VALID_TARGETS = ['local', 'remote', null] as const;
 
 /** Valid status values */
-const VALID_STATUSES = ['ok', 'not-configured', 'unreachable', 'incompatible', 'wrong-service', 'missing'] as const;
+const VALID_STATUSES = ['ok', 'relay-pending', 'not-configured', 'unreachable', 'incompatible', 'wrong-service', 'missing'] as const;
 
 /** Return type for `validateBootOutcome`. */
 type ValidationResult =
@@ -99,12 +106,12 @@ function validateBootOutcome(raw: unknown): ValidationResult {
       return { valid: true, outcome: { target: 'local', status: 'ok', ...availability } };
     }
 
-    if (status === 'ok' && target === 'remote') {
+    if ((status === 'ok' || status === 'relay-pending') && target === 'remote') {
       // { target: 'remote'; status: 'ok' } requires hostId and url
       if (typeof record.hostId !== 'string' || typeof record.url !== 'string') {
         return { valid: false };
       }
-      return { valid: true, outcome: { target: 'remote', status: 'ok', hostId: record.hostId, url: record.url, ...availability } };
+      return { valid: true, outcome: { target: 'remote', status, hostId: record.hostId, url: record.url, ...availability } };
     }
 
     if (status === 'unreachable') {
@@ -191,7 +198,7 @@ export function resolveDesktopBootView(
   }
 
   if (outcome.target === 'remote') {
-    if (outcome.status === 'unreachable') {
+    if (outcome.status === 'unreachable' || outcome.status === 'relay-pending') {
       return { screen: 'recovery', variant: 'remote-unreachable', hostId: outcome.hostId, url: outcome.url, ...availability };
     } else if (outcome.status === 'incompatible') {
       return { screen: 'recovery', variant: 'remote-incompatible', hostId: outcome.hostId, url: outcome.url, ...availability };
@@ -280,7 +287,11 @@ export function getInjectedBootOutcome(): DesktopBootOutcome | null {
     .__VARIN_DESKTOP_BOOT_OUTCOME__;
 
   const result = validateBootOutcome(raw);
-  return result.valid ? result.outcome : null;
+  if (!result.valid) return null;
+  const outcome = result.outcome;
+  if (outcome.status !== 'relay-pending') return outcome;
+  const confirmed = verifiedRelayBootHost?.id === outcome.hostId && verifiedRelayBootHost.stillSelected();
+  return { ...outcome, status: confirmed ? 'ok' : 'unreachable' };
 }
 
 /**

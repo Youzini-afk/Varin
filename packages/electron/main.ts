@@ -59,7 +59,7 @@ import { createDesktopNetworkFetch } from './harness-network-fetch.js';
 import { createTray, createTrayController, type TrayAction } from './tray.js';
 import { NotificationListener } from './notification-listener.js';
 import { routeThreadWindow, runtimeTargetKey, threadMiniChatUrl, threadWindowKey as buildThreadWindowKey } from './thread-window-target.js';
-import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.js';
+import { rendererRelayStartup, resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.js';
 import { createStartupSplashHtml } from './startup-splash.js';
 import { createQuitLifecycle } from './quit-lifecycle.js';
 import { readLocalHostMode, writeLocalHostMode, restartDesktopNormally, type LocalHostModeContext } from './local-host-mode.js';
@@ -2759,6 +2759,7 @@ const activateMainWindow = async (
   state.requestHeaders = sanitizeRuntimeRequestHeaders(runtimeConfig.requestHeaders || {});
   state.bootOutcome = bootOutcome ?? null;
   const rendererRuntimeConfig = buildRendererRuntimeConfig(url, {
+    relayHostId: runtimeConfig.relayHostId,
     apiBaseUrl: state.apiBaseUrl || '',
     clientToken: state.clientToken || '',
     requestHeaders: state.requestHeaders || {},
@@ -2792,8 +2793,8 @@ const activateMainWindow = async (
 
 const openMainWindow = async () => {
   if (!state.startupResolved) {
-    const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
-    return activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+    const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders, relayHostId } = await resolveInitialUrl();
+    return activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders, relayHostId });
   }
 
   const config = readDesktopHostsConfig();
@@ -2804,17 +2805,9 @@ const openMainWindow = async () => {
     : null;
   const relayHost = host && host.relay && typeof host.relay === 'object' ? host : null;
   if (relayHost) {
-    // Relay hosts have no reachable HTTP base. Boot the LOCAL UI with the local
-    // runtime; the renderer re-opens the E2EE tunnel on startup by reading the
-    // relay descriptor + token from desktopHosts and calling
-    // switchRuntimeEndpoint({ relay }).
-    const localApiBaseUrl = state.sidecarUrl || state.apiBaseUrl || state.localOrigin || '';
-    const localToken = resolveStoredClientTokenForUrl(localApiBaseUrl, config) || state.clientToken || '';
-    return activateMainWindow(localUiUrl, state.localOrigin, state.bootOutcome, {
-      apiBaseUrl: localApiBaseUrl,
-      clientToken: localToken,
-      requestHeaders: {},
-    });
+    // The bundled UI owns authenticated direct-or-relay selection for this profile.
+    const relay = rendererRelayStartup(relayHost, localUiUrl, Boolean(state.sidecarUrl))!;
+    return activateMainWindow(localUiUrl, state.localOrigin, relay.bootOutcome, relay);
   }
   const apiBaseUrl = host?.apiUrl || host?.url || state.sidecarUrl || state.apiBaseUrl || '';
   const clientToken = host?.clientToken || resolveStoredClientTokenForUrl(apiBaseUrl, config) || state.clientToken || '';
@@ -3251,7 +3244,9 @@ const resolveInitialUrl = async () => {
   } else if (config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID) {
     const host = config.hosts.find((entry) => entry.id === config.defaultHostId);
     if (host?.url) {
-      apiBaseUrl = host.apiUrl || host.url;
+      const relay = rendererRelayStartup(host, localUiUrl, localAvailable);
+      if (relay) return { ...relay, localOrigin, localUiUrl };
+      apiBaseUrl = normalizeHostUrl(host.apiUrl || host.url) || '';
       clientToken = host.clientToken || '';
       requestHeaders = sanitizeRuntimeRequestHeaders(host.requestHeaders || {});
       initialUrl = usePackagedUi ? localUiUrl : host.url;
@@ -3288,7 +3283,7 @@ const resolveInitialUrl = async () => {
     localAvailable,
   });
 
-  return { initialUrl, localOrigin, localUiUrl, bootOutcome, apiBaseUrl, clientToken, requestHeaders };
+  return { initialUrl, localOrigin, localUiUrl, bootOutcome, apiBaseUrl, clientToken, requestHeaders, relayHostId: '' };
 };
 
 // ---------------------------------------------------------------------------
@@ -3340,7 +3335,7 @@ const setupTrayAndListener = (bootOutcome: BootOutcome | null): void => {
   const config = readDesktopHostsConfig();
   const host = config.hosts.find((entry) => entry.id === bootOutcome.hostId);
   const serverUrl = bootOutcome.url || host?.url;
-  if (!serverUrl) return;
+  if (!serverUrl || bootOutcome.status === 'relay-pending') return; // Native SSE cannot use the renderer-owned tunnel.
 
   // Remote hosts carry their own client token; the local UI password belongs
   // only to this Host and must not be sent to another configured connection.
@@ -5852,8 +5847,8 @@ app.whenReady().then(async () => {
   const initial = extractInitialDeepLinks();
   if (initial.length > 0) handleDeepLinks(initial);
 
-  const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
-  await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+  const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders, relayHostId } = await resolveInitialUrl();
+  await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders, relayHostId });
 
   // Restore downloaded artwork without holding the main application's startup on its first frame.
   void (async () => {

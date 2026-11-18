@@ -1,6 +1,7 @@
 import { getRuntimeExtraHeadersSync, refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, setLocalRuntimeAuthCredentialProvider, setRuntimeBearerToken, setRuntimeExtraHeaders } from '@varin/application-client';
 import { installRuntimeFetchBridge } from '@varin/application-client';
-import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@varin/application-client';
+import { getRuntimeKey, getRuntimeEndpointGeneration, runtimeFetch, initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@varin/application-client';
+import { setVerifiedRelayBootHost } from '@varin/ui/lib/desktopBoot';
 import { restoreDesktopRelayRuntime } from '@varin/ui/lib/desktopRelayRestore';
 import { desktopLocalClientTokenGet } from '@varin/ui/lib/desktopHosts';
 import { configureRuntimeUrlResolver } from '@varin/application-client';
@@ -34,12 +35,13 @@ declare global {
 export const readRuntimeBootstrapConfig = (): EmbeddedSessionRuntimeBootstrap => {
   const readString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
+  const relayHostId = readString(window.__VARIN_RELAY_HOST_ID__);
   return {
-    apiBaseUrl: readString(window.__VARIN_API_BASE_URL__),
-    clientToken: readString(window.__VARIN_CLIENT_TOKEN__),
+    apiBaseUrl: relayHostId ? '' : readString(window.__VARIN_API_BASE_URL__),
+    clientToken: relayHostId ? '' : readString(window.__VARIN_CLIENT_TOKEN__),
     localOrigin: readString(window.__VARIN_LOCAL_ORIGIN__),
-    runtimeHeaders: window.__VARIN_RUNTIME_HEADERS__,
-    relayHostId: readString(window.__VARIN_RELAY_HOST_ID__),
+    runtimeHeaders: relayHostId ? undefined : window.__VARIN_RUNTIME_HEADERS__,
+    relayHostId,
   };
 };
 
@@ -74,7 +76,7 @@ export const createConfiguredWebAPIs = (bootstrap?: EmbeddedSessionRuntimeBootst
       relay,
     });
   }
-  void refreshRuntimeUrlAuthToken(apiBaseUrl || undefined).catch(() => {});
+  if (!relayHostId && !relay) void refreshRuntimeUrlAuthToken(apiBaseUrl || undefined).catch(() => {});
   if (localOrigin && !sameOrigin(apiBaseUrl, localOrigin) && Object.keys(getRuntimeExtraHeadersSync()).length > 0) {
     void refreshLocalRuntimeUrlAuthToken(localOrigin).catch(() => {});
   }
@@ -85,12 +87,22 @@ export const createConfiguredWebAPIs = (bootstrap?: EmbeddedSessionRuntimeBootst
   // relay host is involved. main.tsx holds the app render on this promise so
   // the user sees the splash instead of a transient auth screen against an
   // endpoint that is still being selected.
-  desktopRelayRestoreReady = relay
-    ? Promise.resolve()
-    : Promise.race([
-        restoreDesktopRelayRuntime(relayHostId || undefined).catch(() => {}),
-        // Never hold the app hostage: a stuck probe/tunnel gives up to the UI.
-        new Promise<void>((resolve) => { window.setTimeout(resolve, 10_000); }),
-      ]);
+  setVerifiedRelayBootHost(null);
+  const restore = async () => {
+    await restoreDesktopRelayRuntime(relayHostId || undefined);
+    if (!relayHostId || getRuntimeKey() !== `host:${relayHostId}`) return null;
+    const generation = getRuntimeEndpointGeneration();
+    // Selecting the transport is not proof that the tunnel reached its Host.
+    // Use the active pinned transport; never make an HTTP request to relay://.
+    const response = await runtimeFetch('/auth/session', { cache: 'no-store', signal: AbortSignal.timeout(5_000) });
+    const authenticated = response.ok && (await response.json())?.authenticated === true;
+    const stillSelected = () => getRuntimeEndpointGeneration() === generation && getRuntimeKey() === `host:${relayHostId}`;
+    return authenticated && stillSelected() ? { id: relayHostId, stillSelected } : null;
+  };
+  desktopRelayRestoreReady = relay ? Promise.resolve() : Promise.race([
+    restore().catch(() => null),
+    // A late result must not resurrect a timed-out/unavailable startup selection.
+    new Promise<null>((resolve) => { window.setTimeout(() => resolve(null), 10_000); }),
+  ]).then(setVerifiedRelayBootHost);
   return createWebAPIs({ urls });
 };

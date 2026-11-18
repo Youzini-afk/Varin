@@ -192,7 +192,10 @@ and update feeds on every platform. The light product stages the same renderer a
 The role is compiled into the main shell, and `package.json` records the role, platform and architecture.
 No embedded Host, Rust kernel, ripgrep, VM guest, Puppeteer or native resource drivers are installed.
 The light shell always opens the bundled UI, including the first-launch chooser and lost-connection
-recovery screen. It cannot enable a local Host with a saved preference or environment flag. Client
+recovery screen. For a saved relay profile, the renderer restores the original transport and checks
+the authenticated session once before entering the workbench. A timeout keeps the connection and
+shows recovery instead of probing a relay identifier as HTTP. Native background SSE is direct-only;
+relay traffic belongs to the open renderer. The light app cannot enable a local Host with a saved preference or environment flag. Client
 profiles and pairing choices are local to **Varin Light**. The light app neither reads nor migrates
 the full Host's `VARIN_DATA_DIR`. SSH used by the Agent to reach resources belongs to that Agent;
 an SSH forward on the client itself is not provided. Closing the shell does not stop a separately
