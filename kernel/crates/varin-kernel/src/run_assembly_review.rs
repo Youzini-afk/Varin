@@ -200,7 +200,9 @@ fn hybrid_file_read_can_be_selected_without_granting_a_source() {
     assert!(prepare(json!(["file_read","file_write"])).is_err(),"source-free selection must not authorize mutations");
     let PreparedLaunch::Selection(selected)=prepare(json!(["file_read"])).unwrap() else {panic!("selection receipt required")};
     assert!(selected["selection"]["source"].is_null());
-    assert!(selected["selection"]["tools"].as_array().unwrap().iter().any(|tool|tool["name"]=="file_read"));
+    let tools=selected["selection"]["tools"].as_array().unwrap();
+    assert!(tools.iter().any(|tool|tool["name"]=="file_read" && tool["version"]=="2"));
+    assert!(!tools.iter().any(|tool|tool["name"]=="work_locations"));
     drop(assembly);drop(runtime);std::fs::remove_dir_all(root).unwrap();
 }
 

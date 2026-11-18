@@ -93,6 +93,7 @@ struct Search {
 }
 
 struct Owner {
+    run_id: String,
     default: SourceSelection,
     catalog: Arc<Mutex<Catalog>>,
     resources: KernelResourceClient,
@@ -103,7 +104,10 @@ impl Owner {
         ctx: &ToolExecutionContext,
         cancel: &CancellationToken,
     ) -> Result<String, ExecutionError> {
-        if cancel.is_cancelled() || !matches!(ctx.origin, ToolOrigin::ModelStep { .. }) {
+        if ctx.run_id != self.run_id
+            || cancel.is_cancelled()
+            || !matches!(ctx.origin, ToolOrigin::ModelStep { .. })
+        {
             return Err(denied(
                 "Location selection requires an active ordinary native model request",
             ));
@@ -186,11 +190,13 @@ fn location_owner(run: &str) -> String {
 
 pub(crate) fn declarations(
     reader: ToolDeclaration,
+    run_id: String,
     default: SourceSelection,
     catalog: Arc<Mutex<Catalog>>,
     resources: KernelResourceClient,
 ) -> [ToolDeclaration; 2] {
     let owner = Arc::new(Owner {
+        run_id,
         default,
         catalog,
         resources,
@@ -522,7 +528,8 @@ impl Routed {
         let query = json!({"kind":"work_location_bind","runId":ctx.run_id,"threadId":thread,"operationId":ctx.operation_id,
             "origin":ctx.origin,"callId":a.call.call_id,"tool":"file_read","key":key});
         let result = a.owner.resources.source_query(query, t)?;
-        let binding: ToolBinding = serde_json::from_value(result.clone()).map_err(denied)?;
+        self.lease.set(ReadLease{resources:a.owner.resources.clone(),release:json!({"kind":"work_location_release","runId":ctx.run_id,"threadId":thread,"operationId":ctx.operation_id,"binding":result.clone()})}).map_err(|_|denied("Read was already prepared"))?;
+        let binding: ToolBinding = serde_json::from_value(result).map_err(denied)?;
         let source = binding.source_selection().map_err(denied)?;
         if !eligible(Some(&source))
             || binding.run_id != ctx.run_id
@@ -539,7 +546,6 @@ impl Routed {
                 "Resource owner returned a different location or authority",
             ));
         }
-        self.lease.set(ReadLease{resources:a.owner.resources.clone(),release:json!({"kind":"work_location_release","runId":ctx.run_id,"threadId":thread,"operationId":ctx.operation_id,"binding":result})}).map_err(|_|denied("Read was already prepared"))?;
         if a.expected
             .as_ref()
             .is_some_and(|original| original != &source)

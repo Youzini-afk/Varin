@@ -397,7 +397,7 @@ impl RunAssembly {
             let path_read = existing.is_some();
             let reader = crate::attachment_reads::declaration(existing,runtime.catalog(),self.resource.clone());
             if path_read && !is_child && host_authority && crate::work_locations::eligible(launch_source.as_ref()) {
-                declarations.extend(crate::work_locations::declarations(reader, launch_source.as_ref().unwrap().clone(),
+                declarations.extend(crate::work_locations::declarations(reader, p.run_id.clone(), launch_source.as_ref().unwrap().clone(),
                     runtime.catalog(), resources.clone().with_journal_catalog(runtime.catalog())));
             } else {
                 declarations.push(reader);
