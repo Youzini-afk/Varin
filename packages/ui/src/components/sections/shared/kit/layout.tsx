@@ -185,7 +185,18 @@ export function Loading({ label }: { label?: React.ReactNode }) {
 /* ── Option cards ── */
 export interface CardOption<T extends string> { value: T; label: React.ReactNode; description?: React.ReactNode; icon?: IconName; art?: React.ReactNode; disabled?: boolean; extra?: React.ReactNode }
 export function OptionCards<T extends string>({ value, options, onChange, columns, label }: { value: T; options: readonly CardOption<T>[]; onChange(value: T): void; columns?: number; label?: string }) {
-  return <div className="sk-cards" role="radiogroup" aria-label={label} style={{ '--n': columns ?? options.length } as React.CSSProperties}>
+  return <div className="sk-cards" role="radiogroup" aria-label={label} style={{ '--n': columns ?? options.length } as React.CSSProperties}
+    onKeyDown={event => {
+      const direction = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
+      if (!direction) return;
+      const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button[role="radio"]:not(:disabled)'));
+      const index = buttons.indexOf(event.target as HTMLButtonElement);
+      if (index < 0) return;
+      const next = buttons[(index + direction + buttons.length) % buttons.length]!;
+      event.preventDefault();
+      next.focus();
+      next.click();
+    }}>
     {options.map(option => <button key={option.value} type="button" role="radio" aria-checked={option.value === value} disabled={option.disabled}
       className="sk-ocard" onClick={() => { if (option.value !== value) onChange(option.value); }}>
       {option.art ? <div className="sk-art">{option.art}</div> : null}

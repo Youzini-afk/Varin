@@ -1,9 +1,8 @@
 import React from 'react';
 import { SettingsActionBar } from '../shared/SettingsActionBar';
 import { getRuntimeApiBaseUrl, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, runtimeFetch } from '@varin/application-client';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { SettingsFieldRow, SettingsSection, SettingsRadioGroup, SettingsRadioOption } from '@/components/sections/shared/SettingsSection';
+import { Btn, Note, OptionCards, Row, Section } from '../shared/kit';
 import { useI18n } from '@/lib/i18n';
 
 type NetworkSetting = { mode: 'auto' | 'direct' | 'proxy'; proxyUrl: string; noProxy: string; credentialRef?: string };
@@ -38,7 +37,8 @@ function OutboundNetworkContent({ generation }: { generation: number }) {
   const [saving, setSaving] = React.useState(false);
   const [verifying, setVerifying] = React.useState(false);
   const [testUrl, setTestUrl] = React.useState('https://example.com/');
-  const [result, setResult] = React.useState<string | null>(null);
+  const testUrlId = React.useId();
+  const [result, setResult] = React.useState<{ ok: boolean; message: string } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const host = (() => {
     try { return new URL(getRuntimeApiBaseUrl() || window.location.origin).origin; }
@@ -133,48 +133,74 @@ function OutboundNetworkContent({ generation }: { generation: number }) {
   };
 
   const verify = async () => {
-    if (dirty || writing.current || testing.current || !isCurrent()) return;
+    if (loading || dirty || writing.current || testing.current || !isCurrent()) return;
     testing.current = true;
-    setVerifying(true); setResult(null); setError(null);
+    setVerifying(true); setResult(null);
     try {
       const { response, value } = await request<{ ok?: boolean; status?: number; errorClass?: string; error?: string; policy?: { mode: string; source: string; proxyOrigin?: string } }>('/api/harness/egress/verify', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: testUrl }),
       });
       if (!response.ok) throw new Error(value.error ?? t('settings.page.harness.network.verifyFailed'));
-      setResult(value.ok
+      setResult({ ok: value.ok === true, message: value.ok
         ? `${t('settings.page.harness.network.verifyOk')} HTTP ${value.status} · ${value.policy?.mode ?? '?'} · ${value.policy?.proxyOrigin ?? value.policy?.source ?? '?'}`
-        : `${t('settings.page.harness.network.verifyFailed')} ${value.errorClass ?? 'http'}${value.status ? ` ${value.status}` : ''}: ${value.error ?? ''}`);
-    } catch (cause) { if (isCurrent()) setError(cause instanceof Error ? cause.message : String(cause)); }
+        : `${t('settings.page.harness.network.verifyFailed')} ${value.errorClass ?? 'http'}${value.status ? ` ${value.status}` : ''}: ${value.error ?? ''}` });
+    } catch (cause) {
+      if (isCurrent()) setResult({ ok: false, message: cause instanceof Error ? cause.message : String(cause) });
+    }
     finally { testing.current = false; if (isCurrent()) setVerifying(false); }
   };
 
-  return <SettingsSection title={t('settings.page.harness.network.title')} description={`${t('settings.page.harness.network.host')} ${host}`} contentClassName="space-y-5">
-    <SettingsRadioGroup aria-label={t('settings.page.harness.network.mode')} className="settings-permission-modes">
-      {(['auto', 'direct', 'proxy'] as const).map(mode => <SettingsRadioOption key={mode} selected={draft.mode === mode} label={t(`settings.page.harness.network.${mode}`)} description={mode === 'auto' ? t('settings.page.harness.network.autoHint') : undefined}
-        disabled={loading || saving} onSelect={() => setDraft(current => ({ ...current, mode }))} />)}
-    </SettingsRadioGroup>
-    {draft.mode === 'proxy' ? <>
-      <SettingsFieldRow label={t('settings.page.harness.network.proxyUrl')} controlClassName="@xl:flex-1 @xl:max-w-80">
-        <Input value={draft.proxyUrl} placeholder="http://127.0.0.1:7890" onChange={(event) => setDraft((current) => ({ ...current, proxyUrl: event.target.value }))} disabled={loading || saving} />
-      </SettingsFieldRow>
-      <SettingsFieldRow label={t('settings.page.harness.network.noProxy')} controlClassName="@xl:flex-1 @xl:max-w-80">
-        <Input value={draft.noProxy} placeholder="localhost, .example.org" onChange={(event) => setDraft((current) => ({ ...current, noProxy: event.target.value }))} disabled={loading || saving} />
-      </SettingsFieldRow>
-      <SettingsFieldRow label={t('settings.page.harness.network.username')} controlClassName="@xl:flex-1 @xl:max-w-80">
-        <Input value={username} autoComplete="off" onChange={(event) => setUsername(event.target.value)} disabled={loading || saving} />
-      </SettingsFieldRow>
-      <SettingsFieldRow label={t('settings.page.harness.network.password')} controlClassName="@xl:flex-1 @xl:max-w-80">
-        <Input type="password" value={password} autoComplete="new-password" onChange={(event) => setPassword(event.target.value)} disabled={loading || saving} />
-      </SettingsFieldRow>
-      {hasAuth ? <Button size="sm" variant="ghost" disabled={loading || saving || dirty} onClick={() => void clearAuth()}>{t('settings.page.harness.network.clearAuth')}</Button> : null}
-    </> : null}
-    <SettingsActionBar dirty={dirty} saving={saving} saveDisabled={loading} onSave={save} onCancel={() => { setDraft(saved); setUsername(''); setPassword(''); setError(null); setResult(null); }} error={error} />
-    <SettingsFieldRow label={t('settings.page.harness.network.testUrl')} controlClassName="@xl:flex-1 @xl:max-w-80">
-      <Input value={testUrl} onChange={(event) => setTestUrl(event.target.value)} disabled={loading || verifying} />
-    </SettingsFieldRow>
-    <Button size="sm" variant="secondary" disabled={loading || saving || dirty || verifying} onClick={() => void verify()}>{t('settings.page.harness.network.verify')}</Button>
-    {dirty ? <p className="typography-meta text-muted-foreground">{t('settings.page.harness.network.saveFirst')}</p> : null}
-    {result ? <p role="status" className="typography-meta">{result}</p> : null}
-    {error ? <p role="alert" className="typography-meta text-destructive">{error}</p> : null}
-  </SettingsSection>;
+  const modeLabel = t('settings.page.harness.network.mode');
+  const proxyUrlLabel = t('settings.page.harness.network.proxyUrl');
+  const noProxyLabel = t('settings.page.harness.network.noProxy');
+  const usernameLabel = t('settings.page.harness.network.username');
+  const passwordLabel = t('settings.page.harness.network.password');
+  const testLabel = t('settings.page.harness.network.testUrl');
+
+  return <>
+    <Section title={modeLabel} raw>
+      <OptionCards label={modeLabel} value={draft.mode}
+        options={(['auto', 'direct', 'proxy'] as const).map(mode => ({
+          value: mode, label: t(`settings.page.harness.network.${mode}`),
+          description: t(`settings.page.harness.network.${mode}Hint`), disabled: loading || saving,
+        }))}
+        onChange={mode => { setDraft(current => ({ ...current, mode })); setResult(null); }} />
+    </Section>
+    {draft.mode === 'proxy' ? <Section title={t('settings.page.harness.network.proxy')}>
+      <Row label={proxyUrlLabel}>
+        <Input aria-label={proxyUrlLabel} className="w-72" value={draft.proxyUrl} placeholder="http://127.0.0.1:7890"
+          onChange={event => setDraft(current => ({ ...current, proxyUrl: event.target.value }))} disabled={loading || saving} />
+      </Row>
+      <Row label={noProxyLabel}>
+        <Input aria-label={noProxyLabel} className="w-72" value={draft.noProxy} placeholder="localhost, .example.org"
+          onChange={event => setDraft(current => ({ ...current, noProxy: event.target.value }))} disabled={loading || saving} />
+      </Row>
+      <Row label={usernameLabel}>
+        <Input aria-label={usernameLabel} className="w-72" value={username} autoComplete="off"
+          onChange={event => setUsername(event.target.value)} disabled={loading || saving} />
+      </Row>
+      <Row label={passwordLabel}>
+        <Input aria-label={passwordLabel} className="w-72" type="password" value={password} autoComplete="new-password"
+          onChange={event => setPassword(event.target.value)} disabled={loading || saving} />
+      </Row>
+      {hasAuth ? <Row><Btn kind="ghost-danger" disabled={loading || saving || dirty} onClick={() => void clearAuth()}>
+        {t('settings.page.harness.network.clearAuth')}
+      </Btn></Row> : null}
+    </Section> : null}
+    <Section title={t('settings.page.harness.network.verify')} description={<>{t('settings.page.harness.network.host')} <span className="break-all">{host}</span></>}
+      after={dirty ? <Note>{t('settings.page.harness.network.saveFirst')}</Note>
+        : result ? <Note kind={result.ok ? 'ok' : 'err'}><span role={result.ok ? 'status' : undefined}>{result.message}</span></Note> : null}>
+      <Row label={<label htmlFor={testUrlId}>{testLabel}</label>}>
+        <form className="flex w-[24rem] max-w-full flex-wrap items-center gap-2"
+          onSubmit={event => { event.preventDefault(); void verify(); }}>
+          <Input id={testUrlId} className="min-w-0 flex-[1_1_14ch]" inputMode="url" value={testUrl}
+            onChange={event => { setTestUrl(event.target.value); setResult(null); }} disabled={loading || verifying} />
+          <Btn type="submit" busy={verifying} disabled={loading || saving || dirty || verifying}>{t('settings.models.testConnection')}</Btn>
+        </form>
+      </Row>
+    </Section>
+    <SettingsActionBar dirty={dirty} saving={saving} saveDisabled={loading} onSave={save}
+      onCancel={() => { setDraft(saved); setUsername(''); setPassword(''); setError(null); setResult(null); }}
+      error={error} />
+  </>;
 }
