@@ -39,6 +39,10 @@ it('uses one workspace surface, shows localized groups, and guards Escape and Re
   const close=vi.fn(); await act(async()=>root.render(<SettingsWindow onClose={close}/>));
   expect(container.querySelector('main [data-settings-view]')).not.toBeNull();
   expect(container.querySelector('[role="dialog"]')).toBeNull();
+  const retainedMenu = document.createElement('div');
+  retainedMenu.setAttribute('inert', '');
+  retainedMenu.innerHTML = '<div role="menu"></div>';
+  container.append(retainedMenu);
   expect([...container.querySelectorAll('summary')].map(el=>el.textContent)).toContain('settings.view.nav.group.models');
   await click('model-roles'); expect(container.textContent).toContain('model-roles content');
   const dispose=registerSettingsDraft('fixture',()=>({dirty:true,saving:false,saveDisabled:false,onCancel:()=>{}}));

@@ -215,6 +215,16 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
+      const settingsShortcut = eventMatchesShortcut(e, combo('open_settings'));
+      if (settingsShortcut) {
+        e.preventDefault();
+        if (useUIStore.getState().isSettingsDialogOpen) requestSettingsNavigation(() => setSettingsDialogOpen(false));
+        else setSettingsDialogOpen(true);
+        return;
+      }
+      // The retained editor and conversation are inactive while the settings surface owns the window.
+      if (useUIStore.getState().isSettingsDialogOpen && !eventMatchesShortcut(e, combo('cycle_theme'))) return;
+
       if (eventMatchesShortcut(e, combo('open_command_palette'))) {
         e.preventDefault();
         toggleCommandPalette();
@@ -315,14 +325,6 @@ export const useKeyboardShortcuts = () => {
             activeElement.focus({ preventScroll: true });
           }
         });
-        return;
-      }
-
-      if (eventMatchesShortcut(e, combo('open_settings'))) {
-        e.preventDefault();
-        const { isSettingsDialogOpen } = useUIStore.getState();
-        if (isSettingsDialogOpen) requestSettingsNavigation(() => setSettingsDialogOpen(false));
-        else setSettingsDialogOpen(true);
         return;
       }
 

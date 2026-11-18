@@ -443,7 +443,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     if (!onClose) return;
     if (backActionRef) backActionRef.current = showBackButton ? handleBack : () => requestSettingsNavigation(onClose);
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"]')) return;
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const blockingSurface = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"]')]
+        .some(surface => !surface.closest('[inert], [hidden], [aria-hidden="true"], [data-state="closed"]'));
+      if (blockingSurface) return;
       event.preventDefault(); requestSettingsNavigation(onClose);
     };
     document.addEventListener('keydown', escape);
