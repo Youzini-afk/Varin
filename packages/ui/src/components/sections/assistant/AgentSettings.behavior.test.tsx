@@ -2,22 +2,31 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { beforeEach, afterEach, test, expect, vi } from 'vitest';
-import type { AgentPersonalizationCatalog, AgentSystemPromptSnapshot } from '@varin/protocol';
+import { mergeHarnessSettings, type AgentPersonalizationCatalog, type AgentSystemPromptSnapshot } from '@varin/protocol';
 import { AgentPromptPage } from './AgentPromptPage';
 import { AgentMemoryPage } from './AgentMemoryPage';
 import { ThreadMemory } from '../../thread/ThreadMemory';
 import type { ContextPersonalization } from '@varin/protocol';
 
 const fixture = vi.hoisted(() => ({ catalog: {} as AgentPersonalizationCatalog, snapshot: {} as AgentSystemPromptSnapshot,
-  update: vi.fn(async (..._args: unknown[]) => true), load: vi.fn(), fetch: vi.fn(), hasThreads: true, activityCursor: 0,
+  update: vi.fn(async (..._args: unknown[]) => true), updateHarness: vi.fn(), load: vi.fn(), fetch: vi.fn(), hasThreads: true, activityCursor: 0,
   project: { id: 'project-a', path: '/repo', label: 'Project A' } }));
 vi.mock('@varin/application-client', async importOriginal => ({ ...await importOriginal<typeof import('@varin/application-client')>(),
-  runtimeFetch: fixture.fetch, getRuntimeEndpointGeneration: () => 1 }));
+  runtimeFetch: fixture.fetch, getRuntimeEndpointGeneration: () => 1,
+  createEmbeddingRequestsHttpAPI: () => ({ read: async () => ({ config: { concurrentRequests: 2, requestIntervalMs: 200 }, revision: 'embedding' }) }),
+}));
 vi.mock('./agentSettings', () => ({ useAgentSettings: () => ({ catalog: fixture.catalog, error: null, busy: false,
   runtime: 1, load: fixture.load, update: fixture.update }) }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/lib/settings/service-identity', () => ({ useServiceIdentity: () => null }));
+vi.mock('../harness/useHarnessSettings', () => ({
+  useHarnessSettings: () => ({ harness: mergeHarnessSettings({}, {}), update: fixture.updateHarness, targetKey: 'settings-harness' }),
+}));
+vi.mock('../harness/ConfigurationModels', () => ({
+  useConfigurationModels: () => ({ providers: [{ id: 'service-a', name: 'Embedding service' }],
+    modelsFor: () => [{ id: 'qwen3-embedding-0.6b', name: 'Qwen 0.6B' }] }),
+}));
 vi.mock('@/hooks/useRuntimeAPIs', () => { const apis = { threads: { snapshot: async () => ({ context: { checkpoint: {
   proposal: { effective_system_prompt: fixture.snapshot.content }, personalization: {
     mode: fixture.snapshot.mode, threadId: fixture.snapshot.threadId, threadRole: 'main', projectId: 'project-a', revision: fixture.snapshot.personalization.revision,
@@ -39,7 +48,9 @@ vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: 
 let root: Root, container: HTMLDivElement;
 beforeEach(() => {
   const { window, document } = parseHTML('<html><body></body></html>');
+  window.HTMLElement.prototype.scrollIntoView = () => {};
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('Event', window.Event); vi.stubGlobal('CustomEvent', window.CustomEvent);
+  vi.stubGlobal('Element', window.Element); vi.stubGlobal('HTMLElement', window.HTMLElement);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   fixture.catalog = { revision: 4, prompts: {}, memories: [
     { id: 1, scope: { kind: 'global' }, content: 'Global note', updatedAt: '' },
@@ -99,15 +110,33 @@ test('saves project additions and style while preserving earlier section overrid
 });
 
 test('shows scope-specific notes and keeps an edit on its selected project', async () => {
+  fixture.catalog.memories[1] = { ...fixture.catalog.memories[1]!, source: { label: 'agent', threadId: 'thread:chat' }, updatedAt: '2026-11-18T09:00:00.000Z' };
   await act(async () => root.render(<AgentMemoryPage />));
   expect(container.textContent).toContain('Global note');
   expect(container.textContent).not.toContain('Project note');
   await click('assistant.scope.project');
   expect(container.textContent).toContain('Project note');
   expect(container.textContent).not.toContain('Global note');
+  expect(container.querySelector('article time')?.getAttribute('dateTime')).toBe('2026-11-18T09:00:00.000Z');
+  expect(container.querySelector('article')?.textContent).toContain('settings.memoryx.fromConversation');
+  expect(container.querySelector('article')?.textContent).not.toContain('thread:chat');
   await click('assistant.edit'); await type('Updated project decision');
   await click('assistant.save');
   expect(fixture.update).toHaveBeenCalledWith('memory', { id: 2, scope: { kind: 'project', id: 'project-a' }, content: 'Updated project decision', revision: 4 });
+});
+
+test('memory retrieval selects a model using the existing harness owner', async () => {
+  fixture.updateHarness.mockClear();
+  await act(async () => root.render(<AgentMemoryPage />));
+  const retrieval = container.querySelector('[data-settings-item="harness.embeddingRequests"]')!;
+  expect(retrieval.querySelector('details')?.open).toBeFalsy();
+  expect(retrieval.querySelector('input[aria-label="settings.memoryx.concurrency"]')).not.toBeNull();
+  await click('settings.memoryx.embedding');
+  const option = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(button => button.textContent === 'Qwen 0.6B')!;
+  await act(async () => option.click());
+  expect(fixture.updateHarness).toHaveBeenCalledExactlyOnceWith({ embedding: {
+    protocol: 'openai-compatible', providerId: 'service-a', modelId: 'qwen3-embedding-0.6b',
+  } });
 });
 
 test('previews the conversation memory checkpoint while newly saved notes remain in the catalog', async () => {

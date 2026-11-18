@@ -218,7 +218,7 @@ export function AgentPromptPage() {
     <Tabs value={pageTab} onChange={value => { setPageTab(value); resetCopy(); }} label={t('assistant.prompt.title')}
       tabs={[{ value: 'custom', label: t('settings.promptx.mine') }, { value: 'preview', label: t('assistant.prompt.effective') }]} />
     <div className="-mt-2 mb-8">
-      <AgentScopePicker compact scope={scope} disabled={settings.busy} onChange={setNextScope => {
+      <AgentScopePicker prompt scope={scope} disabled={settings.busy} onChange={setNextScope => {
         if (agentScopeKey(setNextScope) !== currentScopeKey) requestSettingsNavigation(() => setScope(setNextScope));
       }} />
     </div>

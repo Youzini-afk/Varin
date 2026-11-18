@@ -90,6 +90,7 @@
 .sk-rule { display: grid; grid-template-columns: 18px 90px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 16px; font-size: var(--sk-fs-meta); }
 .sk-rule .sk-grip { color: var(--sk-faint); cursor: grab; }
 .sk-mem { padding: 12px 16px; }
+.sk-mem + .sk-mem { border-top: 1px solid var(--sk-line-soft); }
 .sk-mem p { margin: 0; font-size: var(--sk-fs); line-height: 1.65; white-space: pre-wrap; }
 .sk-mem .sk-meta { margin-top: 6px; display: flex; gap: 10px; align-items: center; font-size: var(--sk-fs-micro); color: var(--sk-faint); flex-wrap: wrap; }
 

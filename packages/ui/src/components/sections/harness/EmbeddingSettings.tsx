@@ -1,16 +1,15 @@
 import React from 'react';
 import { createEmbeddingRequestsHttpAPI, type EmbeddingRequestSettings } from '@varin/application-client';
-import { SettingsSection, SettingsFieldRow } from '../shared/SettingsSection';
 import { SettingsActionBar } from '../shared/SettingsActionBar';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Btn, Disclosure, Loading, Note, Row, Section, Select } from '../shared/kit';
 import { LocalSemanticSettings } from './LocalSemanticSettings';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
+import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 import { InferenceSettings } from './RetrievalSettings';
 
-export function EmbeddingRequests() {
+export function EmbeddingRequests({ model, localModel }: { model?: React.ReactNode; localModel?: React.ReactNode } = {}) {
   const { t } = useI18n();
   const api = React.useMemo(() => createEmbeddingRequestsHttpAPI(), []);
   const [saved, setSaved] = React.useState<EmbeddingRequestSettings | null>(null);
@@ -41,44 +40,62 @@ export function EmbeddingRequests() {
     && draft.requestIntervalMs.trim() !== '' && Number.isSafeInteger(requestIntervalMs) && requestIntervalMs >= 0 && requestIntervalMs <= 2_147_483_647;
   const dirty = Boolean(saved && (String(saved.config.concurrentRequests) !== draft.concurrentRequests || String(saved.config.requestIntervalMs) !== draft.requestIntervalMs || draft.localCpuMode !== (saved.config.localCpuMode ?? 'auto') || draft.localCpuThreads !== (saved.config.localCpuThreads == null ? '' : String(saved.config.localCpuThreads))));
   const save = async () => {
-    if (!saved || !valid || busy) return;
+    if (!saved || !valid || busy) return false;
     setBusy(true); setError(null);
-    try { const value = await api.save({ concurrentRequests, requestIntervalMs, localCpuMode: draft.localCpuMode as 'auto' | 'efficient' | 'performance', localCpuThreads: threads }, saved.revision); if (alive.current) restore(value); }
-    catch (failure) { if (alive.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+    try {
+      const value = await api.save({ concurrentRequests, requestIntervalMs, localCpuMode: draft.localCpuMode as 'auto' | 'efficient' | 'performance', localCpuThreads: threads }, saved.revision);
+      if (!alive.current) return false;
+      restore(value);
+      return true;
+    }
+    catch (failure) { if (alive.current) setError(failure instanceof Error ? failure.message : String(failure)); return false; }
     finally { if (alive.current) setBusy(false); }
   };
-  return <>
-    <SettingsSection title={t('settings.page.harness.embeddings.requests.title')} description={t('settings.page.harness.embeddings.requests.description')} settingsItem="harness.embeddingRequests" contentClassName="space-y-5">
-      {!saved && busy ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
-      {saved ? <>
-        <SettingsFieldRow label={t('settings.page.harness.embeddings.requests.concurrency')}>
-          <Input type="number" min={1} step={1} className="w-40" disabled={busy} value={draft.concurrentRequests} aria-label={t('settings.page.harness.embeddings.requests.concurrency')}
+  const concurrency = t('settings.memoryx.concurrency');
+  const interval = t('settings.memoryx.interval');
+  const cpuLabel = t('settings.page.harness.embeddings.cpu.mode');
+  const threadsLabel = t('settings.page.harness.embeddings.cpu.threads');
+  return <Section item="harness.embeddingRequests" title={t(model ? 'settings.roles.retrieval' : 'settings.page.harness.embeddings.requests.title')}
+    description={t('settings.memoryx.sharedRetrieval')}
+    after={saved ? <Note icon="restart">{t(saved.restartRequired
+      ? 'settings.page.harness.embeddings.requests.restartRequired' : 'settings.memoryx.restart')}</Note> : null}>
+      {model}
+      {localModel ? <Disclosure label={t('settings.page.harness.localSemantic.title')} defaultOpen>{localModel}</Disclosure> : null}
+      {!saved && busy ? <Loading /> : null}
+      {saved && <>
+        <Row label={concurrency}>
+          <Input type="number" min={1} step={1} className="w-[90px] text-right tabular-nums" disabled={busy} value={draft.concurrentRequests} aria-label={concurrency}
             onChange={event => setDraft(value => ({ ...value, concurrentRequests: event.target.value }))} />
-        </SettingsFieldRow>
-        <SettingsFieldRow label={t('settings.page.harness.embeddings.requests.interval')}>
-          <Input type="number" min={0} step={1} className="w-40" disabled={busy} value={draft.requestIntervalMs} aria-label={t('settings.page.harness.embeddings.requests.interval')}
+        </Row>
+        <Row label={interval} description={t('settings.memoryx.intervalHint')}>
+          <Input type="number" min={0} step={1} className="w-[90px] text-right tabular-nums" disabled={busy} value={draft.requestIntervalMs} aria-label={interval}
             onChange={event => setDraft(value => ({ ...value, requestIntervalMs: event.target.value }))} />
-        </SettingsFieldRow>
-        <SettingsFieldRow label={t('settings.page.harness.embeddings.cpu.mode')}>
-          <Select value={draft.localCpuMode} onValueChange={value => setDraft(current => ({ ...current, localCpuMode: value ?? 'auto' }))} disabled={busy}>
-            <SelectTrigger size="settings" className="w-64"><SelectValue /></SelectTrigger>
-            <SelectContent>{(['auto', 'efficient', 'performance'] as const).map(mode => <SelectItem key={mode} value={mode}>{t(`settings.page.harness.embeddings.cpu.${mode}`)}</SelectItem>)}</SelectContent>
-          </Select>
-        </SettingsFieldRow>
-        <SettingsFieldRow label={t('settings.page.harness.embeddings.cpu.threads')} description={t('settings.page.harness.embeddings.cpu.threadsDescription')}>
-          <Input type="number" min={1} step={1} className="w-40" disabled={busy} value={draft.localCpuThreads} placeholder={t('settings.page.harness.embeddings.cpu.auto')}
+          <span className="sk-small sk-muted">{t('settings.voice.page.field.millisecondsUnit')}</span>
+        </Row>
+      </>}
+      {saved ? <Disclosure label={t('settings.memoryx.localCompute')}>
+        <Row label={cpuLabel} sub>
+          <Select label={cpuLabel} width="ws" value={draft.localCpuMode} disabled={busy}
+            options={(['auto', 'efficient', 'performance'] as const).map(value => ({ value, label: t(`settings.page.harness.embeddings.cpu.${value}`) }))}
+            onChange={localCpuMode => setDraft(current => ({ ...current, localCpuMode }))} />
+        </Row>
+        <Row label={threadsLabel} sub>
+          <Input type="number" min={1} step={1} className="w-[90px] text-right tabular-nums" disabled={busy} value={draft.localCpuThreads}
+            aria-label={threadsLabel} placeholder={t('settings.page.harness.embeddings.cpu.auto')}
             onChange={event => setDraft(value => ({ ...value, localCpuThreads: event.target.value }))} />
-        </SettingsFieldRow>
-        {dirty && !valid ? <p role="alert" className="typography-meta text-destructive">{t('settings.page.harness.embeddings.requests.invalid')}</p> : null}
-        {saved.restartRequired ? <p role="status" className="typography-meta text-muted-foreground">{t('settings.page.harness.embeddings.requests.restartRequired')}</p> : null}
-      </> : null}
-      {error ? <div role="alert" className="space-y-2">
-        <p className="typography-meta text-destructive">{error}</p>
-        <Button variant="outline" size="sm" disabled={busy} onClick={() => void load()}>{t('settings.page.harness.embeddings.requests.reload')}</Button>
-      </div> : null}
-    </SettingsSection>
-    {dirty ? <SettingsActionBar dirty={dirty} saving={busy} saveDisabled={!valid} onSave={save} onCancel={() => { if (saved) restore(saved); }} error={error} /> : null}
-  </>;
+        </Row>
+      </Disclosure> : null}
+      {dirty && !valid ? <Note kind="err" inPanel>{t('settings.page.harness.embeddings.requests.invalid')}</Note> : null}
+      {error && !dirty ? <Note kind="err" inPanel actions={<Btn kind="ghost" sm disabled={busy} onClick={() => void load()}>
+        {t('settings.page.harness.embeddings.requests.reload')}
+      </Btn>}>{error}</Note> : null}
+      {dirty ? <SettingsActionBar placement="inline" dirty={dirty} saving={busy} saveDisabled={!valid} onSave={save}
+        onCancel={() => { if (saved) restore(saved); }} error={error}>
+        {error ? <Btn kind="ghost" sm disabled={busy} onClick={() => requestSettingsNavigation(() => void load())}>
+          {t('settings.page.harness.embeddings.requests.reload')}
+        </Btn> : null}
+      </SettingsActionBar> : null}
+  </Section>;
 }
 
 export function EmbeddingSettings(props: HarnessSettingsPageProps) {

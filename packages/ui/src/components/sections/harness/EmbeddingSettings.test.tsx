@@ -8,12 +8,6 @@ const fixture = vi.hoisted(() => ({ read: vi.fn(), save: vi.fn() }));
 vi.mock('@varin/application-client', async importOriginal => ({ ...await importOriginal<object>(), createEmbeddingRequestsHttpAPI: () => fixture }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('./RetrievalSettings', () => ({ InferenceSettings: () => <p>Embedding model</p> }));
-vi.mock('@/components/ui/select', () => ({
-  Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SelectItem: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
-  SelectTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>, SelectValue: () => null,
-}));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) =>
   <input {...props} onInput={event => onChange?.(event as unknown as React.ChangeEvent<HTMLInputElement>)} /> }));
 const { EmbeddingSettings } = await import('./EmbeddingSettings');
