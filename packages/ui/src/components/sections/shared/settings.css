@@ -62,3 +62,10 @@
 .settings-tabs > button:focus-visible,.settings-page-nav button:focus-visible,.settings-nav-group > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; border-radius: 3px; }
 @keyframes settings-reveal { from { opacity: .35; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .settings-tab-panel:not([hidden]),.settings-memory-editor { animation: none; } }
+
+.settings-page-scope { display: inline-flex; max-width: 100%; border-radius: 999px; padding: 3px 9px; background: var(--surface-muted); overflow-wrap: anywhere; }
+.settings-field-scope { flex-shrink: 0; color: var(--muted-foreground); font-size: var(--font-size-micro, 11px); font-weight: normal; }
+.varin-settings-page-body:not(.settings-chat-page, .settings-wide-page) { max-width: 860px; }
+.varin-settings-page-body .settings-section-content:has(> .settings-field-row, > .settings-checkbox-row) {
+  border: 1px solid var(--interactive-border); border-radius: 12px; background: var(--surface-muted); padding-inline: clamp(12px, 2.4%, 20px);
+}

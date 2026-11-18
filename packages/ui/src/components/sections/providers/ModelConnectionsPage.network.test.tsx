@@ -1,3 +1,4 @@
+import { SettingsItemNavigationContext } from '@/lib/settings/search-target';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
@@ -266,4 +267,14 @@ test('restoring a field replaces an unfinished invalid edit and clears its error
   await open(); await click('Model'); await commit('settings.models.context', '-1');
   expect(field('settings.models.context').getAttribute('aria-invalid')).toBe('true'); await click('settings.models.fieldRestore');
   expect(field('settings.models.context').value).toBe('128000'); expect(field('settings.models.context').getAttribute('aria-invalid')).toBe('false');
+});
+
+test('a role link for the exact model channel reveals its shared field without editing credentials or connecting', async () => {
+  snapshot.channels[0]!.models = [model()];
+  fixtures.api.readSettings.mockResolvedValue({global:{harness:{embedding:{providerId:'channel',modelId:'model'},rerank:{providerId:'different',modelId:'model'}}}});
+  const navigate=vi.fn(); await act(async()=>root.render(<SettingsItemNavigationContext.Provider value={navigate}><ModelConnectionsPage /></SettingsItemNavigationContext.Provider>));
+  await click('Connection'); await click('settings.page.harness.section.embedding');
+  expect(navigate).toHaveBeenCalledWith('model-roles','harness.embedding');
+  expect(container.textContent).not.toContain('settings.page.harness.section.rerank');
+  expect(fixtures.api.save).not.toHaveBeenCalled(); expect(fixtures.api.test).not.toHaveBeenCalled();
 });

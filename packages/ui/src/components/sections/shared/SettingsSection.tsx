@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { cn } from '@/lib/utils';
+import { SettingsItemScope } from './SettingsScope';
 import { SettingsInfoHint } from './SettingsInfoHint';
 
 /** Settings select trigger: full column width in stacked cells; capped in field rows via parent. */
@@ -213,6 +214,7 @@ export const SettingsControlGroup: React.FC<SettingsControlGroupProps> = ({
           {title != null ? (
             <div className="flex items-center gap-1.5">
               <SettingsGroupTitle>{title}</SettingsGroupTitle>
+              <SettingsItemScope item={settingsItem} />
               {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
             </div>
           ) : null}
@@ -263,6 +265,7 @@ export const SettingsStackedField: React.FC<SettingsStackedFieldProps> = ({
       <div className="space-y-0.5">
         <div className="flex items-center gap-1.5">
           <div className={SETTINGS_FIELD_LABEL_CLASS}>{label}</div>
+          <SettingsItemScope item={settingsItem} />
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </div>
         {descriptionPlacement === 'before' ? descriptionNode : null}
@@ -311,6 +314,7 @@ export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
       <div className="min-w-0 @xl:flex-1 @xl:max-w-[32rem]">
         <div className="flex items-center gap-1.5">
           <div className={SETTINGS_FIELD_LABEL_CLASS}>{label}</div>
+          <SettingsItemScope item={settingsItem} />
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </div>
         {description != null ? (
@@ -347,6 +351,7 @@ export const SettingsInset: React.FC<SettingsInsetProps> = ({
       data-settings-item={settingsItem}
       className={cn('pt-4', className)}
     >
+      <SettingsItemScope item={settingsItem} />
       {children}
     </div>
   );
@@ -386,6 +391,7 @@ export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
           <label id={labelId} className={cn(SETTINGS_FIELD_LABEL_CLASS, 'cursor-pointer')} onClick={() => { if (!disabled) onChange(!checked); }}>{label}</label>
+          <SettingsItemScope item={settingsItem} />
           {labelAccessory}
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </div>

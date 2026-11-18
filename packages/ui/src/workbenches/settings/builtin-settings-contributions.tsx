@@ -17,6 +17,7 @@ import { CompanionSettings } from '@/components/sections/varin/CompanionSettings
 import type { VarinSettingsSection } from '@/components/sections/varin/types';
 import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
+import { ModelRolesPage } from '@/components/sections/harness/ModelRolesPage';
 import { ModelConnectionsPage } from '@/components/sections/providers/ModelConnectionsPage';
 import { McpConnectionsPage } from '@/components/sections/mcp/McpConnectionsPage';
 import { RemoteInstancesPage } from '@/components/sections/remote-instances/RemoteInstancesPage';
@@ -60,6 +61,7 @@ const implementationFor = (spec: BuiltinSettingsPageSpec): SettingsPageImplement
       case 'git': implementation = { renderContent: () => <GitPage /> }; break;
       case 'language-support': implementation = { renderContent: () => <LanguageSupportPage /> }; break;
       case 'projects': implementation = { renderContent: () => <ProjectsPage />, renderSidebar: (options) => <ProjectsSidebar onItemSelect={options.onItemSelect} /> }; break;
+      case 'model-roles': implementation = { renderContent: () => <ModelRolesPage /> }; break;
       case 'model-connections': implementation = { renderContent: () => <ModelConnectionsPage /> }; break;
       case 'mcp-connections': implementation = { renderContent: () => <McpConnectionsPage /> }; break;
       case 'remote-instances': implementation = { renderContent: () => <RemoteInstancesPage /> }; break;

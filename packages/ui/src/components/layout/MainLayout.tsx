@@ -79,13 +79,6 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
     const isSessionSwitcherOpen = useUIStore((state) => state.isSessionSwitcherOpen);
     const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
     const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
-    // Rendering a closed lazy dialog still asks React to fetch its component.
-    // Mount it after the first real open, then retain it for close animation and
-    // in-window state just as before.
-    const [settingsWindowMounted, setSettingsWindowMounted] = React.useState(isSettingsDialogOpen);
-    React.useEffect(() => {
-        if (isSettingsDialogOpen) setSettingsWindowMounted(true);
-    }, [isSettingsDialogOpen]);
     const isMultiRunLauncherOpen = useUIStore((state) => state.isMultiRunLauncherOpen);
     const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
     const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
@@ -440,7 +433,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                 <>
                     <Header navigationTitle={navigationTitle} navigationSubtitle={navigationSubtitle} panelControl={headerPanelControl} sidebarAttention={sidebarAttention} />
                     {/* Desktop navigation and work area share the row below the titlebar. */}
-                    <div className="agent-workspace-row relative flex min-h-0 min-w-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
+                    <div style={isSettingsDialogOpen ? { display: 'none' } : undefined} inert={isSettingsDialogOpen} className="agent-workspace-row relative flex min-h-0 min-w-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
                         {floatingSidebar && isSidebarOpen ? (
                             <div aria-hidden="true" className="absolute inset-0 z-20 bg-black/10" onPointerDown={() => useUIStore.getState().setSidebarOpen(false)} />
                         ) : null}
@@ -507,15 +500,14 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                         </div>
                     </div>
 
-                    {/* Desktop settings: windowed dialog with blur */}
-                    {settingsWindowMounted ? (
+                    {/* Keep the workspace mounted; settings replaces only the row beneath the titlebar. */}
+                    {isSettingsDialogOpen ? (
                         <WorkbenchReplacement
                             target={WORKBENCH_REPLACEMENT_TARGETS.settings}
                             fallback={(
                                 <React.Suspense fallback={null}>
                                     <SettingsWindow
-                                        open={isSettingsDialogOpen}
-                                        onOpenChange={setSettingsDialogOpen}
+                                        onClose={() => setSettingsDialogOpen(false)}
                                     />
                                 </React.Suspense>
                             )}

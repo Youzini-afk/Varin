@@ -36,23 +36,48 @@ describe('Host speech model catalog', () => {
     api.fetch.mockImplementation(() => new Promise<Response>(resolve => pending.push(resolve)));
     const document = setup();
     const onSelect = vi.fn();
-    const onInfo = vi.fn();
+
     await act(async () => root!.render(<React.StrictMode><LocalSttModelPicker selectedModelId={model.id}
-      onSelect={onSelect} onSelectionInfo={onInfo} /></React.StrictMode>));
+      onSelect={onSelect} language="zh" /></React.StrictMode>));
     await act(async () => {
       for (const resolve of pending) resolve(Response.json({ models: [model] }));
     });
     expect(document.body.textContent).toContain(model.name);
-    expect(onInfo).toHaveBeenLastCalledWith(model);
+
     const row = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes(model.name))!;
     await act(async () => row.click());
-    expect(onSelect).toHaveBeenCalledWith(model.id);
+    expect(api.fetch).toHaveBeenCalledWith('/api/dictation/models/server-added-model/download', { method: 'POST' });
+    expect(onSelect).not.toHaveBeenCalled();
+    await act(async () => { pending.at(-1)!(Response.json({ ok: true })); });
+    await act(async () => { pending.at(-1)!(Response.json({ models: [{ ...model, installed: true }] })); });
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(model.id, 'zh');
+  });
+
+  it('sorts supported models first, keeps the working model on failure, and ignores superseded downloads', async () => {
+    const other = { ...model, id: 'unrelated', name: 'English only', languages: ['en'], installed: true };
+    const ready = { ...model, id: 'ready', name: 'Installed and compatible', installed: true };
+    const initial = [other, model, ready];
+    api.fetch.mockResolvedValueOnce(Response.json({ models: initial }));
+    const document = setup(); const choose = vi.fn();
+    await act(async () => root!.render(<LocalSttModelPicker selectedModelId={ready.id} language="zh-Hans" onSelect={choose} />));
+    const rows = () => [...document.querySelectorAll<HTMLButtonElement>('[role="radiogroup"] button')].filter(button => button.textContent?.includes('MB') || button.textContent?.includes('settings.voice.page.stt.downloadSize'));
+    expect(rows().map(row => row.disabled)).toEqual([false, false, true]);
+    api.fetch.mockResolvedValueOnce(Response.json({error:'Offline'}, {status:503}));
+    await act(async () => rows()[0]!.click());
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Offline');
+    expect(choose).not.toHaveBeenCalled();
+    let finish!: (r: Response) => void;
+    api.fetch.mockImplementationOnce(() => new Promise<Response>(resolve => {finish=resolve;})).mockResolvedValueOnce(Response.json({models: initial.map(item => ({...item, installed: true}))}));
+    await act(async () => rows()[0]!.click());
+    await act(async () => rows()[1]!.click());
+    await act(async () => finish(Response.json({ok:true})));
+    expect(choose).toHaveBeenCalledExactlyOnceWith('ready', 'zh');
   });
 
   it('offers a working retry after status failure instead of leaving an empty list', async () => {
     api.fetch.mockResolvedValueOnce(new Response('', { status: 500 })).mockResolvedValueOnce(Response.json({ models: [model] }));
     const document = setup();
-    await act(async () => root!.render(<LocalSttModelPicker selectedModelId={model.id} onSelect={() => {}} onSelectionInfo={() => {}} />));
+    await act(async () => root!.render(<LocalSttModelPicker selectedModelId={model.id} onSelect={() => {}}  />));
     expect(document.querySelector('[role="alert"]')?.textContent).toContain('HTTP 500');
     await act(async () => document.querySelector<HTMLButtonElement>('button')!.click());
     expect(document.body.textContent).toContain(model.name);

@@ -22,6 +22,7 @@ export type BuiltinSettingsRenderer =
   | 'git'
   | 'language-support'
   | 'projects'
+  | 'model-roles'
   | 'model-connections'
   | 'external-agents'
   | 'companion'
@@ -62,6 +63,7 @@ export const BUILTIN_SETTINGS_PAGE_SPECS: readonly BuiltinSettingsPageSpec[] = [
   spec({ slug: 'network', title: 'Outbound network', titleKey: 'settings.page.network.title', group: 'connections', kind: 'single', icon: 'global', order: 2, keywords: ['outbound network'] }, 'network'),
   spec({ slug: 'access', title: 'Devices and access', titleKey: 'settings.page.access.title', group: 'connections', kind: 'single', icon: 'shield-check', order: 3, keywords: ['devices', 'access', 'password', 'passkey', 'security', 'lan', 'pairing', 'revoke'] }, 'access'),
   spec({ slug: 'images', title: 'Image generation and editing', titleKey: 'settings.page.images.title', group: 'harness', kind: 'single', icon: 'file-image', order: 7, keywords: ['image generation and editing'] }, 'images'),
+  spec({ slug: 'model-roles', title: 'Model roles', titleKey: 'settings.roles.title', group: 'harness', kind: 'single', icon: 'stack', order: 0.4, keywords: ['model roles', 'planning', 'embedding', 'rerank', '模型分工', '规划'] }, 'model-roles'),
   spec({ slug: 'model-connections', title: 'Model channels', titleKey: 'settings.models.title', group: 'harness', kind: 'single', icon: 'cloud', order: 0, keywords: ['models', 'channels', 'credentials', 'api', '模型', '渠道'] }, 'model-connections'),
   spec({ slug: 'usage', title: 'Usage', titleKey: 'usage.title', group: 'harness', kind: 'single', icon: 'bar-chart-2', order: 0.5, keywords: ['usage', 'cost', 'tokens', '用量', '费用', 'cache'] }, 'usage'),
   spec({ slug: 'mcp-connections', title: 'MCP', titleKey: 'settings.mcp.title', group: 'connections', kind: 'single', icon: 'plug-2', order: 5, keywords: ['mcp', 'servers', 'tools', 'oauth'] }, 'mcp-connections'),

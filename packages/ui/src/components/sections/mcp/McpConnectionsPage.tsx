@@ -105,7 +105,7 @@ export function McpConnectionsPage() {
     if (active.current === current && authId.current === state.id) setAuthorization(next);
   }, [api]);
   const select = (next: typeof selection, nextPath = path) => requestSettingsNavigation(() => {
-    if (nextPath !== path) preservedDraft.current = false;
+    if (nextPath !== path) { preservedDraft.current = false; revision.current += 1; setDocument(null); setDraft(''); }
     setSelection(next); setPath(nextPath); setShowDetail(true); setRaw(false); setTab(next.mode === 'server' ? 'tools' : 'configuration'); setToolQuery('');
   });
   const selectedServer = selection.mode === 'server' ? snapshot?.servers.find(server => server.name === selection.name) : undefined;
@@ -133,7 +133,8 @@ export function McpConnectionsPage() {
       if (active.current === current) setSnapshot(next);
     }
   });
-  return <SettingsPageLayout title={t('settings.mcp.title')} description={t('settings.mcp.managementHint')}>
+  return <SettingsPageLayout title={t('settings.mcp.title')} description={t('settings.mcp.managementHint')}
+    scope={path && snapshot?.sources.some(source => source.path === path) ? <>{t(snapshot.sources.find(source => source.path === path)?.scope === 'project' ? 'settings.mcp.scope.project' : 'settings.mcp.scope.global')} · <span className="break-all">{path}</span></> : undefined}>
     {error ? <p role="alert" className="mb-4 typography-meta text-destructive">{error}</p> : null}
     {snapshot?.issues.map((issue, index) => <p key={index} role="alert" className="typography-meta text-destructive">{issue}</p>)}
     {!snapshot && !error ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
@@ -143,14 +144,21 @@ export function McpConnectionsPage() {
           <Button variant="ghost" size="sm" aria-label={t('settings.mcp.add')} disabled={busy} onClick={() => select({ mode: 'new' })}><Icon name="add" className="size-4" /></Button>
         </div>
         <Input value={query} onChange={event => setQuery(event.target.value)} placeholder={t('settings.mcp.search')} aria-label={t('settings.mcp.search')} />
-        <div className="space-y-1">{snapshot.servers.filter(server => server.name.toLowerCase().includes(query.toLowerCase())).map(server => <button type="button" key={server.name}
+        <Button variant="ghost" className="w-full justify-start" aria-current={selection.mode === 'settings' ? 'page' : undefined}
+          onClick={() => select({ mode: 'settings' }, snapshot.sources[0]?.path ?? '')}><Icon name="file-text" className="size-4" />{t('settings.mcp.files')}</Button>
+        {(['global', 'project', 'unknown'] as const).map(scope => {
+          // The Host resolves precedence. Group the effective server by its actual source, not its name or directory prefix.
+          const servers = snapshot.servers.filter(server => (snapshot.sources.find(source => source.path === server.source)?.scope ?? 'unknown') === scope && server.name.toLowerCase().includes(query.trim().toLowerCase()));
+          return servers.length ? <section key={scope} aria-label={t(`settings.mcp.scope.${scope}`)} className="space-y-1">
+            <h3 className="px-2 typography-micro font-medium text-muted-foreground">{t(`settings.mcp.scope.${scope}`)}</h3>
+            {servers.map(server => <button type="button" key={server.name}
           className={cn('w-full rounded-lg border border-transparent px-3 py-3 text-left hover:bg-interactive-hover', selection.name === server.name && 'border-border/60 bg-muted/50')}
           onClick={() => select({ mode: 'server', name: server.name }, server.source)}>
           <span className="flex items-center gap-2"><Icon name="plug-2" className="size-4 shrink-0 text-muted-foreground" /><span className="truncate typography-ui-label">{server.name}</span></span>
           <span className="mt-1 block typography-meta text-muted-foreground">{text(`settings.mcp.status.${server.status}`)}</span>
-        </button>)}</div>
+        </button>)}</section> : null;
+        })}
         {!snapshot.servers.length ? <p className="py-4 typography-meta text-muted-foreground">{t('settings.mcp.empty')}</p> : null}
-        <Button variant="ghost" className="w-full justify-start" onClick={() => select({ mode: 'settings' })}>{t('settings.mcp.configuration')}</Button>
       </aside>
       <div className={cn('min-w-0 @3xl:block', !showDetail && 'hidden')}>
         <Button variant="ghost" size="sm" className="mb-4 @3xl:hidden" onClick={() => setShowDetail(false)}><Icon name="arrow-left-s" className="size-4" />{t('settings.mcp.servers')}</Button>

@@ -328,7 +328,7 @@ const CATALOG_ENTRIES: readonly SettingsCatalogEntry[] = [
     field: { path: 'harness.models.agentPlanning', kind: 'json', scope: 'user',
       note: '{enabled?: boolean, providerId?: string, modelId?: string}; explicit model for selected native policy planning, never inherits the main model' },
     apply: 'next-run',
-    ui: { page: 'harness-context', titleKey: 'settings.harness.role.agentPlanning',
+    ui: { page: 'model-roles', titleKey: 'settings.harness.role.agentPlanning',
       keywords: ['planning', 'policy', 'agentPlanning', 'model', 'enable', 'disable'] },
   },
   {
@@ -347,7 +347,7 @@ const CATALOG_ENTRIES: readonly SettingsCatalogEntry[] = [
         note: '{enabled?: boolean, providerId?: string, modelId?: string}; dedicated model for next-step suggestions' },
     ],
     apply: 'next-run',
-    ui: { page: 'harness-context', titleKey: 'settings.page.harness.nextStep.title',
+    ui: { page: 'chat', titleKey: 'settings.page.harness.nextStep.title',
       keywords: ['next step', 'suggestion', 'follow up', 'model'] },
   },
   {

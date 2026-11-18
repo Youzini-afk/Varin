@@ -69,7 +69,7 @@ export function InferenceSettings({ harness, update, kind, embedded = false }: H
   </SettingsSection>;
 }
 
-function FastDecisionSettings({ harness, update, embedded = false }: HarnessSettingsPageProps & { embedded?: boolean }) {
+export function FastDecisionSettings({ harness, update, embedded = false }: HarnessSettingsPageProps & { embedded?: boolean }) {
   const { t } = useI18n();
   const { providers, modelsFor } = useConfigurationModels();
   const settings = harness.fastDecision;

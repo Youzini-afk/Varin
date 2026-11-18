@@ -9,7 +9,7 @@ import { springTiming, staggerDelay } from '@/lib/motion/tokens';
  * glide spring (carrying its velocity if the page changes again), instead of
  * each item painting its own. Items stop painting theirs while the list is
  * marked `data-settings-nav-pill`. A collapsing group moves it with the item;
- * a page outside the list (About in the footer) hides it.
+ * a filtered page outside the list hides it.
  */
 export function useNavPill(root: HTMLElement | null, selected: string): void {
   const pill = React.useRef<SlidingPill | null>(null);

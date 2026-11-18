@@ -1,3 +1,4 @@
+import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import React from 'react';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
@@ -143,6 +144,13 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
+      if (isSettingsDialogOpen) {
+        // The mounted surface handles Escape after its search field, menus and dialogs.
+        if (!isSettingsMounted) { e.preventDefault(); requestSettingsNavigation(() => setSettingsDialogOpen(false)); }
+        resetAbortPriming();
+        return;
+      }
+
       if (isPromptNavigatorPanelOpen) {
         e.preventDefault();
         setPromptNavigatorPanelOpen(false);
@@ -150,12 +158,6 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
-      if (isSettingsDialogOpen) {
-        e.preventDefault();
-        setSettingsDialogOpen(false);
-        resetAbortPriming();
-        return;
-      }
 
       if (isSettingsMounted) {
         resetAbortPriming();
@@ -212,6 +214,16 @@ export const useKeyboardShortcuts = () => {
       if (e.defaultPrevented || e.key === 'Escape' || isTerminalEventTarget(e.target)) {
         return;
       }
+
+      const settingsShortcut = eventMatchesShortcut(e, combo('open_settings'));
+      if (settingsShortcut) {
+        e.preventDefault();
+        if (useUIStore.getState().isSettingsDialogOpen) requestSettingsNavigation(() => setSettingsDialogOpen(false));
+        else setSettingsDialogOpen(true);
+        return;
+      }
+      // The retained editor and conversation are inactive while the settings surface owns the window.
+      if (useUIStore.getState().isSettingsDialogOpen && !eventMatchesShortcut(e, combo('cycle_theme'))) return;
 
       if (eventMatchesShortcut(e, combo('open_command_palette'))) {
         e.preventDefault();
@@ -313,13 +325,6 @@ export const useKeyboardShortcuts = () => {
             activeElement.focus({ preventScroll: true });
           }
         });
-        return;
-      }
-
-      if (eventMatchesShortcut(e, combo('open_settings'))) {
-        e.preventDefault();
-        const { isSettingsDialogOpen } = useUIStore.getState();
-        setSettingsDialogOpen(!isSettingsDialogOpen);
         return;
       }
 

@@ -2,6 +2,11 @@ import { settingsDict as englishSettingsDict } from './en.js';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "settings.view.nav.group.models": "Modèles",
+  "settings.view.nav.group.capabilities": "Capacités",
+  "settings.view.nav.group.data": "Données",
+  "settings.shell.return": "Retour à l’espace de travail",
+  "settings.roles.title": "Rôles des modèles",
   "settings.models.modelDescription": "Description",
   "settings.models.modelDescriptionHint": "Décrivez le modèle, votre expérience et vos préférences de canal au même endroit. Les mises à jour du catalogue conservent vos modifications.",
   "settings.delegationModelSelection.title": "Sélection du modèle de délégation",

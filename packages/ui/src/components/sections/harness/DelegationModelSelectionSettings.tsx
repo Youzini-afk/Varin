@@ -1,3 +1,4 @@
+import { HostSettingsScope } from '../shared/SettingsScope';
 import React from 'react';
 import { modelThinkingLevels } from '@varin/application-client';
 import { useI18n } from '@/lib/i18n';
@@ -75,7 +76,7 @@ export function DelegationModelSelectionPage() {
   const { t } = useI18n();
   const { harness, update, status, error, retry, targetKey } = useWorkspaceHarnessSettings();
   return <SettingsPageLayout title={t('settings.delegationModelSelection.title')}
-    description={t('settings.delegationModelSelection.description')} scope={t('settings.scope.hostGlobalHint')} showSaveStatus>
+    description={t('settings.delegationModelSelection.description')} scope={<HostSettingsScope />} showSaveStatus>
     {status === 'loading' ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
     {error ? <div role="alert" className="mb-4 space-y-2">
       <p className="typography-meta text-destructive">{error}</p>
