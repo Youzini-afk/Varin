@@ -271,7 +271,7 @@ export interface ThreadRunUsage {
   requests: Array<Pick<import('@varin/protocol').ModelPresentation, 'requestId' | 'usage' | 'completeInputTokens' | 'generation'>>;
 }
 /** Current file in the historical operation's original source, never the navigation project. */
-export type ThreadFileTarget = { kind: 'document'; workspaceId: string; root: string; resourceId: string }
+export type ThreadFileTarget = { kind: 'document'; workspaceId: string; root: string; resourceId: string; resourceOwner?: SourceResourceOwner }
   | { kind: 'unavailable'; reason: 'no_source' | 'fixed_source' | 'managed_source' };
 /** Display metadata from the original frozen request; absent for non-model history. */
 export interface ThreadHistoryItem extends HistoryItem {

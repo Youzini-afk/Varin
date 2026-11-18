@@ -8,7 +8,6 @@ const english = {
   noDevices: 'No available file devices.', noProjects: 'No more registered projects to add.',
   missingProject: 'Project no longer registered', offline: 'Device unavailable', local: 'Service device',
   stale: 'This selection changed on the service. Review the updated locations and try again.',
-  notSaved: 'The service did not confirm the change. Refresh before trying again.',
   discovery: 'Resource discovery is unavailable.', duplicate: 'This location is already saved.',
   removeHint: 'Removing a bookmark does not remove the project or its files.',
 };
@@ -21,7 +20,7 @@ const chinese: typeof english = {
   add: '保存位置', remove: '移除收藏', refresh: '刷新', loading: '正在加载…', saving: '正在保存…', done: '已保存',
   noDevices: '没有可用的文件设备。', noProjects: '没有其他已登记项目可添加。',
   missingProject: '项目已取消登记', offline: '设备不可用', local: '服务所在设备',
-  stale: '服务上的位置已变化，请核对最新列表后重试。', notSaved: '服务尚未确认这项修改，请刷新后再试。',
+  stale: '服务上的位置已变化，请核对最新列表后重试。',
   discovery: '暂时无法获取设备列表。', duplicate: '此位置已收藏。', removeHint: '移除收藏不会删除项目或其中的文件。',
 };
 export const workspaceCopy = (locale: string) => locale.startsWith('zh') ? chinese : english;

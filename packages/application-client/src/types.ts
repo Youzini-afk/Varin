@@ -790,9 +790,20 @@ export interface SettingsLoadResult {
   source: 'desktop' | 'web';
 }
 
+export type WorkspaceLocationChange =
+  | { kind: 'add'; location: WorkspaceLocation }
+  | { kind: 'remove'; id: string }
+  | { kind: 'set-default'; id: string | null; expectedId: string | null };
+
+export interface WorkspaceLocationChangeResult {
+  settings: SettingsPayload;
+  conflict?: 'duplicate' | 'stale';
+}
+
 export interface SettingsAPI {
   load(): Promise<SettingsLoadResult>;
   save(changes: Partial<SettingsPayload>): Promise<SettingsPayload>;
+  changeWorkspaceLocation(change: WorkspaceLocationChange, signal?: AbortSignal): Promise<WorkspaceLocationChangeResult>;
 }
 
 export interface DirectoryPermissionRequest {

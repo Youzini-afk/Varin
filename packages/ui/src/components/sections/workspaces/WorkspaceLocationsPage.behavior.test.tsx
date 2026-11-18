@@ -2,14 +2,14 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { SettingsPayload } from '@varin/application-client';
-const f = vi.hoisted(() => ({ endpoint: 1, listeners: new Set<() => void>(), load: vi.fn(), save: vi.fn(), list: vi.fn(), fetch: vi.fn(), projects: vi.fn() }));
+import type { SettingsPayload, WorkspaceLocationChange, WorkspaceLocationChangeResult } from '@varin/application-client';
+const f = vi.hoisted(() => ({ endpoint: 1, listeners: new Set<() => void>(), load: vi.fn(), change: vi.fn(), list: vi.fn(), fetch: vi.fn(), projects: vi.fn() }));
 vi.mock('@varin/application-client', async (importOriginal) => ({ ...(await importOriginal<typeof import('@varin/application-client')>()),
   getRuntimeApiBaseUrl: () => 'https://service.example', getRuntimeEndpointGeneration: () => f.endpoint,
   subscribeRuntimeEndpointChanged: (listener: () => void) => { f.listeners.add(listener); return () => f.listeners.delete(listener); },
   registerRuntimeEndpointSwitchBlocker: vi.fn(), runtimeFetch: f.fetch }));
 vi.mock('@/hooks/useRuntimeAPIs', () => {
-  const apis = { settings: { load: f.load, save: f.save }, threads: { sources: { list: f.list } } };
+  const apis = { settings: { load: f.load, changeWorkspaceLocation: f.change }, threads: { sources: { list: f.list } } };
   return { useRuntimeAPIs: () => apis };
 });
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
@@ -47,7 +47,20 @@ beforeEach(async () => {
     projects: [{ id: 'existing', label: 'Dev', path: '/same' }] };
   f.list.mockResolvedValue({ targets: [{ resourceOwner, label: 'Test machine', capabilities: ['files'] }], unavailable: [] });
   f.load.mockImplementation(async () => ({ settings: structuredClone(state), source: 'web' }));
-  f.save.mockImplementation(async patch => { state = { ...state, ...patch }; return structuredClone(state); });
+  f.change.mockImplementation(async (change: WorkspaceLocationChange): Promise<WorkspaceLocationChangeResult> => {
+    const locations = state.workspaceLocations ?? [];
+    if (change.kind === 'add') state.workspaceLocations = [...locations, change.location];
+    else if (change.kind === 'remove') {
+      state.workspaceLocations = locations.filter(location => location.id !== change.id);
+      if (state.defaultWorkspaceLocationId === change.id) state.defaultWorkspaceLocationId = null;
+    } else {
+      const selected = locations.find(location => location.id === change.id);
+      if (selected?.kind === 'project' && !state.projects?.some(project => project.id === selected.projectId))
+        return { settings: structuredClone(state), conflict: 'stale' };
+      state.defaultWorkspaceLocationId = change.id;
+    }
+    return { settings: structuredClone(state) };
+  });
   f.fetch.mockResolvedValue(Response.json({ resourceOwner, path: '/canonical/same', workspaceId: 'target-documents' }));
   const { document, window } = parseHTML('<html><body></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -69,26 +82,27 @@ it('resolves a folder on the selected device, preserves other saved locations, a
   expect(f.fetch).toHaveBeenCalledWith('/api/projects/sources/resolve', expect.objectContaining({
     method: 'POST', body: JSON.stringify({ resourceOwner, path: '/same' }) }));
   const folder = { kind: 'folder', id: expect.any(String), name: 'Logs', resourceOwner, workspaceId: 'target-documents', path: '/canonical/same' };
-  expect(f.save).toHaveBeenLastCalledWith({ workspaceLocations: [{ kind: 'project', id: 'dev', projectId: 'existing' }, folder] });
+  expect(f.change).toHaveBeenLastCalledWith({ kind: 'add', location: folder }, expect.any(AbortSignal));
   const id = state.workspaceLocations![1]!.id;
   await select(view.querySelector('select')!, id);
-  expect(f.save).toHaveBeenLastCalledWith({ defaultWorkspaceLocationId: id });
+  expect(f.change).toHaveBeenLastCalledWith({ kind: 'set-default', id, expectedId: null }, expect.any(AbortSignal));
   await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Remove bookmark: Logs"]')!.click());
-  expect(f.save).toHaveBeenLastCalledWith({ defaultWorkspaceLocationId: null, workspaceLocations: [{ kind: 'project', id: 'dev', projectId: 'existing' }] });
+  expect(f.change).toHaveBeenLastCalledWith({ kind: 'remove', id }, expect.any(AbortSignal));
+  expect(state).toMatchObject({ defaultWorkspaceLocationId: null, workspaceLocations: [{ kind: 'project', id: 'dev', projectId: 'existing' }] });
   expect(view.textContent).not.toContain('Logs');
 });
 it('saves a project by registry ID only and shows a rejected default without claiming success or fallback', async () => {
   await click('Save a project'); await select(view.querySelectorAll('select')[1]!, 'existing'); await click('Save location');
   expect(f.fetch).not.toHaveBeenCalled();
-  expect(f.save).toHaveBeenCalledWith({ workspaceLocations: [{ kind: 'project', projectId: 'existing', id: expect.any(String) }] });
+  expect(f.change).toHaveBeenCalledWith({ kind: 'add', location: { kind: 'project', projectId: 'existing', id: expect.any(String) } }, expect.any(AbortSignal));
   const saved = state.workspaceLocations![0]!;
-  f.save.mockRejectedValueOnce(new Error('Preference unavailable'));
+  f.change.mockRejectedValueOnce(new Error('Preference unavailable'));
   await select(view.querySelector('select')!, saved.id);
   expect(view.querySelector('[role="alert"]')?.textContent).toBe('Preference unavailable');
   expect(state.defaultWorkspaceLocationId).toBeNull(); expect(view.querySelector('[role="status"]')?.textContent).not.toBe('Saved');
   // The project disappears on a second device after the list was rendered.
-  state.projects = []; const writes = f.save.mock.calls.length;
-  await select(view.querySelector('select')!, saved.id); expect(f.save).toHaveBeenCalledTimes(writes);
+  state.projects = [];
+  await select(view.querySelector('select')!, saved.id);
   expect(view.textContent).toContain('Project no longer registered');
   expect(view.querySelector('[role="alert"]')?.textContent).toContain('changed on the service');
 });
@@ -100,7 +114,7 @@ it('does not write a resolved folder into a newly connected service', async () =
   await act(async () => { ++f.endpoint; state = { workspaceLocations: [] }; for (const listener of f.listeners) listener(); });
   expect(signal.aborted).toBe(true);
   await act(async () => reply(Response.json({ resourceOwner, path: '/same', workspaceId: 'old-owner' })));
-  expect(f.save).not.toHaveBeenCalled(); expect(view.textContent).not.toContain('Logs');
+  expect(f.change).not.toHaveBeenCalled(); expect(view.textContent).not.toContain('Logs');
 });
 
 function samePathServices() {
@@ -127,7 +141,7 @@ it('never paints a superseded service load over the same named folder at a diffe
   expect(view.textContent).toContain('Device B'); expect(view.textContent).toContain('/same');
   await act(async () => release());
   expect([...view.querySelectorAll('option')].map(option => option.value)).toEqual(['', 'bookmark-B']);
-  expect(view.textContent).not.toContain('Device A'); expect(f.save).not.toHaveBeenCalled();
+  expect(view.textContent).not.toContain('Device A'); expect(f.change).not.toHaveBeenCalled();
   expect(b.state.workspaceLocations![0]).toMatchObject({ resourceOwner: { hostId: 'B' } });
 });
 it('keeps an already-dispatched A preference write at A when B has an identically named location', async () => {
@@ -135,16 +149,16 @@ it('keeps an already-dispatched A preference write at A when B has an identicall
   await click('Refresh');
   let ack!: () => void;
   const written = new Set<number>();
-  f.save.mockImplementationOnce((patch: Partial<SettingsPayload>) => {
+  f.change.mockImplementationOnce((change: Extract<WorkspaceLocationChange, { kind: 'set-default' }>) => {
     const ownerAtDispatch = f.endpoint;
     return new Promise(resolve => { ack = () => {
-      written.add(ownerAtDispatch); const original = at(ownerAtDispatch); Object.assign(original.state, patch);
-      resolve(structuredClone(original.state));
+      written.add(ownerAtDispatch); const original = at(ownerAtDispatch); original.state.defaultWorkspaceLocationId = change.id;
+      resolve({ settings: structuredClone(original.state) });
     }; });
   });
   const first = f.endpoint;
   await select(view.querySelector('select')!, 'bookmark-A');
-  expect(f.save).toHaveBeenCalledExactlyOnceWith({ defaultWorkspaceLocationId: 'bookmark-A' });
+  expect(f.change).toHaveBeenCalledExactlyOnceWith({ kind: 'set-default', id: 'bookmark-A', expectedId: null }, expect.any(AbortSignal));
   await switchToB(); await act(async () => ack());
   expect(written).toEqual(new Set([first])); expect(a.state.defaultWorkspaceLocationId).toBe('bookmark-A');
   expect(b.state.defaultWorkspaceLocationId).toBeNull(); expect(view.textContent).toContain('Device B');

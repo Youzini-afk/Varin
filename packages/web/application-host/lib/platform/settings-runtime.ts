@@ -7,7 +7,7 @@ import {
 import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { EXTERNAL_ACCESS_SETTINGS_KEY } from '../tunnels/external-access-config.js';
-import { parseWorkspaceLocations, parseDefaultWorkspaceLocationId, parseProjectSourceBinding, projectResourceOwnerKey, projectFolders, projectPathKey } from '@varin/application-client';
+import { parseWorkspaceLocations, parseDefaultWorkspaceLocationId, parseProjectSourceBinding, projectResourceOwnerKey, projectFolders, projectPathKey, type WorkspaceLocationChangeResult } from '@varin/application-client';
 
 interface ProjectEntry extends Record<string, unknown> {
   id: string;
@@ -251,6 +251,56 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     return formatSettingsResponse(next);
   };
 
+  const changeWorkspaceLocation = async (change: unknown): Promise<WorkspaceLocationChangeResult> => {
+    if (!change || typeof change !== 'object') throw new Error('Invalid workspace location change');
+    const { kind, location, id, expectedId } = change as Record<string, unknown>;
+    const result = await settingsStore.transact<{ document: VarinSettingsDocument; changed?: true; conflict?: 'duplicate' | 'stale' }>(async current => {
+      const locations = parseWorkspaceLocations(current.workspaceLocations ?? []);
+      const selected = parseDefaultWorkspaceLocationId(current.defaultWorkspaceLocationId ?? null);
+      const unchanged = (conflict?: 'duplicate' | 'stale') => ({
+        write: false, result: { document: current, ...(conflict ? { conflict } : {}) },
+      });
+      let patch: VarinSettingsDocument;
+      switch (kind) {
+        case 'add': {
+          const added = parseWorkspaceLocations([location])[0]!;
+          if (locations.some(row => isDeepStrictEqual(row, added))) return unchanged();
+          if (locations.some(row => row.id === added.id
+            || (added.kind === 'project' && row.kind === 'project' && row.projectId === added.projectId)
+            || (added.kind === 'folder' && row.kind === 'folder' && row.workspaceId === added.workspaceId
+              && isDeepStrictEqual(row.resourceOwner, added.resourceOwner)))) return unchanged('duplicate');
+          if (added.kind === 'project' && (!Array.isArray(current.projects)
+            || !current.projects.some(row => row?.id === added.projectId))) return unchanged('stale');
+          patch = { workspaceLocations: [...locations, added] };
+          break;
+        }
+        case 'remove': {
+          if (typeof id !== 'string' || !id.trim()) throw new Error('Invalid saved workspace location');
+          const retained = locations.filter(row => row.id !== id);
+          if (retained.length === locations.length) return unchanged();
+          patch = { workspaceLocations: retained, ...(selected === id ? { defaultWorkspaceLocationId: null } : {}) };
+          break;
+        }
+        case 'set-default': {
+          const nextId = parseDefaultWorkspaceLocationId(id);
+          const expected = parseDefaultWorkspaceLocationId(expectedId);
+          const target = locations.find(row => row.id === nextId);
+          if (nextId !== null && (!target || (target.kind === 'project' && (!Array.isArray(current.projects)
+            || !current.projects.some(row => row?.id === target.projectId))))) return unchanged('stale');
+          if (selected === nextId) return unchanged();
+          if (selected !== expected) return unchanged('stale');
+          patch = { defaultWorkspaceLocationId: nextId };
+          break;
+        }
+        default: throw new Error('Invalid workspace location change');
+      }
+      const document = await applyPersistedChanges(current, patch, []);
+      return { document, result: { document, changed: true } };
+    });
+    if (result.changed) notify(result.document);
+    return { settings: formatSettingsResponse(result.document), ...(result.conflict ? { conflict: result.conflict } : {}) };
+  };
+
   /**
    * CAS variant for the agent-facing settings service (D-306): the caller's
    * expectedRevision is checked inside the store lock so concurrent UI writes
@@ -286,6 +336,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     readSettingsFromDisk,
     updateSettingsOnDisk,
     persistSettings,
+    changeWorkspaceLocation,
     persistSettingsCas,
     subscribe: (listener: (settings: VarinSettingsDocument) => void) => {
       listeners.add(listener);

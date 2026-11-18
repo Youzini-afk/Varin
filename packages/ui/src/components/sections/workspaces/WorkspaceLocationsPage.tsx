@@ -1,5 +1,5 @@
 import React from 'react';
-import { getRuntimeApiBaseUrl, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type SettingsPayload, type ThreadSourceTargets, type WorkspaceLocation } from '@varin/application-client';
+import { getRuntimeApiBaseUrl, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type SettingsPayload, type ThreadSourceTargets, type WorkspaceLocation, type WorkspaceLocationChange } from '@varin/application-client';
 import type { SourceResourceOwner } from '@varin/protocol';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
@@ -12,14 +12,9 @@ import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { workspaceCopy } from './location-copy';
 
 const ownerKey = (owner: SourceResourceOwner) => owner.kind === 'local' ? 'local' : JSON.stringify([owner.hostId, owner.connectionId, owner.endpointIdentity]);
-const same = (a: WorkspaceLocation, b: WorkspaceLocation) => a.id === b.id && (
-  a.kind === 'project' ? b.kind === 'project' && a.projectId === b.projectId
-    : b.kind === 'folder' && ownerKey(a.resourceOwner) === ownerKey(b.resourceOwner)
-      && a.workspaceId === b.workspaceId && a.path === b.path && a.name === b.name);
 const selectClass = 'min-h-9 w-full rounded-md border border-input bg-background px-2 py-1 text-foreground';
 const labelClass = 'grid min-w-0 gap-1.5 typography-ui-label';
 const reason = (error: unknown) => error instanceof Error ? error.message : String(error);
-type Patch = Pick<SettingsPayload, 'workspaceLocations' | 'defaultWorkspaceLocationId'>;
 
 type LocationControlsProps = {
   refreshRevision: number;
@@ -50,6 +45,7 @@ function ServiceLocations({ endpoint, refreshRevision, renderRegisteredProjects 
   const [owner, setOwner] = React.useState(''), [projectId, setProjectId] = React.useState('');
   const mounted = React.useRef(false), busy = React.useRef(false), serial = React.useRef(0);
   const registration = React.useRef<AbortController | null>(null);
+  const reloadAfterSave = React.useRef<(() => Promise<void>) | null>(null);
   const active = React.useCallback(() => mounted.current && getRuntimeEndpointGeneration() === endpoint, [endpoint]);
   React.useEffect(() => {
     mounted.current = true;
@@ -57,15 +53,19 @@ function ServiceLocations({ endpoint, refreshRevision, renderRegisteredProjects 
   }, []);
   React.useEffect(() => {
     let stopped = false;
-    const load = async () => {
-      if (busy.current) return;
+    const load = async (clearError = false) => {
+      if (stopped) return;
+      if (busy.current) { reloadAfterSave.current = () => load(clearError); return; }
       const request = ++serial.current;
       try {
         const { settings: value } = await settings.load();
-        if (!stopped && active() && request === serial.current) { show(value); setError(''); }
+        if (!stopped && active() && request === serial.current) {
+          show(value);
+          if (clearError) setError('');
+        }
       } catch (e) { if (!stopped && active() && request === serial.current) setError(reason(e)); }
     };
-    void load();
+    void load(true);
     const unsubscribe = subscribeVarinEvents(event => {
       if (event.type === 'settings-changed' && event.owner === 'app') void load();
     });
@@ -106,68 +106,43 @@ function ServiceLocations({ endpoint, refreshRevision, renderRegisteredProjects 
       device, path: place.kind === 'folder' ? place.path : p?.path, missing: place.kind === 'project' && !p };
   };
   const reset = () => { setForm(null); setPath(''); setName(''); setOwner(''); setProjectId(''); };
-  // Settings.save is the existing Host patch owner (not a CAS). Re-read before editing
-  // a shared list; only write fields affected by this action, and never retarget a late response.
-  const commit = async (change: (fresh: SettingsPayload) => Patch, prepare?: (signal: AbortSignal) => Promise<void>) => {
+  const commit = async (prepare: (signal: AbortSignal) => WorkspaceLocationChange | Promise<WorkspaceLocationChange>) => {
     if (!active() || busy.current || !snapshot) return false;
     busy.current = true; ++serial.current; setStatus('saving'); setError('');
     const operation = new AbortController(); registration.current = operation;
     try {
-      if (prepare) await prepare(operation.signal);
+      const change = await prepare(operation.signal);
       if (!active()) return false;
-      const { settings: fresh } = await settings.load();
+      const result = await settings.changeWorkspaceLocation(change, operation.signal);
       if (!active()) return false;
-      show(fresh);
-      const patch = change(fresh);
-      if (!active()) return false;
-      const saved = await settings.save(patch);
-      if (!active()) return false;
-      show(saved);
-      const savedPlaces = saved.workspaceLocations;
-      if ((patch.defaultWorkspaceLocationId !== undefined && (saved.defaultWorkspaceLocationId ?? null) !== patch.defaultWorkspaceLocationId)
-        || (patch.workspaceLocations && (patch.workspaceLocations.length !== savedPlaces?.length
-          || !patch.workspaceLocations.every((item, index) => same(savedPlaces[index]!, item))))) throw new Error(c.notSaved);
+      show(result.settings);
+      if (result.conflict) throw new Error(c[result.conflict]);
       setStatus('saved'); return true;
     } catch (e) { if (active()) { setError(reason(e)); setStatus(null); } return false; }
-    finally { busy.current = false; registration.current = null; }
+    finally {
+      busy.current = false; registration.current = null;
+      const reload = reloadAfterSave.current;
+      reloadAfterSave.current = null;
+      if (active()) void reload?.();
+    }
   };
   const add = async () => {
     if (!form) return false;
     // Resolve an explicit folder at its *own* Documents service. Resolving does not
     // grant trust, create a project/thread, or change the current branch or navigation.
     const id = crypto.randomUUID();
-    let resolved: Awaited<ReturnType<typeof resolveProjectSource>> | undefined;
-    const ok = await commit(fresh => {
-      const locations = fresh.workspaceLocations ?? [];
-      let place: WorkspaceLocation;
-      if (form === 'folder' && target && resolved && name.trim()) {
-        const folder = resolved;
-        if (ownerKey(folder.resourceOwner) !== ownerKey(target.resourceOwner)) throw new Error(c.stale);
-        if (locations.some(p => p.kind === 'folder' && ownerKey(p.resourceOwner) === ownerKey(folder.resourceOwner) && p.workspaceId === folder.workspaceId)) throw new Error(c.duplicate);
-        place = { kind: 'folder', id, name: name.trim(), ...resolved };
-      } else if (form === 'project' && fresh.projects?.some(p => p.id === projectId)) {
-        if (locations.some(p => p.kind === 'project' && p.projectId === projectId)) throw new Error(c.duplicate);
-        place = { kind: 'project', id, projectId };
-      } else throw new Error(c.stale);
-      return { workspaceLocations: [...locations, place] };
-    }, form === 'folder' ? async signal => {
+    const ok = await commit(async signal => {
+      if (form === 'project') return { kind: 'add', location: { kind: 'project', id, projectId } };
       if (!target || !path.trim() || !name.trim()) throw new Error(c.stale);
-      resolved = await resolveProjectSource(target.resourceOwner, path.trim(), signal);
-    } : undefined);
+      const resolved = await resolveProjectSource(target.resourceOwner, path.trim(), signal);
+      if (ownerKey(resolved.resourceOwner) !== ownerKey(target.resourceOwner)) throw new Error(c.stale);
+      return { kind: 'add', location: { kind: 'folder', id, name: name.trim(), ...resolved } };
+    });
     if (ok) reset();
     return ok;
   };
-  const remove = (place: WorkspaceLocation) => commit(fresh => {
-    const current = fresh.workspaceLocations ?? [];
-    if (!current.some(p => same(p, place))) throw new Error(c.stale);
-    return { workspaceLocations: current.filter(p => p.id !== place.id), ...(fresh.defaultWorkspaceLocationId === place.id ? { defaultWorkspaceLocationId: null } : {}) };
-  });
-  const setDefault = (id: string) => commit(fresh => {
-    const previous = places.find(p => p.id === id);
-    if ((fresh.defaultWorkspaceLocationId ?? '') !== selectedDefault || (id && (!previous || !fresh.workspaceLocations?.some(place => same(place, previous))
-      || (previous.kind === 'project' && !fresh.projects?.some(p => p.id === previous.projectId))))) throw new Error(c.stale);
-    return { defaultWorkspaceLocationId: id || null };
-  });
+  const remove = (place: WorkspaceLocation) => commit(() => ({ kind: 'remove', id: place.id }));
+  const setDefault = (id: string) => commit(() => ({ kind: 'set-default', id: id || null, expectedId: selectedDefault || null }));
   const saving = status === 'saving', disabled = saving || !snapshot;
   const formReady = form === 'folder' ? Boolean(target && path.trim() && name.trim()) : availableProjects.some(p => p.id === projectId);
   return <>

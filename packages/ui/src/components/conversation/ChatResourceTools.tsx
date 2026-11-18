@@ -40,7 +40,9 @@ export function ToolFileLink({ callId, path, line, label }: { callId: string; pa
     resolve: async () => {
       const resolved = await conversation.fileTarget(callId, path);
       return { path: workspacePathFromResourceId(resolved.root, resolved.resourceId), directory: resolved.root,
-        resource: { workspaceId: resolved.workspaceId, resourceId: resolved.resourceId } };
+        resource: { workspaceId: resolved.workspaceId, resourceId: resolved.resourceId },
+        ...(resolved.resourceOwner?.kind === 'managed_host'
+          ? { location: { resourceOwner: resolved.resourceOwner, root: resolved.root, workspaceId: resolved.workspaceId } } : {}) };
     },
   } : null, [conversation, callId, path, line]);
   const ref = useChatFileTarget(target);

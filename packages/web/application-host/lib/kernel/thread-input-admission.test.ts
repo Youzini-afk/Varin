@@ -6,6 +6,7 @@ import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import { createConversationWorkLocation } from './default-work-location.js';
 import { resourceSource } from './thread-context.js';
 import { ThreadAdapter } from './thread-adapter.js';
+import { createThreadFileTargetResolver } from './thread-file-target.js';
 import { registerThreadRoutes } from './thread-routes.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { KernelClientError, KernelRequestError } from './kernel-error.js';
@@ -24,6 +25,9 @@ function fixture() {
     createThread: vi.fn<AgentRuntimeClient['createThread']>(async (threadId, branchId) => ({ threadId, branchId })),
     inputReceipt: vi.fn<AgentRuntimeClient['inputReceipt']>(async () => null),
     inheritedInputReceipt: vi.fn<AgentRuntimeClient['inheritedInputReceipt']>(async () => null),
+    historyPage: vi.fn<AgentRuntimeClient['historyPage']>(),
+    historyItem: vi.fn<AgentRuntimeClient['historyItem']>(),
+    operation: vi.fn<AgentRuntimeClient['operation']>(),
     thread: vi.fn(async () => ({ thread_id: identity.threadId, branches: [{ branch_id: identity.branchId, active_run_id: 'run', latest_run: { id: 'run', configuration } }] })),
     submit: vi.fn(async () => ({ thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'run', input_id: 'input', cursor: 1 })),
   };
@@ -46,6 +50,35 @@ function fixture() {
   return { api: createThreadsHttpAPI(), adapter, runtime, queued, models, source, configuration };
 }
 afterEach(() => vi.unstubAllGlobals());
+it('opens a cross-workspace read on its operation owner even when the launch has a different owner', async () => {
+  const f = fixture();
+  const owner = { kind: 'managed_host' as const, hostId: 'test', connectionId: 'test-peer', endpointIdentity: 'test-pin' };
+  const root = 'C:\\logs';
+  const read = { resource_owner: owner, workspace_id: 'test-docs', execution_workspace_id: 'test-docs', mode: 'live_root' as const,
+    live_root: { hostId: 'test', rootId: 'test-root', canonicalRoot: root }, branch_id: null, revision: null };
+  const entry = { id: 'history-tool', source: 'assistant' as const, run_id: 'run', thread_id: identity.threadId, parent: null, content_ref: 'body' };
+  f.runtime.historyPage.mockResolvedValue({ head: entry.id, previous: null, items: [entry] });
+  f.runtime.historyItem.mockResolvedValue({ ...entry, provider: null, content: {
+    id: 'model-item:7:request:provider-tool', content: { kind: 'tool_call', call: { name: 'file_read', call_id: 'read', arguments: { path: 'build.log', location: 'saved' } } },
+  } });
+  f.runtime.operation.mockResolvedValue({ id: 'request:tool:read', run_id: entry.run_id, resource_source: read } as Awaited<ReturnType<AgentRuntimeClient['operation']>>);
+  const resolveRemoteSource = vi.fn(async () => ({ resourceOwner: owner, workspaceId: 'test-docs', path: root }));
+  const validateLiveSource = vi.fn();
+  f.adapter.bindFileResolver(createThreadFileTargetResolver({ storageRoot: '/state',
+    documents: {} as Parameters<typeof createThreadFileTargetResolver>[0]['documents'], validateLiveSource, resolveRemoteSource }));
+  const input = { ...identity, itemId: entry.id, path: 'build.log' };
+  await expect(f.api.fileTarget(input)).resolves.toEqual({
+    kind: 'document', workspaceId: 'test-docs', root, resourceId: 'build.log', resourceOwner: owner,
+  });
+  expect(f.runtime.operation).toHaveBeenCalledWith('request:tool:read', expect.any(AbortSignal));
+  expect(resolveRemoteSource).toHaveBeenCalledWith({ resourceOwner: owner, path: root }, expect.any(AbortSignal));
+  expect(validateLiveSource).not.toHaveBeenCalled();
+  expect(f.queued.launch).not.toHaveBeenCalled();
+  f.runtime.operation.mockResolvedValueOnce({ id: 'request:tool:read', run_id: entry.run_id } as Awaited<ReturnType<AgentRuntimeClient['operation']>>);
+  await expect(f.api.fileTarget(input)).resolves.toMatchObject({ kind: 'unavailable' });
+  expect(f.queued.launch).not.toHaveBeenCalled();
+});
+
 it('supplies a device default for source-less sends while keeping explicit sources and inheritance intent', async () => {
   const f = fixture();
   const fallback = { resourceOwner: { kind: 'local' as const }, workspaceId: 'device', executionWorkspaceId: 'device',

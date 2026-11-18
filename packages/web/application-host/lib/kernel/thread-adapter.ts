@@ -317,6 +317,19 @@ export class ThreadAdapter {
   async fileTarget(input: ThreadIdentity & { itemId: string; path: string }, signal?: AbortSignal) {
     const entry = await this.recoveryEntry({ ...input, entryId: input.itemId }, signal);
     if (!this.fileResolver) throw new Error('File navigation is unavailable');
+    if (entry.source === 'assistant') {
+      const item = await this.runtime.historyItem(entry, signal);
+      const content = (item.content as { content?: { kind?: string; call?: { name?: string; call_id?: string; arguments?: { location?: string; ref?: string } } } } | null)?.content;
+      const call = content?.kind === 'tool_call' ? content.call : undefined;
+      const request = historyModelRequestId(item);
+      if (call?.name === 'file_read' && (call.arguments?.location || /^(file|read):/.test(call.arguments?.ref ?? ''))) {
+        if (!request || !call.call_id) return { kind: 'unavailable', reason: 'no_source' } as const;
+        const operation = await this.runtime.operation(`${request}:tool:${call.call_id}`, signal);
+        if (operation.run_id !== entry.run_id) throw new Error('The original file operation changed');
+        if (operation.resource_source) return this.fileResolver(entry.run_id, operation.resource_source, input.path, signal);
+        if (call.arguments?.location) return { kind: 'unavailable', reason: 'no_source' } as const;
+      }
+    }
     const launch = await this.runtime.launch(entry.run_id, signal);
     return this.fileResolver(entry.run_id, launch?.selection.source ?? null, input.path, signal);
   }

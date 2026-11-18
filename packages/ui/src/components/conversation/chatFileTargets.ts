@@ -1,7 +1,7 @@
 import React from 'react';
-import type { VarinResourceReference } from '@varin/application-client';
+import type { ResourceFileLocation, VarinResourceReference } from '@varin/application-client';
 
-export interface ChatFileResource { path: string; directory: string; resource?: VarinResourceReference }
+export interface ChatFileResource { path: string; directory: string; resource?: VarinResourceReference; location?: ResourceFileLocation }
 export interface ChatFileTarget {
   path: string;
   directory?: string;

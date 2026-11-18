@@ -2542,7 +2542,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   threads.bindContentMaintenance(contentMaintenance.request);
   externalAgents.bindContentMaintenance(contentMaintenance.request);
   const userFileTarget = createThreadFileTargetResolver({ storageRoot: kernelClient.handshake!.storageRoot,
-    documents: documentsAuthority, validateLiveSource: liveSources.validate, nativeWorkspaces });
+    documents: documentsAuthority, validateLiveSource: liveSources.validate, resolveRemoteSource: managedSourceConsumers.threads.resolve, nativeWorkspaces });
   threads.bindFileResolver(userFileTarget);
   // User mutations share Documents' native gate and its lease context.
   const catalogFileSearch = createFsSearchRuntimeFactory({ compute: kernelCompute });
@@ -3390,6 +3390,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     formatSettingsResponse,
     readSettingsFromDisk,
     persistSettings,
+    changeWorkspaceLocation: settingsRuntime.changeWorkspaceLocation,
     sanitizeProjects,
     buildAugmentedPath: platformEnvironmentRuntime.buildAugmentedPath,
     projectConfigRuntime,

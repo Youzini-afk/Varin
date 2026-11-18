@@ -88,7 +88,7 @@ export function ChatRetrievalTrace({ operationId, running, expanded, renderTool 
       try {
         const target = await fileTarget(callId, path);
         revealResourceInEditor({ workspaceId: target.workspaceId, workspaceRoot: target.root, resourceId: target.resourceId,
-          thread: conversation.identity, toolCallId: callId, ...(line ? { line } : {}) });
+          resourceOwner: target.resourceOwner, thread: conversation.identity, toolCallId: callId, ...(line ? { line } : {}) });
       } catch (failure) { if (alive.current && !(failure instanceof DOMException && failure.name === 'AbortError')) setError(failure instanceof Error ? failure.message : String(failure)); }
     },
   };

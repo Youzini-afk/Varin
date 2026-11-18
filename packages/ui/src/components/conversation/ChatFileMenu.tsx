@@ -1,11 +1,12 @@
 import React from 'react';
-import { getRuntimeKey } from '@varin/application-client';
+import { createResourceDocumentsAPI, getRuntimeKey } from '@varin/application-client';
 import { ContextMenuItem, ContextMenuSeparator, ContextMenuSub, ContextMenuSubTrigger, ContextMenuSubContent } from '@/components/ui/context-menu';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { getDirectoryForFilePath } from '@/lib/path-utils';
 import { resolveTextDocumentIdentity } from '@/lib/documents/workspace-text';
+import { projectFileOperations } from '@/lib/projectFileOperations';
 import { isDesktopShell, isDesktopLocalOriginActive, openDesktopFileInApp, openDesktopPath, revealDesktopPath } from '@/lib/desktop';
 import { useOpenInAppsStore, type OpenInAppOption } from '@/stores/useOpenInAppsStore';
 import { AppIcon } from '@/components/desktop/OpenInAppButton';
@@ -44,12 +45,14 @@ export function ChatFileMenu({ target }: { target: ChatFileTarget }) {
   };
   const openExternal = async (app?: OpenInAppOption) => {
     const file = await resolve();
+    if (file.location) throw new Error(t('chat.files.managed_source'));
     if (!(app ? await openDesktopFileInApp(file.path, app.id, app.appName) : await openDesktopPath(file.path))) throw new Error(t('chat.context.fileActionFailed'));
   };
   const copyContent = async () => {
     const file = await resolve();
     const resource = file.resource ?? await resolveTextDocumentIdentity(documents, file.directory, file.path);
-    assertCurrent(); const result = await documents.read(resource); assertCurrent();
+    const owner = file.location ? createResourceDocumentsAPI(file.location.resourceOwner) : documents;
+    assertCurrent(); const result = await owner.read(resource); assertCurrent();
     if (result.status === 'missing') throw new Error(t('chat.context.fileMissing'));
     if (result.status !== 'ready') throw new Error(t('chat.context.fileNotText'));
     await copy(result.content);
@@ -79,7 +82,9 @@ export function ChatFileMenu({ target }: { target: ChatFileTarget }) {
     </ContextMenuSub>}
     <ContextMenuSeparator />
     {files.downloadFile && <ContextMenuItem className={inset} onClick={() => run(async () => {
-      const file = await resolve(); await files.downloadFile!(file.path, { directory: file.directory });
+      const file = await resolve();
+      const owner = file.location ? projectFileOperations(file.location) : files;
+      await owner.downloadFile!(file.path, { directory: file.directory });
     })}>{t('chat.context.saveFileAs')}</ContextMenuItem>}
     <ContextMenuItem className={inset} onClick={() => run(async () => {
       let path = target.path;
@@ -88,7 +93,9 @@ export function ChatFileMenu({ target }: { target: ChatFileTarget }) {
     })}>{t('chat.context.copyPath')}</ContextMenuItem>
     <ContextMenuItem className={inset} onClick={() => run(copyContent)}>{t('chat.context.copyFileContent')}</ContextMenuItem>
     {local && <ContextMenuItem className={inset} onClick={() => run(async () => {
-      const file = await resolve(); if (!await revealDesktopPath(file.path)) throw new Error(t('chat.context.fileActionFailed'));
+      const file = await resolve();
+      if (file.location) throw new Error(t('chat.files.managed_source'));
+      if (!await revealDesktopPath(file.path)) throw new Error(t('chat.context.fileActionFailed'));
     })}>{t(window.__VARIN_PLATFORM__ === 'darwin' ? 'common.revealPath.finder' : window.__VARIN_PLATFORM__ === 'win32' ? 'common.revealPath.fileExplorer' : 'common.revealPath.fileManager')}</ContextMenuItem>}
   </>;
 }

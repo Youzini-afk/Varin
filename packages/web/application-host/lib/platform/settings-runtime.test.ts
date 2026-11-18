@@ -3,6 +3,7 @@ import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import type { VarinSettingsDocument } from '@varin/settings-store';
+import type { WorkspaceLocation } from '@varin/application-client';
 import { createSettingsRuntime } from './settings-runtime.js';
 
 const createRuntime = async (
@@ -35,6 +36,32 @@ const createRuntime = async (
     },
   };
 };
+
+it('commits concurrent bookmark edits and checks the default in the same settings transaction', async () => {
+  const { runtime, cleanup } = await createRuntime(undefined, (current, changes) => ({ ...current, ...changes }),
+    async ({ path }) => ({ path, workspaceId: path }));
+  const folder = (id: string): WorkspaceLocation => ({
+    kind: 'folder', id, name: id, path: `/${id}`, workspaceId: `/${id}`, resourceOwner: { kind: 'local' },
+  });
+  const a = folder('desktop'), b = folder('web');
+  try {
+    const additions = await Promise.all([a, b].map(location => runtime.changeWorkspaceLocation({ kind: 'add', location })));
+    expect(additions.every(result => !result.conflict)).toBe(true);
+    expect((await runtime.readSettingsFromDisk()).workspaceLocations).toHaveLength(2);
+    expect(await runtime.changeWorkspaceLocation({ kind: 'add', location: { ...a, id: 'copy' } })).toMatchObject({ conflict: 'duplicate' });
+    await runtime.changeWorkspaceLocation({ kind: 'set-default', id: a.id, expectedId: null });
+    const [selected, removed] = await Promise.all([
+      runtime.changeWorkspaceLocation({ kind: 'set-default', id: b.id, expectedId: a.id }),
+      runtime.changeWorkspaceLocation({ kind: 'remove', id: a.id }),
+    ]);
+    expect(selected.conflict).toBeUndefined();
+    expect(removed.settings).toMatchObject({ workspaceLocations: [b], defaultWorkspaceLocationId: b.id });
+    await expect(runtime.changeWorkspaceLocation({ kind: 'set-default', id: null, expectedId: a.id }))
+      .resolves.toMatchObject({ conflict: 'stale', settings: { defaultWorkspaceLocationId: b.id } });
+    await expect(runtime.changeWorkspaceLocation({ kind: 'remove', id: b.id }))
+      .resolves.toMatchObject({ settings: { workspaceLocations: [], defaultWorkspaceLocationId: null } });
+  } finally { await cleanup(); }
+});
 
 describe('settings runtime', () => {
   it('reads the current settings document without rewriting it', async () => {

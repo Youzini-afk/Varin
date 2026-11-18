@@ -128,7 +128,8 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
       const target = await api.fileTarget({ ...identity, itemId: value.itemId, path: value.path });
       if (!currentScope.current || host !== getRuntimeEndpointGeneration()) return;
       if (target.kind === 'unavailable') throw new Error(t(`chat.files.${target.reason}`));
-      revealResourceInEditor({ workspaceId: target.workspaceId, workspaceRoot: target.root, resourceId: target.resourceId, thread: identity, toolCallId: value.call.id });
+      revealResourceInEditor({ workspaceId: target.workspaceId, workspaceRoot: target.root, resourceId: target.resourceId,
+        resourceOwner: target.resourceOwner, thread: identity, toolCallId: value.call.id });
     } catch (failure) { if (currentScope.current && host === getRuntimeEndpointGeneration()) setProductError(failure instanceof Error ? failure.message : String(failure)); }
   };
   const status = <div className="mb-4 space-y-2">
