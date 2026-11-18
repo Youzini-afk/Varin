@@ -178,9 +178,9 @@ it('shows the confirmed next-run location separately from the old launch, includ
     live_root: { hostId: 'B', rootId: 'B-root', canonicalRoot: '/replacement' } };
   vi.mocked(f.api.sources.list).mockResolvedValue({ targets: [{ resourceOwner: remote, label: 'Test machine', capabilities: [] }], unavailable: [] });
   const api = { ...f.api };
-  const render = async (branchDefaultSource?: LaunchSource | null) => await act(async () => root.render(
+  const render = async (branchDefaultSource?: LaunchSource | null, chatOnly = false) => await act(async () => root.render(
     <ThreadSourcePicker api={api} identity={identity} active={false} launch={{ selection: { source: previous } } as React.ComponentProps<typeof ThreadSourcePicker>['launch']}
-      branchDefaultSource={branchDefaultSource} prepared={null} onPrepared={f.onPrepared} onPreparingChange={f.onPreparingChange} />,
+      branchDefaultSource={branchDefaultSource} chatOnly={chatOnly} prepared={null} onPrepared={f.onPrepared} onPreparingChange={f.onPreparingChange} />,
   ));
   await render();
   expect(container.textContent).toContain('Current source:');
@@ -188,6 +188,9 @@ it('shows the confirmed next-run location separately from the old launch, includ
   expect(container.textContent).toContain('Saved for the next run: Test machine · /replacement');
   expect(container.textContent).toContain('Last run’s source:');
   expect(container.textContent).not.toContain('Following runs use this same live workspace');
+  await render(next, true);
+  expect(container.querySelector('summary')?.textContent).toContain('Chat only');
+  expect(container.textContent).toContain('Saved for the next run: Test machine · /replacement');
   await render(null);
   expect(container.querySelector('summary')?.textContent).toContain('Chat only');
   expect(container.textContent).toContain('Saved for the next run: Chat only');
