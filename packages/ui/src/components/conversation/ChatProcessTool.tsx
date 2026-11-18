@@ -16,7 +16,7 @@ import { ToolHeadingText } from './ToolHeadingText';
 import { processCommand, useToolTargets } from './toolTargetContext';
 import { subjectJoin, toolSubject } from './toolSubject';
 
-export function ChatProcessTool({ call, execution, result, status, generating, output, details }: ToolViewProps) {
+export function ChatProcessTool({ call, execution, result, status, generating, output, details, workLocation }: ToolViewProps) {
   const { t } = useI18n(), conversation = useOptionalConversationPresentation();
   const expanded = useUIStore(state => state.showExpandedBashTools);
   const targets = useToolTargets();
@@ -69,7 +69,7 @@ export function ChatProcessTool({ call, execution, result, status, generating, o
       : call.name === 'process_resize' ? 'chat.tools.resizeTerminal' : 'chat.tools.inspectProcess');
   const subject = toolSubject(call, { ...data, process: snapshot }, t, targets);
   const draining = snapshot.status === 'exited' && snapshot.outputComplete === false && !snapshot.outputError;
-  const receipt = subjectJoin(call.name === 'process_write' && data.state === 'applied' ? t('chat.tools.inputSent') : '',
+  const receipt = subjectJoin(workLocation, call.name === 'process_write' && data.state === 'applied' ? t('chat.tools.inputSent') : '',
     typeof data.confirmedBytes === 'number' ? t('chat.toolSummary.inputBytes', { count: data.confirmedBytes }) : '',
     typeof snapshot.exitCode === 'number' ? t('chat.tools.exitCode', { code: snapshot.exitCode }) : toolValueLabel(snapshot.status, t),
     call.name === 'process_read' && Array.isArray(data.chunks) && (text || data.chunks.length === 0)

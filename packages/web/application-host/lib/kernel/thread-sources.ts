@@ -18,8 +18,13 @@ import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/t
 
 /** Resource discovery is independent of Thread existence. Callers admit their own
  * project/Thread scope before using this shared directory; it never grants execution. */
+type WorkspaceDirectory = import('@varin/application-client').ThreadLocationDirectory;
+type SourceTargets = Awaited<ReturnType<ThreadSourcesAPI['list']>> & {
+  workspace?: WorkspaceDirectory & { projects?: WorkspaceDirectory['locations'] };
+};
+
 export interface SourceDirectory {
-  list(signal?: AbortSignal): ReturnType<ThreadSourcesAPI['list']>;
+  list(signal?: AbortSignal): Promise<SourceTargets>;
   resolve(request: Parameters<ThreadSourcesAPI['resolve']>[1], signal?: AbortSignal): ReturnType<ThreadSourcesAPI['resolve']>;
   draftSkills?(request: Parameters<ThreadSourcesAPI['resolve']>[1], signal?: AbortSignal): Promise<import('@varin/application-client').ThreadSkillCatalog>;
 }
@@ -43,7 +48,7 @@ export function parseSourceResourceOwner(value: unknown): SourceResourceOwner {
 export function createThreadSourceDirectory(options: {
   documents: Pick<DocumentAuthority, 'resolveWorkspace' | 'admitWorkspaceRegistration'>;
   localLabel?: string;
-  workspace?(): Promise<import('@varin/application-client').ThreadLocationDirectory>;
+  workspace?(): Promise<SourceTargets['workspace']>;
   remote?: Pick<ThreadSourceRemoteOwner, 'list' | 'resolve' | 'draftSkills'>;
 }): SourceDirectory {
   return {

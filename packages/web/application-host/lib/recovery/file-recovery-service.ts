@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { FileRecoveryRequest, FileRecoveryResult, FileRecoveryPoint } from '@varin/extension-contract';
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
@@ -9,6 +10,7 @@ import type { RecoveryIdentity } from './journal-files.js';
 import { admitMaterializedRoot, originalMaterializationLocation } from '../kernel/source-launch.js';
 import type { LaunchSource, RecoveryRangeTurn } from '../kernel/protocol.generated.js';
 import { restoreFilesWithEditors, type RecoveryEditors } from './file-recovery-editors.js';
+import type { SourceDirectory } from '../kernel/thread-sources.js';
 
 type RecoveryMethod = 'recovery.points' | 'recovery.files.restore' | 'recovery.point.create' | 'recovery.point.release';
 const sourceKey = (runId: string, source: LaunchSource) => JSON.stringify([
@@ -16,19 +18,28 @@ const sourceKey = (runId: string, source: LaunchSource) => JSON.stringify([
   source.live_root?.rootId, source.mode === 'materialized' ? source.environment_run_id ?? runId : null,
   source.mode==='native_workspace'?[source.branch_id,source.native_scope]:null,
 ]);
+const sourceId = (runId: string, source: LaunchSource) => createHash('sha256').update(sourceKey(runId, source)).digest('hex');
+const fromSource = (turn: RecoveryRangeTurn, source: LaunchSource, runId: string) =>
+  turn.source && sourceKey(turn.anchor.runId, turn.source) === sourceKey(runId, source);
 export function createFileRecoveryService(options: {
   runtime: AgentRuntimeClient;
   kernel: KernelClient;
   storage: KernelStorageAdapter;
   store: KernelRecoveryStore;
   documents: RecoveryEditors;
+  sourceDirectory?: Pick<SourceDirectory, 'list'>;
   resolveFiles(identity: RecoveryIdentity): Promise<KernelFileResourceBackend>;
 }) {
-  const request = async (input: FileRecoveryRequest, sourceRunId: string): Promise<Record<string, unknown>> => {
+  const request = async (input: FileRecoveryRequest, sourceRunId: string, source: LaunchSource, device?: string): Promise<Record<string, unknown>> => {
     const run = await options.runtime.run(sourceRunId);
-    const launch = await options.runtime.launch(sourceRunId);
-    const source = launch?.selection.source;
-    if (run.thread_id !== input.conversation.threadId || !source || source.mode === 'fixed_branch') throw new Error('This recovery point has no original physical worktree');
+    if (run.thread_id !== input.conversation.threadId || source.mode === 'fixed_branch') throw new Error('This recovery point has no original physical worktree');
+    const id = sourceId(sourceRunId, source);
+    const annotate = (result: Record<string, unknown>) => {
+      if (Array.isArray(result.points)) result.points = result.points.map(point => ({ ...point, sourceId: id, ...(device ? { sourceDevice: device } : {}) }));
+      if (Array.isArray(result.operations)) result.operations = result.operations.map(operation => ({ ...operation, sourceId: id, sourceRunId: operation.sourceRunId ?? sourceRunId }));
+      if (result.source) result.source = { ...(result.source as FileRecoveryResult['source']), sourceId: id };
+      return result;
+    };
     const method: RecoveryMethod = input.action === 'restore' || input.action === 'undo' ? 'recovery.files.restore'
       : input.action === 'name' ? 'recovery.point.create' : input.action === 'release' ? 'recovery.point.release' : 'recovery.points';
     const args: Record<string, unknown> = input.action === 'undo' ? { undo: input.operationId }
@@ -47,14 +58,16 @@ export function createFileRecoveryService(options: {
       const latest = (await options.runtime.recoverySources(input.conversation)).find(item => sourceKey(item.runId, item.source) === sourceKey(sourceRunId, source));
       if (latest) {
         const active = await options.runtime.run(latest.runId);
-        if (!['completed', 'cancelled', 'failed'].includes(active.state)) activeTurns = await options.runtime.recoveryRun(latest.runId);
+        if (!['completed', 'cancelled', 'failed'].includes(active.state)) activeTurns = (await options.runtime.recoveryRun(latest.runId))
+          .filter(turn => fromSource(turn, source, sourceRunId));
       }
     }
     const journal = activeTurns.filter(turn => !turn.settled).at(-1)?.anchor;
     const command = { threadId: run.thread_id, sourceRunId, arguments: args, sourceMode: source.mode,
       ...(journal ? { journal } : {}), ...(operationId ? { operationId } : {}) };
     if (source.resource_owner.kind === 'managed_host') {
-      const turns = [...new Map([...(await options.runtime.recoveryRun(sourceRunId)), ...activeTurns].filter(turn => turn.source).map(turn => [turn.anchor.executionId, turn])).values()];
+      const turns = [...new Map([...(await options.runtime.recoveryRun(sourceRunId)), ...activeTurns]
+        .filter(turn => fromSource(turn, source, sourceRunId)).map(turn => [turn.anchor.executionId, turn])).values()];
       if (!turns.length) throw new Error('The original managed source has no recovery anchor');
       const service = await options.runtime.managedSource(source.resource_owner);
       const result = await service.recovery({ coordinatorHostId: options.runtime.coordinatorHostId,
@@ -62,8 +75,7 @@ export function createFileRecoveryService(options: {
           conversation: input.conversation, turns: turns.map(turn => ({ turn, restore: false })) },
         action: { kind: 'files', method, input: command, ...(preview ? { preview } : {}), ...(input.action === 'storage' ? { storage: true } : {}) } });
       if (result.status !== 'files') throw new Error('The original Host did not return its file recovery result');
-      if (Array.isArray(result.result.operations)) result.result.operations = result.result.operations.map(operation => ({ ...operation, sourceRunId: operation.sourceRunId ?? sourceRunId }));
-      return result.result;
+      return annotate(result.result);
     }
     await options.store.listCheckpoints(source.workspace_id);
     const handshake = options.kernel.handshake ?? await options.kernel.start();
@@ -89,20 +101,25 @@ export function createFileRecoveryService(options: {
       : await files.recoveryFiles(identity, method, command);
     if (Array.isArray(result.points)) result.points = result.points.map(point => ({ ...point, sourcePath: root }));
     result.source = { runId: sourceRunId, workspaceId: source.workspace_id, path: root };
-    if (Array.isArray(result.operations)) result.operations = result.operations.map(operation => ({ ...operation, sourceRunId: operation.sourceRunId ?? sourceRunId }));
-    return result;
+    return annotate(result);
   };
   return async (input: FileRecoveryRequest): Promise<FileRecoveryResult> => {
     if (input.action !== 'list' && input.action !== 'history') {
       if (!input.sourceRunId) throw new Error('Select a recovery point in its original worktree');
-      const result = await request(input, input.sourceRunId);
+      const source = input.sourceId
+        ? (await options.runtime.recoveryRun(input.sourceRunId)).find(turn => turn.source && sourceId(input.sourceRunId!, turn.source) === input.sourceId)?.source
+        : (await options.runtime.launch(input.sourceRunId))?.selection.source;
+      if (!source) throw new Error('This recovery point has no original physical worktree');
+      const result = await request(input, input.sourceRunId, source);
       return input.action === 'restore' || input.action === 'undo' || input.action === 'operation'
-        ? { operation: { ...result, sourceRunId: input.sourceRunId } as unknown as NonNullable<FileRecoveryResult['operation']> } : result as FileRecoveryResult;
+        ? { operation: { ...result, sourceRunId: input.sourceRunId, sourceId: sourceId(input.sourceRunId, source) } as unknown as NonNullable<FileRecoveryResult['operation']> } : result as FileRecoveryResult;
     }
-    const sources = (await options.runtime.recoverySources(input.conversation)).filter(item => item.source.mode !== 'fixed_branch');
+    const [frozenSources, directory] = await Promise.all([options.runtime.recoverySources(input.conversation), options.sourceDirectory?.list().catch(() => undefined)]);
+    const sources = frozenSources.filter(item => item.source.mode !== 'fixed_branch');
     const offset = input.cursor ?? 0;
     const limit = input.limit ?? 20;
-    const pages = await Promise.allSettled(sources.map(source => request({ ...input, cursor: 0, limit: offset + limit + 1 }, source.runId)));
+    const pages = await Promise.allSettled(sources.map(({ runId, source }) => request({ ...input, cursor: 0, limit: offset + limit + 1 }, runId, source,
+      directory?.targets.find(target => isDeepStrictEqual(target.resourceOwner, source.resource_owner))?.label)));
     const points: FileRecoveryPoint[] = [];
     const operations: NonNullable<FileRecoveryResult['operations']> = [];
     const failures: string[] = [];

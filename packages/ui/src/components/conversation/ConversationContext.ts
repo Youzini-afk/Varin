@@ -13,6 +13,8 @@ export interface ConversationPresentation {
   openSection?(section: 'plan' | 'recovery' | 'context' | 'threads'): void;
   /** File references are relative to this conversation, not sidebar navigation. */
   fileDirectory?: string;
+  resourceTargets?: import('@varin/application-client').ThreadSourceTarget[];
+  unavailableResources?: import('@varin/application-client').ThreadSourceTargets['unavailable'];
   toolExecutions: Record<string, ChatToolExecutionState>;
   uiInlineViews?: boolean;
   uiEmbeds?: Record<string, import('@/lib/interactive-ui/embed-projection').UiEmbedPlacement>;

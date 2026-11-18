@@ -15,7 +15,7 @@ const operationId = 'req:tool:read';
 const selection = {...q,operationId,kind:'work_location_bind',tool:'file_read'};
 function fixture() {
   const row = {id:'favorite',name:'Logs',path:'/logs',workspaceId:'logs',resourceOwner:owner};
-  const workspace = {locations:[row] as ThreadLocationDirectory['locations']};
+  const workspace = {locations:[row] as ThreadLocationDirectory['locations'], projects: [] as ThreadLocationDirectory['locations']};
   const targets = [{resourceOwner:owner,label:'https://private.example/?token=secret',capabilities:['sources','work-location-read']}];
   const bound = {source:{...resourceSource(source),environment_run_id:null},physicalRoot:root,capabilities:{tools:[{name:'file_read'}],grantCapabilities:['storage.read']},
     authorityId:'read-only',resourceEpoch:'epoch',executionOwner:{kind:'external',epoch:'epoch',identity:'target-private'}};
@@ -35,6 +35,20 @@ function fixture() {
 }
 
 describe('model location admission',()=>{
+  it('resolves unbookmarked directories and projects on their own device before choosing the next default', async () => {
+    const f = fixture();
+    f.targets[0]!.label = 'Test machine';
+    f.workspace.projects.push({ ...f.row, id: 'project:build', name: 'Build project' });
+    const projects = await f.work.query({ ...discovery, query: 'Build project' }, signal) as { locations: Array<{ name: string; key: unknown }> };
+    expect(projects.locations).toMatchObject([{ name: 'Build project' }]);
+    const resolved = await f.work.query({ ...discovery, device: owner, path: '/logs' }, signal) as { locations: Array<{ key: unknown }> };
+    expect(resolved.locations).toMatchObject([{ path: '/logs', device: 'Test machine', key: { workspaceId: 'logs' } }]);
+    const prepared = await f.work.query({ ...selection, kind: 'work_location_switch', key: resolved.locations[0]!.key }, signal);
+    expect(f.directory.resolve).toHaveBeenLastCalledWith({ resourceOwner: owner, path: '/logs' }, signal);
+    expect(prepared).toMatchObject({ source: { resource_owner: owner, workspace_id: 'logs' }, device: 'Test machine' });
+    expect(f.client.bind).not.toHaveBeenCalled();
+    expect(f.launch.selection.source).toEqual({ mode: 'live_root' });
+  });
   it('discovers safe labels and borrows exactly one target read, never the launch source',async()=>{
     const f=fixture();
     const row=await f.discover();

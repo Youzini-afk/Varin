@@ -65,7 +65,7 @@ it('reports a copied destination and preserves a changed source when a cross-dev
   }) });
   expect(await response.json()).toMatchObject({ copied: 1, removed: 0, error: expect.stringContaining('source changed') });
   expect(written).toEqual(bytes);
-  expect(sourceRequest).toHaveBeenLastCalledWith(expect.objectContaining({ command: expect.objectContaining({ kind: 'remove', path: 'note.txt', expectedHash: expect.stringMatching(/^sha256-[0-9a-f]{64}$/) }) }));
+  expect(sourceRequest).toHaveBeenLastCalledWith(expect.objectContaining({ command: expect.objectContaining({ kind: 'remove', path: 'note.txt', expectedHash: expect.stringMatching(/^sha256-[0-9a-f]{64}$/) }) }), undefined);
 });
 
 it('propagates a cancelled recursive search to its original target owner', async () => {

@@ -209,9 +209,9 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
       requestHostIdentity: true,
       hostId: options.hostId,
       capabilities: options.liveSourceOnly
-        ? (sourceOwner ? ['sources', 'work-location-read'] : [])
+        ? (sourceOwner ? ['sources', 'work-location-read', 'work-location'] : [])
         : ['materials', 'process', 'attach', 'cancel', 'logs', 'outputs', 'resource-admission', 'remote-shell',
-          ...(sourceOwner ? ['sources', 'attachment-stream', 'work-location-read'] : []), ...(options.storageAvailable ? ['storage'] : [])],
+          ...(sourceOwner ? ['sources', 'attachment-stream', 'work-location-read', 'work-location'] : []), ...(options.storageAvailable ? ['storage'] : [])],
       machine,
     };
   };

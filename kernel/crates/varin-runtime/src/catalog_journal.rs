@@ -32,29 +32,32 @@ impl Catalog {
     }
     pub fn recovery_sources(&self, thread: &str, branch: &str) -> Result<Vec<Value>> {
         if self.branch_thread_id(branch)? != thread { return Err(RuntimeError::Conflict("recovery branch owner differs".into())); }
-        let mut query=self.db.prepare("SELECT l.id,json_extract(l.body,'$.selection.source') FROM run_launches l JOIN runs r ON r.id=l.id WHERE json_extract(r.body,'$.thread_id')=?1 AND json_extract(l.body,'$.selection.source') IS NOT NULL ORDER BY l.rowid DESC")?;
+        let mut query = self.db.prepare(
+            "WITH locations(run_id, sequence, priority, source) AS (
+                SELECT r.id, r.rowid, 0, json_extract(l.body,'$.selection.source')
+                FROM runs r JOIN run_launches l ON l.id=r.id WHERE json_extract(r.body,'$.thread_id')=?1
+                UNION ALL
+                SELECT r.id, r.rowid, 1, json_extract(o.body,'$.resource_source')
+                FROM runs r JOIN operations o ON o.run_id=r.id WHERE json_extract(r.body,'$.thread_id')=?1
+                  AND json_extract(o.body,'$.intent.contract.name') IN ('file_write','file_edit')
+                  AND json_extract(o.body,'$.effect') != 'none'
+            ) SELECT run_id, source FROM locations WHERE source IS NOT NULL
+              ORDER BY sequence DESC, priority, source",
+        )?;
         let rows=query.query_map([thread],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
         let mut seen=std::collections::BTreeSet::new();
         let mut result=Vec::new();
         for (run,body) in rows {
             let source:Value=serde_json::from_str(&body)?;
             let environment=if source["mode"]=="materialized" {source["environment_run_id"].as_str().unwrap_or(&run)} else {""};
-            let key=json!([source["resource_owner"],source["workspace_id"],source["execution_workspace_id"],source["mode"],source["live_root"],environment]).to_string();
+            let key=json!([source["resource_owner"],source["workspace_id"],source["execution_workspace_id"],source["mode"],source["live_root"],environment,source["native_scope"],source["branch_id"]]).to_string();
             if seen.insert(key) {result.push(json!({"runId":run,"source":source}));}
         }
         Ok(result)
     }
     pub fn recovery_workspaces(&self, thread: &str, branch: &str) -> Result<Vec<launches::SourceSelection>> {
-        if self.branch_thread_id(branch)? != thread {
-            return Err(RuntimeError::Conflict(
-                "recovery branch owner differs".into(),
-            ));
-        }
-        let mut query = self.db.prepare("SELECT DISTINCT json_extract(l.body,'$.selection.source') FROM run_launches l JOIN runs r ON r.id=l.id WHERE json_extract(r.body,'$.thread_id')=?1 AND json_extract(l.body,'$.selection.source.workspace_id') IS NOT NULL ORDER BY 1")?;
-        let rows = query
-            .query_map([thread], |row| row.get(0))?
-            .collect::<std::result::Result<Vec<String>, _>>()?;
-        rows.into_iter().map(|body:String|serde_json::from_str(&body).map_err(Into::into)).collect()
+        self.recovery_sources(thread, branch)?.into_iter()
+            .map(|mut result| serde_json::from_value(result["source"].take()).map_err(Into::into)).collect()
     }
     pub fn capture_journal_anchor(
         &self,
@@ -236,11 +239,14 @@ impl RecoveryRangeRead {
         }
         // Traverse immutable invocation bodies only on this reader, never while holding Catalog.
         let mut external = std::collections::BTreeSet::new();
+        let mut alternate = std::collections::BTreeMap::<String, Vec<launches::SourceSelection>>::new();
         let runs = entries
             .iter()
             .map(|item| item.run_id.clone())
             .collect::<std::collections::BTreeSet<_>>();
         for run_id in runs {
+            let main_source = optional_record::<launch_content::LaunchMetadata>(&db, "run_launches", &run_id)?
+                .and_then(|launch| launch.selection.source);
             let operations = {
                 let mut query = db.prepare("SELECT body FROM operations WHERE run_id=?1")?;
                 let values = query
@@ -257,6 +263,11 @@ impl RecoveryRangeRead {
                 if intent.contract().read_only {
                     continue;
                 }
+                let location = operation.resource_source.clone()
+                    .filter(|source| Some(source) != main_source.as_ref());
+                let journalled_at_location = location.is_some()
+                    && matches!(intent.call().name.as_str(), "file_write" | "file_edit")
+                    && operation.effect == Effect::Confirmed;
                 let integration_journalled=if intent.call().name=="integrate_child" {
                     operation.result.clone().map(|result|result.load(&self.content)).transpose()?
                         .is_some_and(|result|result.output().is_ok_and(|output|output.data["fileJournal"]==true))
@@ -275,7 +286,7 @@ impl RecoveryRangeRead {
                             )
                         })
                 });
-                if !physical_writer
+                if location.is_none() && intent.call().name != "work_location_transfer" && !physical_writer
                     && !matches!(
                         operation.execution_owner,
                         Some(crate::ExecutorOwner::External { .. })
@@ -329,7 +340,16 @@ impl RecoveryRangeRead {
                         ));
                     }
                     if is_input(item.source) {
-                        external.insert(format!("{run_id}:{}", item.id));
+                        let execution = format!("{run_id}:{}", item.id);
+                        if let Some(source) = location {
+                            let sources = alternate.entry(execution.clone()).or_default();
+                            if !sources.contains(&source) {
+                                sources.push(source);
+                            }
+                        }
+                        if !journalled_at_location {
+                            external.insert(execution);
+                        }
                         break;
                     }
                     leaf = item.parent;
@@ -337,6 +357,7 @@ impl RecoveryRangeRead {
             }
         }
         let mut result: Vec<RecoveryRangeTurn> = Vec::new();
+        let mut turn_start = 0;
         for item in entries {
             if is_input(item.source) {
                 let run: Run = record(&db, "runs", &item.run_id)?;
@@ -346,13 +367,18 @@ impl RecoveryRangeRead {
                     &run.id,
                 )?
                 .and_then(|launch| launch.selection.source);
-                let uncovered = external.contains(&format!("{}:{}", run.id, item.id));
-                result.push(RecoveryRangeTurn {
+                let execution_id = format!("{}:{}", run.id, item.id);
+                let uncovered = external.contains(&execution_id);
+                turn_start = result.len();
+                let sources = std::iter::once(source)
+                    .chain(alternate.remove(&execution_id).into_iter().flatten().map(Some));
+                for source in sources {
+                    result.push(RecoveryRangeTurn {
                     anchor: JournalAnchor {
-                        execution_id: format!("{}:{}", run.id, item.id),
+                        execution_id: execution_id.clone(),
                         thread_id: self.thread.clone(),
-                        branch_id: run.branch_id,
-                        run_id: run.id,
+                        branch_id: run.branch_id.clone(),
+                        run_id: run.id.clone(),
                         entry_id: item.id.clone(),
                         epoch: self.epoch,
                     },
@@ -360,10 +386,11 @@ impl RecoveryRangeRead {
                     source,
                     uncovered,
                     settled: run.state.terminal(),
-                });
+                    });
+                }
             }
-            if let Some(turn) = result.last_mut() {
-                turn.entry_ids.push(item.id);
+            for turn in &mut result[turn_start..] {
+                turn.entry_ids.push(item.id.clone());
             }
         }
         history_views::current_history_owner(&self.database, self.epoch)?;

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { ThreadProcessesAPI, ThreadProcessTerminal, ThreadSource } from '@varin/application-client';
 import type { TerminalSessionApi } from '../terminal/session-api.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
@@ -36,9 +37,11 @@ export function createThreadProcesses(options: {
         || identity.threadId !== run.thread_id || identity.branchId !== run.branch_id) throw new Error('Terminal identity conflict');
       return { sessionId, cwd: existing.cwd, operationId: operation.id, processId: identity.processId, resourceOwner: source.resource_owner };
     }
-    const selection = savedSourceLaunch(run.id, source, sourceToolSchemas(launch.selection).map(tool => tool.name) as ThreadSource['tools']);
+    const retainedView = source.resource_owner.kind === 'managed_host' || !isDeepStrictEqual(source, launch.selection.source);
+    const tools = retainedView ? ['process_inspect', 'process_read'] : sourceToolSchemas(launch.selection).map(tool => tool.name);
+    const selection = savedSourceLaunch(run.id, source, tools as ThreadSource['tools']);
     const authority = await admitRunSourceAuthority(kernel, runtime, selection, { resolveLiveSource: options.resolveLiveSource,
-      ...(source.resource_owner.kind === 'managed_host' ? { operationId: operation.id, retention: 'caller', purpose: 'process_view' } : {}) });
+      ...(retainedView ? { operationId: operation.id, retention: 'caller', purpose: 'process_view' } : {}) });
     let child: KernelManagedProcess | undefined;
     let unsubscribe: (() => void) | undefined;
     let disposed = false;

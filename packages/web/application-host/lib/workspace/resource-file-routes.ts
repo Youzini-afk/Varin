@@ -12,6 +12,92 @@ import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import type { ManagedSourceOwner } from '../kernel/managed-source-bridge.js';
 import { parseSourceResourceOwner } from '../kernel/thread-sources.js';
 
+export function createResourceFileTransfer(options: {
+  local: ResourceFilesOwner; remote: ManagedSourceOwner;
+  runtime: Pick<AgentRuntimeClient, 'coordinatorHostId'>;
+}) {
+  const endpoint = async (location: ResourceFileLocation, signal?: AbortSignal) => {
+    const owner = parseSourceResourceOwner(location.resourceOwner);
+    const remote = owner.kind === 'managed_host' ? await options.remote(owner) : null;
+    return {
+      request: (command: ResourceFileRequest['command']) => remote ? remote.workspace({ root: location.root, workspaceId: location.workspaceId, ...(location.selection !== undefined ? {selection:location.selection} : {}), coordinatorHostId: options.runtime.coordinatorHostId, command }, signal) : options.local.request({ ...location, command }, signal),
+      upload: (request: ResourceWorkspaceUpload, body: AsyncIterable<Uint8Array>) => remote ? remote.workspaceUpload({ ...request, coordinatorHostId: options.runtime.coordinatorHostId }, body, signal) : options.local.upload(request, body, signal),
+    };
+  };
+  return async (input: ResourceFileTransfer, signal?: AbortSignal): Promise<{ copied: number; removed: number; error?: string }> => {
+    let copied = 0, removed = 0;
+    try {
+      if (!input.key || !input.path || !input.destinationPath) throw new Error('Source and destination are required');
+      const [source, target] = await Promise.all([endpoint(input.source, signal), endpoint(input.destination, signal)]);
+      // Reject a directory copying into itself before creating any entries.
+      const sourceNative = input.source.selection?.mode === 'native_workspace' ? input.source.selection : undefined;
+      const targetNative = input.destination.selection?.mode === 'native_workspace' ? input.destination.selection : undefined;
+      const sameView = sourceNative || targetNative ? sourceNative && targetNative
+        && sourceNative.workspaceId === targetNative.workspaceId && sourceNative.executionWorkspaceId === targetNative.executionWorkspaceId
+        && sourceNative.branchId === targetNative.branchId : true;
+      if (isDeepStrictEqual(input.source.resourceOwner, input.destination.resourceOwner) && sameView) {
+        const normalize = (root: string, relative: string) => path.posix.normalize(`${root.replaceAll('\\', '/')}/${relative}`).replace(/\/$/, '');
+        const from = normalize(sourceNative?.nativeScope ?? (sourceNative ? '/' : input.source.root), input.path), to = normalize(targetNative?.nativeScope ?? (targetNative ? '/' : input.destination.root), input.destinationPath);
+        const folded = /^[a-z]:/i.test(from) ? [from.toLowerCase(), to.toLowerCase()] : [from, to];
+        if (folded[1] === folded[0] || folded[1]!.startsWith(`${folded[0]}/`)) throw new Error('Choose a destination outside the source');
+      }
+      const copy = async (from: string, to: string, kind: 'file' | 'directory' | 'symlink') => {
+        signal?.throwIfAborted();
+        const key = `${input.key}:${createHash('sha256').update(from).digest('hex')}`;
+        if (kind === 'directory') {
+          await target.request({ kind: 'mkdir', path: to });
+          // Enumerate before removing children so cursors do not shift under a move.
+          const entries: import('@varin/application-client').ResourceFileEntry[] = [];
+          let cursor: string | undefined;
+          do {
+            const page = await source.request({ kind: 'list', path: from, ...(cursor ? { cursor } : {}) });
+            if (page.kind !== 'list') throw new Error('Source directory is unavailable');
+            entries.push(...page.page.entries); cursor = page.page.nextCursor ?? undefined;
+          } while (cursor);
+          for (const entry of entries) await copy(entry.path, `${to}/${entry.name}`, entry.kind);
+          if (input.move) await source.request({ kind: 'remove', path: from, key, emptyDirectory: true });
+          return;
+        }
+        if (kind === 'symlink') {
+          const link = await source.request({ kind: 'readlink', path: from });
+          if (link.kind !== 'link') throw new Error('The source link is unavailable');
+          await target.request({ kind: 'symlink', path: to, target: link.target, key }); copied++;
+          if (input.move) { await source.request({ kind: 'remove', path: from, key: `${key}:remove`, expectedLink: link.target }); removed++; }
+          return;
+        }
+        const first = await source.request({ kind: 'bytes', path: from, offset: 0 });
+        if (first.kind !== 'bytes') throw new Error('Source file is unavailable');
+        const hash = createHash('sha256');
+        const stream = async function* () {
+          let page = first;
+          for (;;) {
+            if (page.version !== first.version || page.byteLength !== first.byteLength) throw new Error('Source file changed during transfer');
+            const bytes = Buffer.from(page.bytesBase64, 'base64'); hash.update(bytes); yield bytes;
+            if (page.eof) return;
+            const next = await source.request({ kind: 'bytes', path: from, offset: page.nextOffset });
+            if (next.kind !== 'bytes' || next.nextOffset <= page.nextOffset) throw new Error('Incomplete file transfer');
+            page = next;
+          }
+        };
+        await target.upload({ ...(input.destination.selection !== undefined ? {selection:input.destination.selection} : {}), root: input.destination.root, workspaceId: input.destination.workspaceId, path: to, key, byteLength: first.byteLength }, stream()); copied++;
+        if (input.move) { await source.request({ kind: 'remove', path: from, key: `${key}:remove`, expectedHash: `sha256-${hash.digest('hex')}` }); removed++; }
+      };
+      const parent = path.posix.dirname(input.path), name = path.posix.basename(input.path);
+      let cursor: string | undefined, found: import('@varin/application-client').ResourceFileEntry | undefined;
+      do {
+        const page = await source.request({ kind: 'list', path: parent === '.' ? '' : parent, query: name, ...(cursor ? { cursor } : {}) });
+        if (page.kind !== 'list') throw new Error('Source directory is unavailable');
+        found = page.page.entries.find(entry => entry.name === name); cursor = page.page.nextCursor ?? undefined;
+      } while (!found && cursor);
+      if (!found) throw new Error('The source no longer exists');
+      await copy(input.path, input.destinationPath, found.kind);
+      return { copied, removed };
+    } catch (error) {
+      return { copied, removed, error: error instanceof Error ? error.message : String(error) };
+    }
+  };
+}
+
 export function registerResourceFileRoutes(app: Express, options: {
   local: ResourceFilesOwner; remote: ManagedSourceOwner; runtime: AgentRuntimeClient; requireAuth: RequestHandler;
   attachments: import('../kernel/thread-attachments.js').ThreadAttachmentOwner;
@@ -41,14 +127,6 @@ export function registerResourceFileRoutes(app: Express, options: {
     } catch (error) { if (!response.headersSent) failure(response, error); else response.end(); }
     finally { response.off('close', closed); controller.abort(); }
   });
-  const endpoint = async (location: ResourceFileLocation) => {
-    const owner = parseSourceResourceOwner(location.resourceOwner);
-    const remote = owner.kind === 'managed_host' ? await options.remote(owner) : null;
-    return {
-      request: (command: ResourceFileRequest['command']) => remote ? remote.workspace({ root: location.root, workspaceId: location.workspaceId, ...(location.selection !== undefined ? {selection:location.selection} : {}), coordinatorHostId: options.runtime.coordinatorHostId, command }) : options.local.request({ ...location, command }),
-      upload: (request: ResourceWorkspaceUpload, body: AsyncIterable<Uint8Array>) => remote ? remote.workspaceUpload({ ...request, coordinatorHostId: options.runtime.coordinatorHostId }, body) : options.local.upload(request, body),
-    };
-  };
   const route = async (input: ResourceFileRequest) => {
     const resourceOwner = parseSourceResourceOwner(input.resourceOwner);
     if (!input.task || input.command.kind !== 'open') return { resourceOwner };
@@ -145,74 +223,9 @@ export function registerResourceFileRoutes(app: Express, options: {
       response.json(await options.attachments.upload(identity, { key, filename, mimeType: attachmentMimeType(filename), byteLength: first.byteLength }, stream()));
     } catch (error) { failure(response, error); }
   });
+  const transfer = createResourceFileTransfer(options);
   app.post('/api/resource-files/transfer', options.requireAuth, async (request, response) => {
-    let copied = 0, removed = 0;
-    try {
-      const input = request.body as ResourceFileTransfer;
-      if (!input.key || !input.path || !input.destinationPath) throw new Error('Source and destination are required');
-      const [source, target] = await Promise.all([endpoint(input.source), endpoint(input.destination)]);
-      // Reject a directory copying into itself before creating any entries.
-      const sourceNative = input.source.selection?.mode === 'native_workspace' ? input.source.selection : undefined;
-      const targetNative = input.destination.selection?.mode === 'native_workspace' ? input.destination.selection : undefined;
-      const sameView = sourceNative || targetNative ? sourceNative && targetNative
-        && sourceNative.workspaceId === targetNative.workspaceId && sourceNative.executionWorkspaceId === targetNative.executionWorkspaceId
-        && sourceNative.branchId === targetNative.branchId : true;
-      if (isDeepStrictEqual(input.source.resourceOwner, input.destination.resourceOwner) && sameView) {
-        const normalize = (root: string, relative: string) => path.posix.normalize(`${root.replaceAll('\\', '/')}/${relative}`).replace(/\/$/, '');
-        const from = normalize(sourceNative?.nativeScope ?? (sourceNative ? '/' : input.source.root), input.path), to = normalize(targetNative?.nativeScope ?? (targetNative ? '/' : input.destination.root), input.destinationPath);
-        const folded = /^[a-z]:/i.test(from) ? [from.toLowerCase(), to.toLowerCase()] : [from, to];
-        if (folded[1] === folded[0] || folded[1]!.startsWith(`${folded[0]}/`)) throw new Error('Choose a destination outside the source');
-      }
-      const copy = async (from: string, to: string, kind: 'file' | 'directory' | 'symlink') => {
-        const key = `${input.key}:${createHash('sha256').update(from).digest('hex')}`;
-        if (kind === 'directory') {
-          await target.request({ kind: 'mkdir', path: to });
-          // Enumerate before removing children so cursors do not shift under a move.
-          const entries: import('@varin/application-client').ResourceFileEntry[] = [];
-          let cursor: string | undefined;
-          do {
-            const page = await source.request({ kind: 'list', path: from, ...(cursor ? { cursor } : {}) });
-            if (page.kind !== 'list') throw new Error('Source directory is unavailable');
-            entries.push(...page.page.entries); cursor = page.page.nextCursor ?? undefined;
-          } while (cursor);
-          for (const entry of entries) await copy(entry.path, `${to}/${entry.name}`, entry.kind);
-          if (input.move) await source.request({ kind: 'remove', path: from, key, emptyDirectory: true });
-          return;
-        }
-        if (kind === 'symlink') {
-          const link = await source.request({ kind: 'readlink', path: from });
-          if (link.kind !== 'link') throw new Error('The source link is unavailable');
-          await target.request({ kind: 'symlink', path: to, target: link.target, key }); copied++;
-          if (input.move) { await source.request({ kind: 'remove', path: from, key: `${key}:remove`, expectedLink: link.target }); removed++; }
-          return;
-        }
-        const first = await source.request({ kind: 'bytes', path: from, offset: 0 });
-        if (first.kind !== 'bytes') throw new Error('Source file is unavailable');
-        const hash = createHash('sha256');
-        const stream = async function* () {
-          let page = first;
-          for (;;) {
-            if (page.version !== first.version || page.byteLength !== first.byteLength) throw new Error('Source file changed during transfer');
-            const bytes = Buffer.from(page.bytesBase64, 'base64'); hash.update(bytes); yield bytes;
-            if (page.eof) return;
-            const next = await source.request({ kind: 'bytes', path: from, offset: page.nextOffset });
-            if (next.kind !== 'bytes' || next.nextOffset <= page.nextOffset) throw new Error('Incomplete file transfer');
-            page = next;
-          }
-        };
-        await target.upload({ ...(input.destination.selection !== undefined ? {selection:input.destination.selection} : {}), root: input.destination.root, workspaceId: input.destination.workspaceId, path: to, key, byteLength: first.byteLength }, stream()); copied++;
-        if (input.move) { await source.request({ kind: 'remove', path: from, key: `${key}:remove`, expectedHash: `sha256-${hash.digest('hex')}` }); removed++; }
-      };
-      const parent = path.posix.dirname(input.path), name = path.posix.basename(input.path);
-      let cursor: string | undefined, found: import('@varin/application-client').ResourceFileEntry | undefined;
-      do {
-        const page = await source.request({ kind: 'list', path: parent === '.' ? '' : parent, query: name, ...(cursor ? { cursor } : {}) });
-        if (page.kind !== 'list') throw new Error('Source directory is unavailable');
-        found = page.page.entries.find(entry => entry.name === name); cursor = page.page.nextCursor ?? undefined;
-      } while (!found && cursor);
-      if (!found) throw new Error('The source no longer exists');
-      await copy(input.path, input.destinationPath, found.kind);
-      response.json({ copied, removed });
-    } catch (error) { if (!response.destroyed) response.json({ copied, removed, error: error instanceof Error ? error.message : String(error) }); }
+    const result = await transfer(request.body);
+    if (!response.destroyed) response.json(result);
   });
 }

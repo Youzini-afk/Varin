@@ -396,11 +396,10 @@ impl RunAssembly {
             let existing=declarations.iter().position(|declaration|declaration.schema.name=="file_read").map(|index|declarations.remove(index));
             let path_read = existing.is_some();
             let reader = crate::attachment_reads::declaration(existing,runtime.catalog(),self.resource.clone());
+            declarations.push(reader);
             if path_read && !is_child && host_authority && crate::work_locations::eligible(launch_source.as_ref()) {
-                declarations.extend(crate::work_locations::declarations(reader, p.run_id.clone(), launch_source.as_ref().unwrap().clone(),
-                    runtime.catalog(), resources.clone().with_journal_catalog(runtime.catalog())));
-            } else {
-                declarations.push(reader);
+                crate::work_locations::route_declarations(&mut declarations, p.run_id.clone(), launch_source.as_ref().unwrap().clone(),
+                    runtime.catalog(), resources.clone().with_journal_catalog(runtime.catalog()));
             }
             declarations.push(crate::agent_resources::declaration(
                 runtime.catalog(),

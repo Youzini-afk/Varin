@@ -82,7 +82,7 @@ export class ManagedSourceBridge {
     void (async () => {
       let result: Extract<PrivateManagedSourceFrame, { kind: 'source-resource-response' }>['result'];
       try {
-        if (record(value.query) && ['work_locations', 'work_location_bind', 'work_location_release'].includes(String(value.query.kind))) {
+        if (record(value.query) && ['work_locations', 'work_location_bind', 'work_location_switch', 'work_location_release', 'work_location_transfer', 'work_location_process_view'].includes(String(value.query.kind))) {
           if (!this.workLocations) throw new Error('Work location owner is unavailable');
           const controller = new AbortController();
           pending.cancel = async () => controller.abort();

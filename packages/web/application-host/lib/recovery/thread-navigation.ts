@@ -118,8 +118,12 @@ export function createThreadRecoveryFileResolver({ runtime, storage, kernel, liv
             throw new RecoveryPrimitiveError('unsupported-metadata', 'This source has no physical file target', { origin: 'storage' });
         const run = await runtime.run(target.runId);
         const launch = await runtime.launch(run.id);
-        const source = launch?.selection.source;
-        if (run.thread_id !== target.threadId || !source || source.workspace_id !== identity.workspaceId || source.execution_workspace_id !== target.executionWorkspaceId || source.mode !== target.sourceMode)
+        const matchesTarget = (source: NonNullable<typeof launch>['selection']['source']) => source && source.workspace_id === identity.workspaceId
+            && source.execution_workspace_id === target.executionWorkspaceId && source.mode === target.sourceMode
+            && (source.mode !== 'live_root' || source.live_root?.rootId === target.rootId);
+        const source = matchesTarget(launch?.selection.source ?? null) ? launch?.selection.source
+            : (await runtime.recoveryRun(run.id)).find(turn => matchesTarget(turn.source))?.source;
+        if (run.thread_id !== target.threadId || !source)
             throw new RecoveryPrimitiveError('workspace-untrusted', 'Recovery source no longer matches the original Run', { origin: 'storage' });
         if (source.resource_owner.kind === 'managed_host')
             throw new RecoveryPrimitiveError('unsupported-metadata', 'Managed Host files require their original remote recovery owner; no local directory was opened.', { origin: 'storage' });

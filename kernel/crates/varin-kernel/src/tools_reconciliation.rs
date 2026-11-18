@@ -85,7 +85,26 @@ impl KernelResourceClient {
                 continue;
             }
             if original_source.is_some_and(|source| Some(source) != binding.source_selection().ok().as_ref()) {
-                return Err(KernelError::Authorization("Original local mutation source is unavailable; its receipt cannot be reconciled here".into()));
+                let original = original_source.expect("alternate mutation source");
+                let saved = self.file_receipt(original.clone(), operation.run_id, binding.thread_id.clone(), operation.id.clone())?;
+                if saved["state"] != "committed" {
+                    continue;
+                }
+                if saved["tool"] != admitted.call.name {
+                    return Err(KernelError::Authorization("Original mutation receipt belongs to another tool".into()));
+                }
+                let file = &saved["receipt"];
+                let applied = file["status"] == "applied";
+                let content = crate::file_tool_reconciliation::recovered_output(file, &operation.id)?;
+                let epoch = file["__nativeEpoch"].as_str().filter(|epoch| !epoch.is_empty())
+                    .ok_or_else(|| KernelError::Storage("Original mutation epoch is missing".into()))?;
+                receipts.push((operation.id.clone(), ExternalReceipt {
+                    executor: admitted.call.name, identity: operation.id, epoch: epoch.into(),
+                    outcome: if applied { varin_runtime::Outcome::Succeeded } else { varin_runtime::Outcome::Failed },
+                    effect: if applied { varin_runtime::Effect::Confirmed } else { varin_runtime::Effect::None },
+                    result: content,
+                }));
+                continue;
             }
             if binding.source_mode == SourceMode::FixedBranch {
                 return Err(KernelError::Authorization("mutation recovery requires the original physical source".into()));
@@ -95,13 +114,22 @@ impl KernelResourceClient {
                     .map_err(|error| KernelError::Authorization(error.to_string()))?);
             }
             let executor = local_executor.as_ref().expect("local executor initialized");
+            let mut call = admitted.call.clone();
+            let mut admitted_contract = admitted.contract.clone();
+            if call.schema_version == "3" && crate::work_locations::alternate_tool(&call.name) {
+                call.schema_version = "2".into();
+                if let Some(arguments) = call.arguments.as_object_mut() {
+                    arguments.remove("location");
+                }
+                admitted_contract.schema_version = "2".into();
+            }
             let original = executor
-                .operation(Some(&context), &admitted.call)
+                .operation(Some(&context), &call)
                 .map_err(|error| KernelError::Authorization(error.to_string()))?;
             let contract = executor
-                .planned_contract(&context, &admitted.call, &original, &cancellation)
+                .planned_contract(&context, &call, &original, &cancellation)
                 .map_err(|error| KernelError::Authorization(error.to_string()))?;
-            if contract != admitted.contract {
+            if contract != admitted_contract {
                 return Err(KernelError::Authorization(
                     "mutation source or contract changed before recovery".into(),
                 ));

@@ -20,8 +20,9 @@ type Props = {
   historyContent?: React.ReactNode; onPageChange?(page: Page): void;
 };
 const mergeOperations = (previous: FileRecoveryOperation[], incoming: FileRecoveryOperation[]) =>
-  [...new Map([...previous, ...incoming].map(item => [item.operationId, item])).values()]
+  [...new Map([...previous, ...incoming].map(item => [JSON.stringify([item.sourceId, item.operationId]), item])).values()]
     .sort((a, b) => Date.parse(b.createdAt ?? '') - Date.parse(a.createdAt ?? ''));
+const pointKey = (point: FileRecoveryPoint) => JSON.stringify([point.sourceId, point.id]);
 
 export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, historyContent, onPageChange }: Props) {
   const { t } = useI18n();
@@ -42,7 +43,7 @@ export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, hist
   const [name, setName] = React.useState('');
   const nameInputId = React.useId();
   const [feedback, setFeedback] = React.useState<FileRecoveryOperation>();
-  const [attempt, setAttempt] = React.useState<{ operationId: string; sourceRunId: string }>();
+  const [attempt, setAttempt] = React.useState<{ operationId: string; sourceRunId: string; sourceId?: string }>();
   const [host] = React.useState(getRuntimeEndpointGeneration);
   const live = React.useRef(true);
   const inFlight = React.useRef(false);
@@ -69,7 +70,7 @@ export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, hist
     try {
       const result = await call({ action: 'list', ...(next !== undefined ? { cursor: next } : {}) });
       if (!current() || read !== readSequence.current) return;
-      setPoints(previous => next === undefined ? result.points ?? [] : [...new Map([...previous, ...result.points ?? []].map(point => [point.id, point])).values()]);
+      setPoints(previous => next === undefined ? result.points ?? [] : [...new Map([...previous, ...result.points ?? []].map(point => [pointKey(point), point])).values()]);
       setOperations(previous => mergeOperations(previous, result.operations ?? []));
       setCursor(result.nextCursor ?? null); setSourceRunId(result.currentSourceRunId); setSource(result.source);
       setError(result.failures?.join('\n'));
@@ -113,11 +114,11 @@ export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, hist
   const inspect = async (point: FileRecoveryPoint, reference = point.before) => {
     if (inFlight.current) return;
     const read = ++inspectionSequence.current;
-    const keep = selection?.point.id === point.id && !selection.loading ? selection.paths : undefined;
+    const keep = selection && pointKey(selection.point) === pointKey(point) && !selection.loading ? selection.paths : undefined;
     setSelection({ point, reference, files: [], paths: [], loading: true });
     setExpandedFile(undefined); setFeedback(undefined); setError(undefined);
     try {
-      const result = await call({ action: 'inspect', sourceRunId: point.sourceRunId, point: reference });
+      const result = await call({ action: 'inspect', sourceRunId: point.sourceRunId, sourceId: point.sourceId, point: reference });
       if (!current() || read !== inspectionSequence.current) return;
       const files = result.files ?? [];
       setSelection({ point, reference, files, paths: files.filter(file => !keep || keep.includes(file.path)).map(file => file.path), loading: false });
@@ -132,7 +133,7 @@ export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, hist
     if (inFlight.current || !current()) return;
     inFlight.current = true; setBusy(input.action); setError(undefined);
     const request = ['restore', 'undo', 'name', 'release'].includes(input.action) ? { ...input, requestId: crypto.randomUUID() } : input;
-    if ((request.action === 'restore' || request.action === 'undo') && request.sourceRunId && request.requestId) setAttempt({ operationId: request.requestId, sourceRunId: request.sourceRunId });
+    if ((request.action === 'restore' || request.action === 'undo') && request.sourceRunId && request.requestId) setAttempt({ operationId: request.requestId, sourceRunId: request.sourceRunId, sourceId: request.sourceId });
     try {
       const result = await call(request);
       if (!current()) return;
@@ -143,7 +144,7 @@ export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, hist
         if (result.operation.status !== 'pending') setAttempt(undefined);
       } else {
         if (request.action === 'name') { setName(''); navigate('timeline'); }
-        if (request.action === 'release' && selection?.point.id === request.point) { setSelection(undefined); setExpandedFile(undefined); }
+        if (request.action === 'release' && selection?.point.id === request.point && selection?.point.sourceId === request.sourceId) { setSelection(undefined); setExpandedFile(undefined); }
       }
       await load();
       if (current()) onChanged();
@@ -151,7 +152,7 @@ export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, hist
     finally { inFlight.current = false; if (current()) setBusy(undefined); }
   };
   const label = (point: FileRecoveryPoint) => point.label || point.title || t(point.runId.startsWith('restore:') ? 'contextPanel.recovery.files.restoredPoint' : 'contextPanel.recovery.files.round');
-  const multipleSources = new Set(points.map(point => point.sourcePath)).size > 1;
+  const multipleSources = new Set(points.map(point => point.sourceId ?? point.sourcePath)).size > 1;
   const targetLabel = (value: Selection) => value.point.label ? t('contextPanel.recovery.files.savedState')
     : t(value.reference === value.point.before ? 'contextPanel.recovery.files.start' : value.point.state === 'pending' ? 'contextPanel.recovery.files.latest' : 'contextPanel.recovery.files.end');
   const statusText = (status?: string) => t(status === 'applied' ? 'contextPanel.recovery.files.applied'
@@ -162,22 +163,22 @@ export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, hist
     && !operations.some(item => item.undoOf === operation.operationId && item.status === 'applied');
   const resultActions = (operation: FileRecoveryOperation) => operation.sourceRunId && <Button size="xs" variant="ghost"
     disabled={Boolean(busy) || operation.status !== 'pending' && !canUndo(operation)}
-    onClick={() => void act({ action: operation.status === 'pending' ? 'operation' : 'undo', sourceRunId: operation.sourceRunId, operationId: operation.operationId })}>
+    onClick={() => void act({ action: operation.status === 'pending' ? 'operation' : 'undo', sourceRunId: operation.sourceRunId, sourceId: operation.sourceId, operationId: operation.operationId })}>
     {t(operation.status === 'pending' ? 'contextPanel.recovery.files.checkOperation' : 'contextPanel.recovery.actions.undo')}
   </Button>;
   const problems = (operation: FileRecoveryOperation) => operation.files.filter(file => !['applied', 'unchanged'].includes(file.status ?? '')).map(file => <div key={file.path} className="mt-2 space-y-1 typography-micro">
     <div className="flex flex-wrap gap-x-2"><span className="min-w-0 flex-1 break-all">{file.path}</span><span className="text-[var(--status-warning)]">{statusText(file.status)}</span></div>
     {file.message && <p className="text-muted-foreground">{file.message}</p>}
     {file.status === 'conflict' && operation.sourceRunId && (operation.point || operation.undoOf) && <button type="button" disabled={Boolean(busy)}
-      className="text-primary hover:underline" onClick={() => void act({ action: operation.point ? 'restore' : 'undo', sourceRunId: operation.sourceRunId,
+      className="text-primary hover:underline" onClick={() => void act({ action: operation.point ? 'restore' : 'undo', sourceRunId: operation.sourceRunId, sourceId: operation.sourceId,
         ...(operation.point ? { point: operation.point } : { operationId: operation.undoOf! }), paths: [file.path], overwritePaths: [file.path] })}>{t('contextPanel.recovery.files.overwrite')}</button>}
   </div>);
   const pointActions = (point: FileRecoveryPoint, Item: typeof DropdownMenuItem | typeof ContextMenuItem) => <>
     <Item disabled={Boolean(busy)} onClick={() => void inspect(point)}>{t('contextPanel.recovery.files.inspect')}</Item>
-    <Item disabled={Boolean(busy)} onClick={() => void act({ action: 'restore', sourceRunId: point.sourceRunId, point: point.before })}>{t(point.label ? 'contextPanel.recovery.files.restorePoint' : 'contextPanel.recovery.files.before')}</Item>
-    {!point.label && <Item disabled={Boolean(busy)} onClick={() => void act({ action: 'restore', sourceRunId: point.sourceRunId, point: point.after })}>{t('contextPanel.recovery.files.after')}</Item>}
+    <Item disabled={Boolean(busy)} onClick={() => void act({ action: 'restore', sourceRunId: point.sourceRunId, sourceId: point.sourceId, point: point.before })}>{t(point.label ? 'contextPanel.recovery.files.restorePoint' : 'contextPanel.recovery.files.before')}</Item>
+    {!point.label && <Item disabled={Boolean(busy)} onClick={() => void act({ action: 'restore', sourceRunId: point.sourceRunId, sourceId: point.sourceId, point: point.after })}>{t('contextPanel.recovery.files.after')}</Item>}
     <Item disabled={Boolean(busy) || point.state === 'pending'} className="text-[var(--status-error)]"
-      onClick={() => void act({ action: 'release', sourceRunId: point.sourceRunId, point: point.id })}>{t('contextPanel.recovery.files.release')}</Item>
+      onClick={() => void act({ action: 'release', sourceRunId: point.sourceRunId, sourceId: point.sourceId, point: point.id })}>{t('contextPanel.recovery.files.release')}</Item>
   </>;
   const day = (value: string) => {
     const date = new Date(value), today = new Date(), yesterday = new Date();
@@ -208,7 +209,7 @@ export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, hist
     <div ref={scroll} className="min-h-0 flex-1 overflow-y-auto px-3 pb-4" style={{ overflowAnchor: 'none' }}>
       {page !== 'timeline' && <Button variant="ghost" size="xs" className="mb-4 mt-1 text-muted-foreground" onClick={() => navigate('timeline')}><Icon name="arrow-left" className="size-3.5" />{t('contextPanel.recovery.files.back')}</Button>}
       {error && <p role="alert" className="mb-3 whitespace-pre-wrap px-1 typography-meta text-[var(--status-error)]">{error}</p>}
-      {page === 'name' && <form className="space-y-3 px-1" onSubmit={event => { event.preventDefault(); if (name.trim() && sourceRunId) void act({ action: 'name', sourceRunId, name: name.trim() }); }}>
+      {page === 'name' && <form className="space-y-3 px-1" onSubmit={event => { event.preventDefault(); if (name.trim() && sourceRunId) void act({ action: 'name', sourceRunId, sourceId: source?.sourceId, name: name.trim() }); }}>
         <h3 className="typography-ui-header">{t('contextPanel.recovery.files.namePoint')}</h3>
         <label className="block typography-meta text-muted-foreground" htmlFor={nameInputId}>{t('contextPanel.recovery.files.namePlaceholder')}</label>
         <Input id={nameInputId} autoFocus value={name} onChange={event => setName(event.target.value)} />
@@ -218,7 +219,7 @@ export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, hist
       {page === 'history' && <div className="space-y-5 px-1">
         <h3 className="typography-ui-header">{t('contextPanel.recovery.files.history')}</h3>
         {operations.length === 0 && (historyLoading || !error) && <p className="typography-meta text-muted-foreground">{t(historyLoading ? 'contextPanel.recovery.files.loading' : 'contextPanel.recovery.files.noFileOperations')}</p>}
-        {operations.map(operation => <div key={operation.operationId} className="border-b border-border/50 pb-3">
+        {operations.map(operation => <div key={JSON.stringify([operation.sourceId, operation.operationId])} className="border-b border-border/50 pb-3">
           <div className="flex items-center justify-between gap-2"><span className="typography-ui-label">{operation.undoOf ? t('contextPanel.recovery.files.undoDone') : statusText(operation.status)}</span>{resultActions(operation)}</div>
           <p className="typography-micro text-muted-foreground">{operation.createdAt ? new Date(operation.createdAt).toLocaleString() : ''} · {t('contextPanel.recovery.files.pathCount', { count: operation.appliedPaths.length })}</p>
           {problems(operation)}
@@ -232,8 +233,9 @@ export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, hist
           {t(loading ? 'contextPanel.recovery.files.loading' : 'contextPanel.recovery.files.empty')}
         </div>}
         {points.map((point, index) => {
-          const selected = selection?.point.id === point.id;
-          return <React.Fragment key={point.id}>
+          const selected = selection && pointKey(selection.point) === pointKey(point);
+          const origin = [point.sourceDevice, point.sourcePath].filter(Boolean).join(' · ');
+          return <React.Fragment key={pointKey(point)}>
             {(index === 0 || day(point.createdAt) !== day(points[index - 1]!.createdAt)) && <div className="mb-1 mt-3 flex items-center gap-3 px-2 typography-micro text-muted-foreground/80">
               <span>{day(point.createdAt)}</span><span className="h-px flex-1 bg-border/40" />
             </div>}
@@ -252,7 +254,7 @@ export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, hist
                       {point.label && <span className="text-primary">{t('contextPanel.recovery.files.named')}</span>}
                       {point.state !== 'ready' && <span className="text-[var(--status-warning)]">{t(point.state === 'pending' ? 'contextPanel.recovery.files.recording' : 'contextPanel.recovery.files.recordedOnly')}</span>}
                     </span>
-                    {multipleSources && <span className="mt-1 block truncate typography-micro text-muted-foreground" title={point.sourcePath}>{point.sourcePath}</span>}
+                    {multipleSources && origin && <span className="mt-1 block truncate typography-micro text-muted-foreground" title={origin}>{origin}</span>}
                   </button>
                   <DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="size-6 shrink-0" aria-label={t('contextPanel.recovery.files.pointActions', { name: label(point) })} />}><Icon name="more" className="size-3.5 text-muted-foreground" /></DropdownMenuTrigger>
                     <DropdownMenuContent align="end">{pointActions(point, DropdownMenuItem)}</DropdownMenuContent></DropdownMenu>
@@ -286,7 +288,7 @@ export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, hist
                       </span>
                     </div>
                     {expandedFile === file.path && <FileRecoveryDiff key={`${selection.reference}:${file.path}:${revision}`} read={call} path={file.path}
-                      point={selection.reference} sourceRunId={point.sourceRunId} targetLabel={targetLabel(selection)} />}
+                      point={selection.reference} sourceRunId={point.sourceRunId} sourceId={point.sourceId} targetLabel={targetLabel(selection)} />}
                   </div>)}
                 </div>}
               </div>
@@ -309,7 +311,7 @@ export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, hist
           : selection && <><div className="mb-2 flex items-center justify-between gap-3 typography-micro text-muted-foreground">
             <span>{targetLabel(selection)}</span><span>{t('contextPanel.recovery.files.pathCount', { count: selection.paths.length })}</span>
           </div><Button className="w-full" size="sm" disabled={Boolean(busy) || !selectedReady}
-            onClick={() => void act({ action: 'restore', sourceRunId: selection.point.sourceRunId, point: selection.reference, paths: selection.paths })}>
+            onClick={() => void act({ action: 'restore', sourceRunId: selection.point.sourceRunId, sourceId: selection.point.sourceId, point: selection.reference, paths: selection.paths })}>
             <Icon name="arrow-go-back" className="size-3.5" />{t(selection.point.label ? 'contextPanel.recovery.files.restorePoint' : selection.reference === selection.point.before ? 'contextPanel.recovery.files.before' : 'contextPanel.recovery.files.after')}
           </Button></>}
     </footer>}
@@ -325,10 +327,10 @@ function RecoveryStorage({ sourceRunId, source, read }: {
   const [error, setError] = React.useState<string>();
   React.useEffect(() => {
     let current = true;
-    void read({ action: 'storage', sourceRunId }).then(value => { if (current) setResult(value); })
+    void read({ action: 'storage', sourceRunId, sourceId: source?.sourceId }).then(value => { if (current) setResult(value); })
       .catch(cause => { if (current) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => { current = false; };
-  }, [read, sourceRunId]);
+  }, [read, sourceRunId, source?.sourceId]);
   return <div className="space-y-3 px-1">
     <h3 className="typography-ui-header">{t('contextPanel.recovery.files.storageDetails')}</h3>
     <p className="typography-meta text-muted-foreground">{t('contextPanel.recovery.files.storageScope')}</p>

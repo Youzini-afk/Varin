@@ -12,6 +12,7 @@ import { createDocumentRootGuard } from './lib/documents/allowed-roots.js';
 import { createDocumentAuthority } from './lib/documents/authority.js';
 import { bindDocumentTextCodec } from './lib/documents/inspect.js';
 import { createManagedResourceTarget } from './lib/harness/managed-resource-target.js';
+import { createResourceFilesOwner } from './lib/workspace/resource-files.js';
 import { createHostResourceStorage, createHostResourceExecution } from './lib/kernel/host-resource-owners.js';
 import { createKernelClient } from './lib/kernel/kernel-client.js';
 import { createLiveSourceOwner } from './lib/kernel/live-source.js';
@@ -146,6 +147,7 @@ export async function startResourceNode(options: NodeOptions) {
       onError: () => console.error('[ResourceNode] Managed resource observation unavailable') });
     cleanup.push(() => target.dispose());
     target.attachSources({ documents, deviceFileAccess: false, validateLiveSource: liveSources.validate,
+      workspaceFiles: createResourceFilesOwner(documents, storage.kernelRecoveryFileResources),
       async prepareSource(input, signal) {
         if (input.mode !== 'live_root' || input.resourceOwner.kind !== 'local' || input.selection?.mode === 'native_workspace')
           throw new SourceAdmissionError('source_unavailable');

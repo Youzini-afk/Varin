@@ -141,7 +141,9 @@ fn submit_input_with_original_source(
     // declarations. Old launches and already accepted requests stay immutable.
     let bot = preparation.scope().is_some_and(|scope| scope.mode == "bot");
     let mut available = if host_authority { crate::run_tools::builtin_schemas(&crate::tools::ToolKind::all().collect(), plan_eligible, true, bot) } else { Vec::new() };
-    if host_authority { available.push(crate::work_locations::schema()); }
+    if host_authority && crate::work_locations::eligible(preparation.inherited_tool_source(launch.as_ref())) {
+        crate::work_locations::add_schemas(&mut available);
+    }
     let prepared = preparation.with_tool_catalog(available).load(launch, inherit_source).map_err(domain)?;
     if cancelled.load(Ordering::Acquire) {
         return Err(KernelError::Cancelled);

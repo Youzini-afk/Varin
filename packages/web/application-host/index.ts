@@ -107,6 +107,7 @@ import { createSemanticInference } from './lib/knowledge/semantic/runtime-infere
 import { createLanguageOwner } from './lib/kernel/language-owner.js';
 import { createThreadSourceFiles } from './lib/kernel/thread-source-files.js';
 import { createModelWorkLocations } from './lib/kernel/model-work-locations.js';
+import { admitRunSourceAuthority, savedSourceLaunch } from './lib/kernel/source-launch.js';
 import { createSourceQueryOwner } from './lib/kernel/source-query.js';
 import { createFollowupEventOwner } from './lib/kernel/followup-event-owner.js';
 import { createLiveSourceOwner } from './lib/kernel/live-source.js';
@@ -275,7 +276,7 @@ import { createMaterialCollections as createMaterialCollectionsService } from '.
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
 import { createThreadFileTargetResolver } from './lib/kernel/thread-file-target.js';
 import { createResourceFilesOwner } from './lib/workspace/resource-files.js';
-import { registerResourceFileRoutes } from './lib/workspace/resource-file-routes.js';
+import { createResourceFileTransfer, registerResourceFileRoutes } from './lib/workspace/resource-file-routes.js';
 
 import { THINKING_LEVELS, resolveHarnessModelSlot, resolveMessageTimeSettings } from '@varin/protocol';
 import { createSettingsService, settingsDocumentRevision } from './lib/harness/settings-service.js';
@@ -2467,7 +2468,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const saved = await readSettingsFromDisk();
       return listWorkLocations(saved, sanitizeProjects(saved.projects) ?? [], workspaceConfig.root);
     } });
-  const modelWorkLocations = createModelWorkLocations({runtime: agentRuntime, kernel: kernelClient, directory: sourceDirectory, prepare: prepareThreadSource});
+  const modelWorkLocations = createModelWorkLocations({runtime: agentRuntime, kernel: kernelClient, directory: sourceDirectory,
+    prepare: prepareThreadSource, executionEnvironment: () => executionEnvironment.snapshot(),
+    transfer: (input, signal) => transferResourceFiles(input, signal),
+    openProcessView: (source, runId, processId, signal) => admitRunSourceAuthority(kernelClient, agentRuntime,
+      savedSourceLaunch(runId, source, ['process_inspect', 'process_read']),
+      { operationId: processId, purpose: 'process_view', retention: 'caller', resolveLiveSource: liveSources.validate, signal }) });
   kernelClient.setModelWorkLocationOwner(modelWorkLocations.query);
   const releaseLocationReads = (runId?: string) => {
     void modelWorkLocations.releaseRun(runId).catch(() => console.error('[Thread] Work-location read authority retirement is pending'));
@@ -2552,6 +2558,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return { path: prepared.path, originalRoot: registration.canonicalPath };
   }, { files: catalogFileSearch, content: workspaceContentSearch }, (bytes,format,signal)=>officeRenderer.convert(bytes,format,'pdf',signal));
   registerResourceFileRoutes(app, { local: resourceFiles, remote: owner => managedRemoteTargets!.source(owner), runtime: agentRuntime, attachments: threadAttachments, requireAuth: uiAuthController.requireAuth });
+  const transferResourceFiles = createResourceFileTransfer({ local: resourceFiles, remote: owner => managedRemoteTargets!.source(owner), runtime: agentRuntime });
   threads.bindMaterials(webRuntimeOwner.current.inputMaterials);
   threads.bindAttachments(threadAttachments);
   let botInactivityMinutes = Number((await readSettingsFromDisk()).botTaskInactivityMinutes ?? 20);
@@ -2684,7 +2691,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const localRecoveryFileResolver = createThreadRecoveryFileResolver(threadRecoveryOwners);
   recoveryFileTargetResolver=async target=>targetRecovery.resolveFileTarget(target)??await localRecoveryFileResolver.resolveTarget(target);
   const fileRecoveryService = createFileRecoveryService({ runtime: agentRuntime, kernel: kernelClient,
-    storage: kernelStorageAdapter, store: kernelRecoveryStore, documents: documentsAuthority, resolveFiles: localRecoveryFileResolver });
+    storage: kernelStorageAdapter, store: kernelRecoveryStore, documents: documentsAuthority, sourceDirectory, resolveFiles: localRecoveryFileResolver });
   kernelRecoveryContentStore.bindTargetResources(async identity =>
     await targetRecovery.resolveFileResources(identity) ?? localRecoveryFileResolver(identity));
   threads.bindRecoveryReader(async (identity, signal) => {

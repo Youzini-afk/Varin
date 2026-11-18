@@ -117,13 +117,16 @@ pub(super) fn inherit_at(
     target: &str,
     head: Option<&str>,
 ) -> Result<()> {
-    if read(tx, from)?.is_none() {
+    let Some(current) = read(tx, from)? else {
         return Ok(());
-    }
+    };
+    let current_head: Option<String> = tx.query_row("SELECT head FROM branches WHERE id=?1", [from], |row| row.get(0))?;
     let saved: Option<String> = tx.query_row(
         "SELECT source FROM branch_workspaces WHERE branch_id=?1 AND head IS ?2 ORDER BY revision DESC LIMIT 1",
         params![from,head], |r| r.get(0)).optional()?;
-    let source = if let Some(saved) = saved {
+    let source = if head == current_head.as_deref() {
+        current.source
+    } else if let Some(saved) = saved {
         serde_json::from_str(&saved)?
     } else {
         // Before the first message, preserve the branch's actual initial source, if
@@ -162,6 +165,29 @@ pub(super) fn inherit_at(
 }
 impl Catalog {
     pub fn set_branch_workspace(&mut self, command: SetBranchWorkspace) -> Result<BranchWorkspace> {
+        self.write_branch_workspace(command, None)
+    }
+
+    pub fn branch_workspace_revision(&self, branch: &str) -> Result<u64> {
+        Ok(read(&self.db, branch)?.map_or(0, |choice| choice.revision))
+    }
+
+    /// An active model can choose where the next Run starts. It cannot move the
+    /// current Run, and uses the same revision comparison as the user's picker.
+    pub fn set_next_workspace_from_model(&mut self, run_id: &str, expected_revision: u64, source: launches::SourceSelection) -> Result<BranchWorkspace> {
+        if self.is_context_job(run_id)? {
+            return Err(RuntimeError::Invalid("Context jobs cannot change the workspace".into()));
+        }
+        let run = self.run(run_id)?;
+        self.write_branch_workspace(SetBranchWorkspace {
+            thread_id: run.thread_id,
+            branch_id: run.branch_id,
+            expected_revision,
+            source: Some(source),
+        }, Some(run_id))
+    }
+
+    fn write_branch_workspace(&mut self, command: SetBranchWorkspace, choosing_run: Option<&str>) -> Result<BranchWorkspace> {
         if !self.thread_has_host_authority(&command.thread_id)?
             || self.child_task_for_thread(&command.thread_id)?.is_some()
         {
@@ -183,9 +209,19 @@ impl Catalog {
         let tx = self.db.transaction()?;
         threads::require_product_caller(&tx, &command.thread_id)?;
         threads::require_branch_available(&tx, &command.branch_id)?;
-        // Until the executor can re-prepare capabilities within a Run, reject an active
-        // switch rather than acknowledge an unsafe or ineffective mid-request retarget.
-        let head = navigation::idle(&tx, &command.thread_id, &command.branch_id)?;
+        let head = if let Some(run_id) = choosing_run {
+            let (head, active): (Option<String>, Option<String>) = tx.query_row(
+                "SELECT head,active_run FROM branches WHERE id=?1 AND thread_id=?2",
+                params![command.branch_id, command.thread_id], |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            let run: Run = record(&tx, "runs", run_id)?;
+            if active.as_deref() != Some(run_id) || run.cancel_requested || run.state.terminal() {
+                return Err(RuntimeError::Conflict("The choosing Run is no longer active".into()));
+            }
+            head
+        } else {
+            navigation::idle(&tx, &command.thread_id, &command.branch_id)?
+        };
         let latest_mode: Option<String> = tx.query_row("SELECT json_extract(l.body,'$.selection.source.mode') FROM history h JOIN run_launches l ON l.id=h.run_id WHERE h.id=?1",
             [head.as_deref()], |r| r.get(0)).optional()?.flatten();
         if latest_mode

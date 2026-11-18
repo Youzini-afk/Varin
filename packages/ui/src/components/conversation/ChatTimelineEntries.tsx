@@ -31,7 +31,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useI18n } from '@/lib/i18n';
-import { cn } from '@/lib/utils';
+import { cn, formatDirectoryName } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { PatchHunkReview } from '@/components/workbench/PatchHunkReview';
 import { useUIStore, type ChatRenderMode } from '@/stores/useUIStore';
@@ -405,8 +405,22 @@ const ChatToolCardBody: React.FC<{
   const status = mutationPhase === 'failed' || mutationPhase === 'partial' ? 'error' : toolDisplayStatus(result, execution, generating);
   const transientOutput = execution?.result ?? execution?.partialResult;
   const details = result?.details ?? transientOutput;
+  const operationSource = execution?.operation?.resource_source;
+  const originalLaunch = conversation?.snapshot?.launch;
+  const launchSource = originalLaunch?.run_id === execution?.operation?.run_id ? originalLaunch?.selection.source : undefined;
+  let workLocation: string | undefined;
+  if (operationSource?.live_root && (toolRecord(call.arguments).location
+    || launchSource && (launchSource.live_root?.rootId !== operationSource.live_root.rootId
+      || launchSource.live_root?.hostId !== operationSource.live_root.hostId))) {
+    const owner = operationSource.resource_owner;
+    const device = conversation?.resourceTargets?.find(target => target.resourceOwner.kind === owner.kind
+      && (owner.kind === 'local' || target.resourceOwner.kind === 'managed_host' && target.resourceOwner.connectionId === owner.connectionId))?.label
+      ?? (owner.kind === 'managed_host' ? conversation?.unavailableResources?.find(target => target.connectionId === owner.connectionId)?.label
+        ?? t('thread.composer.workLocationRemote') : t('thread.composer.workLocationService'));
+    workLocation = `${device} · ${formatDirectoryName(operationSource.live_root.canonicalRoot)}`;
+  }
   const specific = {
-    call, cwd, generating, execution, result, status,
+    call, cwd, generating, execution, result, status, workLocation,
     output: result ? <ToolResultContent messageId={'tool-result:' + call.id} result={result} hideDetails /> : null,
     details: <ToolDisclosure id={'raw:' + call.id} className="tool-invocation-details">
       <summary title={t('chat.tools.details')} aria-label={t('chat.tools.details')}>
@@ -462,7 +476,7 @@ const ChatToolCardBody: React.FC<{
   }, execution?.status === 'running')?.calls.filter(row => row.name === 'models.classify' || row.name === 'models.generateImages') ?? [];
   const applyPatchFiles = call.name === 'apply_patch' ? getApplyPatchFileEntries(result?.details ?? transientOutput) : [];
   const previews = fileChanges.map((file, index) => <ChatFileChangePreview key={index} file={file}
-    previewId={`${call.id}:${index}`}
+    previewId={`${call.id}:${index}`} workLocation={workLocation}
     phase={fileChangePhase(execution, result, fileGenerating, file.path)}
     onOpen={!file.path || file.operation === 'delete' || !conversation || fileGenerating ? undefined : () => void conversation.openFile(call.id, file.path)} />);
   // The folded row's tray shows only the cards; the tool row stays in the body.
@@ -490,6 +504,7 @@ const ChatToolCardBody: React.FC<{
           )}
         />
         <span className="min-w-0 flex-1 truncate" title={`${call.name}: ${compactSummary || call.name}`}>{fileChanges.length ? t('chat.fileChange.details') : compactSummary || call.name}</span>
+        {workLocation && <span className="min-w-0 truncate typography-micro" title={workLocation}>{workLocation}</span>}
         {!fileChanges.length ? <ChatToolStatus status={status} generating={generating} /> : null}
         <Icon name="arrow-down-s" className="size-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>

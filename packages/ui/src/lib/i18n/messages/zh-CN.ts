@@ -678,6 +678,8 @@ export const dict: Record<I18nKey, string> = {
   "thread.composer.afterRun": "本轮结束后发送",
   "thread.composer.images": "添加图片",
   "thread.composer.chatOnly": "未选择",
+  "thread.composer.workLocationService": "Varin 服务",
+  "thread.composer.workLocationRemote": "远程设备",
   "thread.message.summarize": "总结到此处",
   "chat.fileAttachment.actions.attachPdfs": "添加 PDF",
   "chat.fileAttachment.actions.choosePdfs": "选择文档",

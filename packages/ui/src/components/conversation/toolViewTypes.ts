@@ -9,6 +9,7 @@ export interface ToolViewProps {
   status: ToolDisplayStatus;
   generating?: boolean;
   cwd: string;
+  workLocation?: string;
   output: React.ReactNode;
   details: React.ReactNode;
 }

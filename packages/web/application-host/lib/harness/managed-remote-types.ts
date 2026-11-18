@@ -41,7 +41,7 @@ export interface ManagedSourceBindRequest {
   coordinatorHostId: string;
   scope: SourceAuthorityScope;
   source: ThreadSource;
-  purpose: 'source' | 'read' | 'work_location_read' | 'integration' | 'result' | 'process_view' | 'script_environment' | 'mcp_owner' | 'external_harness';
+  purpose: 'source' | 'read' | 'work_location_read' | 'work_location' | 'integration' | 'result' | 'process_view' | 'script_environment' | 'mcp_owner' | 'external_harness';
   operationId?: string;
   retention: 'run' | 'caller';
   handoff?: ChildSourceHandoff;
@@ -101,7 +101,7 @@ export interface ManagedSourceScopeRequest { coordinatorHostId: string; threadId
 export interface ManagedSourceScopeReleaseRequest extends ManagedSourceScopeRequest { mode: 'retire' | 'revoke' }
 export interface ManagedSourceReadScopeRequest { coordinatorHostId:string;scope:Extract<SourceAuthorityScope,{kind:'source_read'}>;source:LaunchSource }
 export interface ManagedFileObservationRequest extends ManagedSourceAddress { requestId:string;action:import('../kernel/protocol.generated.js').SourceFileObservationAction }
-export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: 'preparing' | 'ready' | 'retaining' | 'draining' | 'retired' | 'revoked'; purpose: 'source' | 'read' | 'work_location_read' | 'integration' | 'result' | 'process_view' | 'script_environment' | 'mcp_owner' | 'external_harness'; operationId: string | null; mcpHolders: import('../kernel/protocol.generated.js').SourceMcpHolder[]; mcpDeliveries: import('../kernel/protocol.generated.js').SourceMcpDeliveryReceipt[]; mcpChildren: import('../kernel/protocol.generated.js').SourceMcpChildReference[]; binding: ManagedSourceBinding }
+export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: 'preparing' | 'ready' | 'retaining' | 'draining' | 'retired' | 'revoked'; purpose: 'source' | 'read' | 'work_location_read' | 'work_location' | 'integration' | 'result' | 'process_view' | 'script_environment' | 'mcp_owner' | 'external_harness'; operationId: string | null; mcpHolders: import('../kernel/protocol.generated.js').SourceMcpHolder[]; mcpDeliveries: import('../kernel/protocol.generated.js').SourceMcpDeliveryReceipt[]; mcpChildren: import('../kernel/protocol.generated.js').SourceMcpChildReference[]; binding: ManagedSourceBinding }
 
 /** Closed, non-model source services. A command cannot name an arbitrary kernel method,
  * mint a grant, change a source, or select a different physical root. */

@@ -175,6 +175,15 @@ pub(super) fn delegated_source_lineage(
     Ok((!chain.is_empty()).then_some(chain))
 }
 
+fn same_live_branch(db: &Connection, run: &Run, source: Option<&launches::SourceSelection>, current: Option<&launches::SourceSelection>) -> Result<bool> {
+    Ok(source.is_some_and(|s| s.mode == SourceMode::LiveRoot)
+        && current.is_some_and(|s| s.mode == SourceMode::LiveRoot)
+        && !db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM child_tasks WHERE child_thread_id=?1)",
+            [&run.thread_id], |row| row.get::<_, bool>(0),
+        )?)
+}
+
 pub(super) fn process_observation(
     db: &Connection,
     run: &Run,
@@ -208,8 +217,9 @@ pub(super) fn process_observation(
                 .ok_or_else(|| RuntimeError::NotFound("observer source launch".into()))?;
         if !matches!(process.lifetime, Lifetime::Thread | Lifetime::Environment)
             || original_source.is_none()
-            || (followups::normalized_source(original_source, &owner.id)
-                != followups::normalized_source(current.selection.source, &run.id)
+            || (followups::normalized_source(original_source.clone(), &owner.id)
+                != followups::normalized_source(current.selection.source.clone(), &run.id)
+                && !same_live_branch(db, run, original_source.as_ref(), current.selection.source.as_ref())?
                 && (!process
                     .external_receipt
                     .as_ref()
@@ -249,7 +259,7 @@ impl Catalog {
             .launch_metadata(run_id)?
             .and_then(|v| v.selection.source)
             .ok_or_else(|| RuntimeError::NotFound("observer source".into()))?;
-        if followups::normalized_source(Some(source.clone()), &owner.id)
+        if same_live_branch(&self.db, &target_run, Some(&source), Some(&target))? || followups::normalized_source(Some(source.clone()), &owner.id)
             == followups::normalized_source(Some(target.clone()), run_id)
         {
             return Ok(None);
@@ -303,14 +313,16 @@ impl Catalog {
         context: &ToolExecutionContext,
         process_id: &str,
     ) -> Result<Wait> {
-        if self
-            .require_process_observation(&context.run_id, process_id)?
-            .run_id
-            != context.run_id
-        {
-            return Err(RuntimeError::Conflict(
-                "follow-up process delegation is read-only, not a new process wait".into(),
-            ));
+        let process = self.require_process_observation(&context.run_id, process_id)?;
+        if process.run_id != context.run_id {
+            let run = self.run(&context.run_id)?;
+            let source = self.original_operation_source(&process)?;
+            let current = self.launch_metadata(&run.id)?.and_then(|launch| launch.selection.source);
+            if !same_live_branch(&self.db, &run, source.as_ref(), current.as_ref())? {
+                return Err(RuntimeError::Conflict(
+                    "follow-up process delegation is read-only, not a new process wait".into(),
+                ));
+            }
         }
         let original = self.operation(&context.operation_id)?;
         let original_intent = super::tool_content::ToolIntent::from_operation(&original)?;

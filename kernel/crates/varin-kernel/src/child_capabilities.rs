@@ -92,7 +92,7 @@ pub(crate) fn select_frozen(
                     || *tool == crate::memory::bot_schema(true) || *tool == crate::memory::bot_schema(false) => Some(tool),
                 // Keep the actual v3 declaration frozen in the parent. A child can inherit
                 // only the wrapped ordinary reader already present in its own frozen catalog.
-                Some(tool) if crate::work_locations::wraps_reader(tool, current) && catalogued() => Some(current),
+                Some(tool) if crate::work_locations::wraps_native(tool, current) && catalogued() => Some(current),
                 // Configured profiles and explicit isolated writes can select a native
                 // capability absent from the parent's directory, never replace a stale one.
                 None if catalogued() => Some(current),

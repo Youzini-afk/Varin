@@ -3,6 +3,8 @@ import type { RecoveryConversation } from './recovery.js';
 export interface FileRecoveryPoint {
   title?: string;
   sourcePath?: string;
+  sourceDevice?: string;
+  sourceId?: string;
   id: string;
   runId: string;
   sourceRunId: string;
@@ -15,6 +17,7 @@ export interface FileRecoveryPoint {
   byteLength: number;
 }
 export interface FileRecoverySource {
+  sourceId?: string;
   runId: string;
   workspaceId: string;
   path: string;
@@ -44,6 +47,7 @@ export interface FileRecoveryOperation {
   point?: string;
   undoOf?: string;
   sourceRunId?: string;
+  sourceId?: string;
   createdAt?: string;
   operationId: string;
   status: 'applied' | 'partial' | 'failed' | 'pending';
@@ -58,6 +62,7 @@ export interface FileRecoveryRequest {
   currentOffset?: number;
   targetOffset?: number;
   sourceRunId?: string;
+  sourceId?: string;
   point?: string;
   operationId?: string;
   requestId?: string;
@@ -86,7 +91,7 @@ export function parseFileRecoveryRequest(input: unknown): FileRecoveryRequest {
   const value = input as FileRecoveryRequest;
   if (!['list', 'history', 'inspect', 'preview', 'storage', 'operation', 'restore', 'undo', 'name', 'release'].includes(value.action)
     || value.conversation?.kind !== 'thread' || !value.conversation.threadId || !value.conversation.branchId) throw new Error('File recovery requires its conversation');
-  for (const key of ['sourceRunId', 'point', 'operationId', 'requestId', 'name', 'path'] as const) {
+  for (const key of ['sourceRunId', 'sourceId', 'point', 'operationId', 'requestId', 'name', 'path'] as const) {
     if (value[key] !== undefined && (typeof value[key] !== 'string' || !value[key].trim())) throw new Error(`${key} must be a non-empty string`);
   }
   for (const key of ['paths', 'overwritePaths'] as const) {
@@ -102,7 +107,7 @@ export function parseFileRecoveryRequest(input: unknown): FileRecoveryRequest {
   return {
     action: value.action,
     conversation: { kind: 'thread', threadId: value.conversation.threadId, branchId: value.conversation.branchId },
-    ...Object.fromEntries(['sourceRunId', 'point', 'operationId', 'requestId', 'paths', 'overwritePaths', 'name', 'cursor', 'limit', 'path', 'currentOffset', 'targetOffset']
+    ...Object.fromEntries(['sourceRunId', 'sourceId', 'point', 'operationId', 'requestId', 'paths', 'overwritePaths', 'name', 'cursor', 'limit', 'path', 'currentOffset', 'targetOffset']
       .filter(key => (value as unknown as Record<string, unknown>)[key] !== undefined)
       .map(key => [key, (value as unknown as Record<string, unknown>)[key]])),
   };
@@ -128,7 +133,7 @@ export function parseFileRecoveryResult(input: unknown): FileRecoveryResult {
     if (!['applied', 'partial', 'failed', 'pending'].includes(text(row.status))) throw new Error('Invalid restore status');
     return { operationId: text(row.operationId), status: row.status as FileRecoveryOperation['status'],
       appliedPaths: strings(row.appliedPaths), conflictPaths: strings(row.conflictPaths), files: files(row.files),
-      ...Object.fromEntries(['sourceRunId', 'createdAt', 'point', 'undoOf', 'message'].filter(key => row[key] !== undefined && row[key] !== null).map(key => [key, text(row[key])])) };
+      ...Object.fromEntries(['sourceRunId', 'sourceId', 'createdAt', 'point', 'undoOf', 'message'].filter(key => row[key] !== undefined && row[key] !== null).map(key => [key, text(row[key])])) };
   };
   const row = object(input);
   const result: FileRecoveryResult = {};
@@ -139,7 +144,8 @@ export function parseFileRecoveryResult(input: unknown): FileRecoveryResult {
   }
   if (row.source !== undefined) {
     const source = object(row.source);
-    result.source = { runId: text(source.runId), workspaceId: text(source.workspaceId), path: text(source.path) };
+    result.source = { runId: text(source.runId), workspaceId: text(source.workspaceId), path: text(source.path),
+      ...(source.sourceId ? { sourceId: text(source.sourceId) } : {}) };
   }
   if (row.preview !== undefined) {
     const preview = object(row.preview);
@@ -162,6 +168,8 @@ export function parseFileRecoveryResult(input: unknown): FileRecoveryResult {
       return { id: text(point.id), runId: text(point.runId), sourceRunId: text(point.sourceRunId), before: text(point.before), after: text(point.after),
         createdAt: text(point.createdAt), state: text(point.state), paths: strings(point.paths), byteLength: point.byteLength,
         ...(point.sourcePath ? { sourcePath: text(point.sourcePath) } : {}),
+        ...(point.sourceId ? { sourceId: text(point.sourceId) } : {}),
+        ...(point.sourceDevice ? { sourceDevice: text(point.sourceDevice) } : {}),
         ...(point.title ? { title: text(point.title) } : {}),
         ...(point.label ? { label: text(point.label) } : {}) };
     });

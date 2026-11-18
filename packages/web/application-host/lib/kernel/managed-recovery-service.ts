@@ -123,7 +123,7 @@ export function createManagedRecoveryService(options: ManagedRecoveryServiceOpti
       const originals = await options.kernel.sourceRequest<SourceAuthorityResult[]>('source.authority.inspect_scope', {
         principalId: principal.principalId, coordinatorHostId, threadId: anchor.threadId, runId: anchor.runId,
       }, signal);
-      const matching = originals.filter(original => original.purpose !== 'work_location_read' && original.scope.kind === 'run'
+      const matching = originals.filter(original => original.purpose !== 'work_location_read' && original.purpose !== 'process_view' && original.scope.kind === 'run'
         && original.scope.threadId === anchor.threadId && original.scope.runId === anchor.runId
         && isDeepStrictEqual(original.source, source));
       if (!matching.length) return denied('Recovery has no original Source belonging to this authenticated coordinator');
@@ -144,7 +144,8 @@ export function createManagedRecoveryService(options: ManagedRecoveryServiceOpti
         executionWorkspaceId: source.execution_workspace_id, threadId: anchor.threadId, runId: anchor.runId,
         rootId: root.rootId, canonicalRoot: root.canonicalRoot, sourceMode: source.mode };
       const admitted = { source, target, canDelete: principal.capabilities.includes('filesystem:delete'),
-        deviceFileAccess: source.mode === 'live_root' && options.deviceFileAccess !== false && !principal.allowedDirectories?.length };
+        deviceFileAccess: source.mode === 'live_root' && matching.some(authority => authority.operationId === null)
+          && options.deviceFileAccess !== false && !principal.allowedDirectories?.length };
       // A retired/old-epoch original is evidence only. This obtains current
       // maintenance permission and never calls sourceAuthorityGrant or bind.
       await fileResources(admitted, signal);

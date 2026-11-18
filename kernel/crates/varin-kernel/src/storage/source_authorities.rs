@@ -83,19 +83,22 @@ impl Storage {
         epoch: &str,
         host_id: &str,
     ) -> Result<Value, KernelError> {
+        let alternate = matches!(p.purpose.as_str(), "work_location_read" | "work_location");
         if p.principal_id.is_empty()
             || p.coordinator_host_id.is_empty()
             || !p.scope.validate()
             || !matches!(
                 p.purpose.as_str(),
-                "source" | "read" | "work_location_read" | "integration" | "result" | "process_view" | "script_environment" | "external_harness" | "mcp_owner"
+                "source" | "read" | "work_location_read" | "work_location" | "integration" | "result" | "process_view" | "script_environment" | "external_harness" | "mcp_owner"
             )
             || (matches!(p.scope, SourceAuthorityScope::External { .. }) != (p.purpose == "external_harness"))
-            || (p.purpose == "work_location_read" && (!matches!(p.scope, SourceAuthorityScope::Run { .. })
+            || (alternate && (!matches!(p.scope, SourceAuthorityScope::Run { .. })
                 || p.operation_id.as_deref().is_none_or(str::is_empty)
                 || p.source.mode != varin_runtime::SourceMode::LiveRoot
                 || p.source.workspace_id != p.source.execution_workspace_id
-                || p.enabled_tools != ["file_read"]))
+                || p.enabled_tools.len() != 1
+                || !crate::work_locations::alternate_tool(&p.enabled_tools[0])
+                || p.purpose == "work_location_read" && p.enabled_tools != ["file_read"]))
             || (p.purpose == "external_harness" && (!p.enabled_tools.is_empty()
                 || p.operation_id.as_deref().is_none_or(str::is_empty)
                 || !matches!(&p.scope, SourceAuthorityScope::External { transport_id, .. } if p.operation_id.as_deref() == Some(transport_id.as_str()))
@@ -169,8 +172,8 @@ impl Storage {
             || grant.run_id.as_deref() != p.scope.run_id()
             || grant.owning_workspace.as_deref() != Some(&p.source.workspace_id)
             || grant.execution_workspace.as_deref() != Some(&p.source.execution_workspace_id)
-            || (p.purpose == "work_location_read" && (grant.capabilities.len() != 1
-                || !grant.capabilities.contains("storage.read")))
+            || (alternate && crate::work_locations::grant_capabilities(&p.enabled_tools[0]).is_none_or(|caps|
+                grant.capabilities.len() != caps.len() || caps.iter().any(|cap| !grant.capabilities.contains(*cap))))
             || grant.operation_id != p.operation_id
             || grant.external_transport_id.as_deref() != match &p.scope {
                 SourceAuthorityScope::External { transport_id, .. } => Some(transport_id.as_str()), _ => None,
@@ -183,8 +186,8 @@ impl Storage {
         // One normal Run scope still has exactly one source. A temporary read
         // owns one Operation scope; neither a new grant nor a different source
         // may reuse the same Operation after partial preparation or retirement.
-        let identity = if p.purpose == "work_location_read" {
-            json!(["work_location_read", p.scope.identity(), p.operation_id])
+        let identity = if alternate || p.purpose == "process_view" {
+            json!([p.purpose, p.scope.identity(), p.operation_id])
         } else { p.scope.identity() };
         let scope_id = format!(
             "source-scope:{}",
@@ -194,8 +197,8 @@ impl Storage {
                 identity
             ]))?
         );
-        if p.purpose == "work_location_read" && self.source_record::<ScopeRecord>("source.scope", &scope_id)?.is_some() {
-            return Err(denied("Work location read was already prepared for this Operation"));
+        if alternate && self.source_record::<ScopeRecord>("source.scope", &scope_id)?.is_some() {
+            return Err(denied("Work location was already prepared for this Operation"));
         }
         let mut scope: ScopeRecord =
             self.source_record("source.scope", &scope_id)?
@@ -880,7 +883,7 @@ impl Storage {
                 continue;
             }
             self.require_native_source_owner(&record)?;
-            if p.mode == "retire" && record.operation_id.is_some() && record.purpose != "work_location_read" {
+            if p.mode == "retire" && record.operation_id.is_some() && !matches!(record.purpose.as_str(), "work_location_read" | "work_location") {
                 continue;
             }
             let address = SourceAuthorityAddress {
@@ -1676,7 +1679,8 @@ impl Storage {
         for body in rows {
             let authority: AuthorityRecord = serde_json::from_str(&body?)?;
             if authority.principal_id == p.principal_id && authority.coordinator_host_id == p.coordinator_host_id
-                && authority.purpose == "source" && authority.result.scope.run_id() == Some(p.run_id.as_str())
+                && (authority.purpose == "source" || authority.purpose == "work_location" && authority.operation_id.as_deref() == Some(p.operation_id.as_str()))
+                && authority.result.scope.run_id() == Some(p.run_id.as_str())
                 && authority.result.scope.thread_id() == p.thread_id && authority.result.source == p.source {
                 self.require_native_source_owner(&authority)?;
                 let (reply, _) = std::sync::mpsc::channel();

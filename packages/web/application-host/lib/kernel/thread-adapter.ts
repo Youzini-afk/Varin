@@ -322,7 +322,8 @@ export class ThreadAdapter {
       const content = (item.content as { content?: { kind?: string; call?: { name?: string; call_id?: string; arguments?: { location?: string; ref?: string } } } } | null)?.content;
       const call = content?.kind === 'tool_call' ? content.call : undefined;
       const request = historyModelRequestId(item);
-      if (call?.name === 'file_read' && (call.arguments?.location || /^(file|read):/.test(call.arguments?.ref ?? ''))) {
+      if (call?.name && ['file_read', 'file_list', 'file_search', 'file_write', 'file_edit'].includes(call.name)
+        && (call.arguments?.location || /^(file|read):/.test(call.arguments?.ref ?? ''))) {
         if (!request || !call.call_id) return { kind: 'unavailable', reason: 'no_source' } as const;
         const operation = await this.runtime.operation(`${request}:tool:${call.call_id}`, signal);
         if (operation.run_id !== entry.run_id) throw new Error('The original file operation changed');

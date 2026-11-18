@@ -133,7 +133,12 @@ export async function admitRunSourceAuthority(
   signal?.throwIfAborted();
   const run = await runtime.run(selection.runId, signal);
   const saved = await runtime.launch(run.id, signal);
-  const sourceSelection = saved?.selection.source;
+  const processView = options.purpose === 'process_view' && options.operationId
+    ? await runtime.operation(options.operationId, signal) : undefined;
+  if (processView && (processView.run_id !== run.id || processView.managed_process?.purpose.kind !== 'process_job')) {
+    throw new Error('Process view belongs to another Run or operation');
+  }
+  const sourceSelection = processView?.resource_source ?? saved?.selection.source;
   if (!sourceSelection || !isDeepStrictEqual(sourceSelection.resource_owner, selection.resourceOwner) || sourceSelection.workspace_id !== selection.workspaceId
     || sourceSelection.execution_workspace_id !== selection.executionWorkspaceId
     || sourceSelection.mode !== selection.mode
@@ -145,7 +150,9 @@ export async function admitRunSourceAuthority(
     || sourceSelection.live_root?.rootId !== selection.liveRoot?.rootId
     || sourceSelection.live_root?.canonicalRoot !== selection.liveRoot?.canonicalRoot) throw new SourceAdmissionError('source_changed');
   const tools = [...new Set(selection.tools)];
-  if (JSON.stringify([...tools].sort()) !== JSON.stringify(sourceToolSchemas(saved.selection).map(tool => tool.name).sort())) throw new Error('Source authority cannot change the admitted tools');
+  if (!saved || (processView
+    ? tools.some(tool => tool !== 'process_read' && tool !== 'process_inspect')
+    : JSON.stringify([...tools].sort()) !== JSON.stringify(sourceToolSchemas(saved.selection).map(tool => tool.name).sort()))) throw new Error('Source authority cannot change the admitted tools');
   if (selection.mode === 'live_root' && selection.resourceOwner.kind === 'local') {
     if (!options.resolveLiveSource) throw new Error('Live source requires its Documents resource owner');
     await options.resolveLiveSource(selection, signal);
@@ -175,7 +182,7 @@ export async function admitRunSourceAuthority(
     if (!options.operationId) throw new Error('Independent source lifetime requires its actual Operation');
     const operation = await runtime.operation(options.operationId, signal);
     const liveCall = operation.lifetime === 'run' && operation.phase === 'running' && !operation.cancel_requested && !run.cancel_requested;
-    if (operation.run_id !== run.id || (!liveCall && operation.lifetime !== 'thread' && !(operation.lifetime === 'environment' && operation.managed_process?.purpose.kind === 'script_environment')) || operation.execution_owner?.kind !== 'external') throw new Error('Caller-retained source Operation differs from its original Thread/Run owner');
+    if (operation.run_id !== run.id || (!liveCall && operation.lifetime !== 'thread' && !(operation.lifetime === 'environment' && operation.managed_process?.purpose.kind === 'script_environment')) || (operation.execution_owner?.kind !== 'external' && !processView)) throw new Error('Caller-retained source Operation differs from its original Thread/Run owner');
   }
   if (selection.resourceOwner.kind === 'managed_host') {
     const service = await runtime.managedSource(selection.resourceOwner, signal);
@@ -215,7 +222,7 @@ export async function admitRunSourceAuthority(
     threadId: run.thread_id,
     runId: run.id,
     ...(options.retention === 'caller' ? { operationId: options.operationId } : {}),
-    capabilities: ['storage.read', 'storage.write', ...(selection.mode === 'live_root' && runtime.deviceFileAccess !== false ? ['filesystem.device'] : []), ...(integration ? ['recovery'] : []), ...(saved.selection.tools.some(tool => tool.requirements?.process) ? ['process'] : [])],
+    capabilities: ['storage.read', 'storage.write', ...(selection.mode === 'live_root' && runtime.deviceFileAccess !== false && !processView ? ['filesystem.device'] : []), ...(integration ? ['recovery'] : []), ...(processView || saved.selection.tools.some(tool => tool.requirements?.process) ? ['process'] : [])],
     pathScopes: [''],
   }, signal);
 

@@ -63,12 +63,12 @@ export function ToolResultNotice({ data, status }: { data: unknown; status: Tool
     {incomplete && <p className="typography-micro text-muted-foreground">{t('chat.tools.partialResult')}</p>}</>;
 }
 
-export function ChatFileTools({ call, execution, result, status, generating, output, details }: ToolViewProps) {
+export function ChatFileTools({ call, execution, result, status, generating, output, details, workLocation }: ToolViewProps) {
   const { t } = useI18n();
   const args = toolRecord(call.arguments), data = toolRecord(result?.details ?? execution?.result);
   const rows = values(data.records).map(toolRecord);
   const reading = call.name === 'file_read', searching = call.name === 'file_search';
-  const path = toolText(args.path);
+  const path = toolText(args.path) || toolText(data.path);
   const roots = values(args.paths).filter(value => typeof value === 'string').join(', ');
   return <ToolDisclosure id={'tool:' + call.id} className="tool-file-activity group">
     <summary className="tool-resource-summary">
@@ -76,7 +76,7 @@ export function ChatFileTools({ call, execution, result, status, generating, out
       <ToolHeadingText label={t(reading ? 'chat.tools.readFile' : searching ? 'chat.toolAction.search' : 'chat.toolAction.list')}
         subject={reading ? path || values(args.files).map(value=>toolText(toolRecord(value).path)).filter(Boolean).join(', ')
           : searching ? subjectJoin(args.query || values(args.queries).join(' · '), roots) : roots || '.'}
-        receipt={reading && typeof args.startLine === 'number' ? `L${args.startLine}${typeof args.endLine === 'number' ? '–' + args.endLine : ''}` : undefined} />
+        receipt={subjectJoin(workLocation, reading && typeof args.startLine === 'number' ? `L${args.startLine}${typeof args.endLine === 'number' ? '–' + args.endLine : ''}` : undefined)} />
       {!reading && Array.isArray(data.records) && <span className="shrink-0 typography-micro">{t(searching ? 'chat.tools.matches' : 'chat.tools.entries', { count: rows.length })}</span>}
       {reading && typeof args.offset === 'number' && <span className="typography-micro text-muted-foreground">{t('chat.tools.readingRange', { offset: args.offset })}</span>}
       <span className={status === 'success' ? 'sr-only' : undefined}><ToolStatus status={status} generating={generating} /></span>

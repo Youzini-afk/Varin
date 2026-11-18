@@ -61,6 +61,7 @@ import { ThreadQuestions } from './ThreadQuestions';
 import { ThreadWorkStrips } from './ThreadWorkStrips';
 import { ThreadMcpInteractions } from './ThreadMcpInteraction';
 import { ThreadSourcePicker } from './ThreadSourcePicker';
+import { useWorkLocationLabel } from './useWorkLocationLabel';
 import { useThreadRecovery } from './useThreadRecovery';
 import { ThreadRecovery } from './ThreadRecovery';
 import type { ImageAttachment } from '@varin/protocol';
@@ -526,6 +527,14 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   // The empty home animates away only when this view is sending; arriving history or a switch replaces it at once.
   const sendDeparts = Boolean(snapshot && (pending || draft.pendingInput || draft.firstSend || firstMessage.message));
   const effectiveWorkspace = active ? launch?.selection.source : confirmedWorkspaceSource;
+  const located = !botSurface && !botSession && !draft.sourceDisabled && (active ? confirmedWorkspaceSource : preparedSource?.source ?? confirmedWorkspaceSource);
+  const preparedPath = !active ? preparedSource?.path : undefined;
+  const locationPath = located ? preparedPath ?? ('resource_owner' in located ? located.live_root?.canonicalRoot : located.liveRoot?.canonicalRoot) ?? workspacePath : undefined;
+  const workLocation = useWorkLocationLabel(api.sources, host, located && locationPath ? {
+    owner: 'resource_owner' in located ? located.resource_owner : located.resourceOwner,
+    path: locationPath,
+    workspaceId: 'workspace_id' in located ? located.workspace_id : located.workspaceId,
+  } : undefined, !branchDefault && !draft.projectId && !draft.sourceSelection && !preparedSource, Boolean(launch?.selection.source));
   const nextPrepared = !active && !draft.sourceDisabled ? preparedSource : null;
   const emptyWorkspacePath = !active && draft.sourceDisabled ? undefined
     : nextPrepared?.path ?? effectiveWorkspace?.live_root?.canonicalRoot ?? (effectiveWorkspace === undefined ? workspacePath : undefined);
@@ -596,6 +605,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       <p className="break-words text-destructive">{loadError}</p>
       <Button variant="outline" onClick={() => { setLoadFailure(undefined); void projection.current?.refresh(); }}>{t('harness.threads.history.retry')}</Button>
     </div> : <ConversationTimeline api={api} identity={identity} snapshot={history.connecting ? undefined : snapshot} history={visibleHistory}
+      resourceTargets={workLocation.targets} unavailableResources={workLocation.unavailable}
       onOpenSection={showOverview}
       onScrollContainerChange={bindScrollViewport}
       runUsage={history.usage} historyReset={history.reset} historyReady={history.ready}
@@ -777,7 +787,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         imageReferences={draftImageReferences(draft)} attachmentNames={[...images.map(() => ''), ...materials.map(material => material.filename), ...(draft.files ?? []).map(file => file.filename)]}
         hasInput={hasComposerInput}
         prepareSendMode={botSession ? mode => { submitMode.current = mode; } : undefined}
-        onWorkspace={botSurface || botSession ? undefined : () => showOverview('sources')} workspaceLabel={draft.sourceDisabled ? t('thread.composer.chatOnly') : preparedSource ? formatDirectoryName(preparedSource.path) : confirmedWorkspaceSource?.live_root ? formatDirectoryName(confirmedWorkspaceSource.live_root.canonicalRoot) : confirmedWorkspaceSource ? t('harness.overview.sources') : confirmedWorkspaceSource === null ? t('thread.composer.chatOnly') : workspacePath ? formatDirectoryName(workspacePath) : t('chat.modelControls.default')}
+        onWorkspace={botSurface || botSession ? undefined : () => showOverview('sources')} workspaceLabel={draft.sourceDisabled || confirmedWorkspaceSource === null && !preparedSource ? t('thread.composer.chatOnly') : workLocation.label}
         workspacePath={localWorkspacePath}
         skills={snapshot?.context.checkpoint?.resources?.snapshot.skills.map(skill => skill.name) ?? []}>
         <div className="space-y-2 px-3 empty:hidden">{!botSurface && emptyWorkspacePath && <ActiveEditorSuggestion threadKey={draftKey} />}      <EditorContextAttachmentChips threadKey={draftKey} /><DraftContentReferences draftKey={draftKey} locked={pending || Boolean(draft.firstSend || draft.pendingInput)} />

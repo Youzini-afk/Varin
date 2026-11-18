@@ -218,7 +218,7 @@ impl Storage {
         epoch: &str,
     ) -> Result<Value, KernelError> {
         let record = self.source_authority(address, false, epoch)?;
-        if record.purpose == "work_location_read" && record.operation_id.as_deref() != Some(id) {
+        if matches!(record.purpose.as_str(), "work_location_read" | "work_location") && record.operation_id.as_deref() != Some(id) {
             return Err(crate::source_resources::denied("Work location release belongs to another Operation"));
         }
         let mut prior = self.operation_get(&json!({"operationId":id}))?;
@@ -259,7 +259,7 @@ impl Storage {
         }
         // A recovered coordinator can acknowledge the durable original read
         // without its old preparation. Never retire the ordinary Run grant.
-        if released && record.purpose == "work_location_read"
+        if released && matches!(record.purpose.as_str(), "work_location_read" | "work_location")
             && !matches!(record.result.phase.as_str(), "retired" | "revoked") {
             let host = record.result.source.resource_owner.host_id()
                 .ok_or_else(|| crate::source_resources::denied("Original work location Host is missing"))?;

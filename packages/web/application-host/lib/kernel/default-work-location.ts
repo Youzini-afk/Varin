@@ -33,9 +33,14 @@ export async function prepareWorkLocation(identity: ThreadIdentity, key: string,
 }
 
 export function listWorkLocations(settings: { workspaceLocations?: unknown; defaultWorkspaceLocationId?: unknown },
-  projects: ProjectEntry[], servicePath: string): ThreadLocationDirectory {
+  projects: ProjectEntry[], servicePath: string): ThreadLocationDirectory & { projects: ThreadLocationDirectory['locations'] } {
+  const favorites = parseWorkspaceLocations(settings.workspaceLocations ?? []);
   return { servicePath, defaultId: parseDefaultWorkspaceLocationId(settings.defaultWorkspaceLocationId ?? null),
-    locations: parseWorkspaceLocations(settings.workspaceLocations ?? []).map(row => {
+    projects: projects.filter(project => !favorites.some(row => row.kind === 'project' && row.projectId === project.id)).map(project => {
+      const id = `project:${project.id}`;
+      return { id, ...workspaceLocationSource({ kind: 'project', id, projectId: project.id }, projects) };
+    }),
+    locations: favorites.map(row => {
       if (row.kind === 'project' && !projects.some(project => project.id === row.projectId)) {
         return { id: row.id, name: row.projectId, unavailable: 'Project no longer registered' };
       }

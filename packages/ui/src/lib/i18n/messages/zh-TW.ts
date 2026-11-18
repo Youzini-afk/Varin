@@ -529,6 +529,8 @@ export const dict: Record<I18nKey, string> = {
   "thread.composer.afterRun": "本輪結束後傳送",
   "thread.composer.images": "新增圖片",
   "thread.composer.chatOnly": "未選擇",
+  "thread.composer.workLocationService": "Varin 服務",
+  "thread.composer.workLocationRemote": "遠端裝置",
   "thread.message.summarize": "總結至此處",
   "chat.fileAttachment.actions.attachPdfs": "加入 PDF",
   "chat.fileAttachment.actions.choosePdfs": "選擇文件",

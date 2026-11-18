@@ -139,7 +139,8 @@ export const ChatFileChangePreview: React.FC<{
   file: FileChangePreview;
   phase: FileChangePhase;
   onOpen?: () => void;
-}> = ({ previewId, file, phase, onOpen }) => {
+  workLocation?: string;
+}> = ({ previewId, file, phase, onOpen, workLocation }) => {
   const { t } = useI18n();
   const showFileIcons = useUIStore(state => state.showToolFileIcons);
   const theme = useOptionalThemeSystem();
@@ -368,6 +369,7 @@ export const ChatFileChangePreview: React.FC<{
         disabled={!file.path || !onOpen || file.operation === 'delete'} onClick={onOpen}
         className="flex min-w-0 flex-1 text-left text-muted-foreground enabled:hover:text-foreground enabled:hover:underline">
         <SwapText text={file.path ? file.path.replace(/\\/g, '/').split('/').at(-1)! : pathLabel} live={!file.path} />
+        {workLocation && <span className="min-w-0 truncate typography-micro text-muted-foreground" title={workLocation}>{workLocation}</span>}
       </button>
       {file.counts ? <span className="workbench-diff-counts flex shrink-0 gap-1.5 font-mono typography-micro tabular-nums">
         <span className="text-[var(--status-success)]">+<SwapText text={String(file.counts.added)} hold={0} /></span>

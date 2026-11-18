@@ -346,13 +346,17 @@ impl ProcessWaitTools {
             (h.process_id, None, crate::process::text::Mode::Text, None)
         };
         let source_run_id = self.check_owner(c, &id)?;
-        let lineage = self
-            .catalog
-            .lock()
-            .map_err(error)?
-            .process_result_lineage(&c.run_id, &id)
-            .map_err(error)?;
-        let mut value = self.resources.observe_process(
+        let (lineage, operation, source) = {
+            let catalog = self.catalog.lock().map_err(error)?;
+            let operation = catalog.require_process_observation(&c.run_id, &id).map_err(error)?;
+            let source = catalog.original_operation_source(&operation).map_err(error)?;
+            (catalog.process_result_lineage(&c.run_id, &id).map_err(error)?, operation, source)
+        };
+        let original = self.binding.source_selection().map_err(error)?;
+        let mut value = if let Some(source) = source.as_ref().filter(|source| *source != &original && lineage.is_none()
+            && crate::work_locations::eligible(Some(source)) && crate::work_locations::eligible(Some(&original))) {
+            crate::work_locations::observe_original_process(&self.resources, c, call, &self.binding.thread_id, &operation, source, read, authorize_only, cancel)?
+        } else { self.resources.observe_process(
             &self.binding,
             c,
             &id,
@@ -361,7 +365,7 @@ impl ProcessWaitTools {
             read,
             authorize_only,
             cancel,
-        )?;
+        )? };
         if !authorize_only { crate::process::text::project(&mut value, &mode, encoding.as_deref()); }
         Ok(value)
     }
@@ -538,12 +542,12 @@ impl ToolExecutor for ProcessWaitTools {
             return Err(error("process observation cancelled"));
         }
         self.validate_contract(c, call, contract)?;
-        let id = self.handle(c, call)?;
-        let source_run_id = self.check_owner(c, &id)?;
-        let lineage = self.catalog.lock().map_err(error)?.process_result_lineage(&c.run_id, &id).map_err(error)?;
-        self.resources
-            .observe_process(&self.binding, c, &id, &source_run_id, lineage, None, true, cancel)
-            .map(|_| ())
+        if call.name == STOP_TOOL {
+            self.handle(c, call)?;
+            // The durable process Operation determines where cancellation is delivered.
+            return Ok(());
+        }
+        self.observe(c, call, true, cancel).map(|_| ())
     }
     fn execute(
         &self,

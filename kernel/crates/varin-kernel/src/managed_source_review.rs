@@ -3723,7 +3723,7 @@ fn external_source_stop_fences_late_spawn_and_recalls_original_after_reopen() {
 }
 
 #[test]
-fn one_operation_location_read_cannot_move_the_run_source_or_borrow_device_access() {
+fn work_location_reads_and_writes_stay_on_their_original_target() {
     let root = std::env::temp_dir().join(format!("work-location-read-{}",uuid::Uuid::new_v4()));
     std::fs::create_dir(&root).unwrap();
     let owner = Owner::new(root.join("target"), "target", "gen", "epoch");
@@ -3777,6 +3777,27 @@ fn one_operation_location_read_cannot_move_the_run_source_or_borrow_device_acces
     assert!(owner.tool(&address,"file_read","alternate-read",json!({"path":"same.txt"})).is_err());
     issue("replacement",Some(call_id),vec!["storage.read"]);
     assert!(open("replacement").is_err());
+    let write_id = "request:tool:alternate-write";
+    issue("write-grant", Some(write_id), vec!["storage.read", "storage.write"]);
+    let write = owner.rpc("source.authority.open", json!({"principalId":"client","coordinatorHostId":"coordinator",
+        "scope":{"kind":"run","threadId":"thread","runId":"run","epoch":1},"source":source,"grantId":"write-grant",
+        "operationId":write_id,"enabledTools":["file_write"],"purpose":"work_location"}), None).unwrap();
+    let write_address = json!({"principalId":"client","coordinatorHostId":"coordinator","authorityId":write["authorityId"],"resourceEpoch":write["resourceEpoch"]});
+    let mut binding = write_address.clone();
+    binding["physicalRoot"] = live.clone();
+    binding["toolBinding"] = json!({"resourceOwner":source["resource_owner"],"grantId":"write-grant","runId":"run","threadId":"thread",
+        "workspaceId":"alternate","executionWorkspaceId":"alternate","rootId":registration["rootId"],"sourceMode":"live_root","liveRoot":live,"enabledTools":["file_write"]});
+    owner.rpc("source.authority.bind", binding, None).unwrap();
+    let version = receipt["result"]["completion"]["content"]["data"]["readVersion"].clone();
+    assert!(owner.tool(&write_address, "file_write", "alternate-write", json!({"path":"../primary/same.txt","content":"wrong","readVersion":version})).is_err());
+    let mut request = write_address.clone();
+    request["call"] = json!({"runId":"run","operationId":write_id,"origin":{"kind":"model_step","request_id":"request"},
+        "callId":"alternate-write","name":"file_write","schemaVersion":"2","arguments":{"path":"same.txt","readVersion":version,"content":"changed"}});
+    request["journal"] = json!({"executionId":"location-write-turn","threadId":"thread","branchId":"main","runId":"run","entryId":"source-input","epoch":1});
+    let write = owner.rpc("source.resource.execute", request, None).unwrap();
+    assert_eq!(write["result"]["completion"]["effect"], "confirmed", "{write}");
+    assert_eq!(std::fs::read_to_string(alternate.join("same.txt")).unwrap(), "changed");
+    assert_eq!(std::fs::read_to_string(primary.join("same.txt")).unwrap(), "primary");
     drop(owner);
     std::fs::remove_dir_all(root).unwrap();
 }

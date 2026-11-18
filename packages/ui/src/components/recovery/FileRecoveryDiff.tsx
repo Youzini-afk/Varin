@@ -8,10 +8,10 @@ import { formatWorkspaceArchiveBytes } from '@/lib/workspaceArchive';
 
 const Diff = React.lazy(() => import('@/components/views/PierreDiffViewer').then(module => ({ default: module.PierreDiffViewer })));
 type Props = {
-  path: string; point: string; sourceRunId: string; targetLabel: string;
+  path: string; point: string; sourceRunId: string; sourceId?: string; targetLabel: string;
   read(input: Omit<FileRecoveryRequest, 'conversation'>): Promise<FileRecoveryResult>;
 };
-export function FileRecoveryDiff({ path, point, sourceRunId, targetLabel, read }: Props) {
+export function FileRecoveryDiff({ path, point, sourceRunId, sourceId, targetLabel, read }: Props) {
   const { t } = useI18n();
   const [preview, setPreview] = React.useState<FileRecoveryPreview>();
   const [busy, setBusy] = React.useState(false);
@@ -25,7 +25,7 @@ export function FileRecoveryDiff({ path, point, sourceRunId, targetLabel, read }
     const id = ++sequence.current;
     setBusy(true); setError(undefined);
     try {
-      const result = await read({ action: 'preview', sourceRunId, point, path,
+      const result = await read({ action: 'preview', sourceRunId, sourceId, point, path,
         ...(previous ? { currentOffset: previous.current.nextOffset, targetOffset: previous.target.nextOffset } : {}) });
       if (id !== sequence.current) return;
       if (!result.preview || result.preview.path !== path) throw new Error(t('contextPanel.recovery.files.previewUnavailable'));
@@ -41,7 +41,7 @@ export function FileRecoveryDiff({ path, point, sourceRunId, targetLabel, read }
     } finally {
       if (id === sequence.current) { loading.current = false; setBusy(false); }
     }
-  }, [path, point, read, sourceRunId, t]);
+  }, [path, point, read, sourceRunId, sourceId, t]);
   React.useEffect(() => {
     void load();
     return invalidate;

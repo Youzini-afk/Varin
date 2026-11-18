@@ -70,6 +70,7 @@ export interface ManagedRecoveryPort {
 export const managedRecoveryPath = (participant: Pick<ManagedRecoveryParticipant, 'id'>, path: string): string =>
   `managed/${encodeURIComponent(participant.id)}/${path}`;
 const ownerKey = (owner: ManagedRecoveryParticipant['owner']) => JSON.stringify([owner.hostId, owner.connectionId, owner.endpointIdentity]);
+const participantKey = (owner: ManagedRecoveryParticipant['owner'], workspaceId: string) => JSON.stringify([ownerKey(owner), workspaceId]);
 
 /** The authenticated target resolves every action through its original recovery journal. */
 export function createManagedRecoveryCoordinator(options: {
@@ -112,7 +113,7 @@ export function createManagedRecoveryCoordinator(options: {
       for (const selected of turns) {
         const owner = selected.turn.source?.resource_owner;
         if (!owner || owner.kind !== 'managed_host') throw new Error('Managed recovery turn has no original managed owner');
-        const key = ownerKey(owner);
+        const key = participantKey(owner, selected.turn.source!.workspace_id);
         groups.set(key, [...groups.get(key) ?? [], selected]);
       }
       const participants: ManagedRecoveryParticipant[] = [];
@@ -133,7 +134,7 @@ export function createManagedRecoveryCoordinator(options: {
       return participants;
     },
     async prepareUndo(participant, operationId, navigation) {
-      const id = `${operationId}:managed:${createHash('sha256').update(ownerKey(participant.owner)).digest('hex')}`;
+      const id = `${operationId}:managed:${createHash('sha256').update(participantKey(participant.owner, participant.workspaceId)).digest('hex')}`;
       const next = { ...participant, id };
       const result = parseWorkspaceCombinedRecoveryPrepareResult(await request(next, { kind: 'prepare_undo', undoOf: participant.id, navigation }));
       if (result.status !== 'ready') throw new RecoveryPrimitiveError(result.failure.code, result.failure.message, result.failure);

@@ -221,6 +221,13 @@ impl SubmissionPreparation {
         self.current_tool_catalog = Some(tools);
         self
     }
+    pub fn inherited_tool_source<'a>(&'a self, launch: Option<&'a launches::LaunchSelection>) -> Option<&'a launches::SourceSelection> {
+        if self.expected_workspace_revision > 0 {
+            launch.and_then(|selection| selection.source.as_ref())
+        } else {
+            self.inherited_launch.as_ref().and_then(|selection| selection.source.as_ref())
+        }
+    }
     pub fn with_input_preparation(
         mut self,
         preparation: Option<resources::InputResourcePreparation>,
@@ -364,9 +371,7 @@ impl SubmissionPreparation {
             match (&self.inherited_launch, &self.current_tool_catalog) {
                 (Some(previous), Some(available)) if previous.source.is_some() => {
                     let old: Vec<crate::execution::ToolSchema> = serde_json::from_value(self.content.load(&previous.base_tools_ref)?)?;
-                    let mode = if self.expected_workspace_revision > 0 {
-                        launch.as_ref().and_then(|l| l.source.as_ref()).map(|s| s.mode)
-                    } else { previous.source.as_ref().map(|s| s.mode) };
+                    let mode = self.inherited_tool_source(launch.as_ref()).map(|source| source.mode);
                     let mut tools = available.iter().filter(|tool| old.iter().any(|prior| prior.name == tool.name)
                         && tool.requirements.as_ref().is_none_or(|requirements| mode.is_some_and(|m| requirements.accepts_mode(m)))
                         && (self.expected_workspace_revision == 0 || launch.as_ref().is_some_and(|l| l.tools.iter().any(|t| t.name == tool.name))))

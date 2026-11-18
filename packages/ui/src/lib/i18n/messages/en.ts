@@ -565,6 +565,8 @@ export const dict = {
   "thread.composer.afterRun": "After this run",
   "thread.composer.images": "Attach images",
   "thread.composer.chatOnly": "No project",
+  "thread.composer.workLocationService": "Varin service",
+  "thread.composer.workLocationRemote": "Remote device",
   "thread.message.summarize": "Summarize through here",
 
   "chat.fileAttachment.actions.attachPdfs": "Attach PDFs",

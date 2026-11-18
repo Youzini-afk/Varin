@@ -4691,6 +4691,24 @@ fn branch_workspace_cas_fences_preparation_and_preserves_handed_off_work() {
 }
 
 #[test]
+fn branch_workspace_model_choice_is_for_the_next_run() {
+    let fixture = Fixture::new();
+    let mut db = fixture.open();
+    let first = submit(&mut db);
+    let choice: launches::SourceSelection = serde_json::from_value(json!({
+        "resource_owner":{"kind":"local"},"mode":"live_root","workspace_id":"testing",
+        "execution_workspace_id":"testing","branch_id":null,"revision":null,
+        "live_root":{"hostId":"host","rootId":"test-root","canonicalRoot":"/testing"}
+    })).unwrap();
+    let original = db.launch_metadata(&first.run_id).unwrap();
+    let revision = db.branch_workspace_revision(&first.branch_id).unwrap();
+    let selected = db.set_next_workspace_from_model(&first.run_id, revision, choice.clone()).unwrap();
+    assert_eq!(selected.source, Some(choice));
+    assert!(matches!(db.set_next_workspace_from_model(&first.run_id, revision, selected.source.unwrap()), Err(RuntimeError::Conflict(_))));
+    assert_eq!(db.launch_metadata(&first.run_id).unwrap(), original);
+}
+
+#[test]
 fn branch_workspace_explicit_chat_and_owner_checks() {
     use super::branch_workspace::SetBranchWorkspace;
     let f=Fixture::new(); let mut db=f.open();

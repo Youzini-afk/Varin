@@ -106,6 +106,7 @@ fn projected_refs(value: &Value, output: &mut BTreeSet<String>) {
         "collectionId",
         "target",
         "sourceAgent",
+        "location",
     ];
     const CONTAINERS: &[&str] = &[
         "read",
@@ -140,6 +141,7 @@ fn projected_refs(value: &Value, output: &mut BTreeSet<String>) {
         "registrationTrigger",
         "sources",
         "evidence",
+        "locations",
     ];
     match value {
         Value::Array(values) => {
@@ -311,6 +313,17 @@ impl ModelReferenceExportRead {
                     };
                     if !exact {
                         continue;
+                    }
+                    if let Some(source) = &operation.resource_source {
+                        let original = optional_record::<launch_content::LaunchMetadata>(&db, "run_launches", &operation.run_id)?
+                            .and_then(|launch| launch.selection.source);
+                        if Some(source) != original.as_ref() {
+                            bindings.push(ExportModelBinding {
+                                item_id: item.id.clone(), operation_id: operation.id.clone(),
+                                purpose: "work_location".into(), original: serde_json::to_value(original)?,
+                                target: serde_json::to_value(source)?,
+                            });
+                        }
                     }
                     let mut bound=db.prepare("SELECT purpose,original,target FROM model_bound_targets WHERE operation_id=?1 AND purpose!='tool_result_projection' ORDER BY purpose")?;
                     for row in bound.query_map([&operation.id], |r| {

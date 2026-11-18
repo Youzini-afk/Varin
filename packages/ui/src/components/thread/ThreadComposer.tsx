@@ -636,7 +636,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
         </motion.div>
         </motion.div>
         {(onWorkspace || connectionStatus) && <motion.div layout={reducedMotion ? false : 'position'} layoutDependency={isExpandedInput} transition={COMPOSER_LAYOUT_TRANSITION} className="flex min-w-0 items-center justify-between gap-2 px-1 pt-1" data-conversation-composer-status="true">
-          <div className="min-w-0">{onWorkspace && <button type="button" onClick={onWorkspace} className="flex min-w-0 items-center gap-1 rounded-md px-1 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover" title={workspaceLabel}><Icon name="folder" className="size-3.5" /><span className="max-w-28 truncate">{workspaceLabel}</span></button>}</div>
+          <div className="min-w-0">{onWorkspace && <button type="button" onClick={onWorkspace} className="flex max-w-full min-w-0 items-center gap-1 rounded-md px-1 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover" title={workspaceLabel}><Icon name="folder" className="size-3.5 shrink-0" /><span className="truncate">{workspaceLabel}</span></button>}</div>
           {connectionStatus}
         </motion.div>}
       </div>
