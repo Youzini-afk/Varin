@@ -31,10 +31,10 @@ export function classifyChanges(files, { full = false, called = false, qualifica
     if (/(?:^|\/)package\.json$/u.test(file) || /^(?:bun\.lock|bun-patches\/|patches\/)/u.test(file)) {
       Object.assign(result, all()); continue;
     }
-    if (/^(?:Dockerfile(?:\.base)?$|\.dockerignore$|docker-compose(?:\.toolbelt)?\.yml$|\.github\/workflows\/(?:docker(?:-commit)?|container-(?:check|images))\.yml$|scripts\/(?:docker-|build-container-images))/u.test(file)) {
+    if (/^(?:Dockerfile(?:\.base)?$|\.dockerignore$|docker-compose(?:\.(?:toolbelt|resource-node))?\.yml$|\.github\/workflows\/(?:docker(?:-commit)?|container-(?:check|images))\.yml$|scripts\/(?:docker-|build-container-images))/u.test(file)) {
       enable('container', 'toolbelt'); continue;
     }
-    if (file === 'scripts/smoke-container-budget.mjs' || file === 'scripts/smoke-container-stop.mjs') {
+    if (['scripts/smoke-container-budget.mjs', 'scripts/smoke-container-stop.mjs', 'scripts/smoke-container-resource-node.mjs'].includes(file)) {
       enable('container', 'toolbelt'); continue;
     }
     if (/^packages\/(?:ui\/|web\/(?:src\/|public\/|(?:index|mobile|mini-chat|companion)\.html$|vite\.config\.ts$|postcss\.config\.js$))/u.test(file)) {
