@@ -8,13 +8,9 @@ import { cn } from '@/lib/utils';
 import { SettingsNavigationContext } from '../settings-context';
 import { Btn, Ic, Info, Tip } from './controls';
 import { useSettingsShell } from './shell-context';
+import { subscribeSettingsSavedFlash, type FlashState } from './saved-feedback';
 
 /* ── Saved feedback: instant-save pages flash "Saved" in the header ── */
-type FlashState = 'idle' | 'saving' | 'saved' | 'error';
-const flashListeners = new Set<(state: FlashState) => void>();
-/** Pages whose owner does not report through the shared persistence state call this after an acknowledged save. */
-export function flashSettingsSaved(state: Exclude<FlashState, 'idle'> = 'saved') { flashListeners.forEach(listener => listener(state)); }
-
 function SavedIndicator() {
   const { t } = useI18n();
   const shared = React.useSyncExternalStore(subscribeToSettingsSaveState, getSettingsSaveState, getSettingsSaveState);
@@ -33,7 +29,10 @@ function SavedIndicator() {
     if (shared === 'saved') show('saved');
     else if (shared === 'error') show('error');
   }, [shared, show]);
-  React.useEffect(() => { flashListeners.add(show); return () => { flashListeners.delete(show); window.clearTimeout(timer.current); }; }, [show]);
+  React.useEffect(() => {
+    const unsubscribe = subscribeSettingsSavedFlash(show);
+    return () => { unsubscribe(); window.clearTimeout(timer.current); };
+  }, [show]);
   if (state === 'error') return <span className="sk-saved err" role="alert"><Ic name="error-warning" size="xs" />{t('settings.common.status.saveFailed')}</span>;
   return <span className={cn('sk-saved', state === 'saved' && 'on')} aria-live="polite"><Ic name="check" size="xs" />{state === 'saved' ? t('settings.common.status.saved') : ''}</span>;
 }

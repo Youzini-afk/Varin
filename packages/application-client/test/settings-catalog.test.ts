@@ -20,7 +20,7 @@ test('self, future defaults and project defaults retain distinct owner targets',
 });
 
 test('legacy settings without a current execution consumer remain inspectable, not fake operating controls', () => {
-  for (const id of ['harness.context.compactionRecovery', 'harness.models.permissionJudge', 'harness.dispatch', 'harness.worktree',
+  for (const id of ['harness.context.compactionRecovery', 'harness.dispatch', 'harness.worktree',
     'projects.worktree', 'projects.worktree.setup.wait', 'chat.server-permission-auto-accept']) {
     const entry = getSettingsCatalogEntry(id)!;
     assert.equal(entry.writable, false, id); assert.equal(entry.apply, 'unsupported', id);
@@ -29,4 +29,13 @@ test('legacy settings without a current execution consumer remain inspectable, n
   assert.equal(documents.find(field => field.path.endsWith('ocrLanguage'))?.authority, undefined);
   assert.equal(documents.find(field => field.path.endsWith('doclingCommand'))?.authority, 'permissions');
   assert.equal(getSettingsCatalogEntry('voice.speech-recognition')?.fields?.find(field => field.path === 'sttServerUrl')?.authority, 'permissions');
+});
+
+test('smart permission mode exposes its writable judgment model', () => {
+  const mode = getSettingsCatalogEntry('harness.permissions.mode')!;
+  assert.ok(mode.field?.options?.some(option => option.value === 'smart'));
+  const judge = getSettingsCatalogEntry('harness.models.permissionJudge')!;
+  assert.notEqual(judge.writable, false);
+  assert.equal(judge.apply, 'immediate');
+  assert.equal(judge.authority, 'permissions');
 });

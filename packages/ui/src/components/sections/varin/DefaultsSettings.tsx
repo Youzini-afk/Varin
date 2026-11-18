@@ -2,7 +2,7 @@ import React from 'react';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { RetrySettings } from './RetrySettings';
 import { ExternalAgentDefault } from '@/components/sections/external-agents/ExternalAgentsPage';
-import { flashSettingsSaved } from '../shared/kit';
+import { flashSettingsSaved } from '../shared/kit/saved-feedback';
 import { SettingsPageLink } from '@/components/sections/shared/SettingsPageLink';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, modelThinkingLevels, type AgentSettingsSnapshot } from '@varin/application-client';

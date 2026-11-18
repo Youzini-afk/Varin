@@ -7,7 +7,6 @@ import { isDesktopShell } from '@/lib/desktop';
 import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import { getClientPlatform } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
 import {

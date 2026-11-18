@@ -135,7 +135,7 @@ it('saves name, instructions and model as one profile draft', async () => {
   expect(instructions.value).toBe('Unsaved instructions');
   await click('settings.bots.save');
   expect(api.update).toHaveBeenCalledExactlyOnceWith('a', { name: 'Unsaved name', instructions: 'Unsaved instructions', model: { providerId: 'gateway', modelId: 'claude' } });
-  expect(container.querySelector('[data-settings-action-bar] [role=status]')?.textContent).toBe('settings.common.status.saved');
+  expect(container.querySelector('.sk-dock [role=status]')?.textContent).toBe('settings.common.status.saved');
 });
 
 it('opens work and memory in place, keeps drafts across tabs, and guards changing Bots', async () => {
@@ -172,7 +172,7 @@ it('keeps a failed profile save editable and cancels back to the saved profile',
   await click('settings.bots.save');
   expect(name.value).toBe('Draft');
   expect(container.textContent).toContain('Save unavailable');
-  await click('settings.common.actions.cancel');
+  await click('settings.kit.discard');
   expect(name.value).toBe('a');
   expect(api.update).toHaveBeenCalledOnce();
 });

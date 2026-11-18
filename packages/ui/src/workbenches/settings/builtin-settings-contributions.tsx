@@ -14,7 +14,6 @@ import { ExternalAgentsPage } from '@/components/sections/external-agents/Extern
 import { HistorySettingsPage } from '@/components/sections/connections/SettingsUtilityPages';
 import { StorageSettingsPage } from '@/components/sections/storage/StorageSettingsPage';
 import { UsageSettingsPage } from '@/components/sections/usage/UsageSettingsPage';
-import { HarnessSettingsPage } from '@/components/sections/harness/HarnessSettingsPage';
 import type { SurfaceActivationContext } from '@varin/extension-surface';
 import { AgentMemoryPage } from '@/components/sections/assistant/AgentMemoryPage';
 import { AgentPromptPage } from '@/components/sections/assistant/AgentPromptPage';

@@ -2,6 +2,7 @@ import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
 import { hostConnectionRequest } from './hostConnections';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@varin/application-client';
 import type {
   DesktopHost,
   DesktopHostRelay,
@@ -319,6 +320,70 @@ const parseHost = (value: unknown): DesktopHost | null => {
 
 export const getDesktopHostApiUrl = (host: DesktopHost): string => {
   return normalizeHostUrl(host.apiUrl || host.url) || host.apiUrl || host.url;
+};
+
+export const LOCAL_HOST_ID = 'local';
+
+export const desktopHostRuntimeKey = (host: DesktopHost): string => host.id === LOCAL_HOST_ID ? 'local' : `host:${host.id}`;
+
+export const getDesktopLocalOrigin = (): string => {
+  if (typeof window === 'undefined') return '';
+  return window.__VARIN_LOCAL_ORIGIN__ || window.location.origin;
+};
+
+export const resolveCurrentHost = (hosts: DesktopHost[]) => {
+  const currentHref = typeof window === 'undefined' ? '' : window.location.href;
+  const localOrigin = hosts.find((host) => host.id === LOCAL_HOST_ID)?.url || getDesktopLocalOrigin();
+  const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
+  const normalizedLocal = normalizeHostUrl(localOrigin) || localOrigin;
+  const normalizedCurrent = normalizeHostUrl(currentHref) || currentHref;
+
+  // Relay hosts share the window origin as their (virtual) API base, so URL
+  // matching can't distinguish them — identify the active relay host by its
+  // stable runtime key instead.
+  const activeRuntimeKey = getRuntimeKey();
+  const relayMatch = hosts.find((h) => h.relay && desktopHostRuntimeKey(h) === activeRuntimeKey);
+  if (relayMatch) {
+    return { id: relayMatch.id, label: relayMatch.label, url: relayMatch.url };
+  }
+
+  if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) {
+    return { id: LOCAL_HOST_ID, label: 'Local', url: normalizedLocal };
+  }
+
+  const runtimeMatch = hosts.find((h) => {
+    return runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(h)) : false;
+  });
+
+  if (runtimeMatch) {
+    return {
+      id: runtimeMatch.id,
+      label: runtimeMatch.label,
+      url: normalizeHostUrl(getDesktopHostApiUrl(runtimeMatch)) || getDesktopHostApiUrl(runtimeMatch),
+    };
+  }
+
+  if (currentHref && locationMatchesHost(currentHref, localOrigin)) {
+    return { id: LOCAL_HOST_ID, label: 'Local', url: normalizedLocal };
+  }
+
+  const match = hosts.find((h) => {
+    return currentHref ? locationMatchesHost(currentHref, h.url) : false;
+  });
+
+  if (match) {
+    return { id: match.id, label: match.label, url: normalizeHostUrl(match.url) || match.url };
+  }
+
+  if (currentHref.startsWith('varin-ui://')) {
+    return { id: LOCAL_HOST_ID, label: 'Local', url: normalizedLocal };
+  }
+
+  return {
+    id: 'custom',
+    label: redactSensitiveUrl(normalizedCurrent || 'Instance'),
+    url: normalizedCurrent,
+  };
 };
 
 const getInvoke = (): DesktopInvoke | null => {

@@ -11,7 +11,7 @@ import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type 
 import { getStoredMobileLayoutPreference, setStoredMobileLayoutPreference, type MobileLayoutPreference } from '@/lib/mobileLayoutPreference';
 import { After, Btn, Chip, CommitField, Page, Row, Section, Seg, Select, Sw, UnitBar } from '@/components/sections/shared/kit';
 import { SettingsScopeLabel } from '@/components/sections/shared/SettingsScope';
-import { useDesktopNetwork } from '@/components/sections/varin/DesktopNetworkSettings';
+import { useDesktopNetwork } from '@/components/sections/varin/useDesktopNetwork';
 
 const DEFAULT_PWA_INSTALL_NAME = 'Varin - Agent Workspace';
 type Orientation = 'system' | 'portrait' | 'landscape';

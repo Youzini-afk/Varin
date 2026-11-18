@@ -151,7 +151,8 @@ test('keeps draft revisions across refresh; conflicts do not silently retry or o
   const before = await owner.read({ runtime: 'agent' });
   const external = before.profiles.find(profile => profile.id === 'varin:custom:legacy')!;
   if (external.config.kind !== 'custom') throw new Error('Expected custom fixture');
-  await owner.save({ runtime: 'agent', expectedRevision: before.revision, id: external.id, config: { ...external.config, agent: { ...external.config.agent, description: 'External change' } } });
+  const config = { ...external.config, agent: { ...external.config.agent, description: 'External change' } };
+  await act(async () => { await owner.save({ runtime: 'agent', expectedRevision: before.revision, id: external.id, config }); });
   await click(button('Refresh'));
   await act(async () => selectAgentProfile('varin:custom:legacy')); await settle();
   expect(container.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('false');
@@ -159,7 +160,7 @@ test('keeps draft revisions across refresh; conflicts do not silently retry or o
   expect(fixture.writes).toHaveLength(1); expect(fixture.writes[0]!.expectedRevision).toBe(before.revision);
   expect(container.textContent).toContain('Agent settings changed. Reload them before saving.');
   expect((await persisted()).harness.agents.legacy.enabled).toBe(true);
-  await click(button('Cancel'));
+  await click(button('Discard'));
   expect(container.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
   expect(container.querySelector<HTMLInputElement>('[aria-label="Responsibility"]')?.value).toBe('External change');
 });

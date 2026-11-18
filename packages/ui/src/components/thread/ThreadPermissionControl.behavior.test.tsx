@@ -58,12 +58,12 @@ it('loads the conversation workspace, changes permission mode, and preserves rul
   await render('/conversation-project');
   expect(trigger().disabled).toBe(false);
   expect(fixture.read).toHaveBeenCalledWith(fixture.host, '/conversation-project');
-  expect(option('smart')).toBeUndefined();
   expect(option('accept-edits')).toBeUndefined();
-  await click('bypass');
+  await click('smart');
   expect(fixture.write).toHaveBeenCalledWith(fixture.host, { cwd: '/conversation-project', scope: 'global', expectedRevision: 'initial',
-    set: { harness: { permissions: { mode: 'bypass', rules: [{ tool: 'example', decision: 'ask' }] }, shell: 'auto' } }, remove: [] });
-  expect(trigger().getAttribute('aria-label')).toContain('mode.bypass');
+    set: { harness: { permissions: { mode: 'smart', rules: [{ tool: 'example', decision: 'ask' }] }, shell: 'auto' } }, remove: [] });
+  expect(option('smart').getAttribute('aria-checked')).toBe('true');
+  expect(trigger().getAttribute('aria-label')).toContain('mode.smart');
 });
 
 it('reflects trusted project constraints and external settings changes, and retries failed saves with current settings', async () => {
