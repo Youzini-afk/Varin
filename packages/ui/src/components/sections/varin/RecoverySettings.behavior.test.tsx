@@ -45,7 +45,7 @@ test('saving a recovery location preserves an independent retention draft until 
 test('failed save keeps the draft and cancel restores the last acknowledged policy', async () => {
   await act(async () => root.render(<RecoverySettings />)); await type(retentionInput(), '29');
   fixture.api.setRetentionPolicy.mockResolvedValue({ status: 'failed', failure: { message: 'owner rejected' } }); await click('settings.varin.recovery.retention.save'); expect(retentionInput().value).toBe('29');
-  await click('settings.common.actions.cancel'); expect(retentionInput().value).toBe('10'); expect(container.textContent).not.toContain('assistant.unsaved');
+  await click('settings.kit.discard'); expect(retentionInput().value).toBe('10'); expect(container.textContent).not.toContain('assistant.unsaved');
 });
 test('storage links open preview management without directly calling cleanup', async () => {
   await act(async () => root.render(<RecoverySettings />)); await click('Open storage'); expect(fixture.navigate).toHaveBeenCalledWith('storage'); expect(fixture.api.cleanupStorage).not.toHaveBeenCalled();
@@ -56,5 +56,5 @@ test('a failed refresh preserves both acknowledged baselines and unsaved retenti
   fixture.api.status.mockRejectedValue(new Error('offline')); fixture.api.storageStatus.mockRejectedValue(new Error('offline'));
   await click('settings.varin.recovery.actions.refresh');
   expect(retentionInput().value).toBe('23'); expect(container.textContent).toContain('assistant.unsaved');
-  await click('settings.common.actions.cancel'); expect(retentionInput().value).toBe('10');
+  await click('settings.kit.discard'); expect(retentionInput().value).toBe('10');
 });

@@ -159,7 +159,7 @@ test('keeps draft revisions across refresh; conflicts do not silently retry or o
   expect(fixture.writes).toHaveLength(1); expect(fixture.writes[0]!.expectedRevision).toBe(before.revision);
   expect(container.textContent).toContain('Agent settings changed. Reload them before saving.');
   expect((await persisted()).harness.agents.legacy.enabled).toBe(true);
-  await click(button('Cancel'));
+  await click(button('Discard'));
   expect(container.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
   expect(container.querySelector<HTMLInputElement>('[aria-label="Responsibility"]')?.value).toBe('External change');
 });

@@ -5,4 +5,5 @@ import './kit-legacy.css';
 
 export * from './controls';
 export * from './layout';
+export { flashSettingsSaved } from './saved-feedback';
 export * from './shell-context';

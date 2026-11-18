@@ -2,10 +2,11 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-const fixture = vi.hoisted(() => ({ generation: 1, listeners: new Set<() => void>(), fetch: vi.fn(), translate: (key: string) => key }));
-vi.mock('@varin/application-client', () => ({ runtimeFetch: fixture.fetch, registerRuntimeEndpointSwitchBlocker: vi.fn(),
-  getRuntimeEndpointGeneration: () => fixture.generation, getRuntimeApiBaseUrl: () => `https://host-${fixture.generation}.example`,
-  subscribeRuntimeEndpointChanged: (listener: () => void) => { fixture.listeners.add(listener); return () => fixture.listeners.delete(listener); } }));
+import type { RuntimeEndpointChangedDetail } from '@varin/application-client';
+const fixture = vi.hoisted(() => ({ generation: 1, url: (generation: number) => `https://host-${generation}.example`, listeners: new Set<(detail: RuntimeEndpointChangedDetail) => void>(), fetch: vi.fn(), translate: (key: string) => key }));
+vi.mock(import('@varin/application-client'), async importOriginal => ({ ...await importOriginal(), runtimeFetch: fixture.fetch, registerRuntimeEndpointSwitchBlocker: vi.fn(),
+  getRuntimeEndpointGeneration: () => fixture.generation, getRuntimeApiBaseUrl: () => fixture.url(fixture.generation),
+  subscribeRuntimeEndpointChanged: (listener: (detail: RuntimeEndpointChangedDetail) => void) => { fixture.listeners.add(listener); return () => fixture.listeners.delete(listener); } }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: fixture.translate }) }));
 vi.mock('@/components/ui/button', () => ({ Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => <button {...props} /> }));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={event => onChange?.(event as unknown as React.ChangeEvent<HTMLInputElement>)} /> }));
@@ -18,7 +19,11 @@ const settings = () => ({ outboundNetwork: { mode: 'proxy', proxyUrl: `https://p
 const field = (name: string) => container.querySelector<HTMLInputElement>(`[data-field="settings.page.harness.network.${name}"] input`)!;
 const button = (key: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === key)!;
 const input = (name: string, value: string) => act(async () => { field(name).value = value; field(name).dispatchEvent(new window.Event('input', { bubbles: true })); });
-const switchHost = () => act(async () => { fixture.generation += 1; for (const listener of fixture.listeners) listener(); });
+const switchHost = () => act(async () => {
+  const previousApiBaseUrl = fixture.url(fixture.generation);
+  const apiBaseUrl = fixture.url(++fixture.generation);
+  for (const listener of fixture.listeners) listener({ apiBaseUrl, previousApiBaseUrl, runtimeKey: `url:${apiBaseUrl}`, previousRuntimeKey: `url:${previousApiBaseUrl}` });
+});
 const credentialsWrites = () => fixture.fetch.mock.calls.filter(([url, init]) => url.endsWith('/credentials') && init?.method === 'PUT');
 beforeEach(() => {
   vi.clearAllMocks(); fixture.generation += 1;
@@ -43,7 +48,7 @@ it('sends each save once and never sends its credential follow-up after a Host s
   await render(); await input('username', 'fixture-user'); await input('password', 'fixture-password');
   let complete!: (value: Response) => void;
   fixture.fetch.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
-  await act(async () => { button('settings.common.actions.saveChanges').click(); button('settings.common.actions.saveChanges').click(); });
+  await act(async () => { button('settings.kit.save').click(); button('settings.kit.save').click(); });
   expect(fixture.fetch.mock.calls.filter(([url, init]) => url.endsWith('/settings') && init?.method === 'PUT')).toHaveLength(1);
   await switchHost();
   await act(async () => complete(Response.json({ outboundNetwork: { mode: 'proxy', proxyUrl: 'https://old.invalid/', noProxy: '', credentialRef: 'old-secret-ref' } })));
@@ -59,11 +64,11 @@ it('binds credentials to the acknowledged configuration and retains failed crede
     if (init?.method === 'PUT') return Response.json({ error: 'fixture failure' }, { status: 409 });
     return Response.json({ configured: false });
   });
-  await act(async () => button('settings.common.actions.saveChanges').click());
+  await act(async () => button('settings.kit.save').click());
   expect(credentialsWrites()).toHaveLength(1);
   expect(JSON.parse(credentialsWrites()[0][1].body)).toEqual({ username: 'fixture-user', password: 'fixture-password', credentialRef: 'saved-config-reference' });
-  expect(field('password').value).toBe('fixture-password'); expect(button('settings.common.actions.saveChanges').disabled).toBe(false);
-  await act(async () => button('settings.common.actions.cancel').click());
+  expect(field('password').value).toBe('fixture-password'); expect(button('settings.kit.save').disabled).toBe(false);
+  await act(async () => button('settings.kit.discard').click());
   expect(field('password').value).toBe(''); expect(field('username').value).toBe('');
-  expect(button('settings.common.actions.saveChanges').disabled).toBe(true);
+  expect(button('settings.kit.save')).toBeUndefined();
 });

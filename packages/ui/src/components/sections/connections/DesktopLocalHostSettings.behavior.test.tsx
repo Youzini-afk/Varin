@@ -4,7 +4,7 @@ import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { DesktopLocalHostMode } from '@varin/application-client';
 const fixture = vi.hoisted(() => ({ invoke: vi.fn(), fetch: vi.fn(), translate: (key: string) => key, mode: {} as DesktopLocalHostMode }));
-vi.mock('@varin/application-client', () => ({ registerRuntimeEndpointSwitchBlocker: vi.fn(), runtimeFetch: fixture.fetch }));
+vi.mock(import('@varin/application-client'), async importOriginal => ({ ...await importOriginal(), registerRuntimeEndpointSwitchBlocker: vi.fn(), runtimeFetch: fixture.fetch }));
 vi.mock('@/lib/desktop', () => ({ invokeDesktop: fixture.invoke, hasDesktopInvoke: () => true, isDesktopShell: () => true, restartDesktopApp: vi.fn(), startDesktopWindowDrag: vi.fn() }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: fixture.translate }) }));
 vi.mock('@/components/ui/button', () => ({ Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => <button {...props} /> }));
@@ -50,8 +50,8 @@ afterEach(() => { act(() => root.unmount()); stayInSettings(); container.remove(
 
 it('keeps edits local until save, cancel restores the native baseline, and failed saves keep navigation guarded', async () => {
   await render(); await change(false);
-  expect(button('settings.common.actions.saveChanges').disabled).toBe(false); expect(writes()).toHaveLength(0);
-  await click('settings.common.actions.cancel'); expect(checkbox().checked).toBe(true);
+  expect(button('settings.kit.save').disabled).toBe(false); expect(writes()).toHaveLength(0);
+  await click('settings.kit.discard'); expect(checkbox().checked).toBe(true);
   await change(false);
   const proceed = vi.fn(); act(() => requestSettingsNavigation(proceed)); expect(getPendingSettingsNavigation()).not.toBeNull();
   fixture.invoke.mockRejectedValueOnce(new Error('native settings write failed'));
@@ -66,7 +66,7 @@ it('keeps edits local until save, cancel restores the native baseline, and faile
 });
 
 it('saving does not restart; restart is explicit, cancellable, and uses the ordinary native command', async () => {
-  await render(); await change(false); await click('settings.common.actions.saveChanges');
+  await render(); await change(false); await click('settings.kit.save');
   expect(fixture.invoke.mock.calls.some(([name]) => name.startsWith('desktop_restart'))).toBe(false);
   await click('settings.connections.localHost.restart'); expect(container.querySelector('[role="dialog"]')).not.toBeNull();
   await click('settings.common.actions.cancel', true); expect(container.querySelector('[role="dialog"]')).toBeNull();

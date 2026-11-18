@@ -124,7 +124,9 @@ it('shows pending cleanup and exposes retry when an archived Bot deletion fails'
 it('saves name, instructions and model as one profile draft', async () => {
   let current = bot('a');
   api.list.mockImplementation(async () => [current]);
-  api.update.mockImplementation(async (_id, patch) => { current = { ...current, ...patch }; return current; });
+  let acknowledge!: () => void;
+  const pending = new Promise<void>(resolve => { acknowledge = resolve; });
+  api.update.mockImplementation(async (_id, patch) => { await pending; current = { ...current, ...patch }; return current; });
   await render();
   const name = container.querySelector<HTMLInputElement>('[aria-label="settings.bots.name.label"]')!;
   const instructions = container.querySelector<HTMLTextAreaElement>('[aria-label="settings.bots.instructions.label"]')!;
@@ -135,7 +137,18 @@ it('saves name, instructions and model as one profile draft', async () => {
   expect(instructions.value).toBe('Unsaved instructions');
   await click('settings.bots.save');
   expect(api.update).toHaveBeenCalledExactlyOnceWith('a', { name: 'Unsaved name', instructions: 'Unsaved instructions', model: { providerId: 'gateway', modelId: 'claude' } });
-  expect(container.querySelector('[data-settings-action-bar] [role=status]')?.textContent).toBe('settings.common.status.saved');
+  const visibleStatus = () => container.querySelector('[aria-hidden="false"] [role="status"]')?.textContent;
+  expect(visibleStatus()).toBe('settings.common.actions.saving');
+  await act(async () => acknowledge());
+  expect(visibleStatus()).toBe('settings.common.status.saved');
+
+  // A new edit interrupts the brief acknowledgement. Discarding it isn't another save.
+  await act(async () => { name.value = 'Another draft'; name.dispatchEvent(new Event('input', { bubbles: true })); });
+  expect(visibleStatus()).toBe('assistant.unsaved');
+  await click('settings.kit.discard');
+  expect(name.value).toBe('Unsaved name');
+  expect(visibleStatus()).toBeUndefined();
+  expect(api.update).toHaveBeenCalledOnce();
 });
 
 it('opens work and memory in place, keeps drafts across tabs, and guards changing Bots', async () => {
@@ -172,7 +185,7 @@ it('keeps a failed profile save editable and cancels back to the saved profile',
   await click('settings.bots.save');
   expect(name.value).toBe('Draft');
   expect(container.textContent).toContain('Save unavailable');
-  await click('settings.common.actions.cancel');
+  await click('settings.kit.discard');
   expect(name.value).toBe('a');
   expect(api.update).toHaveBeenCalledOnce();
 });
