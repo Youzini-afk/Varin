@@ -24,9 +24,18 @@ export async function resolveRuntimePackage(name, importer) {
 }
 
 /** Produce an ordinary, closed Node dependency tree from the installed lockfile graph. */
-export async function stageRuntime({ repository, destination, hostDirectory, platform = process.platform, architecture = process.arch }) {
+export async function stageRuntime({ repository, destination, hostDirectory, bundleDirectory, role = 'full', platform = process.platform, architecture = process.arch }) {
   const electron = path.join(repository, 'packages/electron');
   const app = JSON.parse(await fs.readFile(path.join(electron, 'package.json'), 'utf8'));
+  if (role === 'light') {
+    // Shared workspace DTOs, the settings store and UI helpers are bundled; retain
+    // only the shell dependencies which may resolve their own assets at runtime.
+    app.dependencies = Object.fromEntries(['electron-context-menu', 'electron-log', 'electron-updater'].map(name => {
+      if (!app.dependencies[name]) throw new Error(`Missing shell dependency: ${name}`);
+      return [name, app.dependencies[name]];
+    }));
+    app.name = 'varin-light'; // also isolates electron-updater's on-disk cache
+  } else if (role !== 'full') throw new Error(`Unknown desktop distribution: ${role}`);
   const modules = path.join(destination, 'node_modules');
   const nodes = new Map();
   const direct = new Map();
@@ -103,9 +112,11 @@ export async function stageRuntime({ repository, destination, hostDirectory, pla
     if (!node) throw new Error(`Missing distributable application dependency ${name}`);
     if (app.dependencies[name].startsWith('workspace:')) app.dependencies[name] = JSON.parse(await fs.readFile(path.join(node.source, 'package.json'), 'utf8')).version;
   }
+  app.varinDistribution = { role, platform, architecture };
   delete app.devDependencies; delete app.build; delete app.scripts;
   await fs.writeFile(path.join(destination, 'package.json'), JSON.stringify(app, null, 2) + '\n');
-  for (const entry of ['bootstrap.mjs', 'dist-bundle']) await fs.cp(path.join(electron, entry), path.join(destination, entry), { recursive: true });
+  await fs.copyFile(path.join(electron, 'bootstrap.mjs'), path.join(destination, 'bootstrap.mjs'));
+  await fs.cp(bundleDirectory ?? path.join(electron, 'dist-bundle'), path.join(destination, 'dist-bundle'), { recursive: true });
 
   // These entry owners run through a real Node process, including a user-selected Node executable.
   // Preserve their dependency closures outside ASAR; ordinary main-process JS stays in the archive.
@@ -120,6 +131,6 @@ export async function stageRuntime({ repository, destination, hostDirectory, pla
   // Native package wrappers may themselves import JS helpers from a physical entry.
   for (const node of nodes.values()) if (node.physical && !node.name.startsWith('@varin/')) unpack(node);
   const unpackPatterns = [...physical].map(target => `${path.relative(destination, target).replaceAll('\\', '/')}/**/*`);
-  await fs.writeFile(path.join(destination, 'runtime-layout.json'), JSON.stringify({ schema: 1, platform, architecture, unpackPatterns }, null, 2) + '\n');
+  await fs.writeFile(path.join(destination, 'runtime-layout.json'), JSON.stringify({ schema: 1, role, platform, architecture, unpackPatterns }, null, 2) + '\n');
   return { directory: destination, unpackPatterns };
 }

@@ -75,3 +75,14 @@ test('invalid saved mode is rejected without rewriting the settings document', a
   await assert.rejects(writeLocalHostMode(store, { enabled: true }, context()), /Invalid desktop/);
   assert.deepEqual(store.readSync(), { desktopLocalHostEnabled: 'disabled', custom: { keep: true } });
 });
+
+test('a light installation never starts or configures a Host, even with a stale full preference or missing UI', async () => {
+  const store = await setup();
+  await store.update(root => { root.desktopLocalHostEnabled = true; root.desktopDefaultHostId = 'peer'; });
+  const previous = store.readSync();
+  const light = context({ role: 'light', runtime: 'stopped', startedEnabled: null, recoveryUiAvailable: false });
+  assert.deepEqual(readLocalHostMode(store, light), { installedRole: 'light', enabled: false, effectiveEnabled: false, canDisable: false,
+    environmentDisabled: false, environmentRemoteTarget: false, runtime: 'stopped', requiresRestart: false });
+  for (const enabled of [true, false]) await assert.rejects(writeLocalHostMode(store, { enabled }, light), /does not include/);
+  assert.deepEqual(store.readSync(), previous);
+});

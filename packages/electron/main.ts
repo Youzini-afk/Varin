@@ -29,9 +29,9 @@ import { CompanionStoolWindows } from './companion-stool.js';
 import { CompanionAssets, readCompanionAssetCatalog } from './companion-assets.js';
 import { CompanionSceneWindows, readCompanionSceneDescriptor, type CompanionSceneViewport } from './companion-scene.js';
 import { CompanionWindowMovement, CompanionWindowPresentation, requireCompanionWindow, applyCompanionPassthrough, companionWorldRect, captureCompanionPlacement, restoreCompanionPlacement } from './companion-window.js';
-import { createComputerFeedback } from './computer-feedback.js';
-import { createComputerControls } from './computer-controls.js';
-import { ElectronBrowserOwner } from './browser-owner.js';
+import type { createComputerFeedback } from './computer-feedback.js';
+import type { createComputerControls } from './computer-controls.js';
+import type { ElectronBrowserOwner } from './browser-owner.js';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
 import fs from 'node:fs';
@@ -54,7 +54,7 @@ import {
 } from '@varin/application-client/desktop';
 import type { WebUiServerController } from '@varin/web/server/index.js';
 import type { HostSshManager } from '@varin/web/server/lib/connections/ssh-manager.js';
-import { readHostConnections, writeHostConnections } from '@varin/web/server/lib/connections/hosts.js';
+import { readHostConnections, writeHostConnections } from '../web/application-host/lib/connections/hosts.js';
 import { createDesktopNetworkFetch } from './harness-network-fetch.js';
 import { createTray, createTrayController, type TrayAction } from './tray.js';
 import { NotificationListener } from './notification-listener.js';
@@ -92,13 +92,18 @@ import {
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.js';
 import type { RendererRuntimeConfig, WindowFocusListener } from './electron-runtime.js';
 import { errorMessage, recordOf } from './runtime-types.js';
-import {
-  mintOutsideFileGrant,
-  resolveVarinDataDir,
-  clearAppImageArgv0FromProcessEnv,
-} from '@varin/web/server/index.js';
+import { resolveVarinDataDir } from '../web/application-host/lib/platform/data-paths.js';
+import { clearAppImageArgv0FromProcessEnv } from '../web/application-host/lib/platform/inherited-env.js';
+import { pathLooksUserConfigured, mergePathValues } from '../web/application-host/lib/platform/path-utils.js';
 import { createSettingsFileStore, type VarinSettingsDocument } from '@varin/settings-store';
 
+// This is a build-time constant, never an environment variable or saved preference.
+// Bun drops the entire embedded Host/driver import edge from the light bundle.
+const loadEmbeddedHost = () => __VARIN_LIGHT_DESKTOP__
+  ? Promise.reject<typeof import('./embedded-host.js')>(new Error('Local resources require the full desktop or a separately connected Host'))
+  : import('./embedded-host.js');
+const desktopRole = __VARIN_LIGHT_DESKTOP__ ? 'light' : 'full';
+const desktopName = __VARIN_LIGHT_DESKTOP__ ? 'Varin Light' : 'Varin';
 const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
@@ -108,7 +113,7 @@ const electronStartupStartedAt = performance.now();
 
 const DEEP_LINK_PROTOCOL = 'varin';
 const UI_PROTOCOL = 'varin-ui';
-const PACKAGED_APP_USER_MODEL_ID = 'dev.varin.desktop';
+const PACKAGED_APP_USER_MODEL_ID = __VARIN_LIGHT_DESKTOP__ ? 'dev.varin.desktop.light' : 'dev.varin.desktop';
 const DEV_APP_USER_MODEL_ID = 'dev.varin.desktop.dev';
 const APP_USER_MODEL_ID = app.isPackaged ? PACKAGED_APP_USER_MODEL_ID : DEV_APP_USER_MODEL_ID;
 const BACKGROUND_START_ARG = '--background';
@@ -145,12 +150,30 @@ const shouldStartInBackground = (loginItemSettings = readLoginItemSettings()) =>
 
 // Set the product name early so electron-log derives its log directory as
 // ~/Library/Logs/Varin/ (not ~/Library/Logs/@varin/electron/).
-app.setName('Varin');
+app.setName(desktopName);
 if (process.platform === 'linux') {
-  app.setDesktopName('varin.desktop');
+  app.setDesktopName(__VARIN_LIGHT_DESKTOP__ ? 'varin-light.desktop' : 'varin.desktop');
 }
 if (isDev) {
-  app.setPath('userData', path.join(app.getPath('appData'), 'Varin Dev'));
+  app.setPath('userData', path.join(app.getPath('appData'), `${desktopName} Dev`));
+}
+if (__VARIN_LIGHT_DESKTOP__) {
+  // Electron can resolve these paths before app.setName(). Do not let a full
+  // install's cookies, lock, settings or tokens become a second writer's state.
+  if (!isDev && !app.commandLine.hasSwitch('user-data-dir')) {
+    const profile = path.join(app.getPath('appData'), desktopName);
+    fs.mkdirSync(profile, { recursive: true, mode: 0o700 });
+    app.setPath('userData', profile);
+  }
+  app.setPath('sessionData', app.getPath('userData'));
+  if (process.argv.includes('--varin-smoke-profile')) {
+    const expected = path.join(app.getPath('appData'), desktopName);
+    // Emit only product-relative identity, never home paths, cookies or tokens.
+    process.stdout.write('[varin-smoke-profile] ' + JSON.stringify({
+      userData: app.getPath('userData') === expected ? desktopName : null,
+      sessionData: app.getPath('sessionData') === expected ? desktopName : null,
+    }) + '\n');
+  }
 }
 app.setAppUserModelId(APP_USER_MODEL_ID);
 if (process.platform === 'win32' && app.isPackaged) {
@@ -262,7 +285,7 @@ try {
 }
 
 try {
-  if (!app.isDefaultProtocolClient(DEEP_LINK_PROTOCOL)) {
+  if (!__VARIN_LIGHT_DESKTOP__ && !app.isDefaultProtocolClient(DEEP_LINK_PROTOCOL)) {
     app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL);
   }
 } catch (error) {
@@ -280,7 +303,7 @@ const readAppMetadata = () => {
     try {
       const raw = fs.readFileSync(candidate, 'utf8');
       const parsed = JSON.parse(raw);
-      if (parsed?.name === '@varin/electron' && typeof parsed.version === 'string') {
+      if (parsed?.name === (__VARIN_LIGHT_DESKTOP__ ? 'varin-light' : '@varin/electron') && typeof parsed.version === 'string') {
         return { name: parsed.name, version: parsed.version };
       }
     } catch {
@@ -708,10 +731,11 @@ const refreshQuitRiskFlags = async () => {
   }
 };
 
-const settingsFilePath = (): string => path.join(resolveVarinDataDir(process), 'settings.json');
+const settingsFilePath = (): string => path.join(__VARIN_LIGHT_DESKTOP__ ? app.getPath('userData') : resolveVarinDataDir(process), 'settings.json');
 const settingsStore = createSettingsFileStore({ filePath: settingsFilePath() });
 
 const hostConnections = (): HostSshManager => {
+  if (__VARIN_LIGHT_DESKTOP__) throw new Error('This client cannot run local SSH forwards. Manage remote SSH resources on the connected Agent service.');
   if (!state.serverHandle) throw new Error('Application Host is not ready');
   return state.serverHandle.connections;
 };
@@ -1210,6 +1234,7 @@ const detectLanIPv4Address = async (): Promise<string | null> => {
 const buildLocalUrl = (port: number): string => `http://127.0.0.1:${port}`;
 
 const resolveLocalWorkspaceHome = (): string => {
+  if (__VARIN_LIGHT_DESKTOP__) return ''; // A client directory is never the remote Agent’s home.
   const configuredRoot = process.env.VARIN_WORKSPACE_ROOT?.trim();
   return configuredRoot ? path.resolve(configuredRoot) : (os.homedir() || '');
 };
@@ -1219,6 +1244,7 @@ const resolveLocalWorkspaceHome = (): string => {
 const resourceRoot = () => app.isPackaged ? process.resourcesPath : path.resolve(__dirname, '..', 'resources');
 const resolveWebDistDir = () => path.join(resourceRoot(), 'web-dist');
 const shouldUsePackagedUi = () => {
+  if (__VARIN_LIGHT_DESKTOP__) return true;
   if (process.env.VARIN_ELECTRON_LOAD_SERVER_UI === '1') return false;
   if (process.env.VARIN_ELECTRON_USE_BUNDLED_UI === '1') return true;
   return app.isPackaged;
@@ -1485,7 +1511,6 @@ const loadShellEnv = (): Record<string, string> | null => {
 };
 
 // Merge the user's login-shell env (PATH, etc.) into this process before we
-import { pathLooksUserConfigured, mergePathValues } from '@varin/web/server/index.js';
 
 // import/start the server in-process. The server and its children (native kernel,
 // git, etc.) inherit process.env directly now — there is no sidecar
@@ -1515,9 +1540,9 @@ const inheritUserShellEnv = () => {
 
 let startedLocalHostEnabled: boolean | null = null;
 const localHostModeContext = (): LocalHostModeContext => {
-  inheritUserShellEnv();
+  if (!__VARIN_LIGHT_DESKTOP__) inheritUserShellEnv();
   return {
-    environment: process.env,
+    role: desktopRole, environment: process.env,
     recoveryUiAvailable: shouldUsePackagedUi() && fs.existsSync(path.join(resolveWebDistDir(), 'index.html')),
     startedEnabled: startedLocalHostEnabled,
     runtime: state.serverHandle ? 'embedded' : state.sidecarUrl ? 'external' : 'stopped',
@@ -1579,7 +1604,7 @@ const spawnLocalServer = async () => {
   process.env.NO_PROXY = process.env.NO_PROXY || 'localhost,127.0.0.1';
   process.env.no_proxy = process.env.no_proxy || 'localhost,127.0.0.1';
 
-  const { startWebUiServer } = await import('@varin/web/server/index.js');
+  const { startWebUiServer, createComputerControls, createComputerFeedback, ElectronBrowserOwner } = await loadEmbeddedHost();
   const outboundSession = session.fromPartition('varin-harness-egress', { cache: false });
 
   const computerFeedback = createComputerFeedback();
@@ -3355,6 +3380,14 @@ const compareSemver = (left: unknown, right: unknown): number => {
   return 0;
 };
 
+// The native updater keeps one mutable download slot. Serialize its check and
+// download so a new, unadmitted manifest cannot replace it mid-operation.
+let updateActionRunning = false;
+const withDesktopUpdater = async <T>(action: () => Promise<T>): Promise<T> => {
+  if (state.installingUpdate || updateActionRunning) throw new Error('A desktop update action is already in progress');
+  updateActionRunning = true;
+  try { return await action(); } finally { updateActionRunning = false; }
+};
 const setupAutoUpdater = () => {
   if (!app.isPackaged) {
     return;
@@ -3369,11 +3402,12 @@ const setupAutoUpdater = () => {
   const testBuild = typeof __VARIN_UPDATER_E2E_BUILD__ !== 'undefined'
     && __VARIN_UPDATER_E2E_BUILD__ === true;
   const feed = resolveUpdaterFeed({ testBuild });
-  const updaterChannel = feed.provider === 'github'
-    ? resolveUpdaterChannel({ platform: process.platform, architecture: process.arch })
+  const updaterChannel = feed.provider === 'github' || __VARIN_LIGHT_DESKTOP__
+    ? resolveUpdaterChannel({ role: desktopRole, platform: process.platform, architecture: process.arch })
     : null;
   if (updaterChannel) {
     autoUpdater.channel = updaterChannel;
+    autoUpdater.allowDowngrade = false; // assigning channel implicitly enables downgrades
   }
   autoUpdater.setFeedURL(feed);
   log.info('[electron] updater feed configured', {
@@ -4189,7 +4223,7 @@ const handleInvoke = async (
 
     case 'desktop_get_launch_at_login': {
       if (process.platform === 'linux') {
-        return { supported: true, enabled: await readLinuxAutostartEnabled() };
+        return { supported: true, enabled: await readLinuxAutostartEnabled({ role: desktopRole }) };
       }
       if (process.platform !== 'darwin' && process.platform !== 'win32') return { supported: false, enabled: false };
       const settings = app.getLoginItemSettings(getLoginItemOptions());
@@ -4200,6 +4234,7 @@ const handleInvoke = async (
       if (process.platform === 'linux') {
         const enabled = args.enabled === true;
         return setLinuxAutostartEnabled({
+          role: desktopRole,
           enabled,
           appName: app.getName(),
           backgroundArg: BACKGROUND_START_ARG,
@@ -4731,13 +4766,16 @@ const handleInvoke = async (
       return { enabled, requiresRestart: true };
     }
 
-    case 'desktop_check_for_updates': {
+    case 'desktop_check_for_updates': return withDesktopUpdater(async () => {
       assertUpdaterCapability({ packaged: app.isPackaged });
       const currentVersion = APP_VERSION;
+      const previous = state.pendingUpdate;
+      state.pendingUpdate = null; // do not keep a stale installer paired with the next native slot
       const { available, updateInfo, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
         autoUpdater,
         currentVersion,
-        pendingUpdate: state.pendingUpdate,
+        pendingUpdate: previous,
+        target: { role: desktopRole, platform: process.platform, architecture: process.arch },
         compareVersions: compareSemver,
       });
       const body =
@@ -4754,9 +4792,9 @@ const handleInvoke = async (
           (typeof updateInfo?.releaseDate === 'string' && updateInfo.releaseDate) ||
           null,
       };
-    }
+    });
 
-    case 'desktop_download_and_install_update':
+    case 'desktop_download_and_install_update': return withDesktopUpdater(async () => {
       assertUpdaterCapability({ packaged: app.isPackaged });
       if (!state.pendingUpdate) {
         throw new Error('No pending update');
@@ -4806,6 +4844,7 @@ const handleInvoke = async (
       } finally {
         setTaskbarProgress(-1);
       }
+    });
 
     case 'desktop_get_local_host_mode': {
       return readLocalHostMode(settingsStore, localHostModeContext());
@@ -4825,6 +4864,7 @@ const handleInvoke = async (
     }
 
     case 'desktop_restart': {
+      if (updateActionRunning) throw new Error('Wait for the current desktop update action before restarting');
       const applyUpdate = Boolean(state.pendingUpdate?.downloaded && app.isPackaged);
       if (applyUpdate) assertUpdaterCapability({ packaged: app.isPackaged });
       log.info(`[electron] desktop_restart applyUpdate=${applyUpdate} packaged=${app.isPackaged}`);
@@ -5425,9 +5465,9 @@ ipcMain.handle('varin:dialog:open', async (event: IpcMainInvokeEvent, rawOptions
     : await dialog.showOpenDialog(dialogOptions);
   if (result.canceled) return null;
   const grantFilePath = async (filePath: string) => {
-    if (options?.directory) return { path: filePath };
+    if (options?.directory || __VARIN_LIGHT_DESKTOP__) return { path: filePath };
     try {
-      const grant = await mintOutsideFileGrant(filePath, { scopes: ['stat', 'read', 'raw'], fsPromises: fsp, path });
+      const grant = await (await loadEmbeddedHost()).mintOutsideFileGrant(filePath, { scopes: ['stat', 'read', 'raw'], fsPromises: fsp, path });
       return { path: grant.path, outsideFileGrant: grant.outsideFileGrant, expiresAt: grant.expiresAt };
     } catch (error) {
       log.warn(`[ipc] failed to mint outside file grant: ${errorMessage(error)}`);
@@ -5455,7 +5495,7 @@ ipcMain.handle('varin:file:grant-existing', async (event, filePath) => {
     throw new Error('Path is required');
   }
 
-  const grant = await mintOutsideFileGrant(targetPath, { scopes: ['stat', 'read', 'raw'], fsPromises: fsp, path });
+  const grant = await (await loadEmbeddedHost()).mintOutsideFileGrant(targetPath, { scopes: ['stat', 'read', 'raw'], fsPromises: fsp, path });
   return {
     path: grant.path,
     outsideFileGrant: grant.outsideFileGrant,
@@ -5770,9 +5810,10 @@ app.whenReady().then(async () => {
 
   if (process.platform === 'linux' && app.isPackaged) {
     try {
-      const enabled = await readLinuxAutostartEnabled();
+      const enabled = await readLinuxAutostartEnabled({ role: desktopRole });
       if (enabled) {
         await setLinuxAutostartEnabled({
+          role: desktopRole,
           enabled: true,
           appName: app.getName(),
           backgroundArg: BACKGROUND_START_ARG,

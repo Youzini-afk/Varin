@@ -104,3 +104,15 @@ it('first-launch and lost-remote screens retain the local recovery action withou
   await render(<RecoveryScreen variant="remote-unreachable" localAvailable={false} />); expect(button('settings.connections.localHost.restore')).toBeTruthy();
   await render(<RecoveryScreen variant="remote-unreachable" localAvailable={false} showRemoteForm />); expect(button('settings.connections.localHost.restore')).toBeTruthy();
 });
+
+it('light desktop opens the remote chooser and recovery without offering an impossible local restart', async () => {
+  fixture.mode = mode({ installedRole: 'light', enabled: false, effectiveEnabled: false, runtime: 'stopped' });
+  await render(<ChooserScreen localAvailable={false} />);
+  expect(container.textContent).toContain('Remote form remains available');
+  expect(container.textContent).toContain('settings.connections.localHost.light');
+  expect(button('settings.connections.localHost.restore')).toBeUndefined();
+  await render(<RecoveryScreen variant="remote-unreachable" localAvailable={false} showRemoteForm />);
+  expect(button('settings.connections.localHost.restore')).toBeUndefined();
+  await render(); expect(checkbox()).toBeNull();
+  expect(writes()).toHaveLength(0);
+});

@@ -10,9 +10,9 @@ This package owns the native shell: windows, menus, deep links, native notificat
 
 ## How it runs
 
-Desktop starts the Varin web server in the same Electron main process. There is no separate sidecar subprocess for the Varin server.
+By default the **full desktop** starts the Varin web server in the same Electron main process. There is no separate sidecar subprocess for the Varin server.
 
-The `main.ts` source imports `@varin/web/server/index.js` and calls `startWebUiServer()`; builds execute the generated `dist-bundle/main.mjs`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
+The full shell loads `embedded-host.ts` when it needs `@varin/web/server/index.js` and calls `startWebUiServer()` to run the local Host; builds execute the generated `dist-bundle/main.mjs`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
 
 Desktop LAN access and the optional UI password are independent preferences. Enabling LAN access
 binds the embedded Host on all interfaces, including when the password is empty; clearing a password
@@ -180,6 +180,40 @@ It also verifies the kernel identity/hash and rejects optional embedding weights
 packages and duplicate Web payload. Frontend assets live only in `resources/web-dist`; the kernel lives
 only in `resources/kernel`. Production `@varin/web` contains its compiled `server` and package/license
 metadata, excluding `public`, source and private Host development generations at collection time.
+
+### Linux light desktop (local assembly)
+
+Use `bun run --cwd packages/electron package --role=light --linux --publish=never` on a native
+Linux x64 or ARM64 builder. Omitting `--role` keeps the existing full product, output paths
+and update feeds on every platform. The light product stages the same renderer and shell in
+`artifacts/build/desktop-light-linux-<arch>/`; its output under `dist/` is named
+`Varin-Light-<version>-linux-<x86_64|arm64>.AppImage`. No public light release is implied.
+
+The role is compiled into the main shell, and `package.json` records the role, platform and architecture.
+No embedded Host, Rust kernel, ripgrep, VM guest, Puppeteer or native resource drivers are installed.
+The light shell always opens the bundled UI, including the first-launch chooser and lost-connection
+recovery screen. It cannot enable a local Host with a saved preference or environment flag. Client
+profiles and pairing choices are local to **Varin Light**. The light app neither reads nor migrates
+the full Host's `VARIN_DATA_DIR`. SSH used by the Agent to reach resources belongs to that Agent;
+an SSH forward on the client itself is not provided. Closing the shell does not stop a separately
+running Agent or node.
+
+The light AppImage uses the `light-linux.yml` or `light-linux-arm64.yml` channel and a separate
+updater cache. Before enabling download, the Linux shell checks the sole AppImage against the
+installed role, architecture and candidate version. Missing light manifests mean no update,
+not a fallback to `latest-linux.yml`. On supported builders, run
+`node packages/electron/scripts/smoke-desktop-unpacked.mjs --role=light /path/to/linux-unpacked/varin-light`
+with a display. This checks the rendered chooser using a fresh XDG profile with no reachable Host,
+including Chromium profile isolation and lack of Host data writes. The loopback updater fixture
+also accepts `--role light`.
+
+This is an additional product, not an in-place full-to-light migration. The full executable,
+autostart entry, sessions, credentials and running work are not replaced. To undo a trial, quit
+the light app, turn off its own launch-at-login setting if enabled, and remove its AppImage;
+resume the full app using its original profile. Removing the AppImage does not erase the light
+profile. For a light-version rollback, select an earlier verified light AppImage of the same
+architecture manually; automatic updates do not downgrade. An independent resource-node image
+and its data ownership are separate work, not included in this desktop package.
 
 ### Optional desktop companions
 

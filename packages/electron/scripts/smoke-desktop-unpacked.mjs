@@ -5,6 +5,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseRoleArgument } from './desktop-distribution.mjs';
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const DEVTOOLS_TIMEOUT_MS = 20_000;
@@ -111,7 +112,7 @@ const connectDevTools = (webSocketDebuggerUrl) => new Promise((resolve, reject) 
   }, { once: true });
 });
 
-const waitForRenderer = async (userDataDir) => {
+const waitForRenderer = async (userDataDir, role) => {
   const activePortPath = path.join(userDataDir, 'DevToolsActivePort');
   let debugPort;
   for (let attempt = 0; attempt < 120 && debugPort === undefined; attempt += 1) {
@@ -157,7 +158,11 @@ const waitForRenderer = async (userDataDir) => {
       if (/Minified React error|Maximum update depth|发生错误|Something went wrong/i.test(lastState?.bodyText ?? '')) {
         throw new Error('Packaged renderer entered its error boundary.');
       }
-      if (lastState?.ready === true && lastState.mainWorkspace === true) {
+      if (role === 'light' && lastState?.ready && lastState.diagnostics?.bootView?.screen === 'chooser'
+        && lastState.diagnostics.bootView.localAvailable === false && !lastState.localOrigin && !lastState.apiBaseUrl) {
+        return { mode: 'chooser', state: lastState };
+      }
+      if (role === 'full' && lastState?.ready === true && lastState.mainWorkspace === true) {
         return {
           consoleMessages: devTools.consoleMessages,
           exceptions: devTools.exceptions,
@@ -191,7 +196,7 @@ const waitForExit = (child, milliseconds) => new Promise((resolve) => {
   });
 });
 
-export async function smokeDesktopApp(executable, appArguments = []) {
+export async function smokeDesktopApp(executable, appArguments = [], role = 'full') {
   const appPath = path.resolve(executable ?? '');
   if (!executable || !existsSync(appPath)) throw new Error(`Missing packaged Varin executable at ${appPath}`);
   const smokeEnvironment = { ...process.env };
@@ -200,12 +205,13 @@ export async function smokeDesktopApp(executable, appArguments = []) {
     'VARIN_SMOKE_PROFILE_SOURCE', 'VARIN_SMOKE_LOCAL_SEMANTIC_PACK', 'ELECTRON_RUN_AS_NODE', 'NODE_PATH',
   ]) delete smokeEnvironment[variable];
   const smokeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'varin-desktop-smoke-'));
-  const userDataDir = path.join(smokeRoot, 'user-data');
+  const configHome = path.join(smokeRoot, 'config');
+  const userDataDir = role === 'light' ? path.join(configHome, 'Varin Light') : path.join(smokeRoot, 'user-data');
   const workspaceRoot = path.join(smokeRoot, 'workspace');
   await fsp.mkdir(workspaceRoot);
-  await fsp.mkdir(userDataDir);
+  if (role === 'full') await fsp.mkdir(userDataDir);
   // Select the embedded Host up front; completing onboarding restarts the app.
-  await fsp.writeFile(path.join(userDataDir, 'settings.json'), JSON.stringify({
+  if (role === 'full') await fsp.writeFile(path.join(userDataDir, 'settings.json'), JSON.stringify({
     desktopDefaultHostId: 'local',
     desktopInitialHostChoiceCompleted: true,
   }));
@@ -217,8 +223,9 @@ export async function smokeDesktopApp(executable, appArguments = []) {
     ] : []),
   ];
   let processOutput = '';
+  let profileIsolated = false;
   const child = spawn(appPath, [
-    `--user-data-dir=${userDataDir}`,
+    ...(role === 'light' ? ['--varin-smoke-profile'] : [`--user-data-dir=${userDataDir}`]),
     '--remote-debugging-port=0',
     '--remote-debugging-address=127.0.0.1',
     '--remote-allow-origins=*',
@@ -227,8 +234,10 @@ export async function smokeDesktopApp(executable, appArguments = []) {
     cwd: path.dirname(appPath),
     env: {
       ...smokeEnvironment,
+      ...(role === 'light' ? { XDG_CONFIG_HOME: configHome, XDG_CACHE_HOME: path.join(smokeRoot, 'cache'),
+        XDG_DATA_HOME: path.join(smokeRoot, 'data'), HOME: smokeRoot } : {}),
       VARIN_STARTUP_PERF: '1',
-      VARIN_DATA_DIR: userDataDir,
+      VARIN_DATA_DIR: role === 'light' ? path.join(smokeRoot, 'absent-host-data') : userDataDir,
       VARIN_WORKSPACE_ROOT: workspaceRoot,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -237,6 +246,7 @@ export async function smokeDesktopApp(executable, appArguments = []) {
   for (const stream of [child.stdout, child.stderr]) {
     stream.on('data', (chunk) => {
       processOutput = (processOutput + chunk.toString()).slice(-6_000);
+      if (processOutput.includes('[varin-smoke-profile] {"userData":"Varin Light","sessionData":"Varin Light"}')) profileIsolated = true;
     });
   }
   const launched = new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
@@ -251,9 +261,17 @@ export async function smokeDesktopApp(executable, appArguments = []) {
 
   try {
     await launched;
-    const renderer = await waitForRenderer(userDataDir);
+    const renderer = await waitForRenderer(userDataDir, role);
     if (child.exitCode !== null) {
       throw new Error(`Packaged Varin exited before startup completed (code ${child.exitCode}).`);
+    }
+    if (role === 'light') {
+      if (!profileIsolated || ['Varin', 'varin'].some(name => existsSync(path.join(configHome, name)))) {
+        throw new Error('Light shell did not isolate the Chromium userData and sessionData profiles from full');
+      }
+      if (existsSync(path.join(smokeRoot, 'absent-host-data'))) throw new Error('Light shell wrote to the Host data directory');
+      console.log(JSON.stringify({ appPath, role, architecture: process.arch, renderer: renderer.mode, localHost: false, userData: 'Varin Light', sessionData: 'Varin Light', fullDataWritten: false }));
+      return;
     }
     const runtimeValue = renderer.state?.localOrigin || renderer.state?.apiBaseUrl;
     let runtimeUrl;
@@ -303,5 +321,7 @@ export async function smokeDesktopApp(executable, appArguments = []) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  await smokeDesktopApp(process.argv[2], process.argv.slice(3));
+  const args = process.argv.slice(2);
+  const role = parseRoleArgument(args);
+  await smokeDesktopApp(args.shift(), args, role);
 }

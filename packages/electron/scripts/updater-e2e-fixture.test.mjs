@@ -52,3 +52,16 @@ test('serves only staged fixture files over loopback', async () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('staging the two roles in the same feed never overwrites the other channel', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-role-feed-')); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const base = { directory: path.join(root, 'feed'), architecture: 'x64', version: '1.2.3' };
+  const full = path.join(root, 'Varin-1.2.3-linux-x86_64.AppImage'), light = path.join(root, 'Varin-Light-1.2.3-linux-x86_64.AppImage');
+  fs.writeFileSync(full, 'full'); fs.writeFileSync(light, 'light');
+  assert.equal(stageUpdaterFixture({ ...base, nextAppImage: full }).manifestName, 'latest-linux.yml');
+  assert.throws(() => stageUpdaterFixture({ ...base, role: 'light', nextAppImage: full }), /Expected updater artifact/);
+  assert.equal(stageUpdaterFixture({ ...base, role: 'light', nextAppImage: light }).manifestName, 'light-linux.yml');
+  for (const [role, asset] of [['latest', full], ['light', light]]) {
+    verifyUpdateManifest({ manifestPath: path.join(base.directory, `${role}-linux.yml`), artifactPath: asset, expectedVersion: base.version });
+  }
+});

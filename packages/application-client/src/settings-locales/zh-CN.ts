@@ -480,6 +480,7 @@ export const settingsDict = {
   "settings.connections.localHost.nextLocal": "下次启动：启用本地 Host。",
   "settings.connections.localHost.nextFrontend": "下次启动：纯前端，仅连接远端 Agent。",
   "settings.connections.localHost.sshWarning": "纯前端模式不运行内置本地任务或 SSH 转发。请使用可直接访问或通过中继连接的 Agent；本地 SSH 转发不会跨此次重启保留。",
+  "settings.connections.localHost.light": "轻客户端连接已有 Agent 服务，不包含本地 Host。",
   "settings.connections.localHost.environmentDisabled": "启动环境中的 VARIN_SKIP_LOCAL_SERVER=1 强制使用纯前端模式。移除此环境变量后才能启用本地 Host。",
   "settings.connections.localHost.environmentRemote": "VARIN_SERVER_URL 指定了启动时连接的 Agent。请先从启动环境中移除此变量，再切换到本地 Host。",
   "settings.connections.localHost.bundledRequired": "纯前端启动需要内置恢复界面。当前开发或服务端界面模式会保持本地 Host 启用。",

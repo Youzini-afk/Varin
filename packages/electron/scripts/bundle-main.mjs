@@ -12,12 +12,14 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { prepareCompanionCatalog } from './companion-assets.mjs';
+import { parseRoleArgument } from './desktop-distribution.mjs';
 
+const role = parseRoleArgument(process.argv.slice(2));
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
-const outdir = path.join(root, 'dist-bundle');
+const outdir = role === 'light' ? path.resolve(root, '../../artifacts/build/desktop-light-bundle') : path.join(root, 'dist-bundle');
 const updaterE2eBuild = process.env.VARIN_UPDATER_E2E_BUILD === '1';
-await prepareCompanionCatalog();
+if (role === 'full') await prepareCompanionCatalog(); // light assets are staged in the product's own resources
 
 // dist-bundle is generated output. Replace it as one unit so a removed entry
 // cannot survive from an older build and later enter a package.
@@ -35,9 +37,11 @@ const result = await Bun.build({
     '@varin/web/*',
   ],
   minify: false,
+  metafile: role === 'light',
   sourcemap: 'none',
   naming: '[name].mjs',
   define: {
+    __VARIN_LIGHT_DESKTOP__: String(role === 'light'),
     __VARIN_UPDATER_E2E_BUILD__: updaterE2eBuild ? 'true' : 'false',
   },
 });
@@ -45,6 +49,16 @@ const result = await Bun.build({
 if (!result.success) {
   for (const msg of result.logs) console.error(msg);
   process.exit(1);
+}
+
+if (role === 'light') {
+  // Audit the emitted dependency graph: a dormant external import could make
+  // the installer look small but strand a fresh machine at startup.
+  for (const output of Object.values(result.metafile.outputs)) {
+    const forbidden = output.imports.find(item => /^(?:@varin\/web(?:\/|$)|puppeteer-core(?:\/|$))/.test(item.path))
+      ?? Object.keys(output.inputs).find(file => /(?:^|[/\\])(?:embedded-host|browser-owner|computer-controls|computer-feedback)\.ts$/u.test(file));
+    if (forbidden) throw new Error(`Embedded Host/driver dependency entered the light shell: ${JSON.stringify(forbidden)}`);
+  }
 }
 
 // Verify both entry bundles exist and are accepted by the same Node parser
@@ -69,4 +83,4 @@ for (const entry of expectedEntries) {
   }
 }
 
-console.log(`[electron] main.ts + preload.ts bundled -> dist-bundle/*.mjs (updater E2E=${updaterE2eBuild})`);
+console.log(`[electron] bundled ${role} shell -> ${outdir} (updater E2E=${updaterE2eBuild})`);

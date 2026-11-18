@@ -3,9 +3,8 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const AUTOSTART_FILE_NAME = 'varin.desktop';
-
 interface LinuxAutostartPathsOptions {
+  role?: 'full' | 'light';
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
 }
@@ -35,7 +34,7 @@ export const resolveLinuxAutostartDirectory = ({
 };
 
 export const resolveLinuxAutostartFilePath = (options: LinuxAutostartPathsOptions = {}): string =>
-  path.join(resolveLinuxAutostartDirectory(options), AUTOSTART_FILE_NAME);
+  path.join(resolveLinuxAutostartDirectory(options), options.role === 'light' ? 'varin-light.desktop' : 'varin.desktop');
 
 export const resolveLinuxLaunchExecutable = ({
   env = process.env,
@@ -58,6 +57,7 @@ const quoteDesktopExecArg = (value: unknown): string => {
 
 export const buildLinuxAutostartDesktopEntry = ({
   appName = 'Varin',
+  role = 'full',
   executable,
   backgroundArg,
   env = process.env,
@@ -75,7 +75,7 @@ export const buildLinuxAutostartDesktopEntry = ({
     `Exec=${args.join(' ')}`,
     'Terminal=false',
     'X-GNOME-Autostart-enabled=true',
-    'StartupWMClass=varin',
+    role === 'light' ? 'StartupWMClass=varin-light' : 'StartupWMClass=varin',
     '',
   ].join('\n');
 };
@@ -92,6 +92,7 @@ export const readLinuxAutostartEnabled = async (options: LinuxAutostartPathsOpti
 
 export const setLinuxAutostartEnabled = async ({
   enabled,
+  role = 'full',
   appName = 'Varin',
   backgroundArg,
   env = process.env,
@@ -99,7 +100,7 @@ export const setLinuxAutostartEnabled = async ({
   homeDir = os.homedir(),
 }: SetLinuxAutostartOptions): Promise<{ enabled: boolean; filePath: string; supported: true }> => {
   const directory = resolveLinuxAutostartDirectory({ env, homeDir });
-  const filePath = path.join(directory, AUTOSTART_FILE_NAME);
+  const filePath = resolveLinuxAutostartFilePath({ env, homeDir, role });
 
   if (!enabled) {
     await fsp.rm(filePath, { force: true });
@@ -108,7 +109,7 @@ export const setLinuxAutostartEnabled = async ({
 
   await fsp.mkdir(directory, { recursive: true });
   const contents = buildLinuxAutostartDesktopEntry({
-    appName,
+    role, appName,
     env,
     execPath,
     ...(backgroundArg !== undefined ? { backgroundArg } : {}),
