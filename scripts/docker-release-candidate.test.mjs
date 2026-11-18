@@ -53,6 +53,16 @@ test('saved builds retain both architectures, exact source and immutable applica
   }
 });
 
+test('a resource-enabled release cannot resume without its reserved immutable image', t => {
+  const f = fixture(t), modern = { ...f.candidate, resourceNode: true };
+  assert.throws(() => validateReleaseBuild(f.result, modern, f.source));
+  const resource_node = `ghcr.io/astrmira/varin-node@sha256:${'5'.repeat(64)}`;
+  const images = { ...f.images, resource_node };
+  assert.deepEqual(validateReleaseBuild({ ...f.result, images }, modern, f.source), images);
+  assert.throws(() => validateReleaseBuild({ ...f.result, images }, f.candidate, f.source));
+  assert.throws(() => validateReleaseBuild({ ...f.result, images: { ...images, resource_node: f.images.standard_app } }, modern, f.source));
+});
+
 test('resume reads the original successful builder, not overall run status or a later failed attempt', t => {
   const f = fixture(t), archive = path.join(f.cwd, 'build.zip');
   fs.writeFileSync(path.join(f.cwd, 'result.json'), JSON.stringify(f.result));

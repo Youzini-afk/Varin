@@ -173,6 +173,14 @@ jobs:
           node scripts/smoke-container-budget.mjs varin-check-smoke
           node scripts/smoke-container-stop.mjs varin-check-smoke slim
 
+      - name: Smoke the exact resource node image
+        if: ${{ !cancelled() && steps.images.outcome == 'success' && steps.images.outputs.resource_node != '' }}
+        working-directory: tooling
+        env:
+          IMAGE_REF: ${{ steps.images.outputs.resource_node }}
+          EXPECTED_RELEASE_ID: image-${{ inputs.source_sha || github.sha }}
+        run: node scripts/smoke-container-resource-node.mjs "$IMAGE_REF" "$EXPECTED_RELEASE_ID"
+
       - name: Smoke the exact toolbelt image
         if: ${{ !cancelled() && inputs.toolbelt && steps.images.outcome == 'success' }}
         shell: bash
@@ -243,6 +251,14 @@ jobs:
             cleanup
             docker image rm "$image" 2>/dev/null || true
           done
+
+      - name: Smoke resource node on the target architecture
+        if: ${{ !cancelled() && inputs.multi_platform && steps.images.outcome == 'success' && steps.images.outputs.resource_node != '' }}
+        working-directory: tooling
+        env:
+          IMAGE_REF: ${{ steps.images.outputs.resource_node }}
+          EXPECTED_RELEASE_ID: image-${{ inputs.source_sha || github.sha }}
+        run: node scripts/smoke-container-resource-node.mjs "$IMAGE_REF" "$EXPECTED_RELEASE_ID" linux/arm64
 
       - name: Create a source-only cache fixture and discard the original builder
         if: ${{ !cancelled() && inputs.benchmark && steps.warm.outcome == 'success' }}

@@ -93,6 +93,38 @@ RUN VARIN_SOURCE_REVISION="${VARIN_SOURCE_REVISION}" \
   VARIN_TARGET_ARCH="${TARGETARCH}" \
   bun run build:cloud-runtime -- --output /app/artifacts/cloud-runtime --no-archive
 
+# Select the resource-only executable from the same versioned Host/kernel build.
+# The full frontend, Agent entrypoint and Application CLI do not enter the
+# node image. For now both roles share the canonical production dependency lock.
+FROM builder AS resource-node-files
+RUN set -eu; \
+  cd /app/artifacts/cloud-runtime; \
+  test -f packages/web/server/resource-node.js; \
+  rm -rf packages/web/dist packages/web/bin packages/web/server/index.js verify-services.mjs
+
+FROM ${RUNTIME_BASE_IMAGE} AS resource-node
+WORKDIR /home/varin/app
+ARG VARIN_SOURCE_REVISION
+LABEL io.varin.image.role="resource-node"
+ENV HOME=/home/varin \
+  NODE_ENV=production \
+  VARIN_DATA_DIR=/home/varin/.config/varin \
+  VARIN_WORKSPACE_ROOT=/home/varin/workspaces \
+  VARIN_HOST=0.0.0.0 \
+  VARIN_PORT=3000 \
+  VARIN_RELEASE_ID=image-${VARIN_SOURCE_REVISION}
+COPY --from=resource-node-files --chown=varin:varin /app/artifacts/cloud-runtime/ ./
+RUN --mount=type=cache,target=/home/varin/.cache/bun,uid=1000,gid=1000 \
+  bun install --production --frozen-lockfile --cache-dir=/home/varin/.cache/bun \
+  && test -f packages/web/server/resource-node.js \
+  && test ! -e packages/web/dist \
+  && test ! -e packages/web/server/index.js
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
+  CMD curl --fail --silent --show-error http://127.0.0.1:3000/health || exit 1
+ENTRYPOINT ["node", "packages/web/server/resource-node.js"]
+CMD []
+
 # This stage runs on TARGETPLATFORM. Installing the canonical runtime tree here
 # ensures native production dependencies match the image architecture instead
 # of the builder architecture.

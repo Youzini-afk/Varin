@@ -9,7 +9,7 @@ const repository = 'Astrmira/Varin';
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const shaPattern = /^[a-f0-9]{40}$/;
 const names = { slim_base: 'varin-runtime-slim', toolbelt_base: 'varin-runtime-toolbelt',
-  standard_app: 'varin', toolbelt_app: 'varin-toolbelt' };
+  standard_app: 'varin', toolbelt_app: 'varin-toolbelt', resource_node: 'varin-node' };
 const baseTargets = { slim_base: 'slim', toolbelt_base: 'toolbelt' };
 const baseForApp = { standard_app: 'slim_base', toolbelt_app: 'toolbelt_base' };
 
@@ -42,6 +42,7 @@ export function containerBuildConfig(input) {
     localCache: input.localCache === true,
     registry: input.publication === 'check' ? 'localhost:5000' : imageRegistry,
     sourceDirectory: path.resolve(input.sourceDirectory), outputDirectory: path.resolve(input.outputDirectory),
+    resourceNode: input.publication !== 'commit' && input.resourceNode === true,
     tag: `candidate-${input.runId}-${input.runAttempt}` };
 }
 
@@ -70,14 +71,14 @@ function cache(config, phase) {
 export function containerBakePlan(config, phase, bases = {}) {
   if (!['bases', 'applications'].includes(phase)) throw new Error('Unknown container build phase');
   const targets = {}, caching = cache(config, phase);
-  const keys = phase === 'bases' ? Object.keys(baseTargets) : Object.keys(baseForApp);
+  const keys = phase === 'bases' ? Object.keys(baseTargets) : [...Object.keys(baseForApp), ...(config.resourceNode ? ['resource_node'] : [])];
   for (const key of keys) {
     if (!config.toolbelt && key.startsWith('toolbelt_')) continue;
     if (phase === 'bases' && config.overrides[key]) continue;
-    const base = phase === 'applications' ? bases[baseForApp[key]] : null;
+    const base = phase === 'applications' ? bases[key === 'resource_node' ? 'slim_base' : baseForApp[key]] : null;
     if (phase === 'applications' && !/^.+@sha256:[a-f0-9]{64}$/.test(base ?? '')) throw new Error(`Missing immutable base for ${key}`);
     targets[key] = { context: config.sourceDirectory, dockerfile: phase === 'bases' ? 'Dockerfile.base' : 'Dockerfile',
-      ...(phase === 'bases' ? { target: baseTargets[key] } : {}),
+      ...(phase === 'bases' ? { target: baseTargets[key] } : key === 'resource_node' ? { target: 'resource-node' } : {}),
       platforms: config.platforms, pull: true, tags: [`${config.registry}/${names[key]}:${config.tag}`],
       labels: labels(config, base), attest: ['type=provenance,mode=max', 'type=sbom'],
       output: ['type=registry'], 'cache-from': caching.from,
@@ -178,6 +179,7 @@ function environmentConfig(env) {
     sourceDirectory, outputDirectory: env.CONTAINER_OUTPUT_DIR || path.resolve('artifacts/container-build'),
     localCache: env.CONTAINER_LOCAL_CACHE === 'true',
     toolbelt: env.CONTAINER_TOOLBELT === 'true', multiPlatform: env.CONTAINER_MULTI_PLATFORM === 'true',
+    resourceNode: fs.existsSync(path.join(sourceDirectory, 'packages/web/application-host/resource-node.ts')),
     slimBase: env.CONTAINER_SLIM_BASE, toolbeltBase: env.CONTAINER_TOOLBELT_BASE });
 }
 
