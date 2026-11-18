@@ -386,7 +386,10 @@ export class ManagedBrowserPeers {
           if (!owner) {
             owner = new ManagedBrowserOwner(this.coordinatorHostId, target.resourceOwner, resource, this.targets, this.fetchImpl);
             this.owners.set(id, owner);
-            this.resources.register(owner, resource.label, `${target.label} · ${resource.deviceName}`, { remote: true, source: resource.source });
+            this.resources.register(owner, resource.label, `${target.label} · ${resource.deviceName}`, {
+              remote: true, source: resource.source,
+              ...(resource.source === 'embedded' ? { device: { kind: 'managed_host', connectionId: target.resourceOwner.connectionId } } : {}),
+            });
           } else { owner.update(resource); this.resources.updateMetadata(id, resource.label, `${target.label} · ${resource.deviceName}`); }
         }
       } catch { /* An unavailable peer never erases the original resource binding. */ }

@@ -29,8 +29,8 @@ const readJson = async <T>(response: Response, fallback: string): Promise<T> => 
   return response.json() as Promise<T>;
 };
 
-export const listComputers = async (): Promise<ComputerCatalog> => (
-  readJson<ComputerCatalog>(await runtimeFetch('/api/computers'), 'Unable to list computers')
+export const listComputers = async (signal?: AbortSignal): Promise<ComputerCatalog> => (
+  readJson<ComputerCatalog>(await runtimeFetch('/api/computers', { signal }), 'Unable to list computers')
 );
 
 /** Re-probe a desktop's driver; the response carries the real capability table. */

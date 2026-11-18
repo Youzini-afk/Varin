@@ -1,6 +1,6 @@
 import { Router, type Express } from 'express';
 import { expect, it, vi } from 'vitest';
-import { BrowserExecutionError, type BrowserOwner, type BrowserPage, type BrowserResourceCapability, type BrowserUseScope } from '@varin/protocol';
+import { BrowserExecutionError, type BrowserOwner, type BrowserPage, type BrowserResource, type BrowserResourceCapability, type BrowserUseScope } from '@varin/protocol';
 import { routerTransport } from '../extensions/direct-router.test-helper.js';
 import { createManagedRemoteTargetRegistry, managedEndpointIdentity } from '../harness/managed-remote-client.js';
 import { BrowserResources } from './browser-resources.js';
@@ -11,7 +11,7 @@ const prefix = '/api/harness/managed-execution/v1';
 const mount = '/original/mount';
 const page = (browserId = 'local-browser'): BrowserPage => ({ browserId, pageId: 'tab', title: 'Original tab',
   url: 'https://example.org', loading: false, canGoBack: false, canGoForward: false, retained: true });
-function fixture() {
+function fixture(source?: BrowserResource['source']) {
   let instanceId = 'browser-session', peerHostId = 'browser-host';
   let declared: BrowserResourceCapability[] = ['tabs', 'open', 'read', 'act', 'activate', 'upload', 'download'];
   let offline = false, lostReceipt = false, corruptReceipt = false;
@@ -33,7 +33,7 @@ function fixture() {
     upload: vi.fn(async () => ({ page: page(), action: 'upload' as const })),
     retainForThread: vi.fn(), releaseThread: vi.fn(async () => {}), subscribe: () => () => {},
   };
-  original.register(owner, 'Chrome', 'Browser device');
+  original.register(owner, 'Chrome', 'Browser device', { source });
   original.register({ ...owner, browserId: 'recursive-import' }, 'Other peer', 'Elsewhere', { remote: true });
   const routes = Router();
   let browserDocument: Record<string, unknown> = {};
@@ -109,10 +109,14 @@ it('discovers local peer resources through existing mounted authenticated Host c
 });
 
 it('keeps different connections and mounts distinct even when Host and browser IDs match', async () => {
-  const f = fixture(); f.addConnection();
-  const discovered = await f.resources.list();
+  const f = fixture('embedded'); f.addConnection();
+  const discovered = await f.resources.list({ includeDevice: true });
   expect(discovered).toHaveLength(2);
   expect(new Set(discovered.map(item => item.browserId)).size).toBe(2);
+  expect(discovered.map(item => item.device)).toEqual(expect.arrayContaining([
+    { kind: 'managed_host', connectionId: 'original-connection' },
+    { kind: 'managed_host', connectionId: 'other-connection' },
+  ]));
   expect(managedBrowserResourceId({ ...f.peer, endpointIdentity: 'another-mount' }, 'local-browser')).not.toBe(f.binding.browserId);
   expect(managedBrowserResourceId({ ...f.peer, hostId: 'another-host' }, 'local-browser')).not.toBe(f.binding.browserId);
 });

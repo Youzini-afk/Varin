@@ -1557,7 +1557,7 @@ const RemoteInstancesContent: React.FC<RemoteInstancesPageProps> = ({ view = 'ho
                               })
                             : t('settings.remoteInstances.clientAuth.neverUsed');
                       return (
-                        <div key={client.id} className="flex items-center justify-between gap-3 py-1.5">
+                        <div key={client.id} data-settings-item={`client-access:${client.id}`} className="flex items-center justify-between gap-3 py-1.5">
                           <div className="min-w-0">
                             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
                               <span className={cn(

@@ -2215,7 +2215,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     resolveLiveSource: liveSources.validate, experiments: experimentService });
   const binaryFiles = createBinaryFileOwner({ kernel: kernelClient, runtime: agentRuntime, resolveLiveSource: liveSources.validate });
   const browserResources = new BrowserResources();
-  if (options.browser) browserResources.register(options.browser, 'Varin Browser', 'This Host', { dispose: false, source: 'embedded' });
+  if (options.browser) browserResources.register(options.browser, 'Varin Browser', 'This Host',
+    { dispose: false, source: 'embedded', device: { kind: 'service' } });
   const browserSettings = createBrowserSettings({ resources: browserResources, read: readSettingsFromDisk,
     update: change => updateSettingsOnDisk(current => change(current) as typeof current),
     environment: { endpoint: process.env.VARIN_BROWSER_CDP_ENDPOINT, scratchDirectory: process.env.VARIN_BROWSER_CDP_SCRATCH_DIRECTORY } });

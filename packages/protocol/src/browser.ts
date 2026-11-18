@@ -11,6 +11,8 @@ export interface BrowserResource extends BrowserProviderStatus {
   label: string;
   deviceName: string;
   source?: 'embedded' | 'cdp' | 'connector' | 'desktop';
+  /** Physical device of the embedded browser, relative to the service serving this catalog. */
+  device?: { kind: 'service' } | { kind: 'managed_host'; connectionId: string };
 }
 
 /** Connection settings belong to the Host that reaches the browser, not the UI device. */
