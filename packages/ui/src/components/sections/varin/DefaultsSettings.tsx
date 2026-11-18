@@ -1,4 +1,5 @@
 import React from 'react';
+import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { RetrySettings } from './RetrySettings';
 import { ExternalAgentDefault } from '@/components/sections/external-agents/ExternalAgentsPage';
 import { toast } from '@/components/ui';
@@ -16,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-export const DefaultsSettings: React.FC = () => {
+export const DefaultsSettings: React.FC<{ modelsOnly?: boolean }> = ({ modelsOnly = false }) => {
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const api = React.useMemo(() => createModelConnectionsHttpAPI(host), [host]);
@@ -34,6 +35,9 @@ export const DefaultsSettings: React.FC = () => {
     catch (failure) { if (request === sequence.current) setError(failure instanceof Error ? failure.message : String(failure)); }
   }, [api]);
   React.useEffect(() => { setSnapshot(undefined); setSaving(false); void reload(); return () => { sequence.current += 1; }; }, [reload]);
+  React.useEffect(() => subscribeVarinEvents(event => {
+    if (event.type === 'stream-ready' || event.type === 'settings-changed' && event.owner === 'agent-settings') void reload();
+  }), [reload]);
   const settings = snapshot?.global ?? {};
   const channels = useModelCatalogStore(state => state.channels);
   const selectedModel = channels.find(channel => channel.id === settings.defaultProvider)?.models.find(model => model.id === settings.defaultModel);
@@ -59,10 +63,10 @@ export const DefaultsSettings: React.FC = () => {
   const utilityDefault = !utility.modelId && utilityLevels?.includes(defaultThinking) ? defaultThinking : utilityLevels?.[0];
   return <>
   <SettingsSection title={t('settings.varin.defaults.title')} description={t('settings.defaults.globalHint')} divider={false} contentClassName="divide-y divide-border/50">
-    <ExternalAgentDefault />
+    {!modelsOnly && <ExternalAgentDefault />}
     {!snapshot && !error && <p role="status" className="py-3 typography-meta text-muted-foreground">{t('settings.defaults.loading')}</p>}
     {error && <p role="alert" className="text-destructive text-sm">{error} <Button variant="ghost" onClick={() => void reload()}>{t('assistant.reload')}</Button></p>}
-    <SettingsFieldRow label={t('settings.varin.agents.detail.model')}><ModelSelector providerId={string(settings.defaultProvider)} modelId={string(settings.defaultModel)} disabled={!snapshot || saving}
+    <SettingsFieldRow settingsItem="roles.default" label={t('settings.varin.agents.detail.model')}><ModelSelector providerId={string(settings.defaultProvider)} modelId={string(settings.defaultModel)} disabled={!snapshot || saving}
       onChange={async (providerId, modelId) => { await save(providerId && modelId ? { defaultProvider: providerId, defaultModel: modelId } : {}, [...(providerId && modelId ? ['defaultThinkingLevel'] : ['defaultProvider', 'defaultModel', 'defaultThinkingLevel']), ...(!utility.modelId ? ['utilityThinkingLevel'] : [])]); }} /></SettingsFieldRow>
     <SettingsFieldRow label={t('settings.varin.agents.detail.thinking')}><Select value={string(settings.defaultThinkingLevel) || 'inherit'} disabled={!snapshot || saving} onValueChange={value => void save(value !== 'inherit' ? { defaultThinkingLevel: value } : {}, value !== 'inherit' ? [] : ['defaultThinkingLevel'])}>
       <SelectTrigger className="w-48"><SelectValue /></SelectTrigger><SelectContent>
@@ -96,8 +100,8 @@ export const DefaultsSettings: React.FC = () => {
     </SettingsFieldRow>
     <SettingsPageLink page="projects" description={t('settings.defaults.projectLinkHint')} onNavigate={() => { const id = useProjectsStore.getState().activeProjectId; if (id) useUIStore.getState().setSettingsProjectsSelectedId(id); }}>{t('settings.page.projects.title')}</SettingsPageLink>
   </SettingsSection>
-  {snapshot && <RetrySettings key={host} value={snapshot.global.retry} disabled={saving} api={api} onSave={save} />}
-  <SettingsSection title={t('settings.defaults.clientPreferences')}>
+  {!modelsOnly && snapshot && <RetrySettings key={host} value={snapshot.global.retry} disabled={saving} api={api} onSave={save} />}
+  {!modelsOnly && <SettingsSection title={t('settings.defaults.clientPreferences')}>
     <SettingsCheckboxRow checked={showDeletionDialog} onChange={setShowDeletionDialog} label={t('thread.settings.confirmDelete')} />
-  </SettingsSection></>;
+  </SettingsSection>}</>;
 };

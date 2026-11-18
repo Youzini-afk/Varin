@@ -194,7 +194,6 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   const isMultiRunLauncherOpen = useUIStore((state) => state.isMultiRunLauncherOpen);
   const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
   const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
-  const [settingsWindowMounted, setSettingsWindowMounted] = React.useState(isSettingsDialogOpen);
   const [directoryDialogOpen, setDirectoryDialogOpen] = React.useState(false);
   const [sessionPickerOpen, setSessionPickerOpen] = React.useState(false);
   const [searchDraftByDirectory, setSearchDraftByDirectory] = React.useState<Record<string, IdeSearchDraft>>({});
@@ -273,9 +272,6 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
     });
   }, [searchDirectoryKey]);
 
-  React.useEffect(() => {
-    if (isSettingsDialogOpen) setSettingsWindowMounted(true);
-  }, [isSettingsDialogOpen]);
 
   React.useEffect(() => workspaceEvents.onDirectoryRequest(() => {
     setDirectoryDialogOpen(true);
@@ -582,7 +578,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
             <Icon name="layout-column" className="size-3.5" />{t(readingFocus ? 'workbench.ide.restoreLayout' : 'workbench.ide.columns')}
           </button>
         </nav> : null}
-        <div ref={mainAreaRef} className="ide-workspace-row flex min-h-0 flex-1 overflow-hidden">
+        <div style={isSettingsDialogOpen ? { display: 'none' } : undefined} inert={isSettingsDialogOpen} ref={mainAreaRef} className="ide-workspace-row flex min-h-0 flex-1 overflow-hidden">
           {layout.activityVisible ? (
           <nav className="ide-activity flex w-11 shrink-0 flex-col items-center gap-1 py-2" aria-label={t('workbench.ide.title')}>
             <WorkbenchReplacement
@@ -849,7 +845,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
         </div>
 
         {layout.statusVisible ? (
-        <footer className="ide-statusbar flex h-7 shrink-0 items-center gap-3 px-3 typography-micro text-muted-foreground">
+        <footer style={isSettingsDialogOpen ? { display: 'none' } : undefined} className="ide-statusbar flex h-7 shrink-0 items-center gap-3 px-3 typography-micro text-muted-foreground">
           <WorkbenchReplacement
             target={WORKBENCH_REPLACEMENT_TARGETS.status}
             fallback={(
@@ -881,14 +877,13 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
         </footer>
         ) : null}
 
-        {settingsWindowMounted ? (
+        {isSettingsDialogOpen ? (
           <WorkbenchReplacement
             target={WORKBENCH_REPLACEMENT_TARGETS.settings}
             fallback={(
               <React.Suspense fallback={null}>
                 <SettingsWindow
-                  open={isSettingsDialogOpen}
-                  onOpenChange={setSettingsDialogOpen}
+                  onClose={() => setSettingsDialogOpen(false)}
                 />
               </React.Suspense>
             )}

@@ -212,30 +212,6 @@
   from { opacity: 0; translate: 0 2px; }
 }
 
-/* Settings settles in place, without travelling to or from its launcher. CSS
-   transitions reverse from the current frame when opening interrupts a close. */
-.motion-settings-window,
-.motion-settings-backdrop {
-  opacity: 1;
-  transition: opacity 220ms cubic-bezier(.2, .65, .25, 1);
-}
-.motion-settings-window {
-  scale: 1;
-  transform-origin: center;
-  transition-property: opacity, scale, filter;
-}
-.motion-settings-window:is([data-starting-style], [data-ending-style]),
-.motion-settings-backdrop:is([data-starting-style], [data-ending-style]) {
-  opacity: 0;
-}
-.motion-settings-window:is([data-starting-style], [data-ending-style]) {
-  scale: .99;
-}
-.motion-settings-window[data-ending-style],
-.motion-settings-backdrop[data-ending-style] {
-  transition-duration: 160ms;
-  transition-timing-function: cubic-bezier(.4, 0, .6, 1);
-}
 /* The settings module is lazy. Its first Dialog.Root mounts already open, so
    Base UI has no starting-style phase. Supply the first painted frame as well. */
 @starting-style {

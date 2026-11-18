@@ -6,7 +6,7 @@ import { useConfigurationModels } from './ConfigurationModels';
 import { HarnessModelField } from './HarnessModelField';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 
-function AssistanceModel({ harness, update, purpose, slot }: HarnessSettingsPageProps & {
+export function AssistanceModel({ harness, update, purpose, slot }: HarnessSettingsPageProps & {
   purpose: 'web-selection' | 'web-reading'; slot: 'webSelection' | 'reader';
 }) {
   const { t } = useI18n();

@@ -1,3 +1,4 @@
+import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import React from 'react';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
@@ -143,6 +144,13 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
+      if (isSettingsDialogOpen) {
+        // The mounted surface handles Escape after its search field, menus and dialogs.
+        if (!isSettingsMounted) { e.preventDefault(); requestSettingsNavigation(() => setSettingsDialogOpen(false)); }
+        resetAbortPriming();
+        return;
+      }
+
       if (isPromptNavigatorPanelOpen) {
         e.preventDefault();
         setPromptNavigatorPanelOpen(false);
@@ -150,12 +158,6 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
-      if (isSettingsDialogOpen) {
-        e.preventDefault();
-        setSettingsDialogOpen(false);
-        resetAbortPriming();
-        return;
-      }
 
       if (isSettingsMounted) {
         resetAbortPriming();
@@ -319,7 +321,8 @@ export const useKeyboardShortcuts = () => {
       if (eventMatchesShortcut(e, combo('open_settings'))) {
         e.preventDefault();
         const { isSettingsDialogOpen } = useUIStore.getState();
-        setSettingsDialogOpen(!isSettingsDialogOpen);
+        if (isSettingsDialogOpen) requestSettingsNavigation(() => setSettingsDialogOpen(false));
+        else setSettingsDialogOpen(true);
         return;
       }
 

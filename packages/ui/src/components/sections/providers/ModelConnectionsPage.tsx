@@ -1,3 +1,4 @@
+import { HostSettingsScope } from '../shared/SettingsScope';
 import React from 'react';
 import { applyModelDirectoryDefaults, createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, registerRuntimeEndpointSwitchBlocker, type AgentSettingsSnapshot, type ChannelModel, type ModelChannel, type ModelConnectionOptions, type DiscoveredModel, type ConnectionAuthentication, type AuthorizationState, type ModelConnectionTestResult } from '@varin/application-client';
 import { SettingsPageLayout } from '../shared/SettingsPageLayout';
@@ -231,19 +232,31 @@ function ModelConnectionsEditor({ host }: { host: number }) {
     const id = savedChannel.id;
     void enqueue(current => api.remove(id, current.revision)).then(ok => { if (ok && alive.current) close(); });
   };
-  const usages: Record<string, string[]> = {};
-  const addUsage = (provider: unknown, model: unknown, label: string) => { if (provider === channel?.id && typeof model === 'string') (usages[model] ??= []).push(label); };
+  const usages: Record<string, {label: string; page: string; item: string}[]> = Object.create(null);
+  const addUsage = (binding: {providerId?: string; modelId?: string} | null | undefined, label: string, item: string, page = 'model-roles') => {
+    if (binding?.providerId && binding.providerId === channel?.id && binding.modelId) (usages[binding.modelId] ??= []).push({ label, page, item });
+  };
   const global = settings?.global;
   if (global) {
-    addUsage(global.defaultProvider, global.defaultModel, t('settings.models.usageDefault'));
-    const utility = global.utilityModel as { providerId?: string; modelId?: string } | undefined;
-    addUsage(utility?.providerId, utility?.modelId, t('settings.models.usageUtility'));
-    const harness = global.harness as { models?: Record<string, { providerId?: string; modelId?: string }>; delegationModelSelection?: { model?: { providerId?: string; modelId?: string } } } | undefined;
+    addUsage({providerId: typeof global.defaultProvider === 'string' ? global.defaultProvider : undefined, modelId: typeof global.defaultModel === 'string' ? global.defaultModel : undefined}, t('settings.models.usageDefault'), 'roles.default');
+    type Binding = {providerId?: string; modelId?: string};
+    addUsage(global.utilityModel as Binding | undefined, t('settings.models.usageUtility'), 'sessions.small-model');
+    const harness = global.harness as { models?: Record<string, Binding>; images?: {generation?: Binding; editing?: Binding}; embedding?: Binding; rerank?: Binding; delegationModelSelection?: {model?: Binding}; fastDecision?: {default?: Binding; purposes?: Record<string, Binding | 'off'>} } | undefined;
+    const central = ['contextCompaction', 'agentPlanning', 'explore', 'nextStep', 'reader', 'webSelection', 'permissionJudge'];
     for (const [slot, binding] of Object.entries(harness?.models ?? {})) {
-      const key = `settings.harness.role.${slot}`;
-      addUsage(binding.providerId, binding.modelId, t(key as Parameters<typeof t>[0]));
+      addUsage(binding, t(`settings.harness.role.${slot}` as Parameters<typeof t>[0]),
+        slot === 'reader' || slot === 'webSelection' ? 'roles.web' : 'harness.models.' + slot, central.includes(slot) ? 'model-roles' : 'agents');
     }
-    addUsage(harness?.delegationModelSelection?.model?.providerId, harness?.delegationModelSelection?.model?.modelId, t('settings.models.usageDelegation'));
+    addUsage(harness?.delegationModelSelection?.model, t('settings.models.usageDelegation'), 'harness.delegationModelSelection');
+    addUsage(harness?.embedding, t('settings.page.harness.section.embedding'), 'harness.embedding');
+    addUsage(harness?.rerank, t('settings.page.harness.section.rerank'), 'harness.rerank');
+    for (const purpose of ['generation','editing'] as const) addUsage(harness?.images?.[purpose], t(`settings.harness.images.${purpose}`), 'harness.images');
+    addUsage(harness?.fastDecision?.default, t('settings.page.harness.section.fastDecision'), 'harness.fastDecision');
+    for (const [purpose, binding] of Object.entries(harness?.fastDecision?.purposes ?? {})) {
+      if (binding === 'off') continue;
+      const web = purpose === 'web-reading' || purpose === 'web-selection';
+      addUsage(binding, web ? t(purpose === 'web-reading' ? 'settings.page.harness.web.assistance.reading' : 'settings.page.harness.web.assistance.selection') : t('settings.page.harness.section.fastDecision') + ' · ' + purpose, web ? 'roles.web' : 'harness.fastDecision');
+    }
   }
   const selectedModel = models.find(model => model.id === selectedModelId);
   const connectionValid = !invalidFields.size && Boolean(draft?.name.trim()) && authorization?.status !== 'pending';
@@ -251,7 +264,7 @@ function ModelConnectionsEditor({ host }: { host: number }) {
     setSecret={value => { invalidateConnection(); setSecret(value); }} cancelAuthorization={cancelAuthorization} onSignIn={signIn}
     onSignOut={() => { void run(async () => { if (preview.authentication.kind === 'credential') await api.removeCredential(preview.authentication.reference); if (alive.current) edit({ authentication: { kind: 'credential', reference: '' } }); }); }}
     onAuthorizationReply={value => api.replyAuthorization(authorization!.id, value)} onAuthorizationCancel={async () => { await api.cancelAuthorization(authorization!.id); if (alive.current) { activeAuthorization.current = undefined; setAuthorization(null); } }} />;
-  return <SettingsPageLayout title={t('settings.models.title')} description={t('settings.models.description')} className="max-w-[1320px] @container/model-connections">
+  return <SettingsPageLayout scope={<HostSettingsScope />} title={t('settings.models.title')} description={t('settings.models.description')} className="max-w-[1320px] @container/model-connections">
     {error ? <div role="alert" className="mb-4 flex items-center gap-3 typography-meta text-destructive">{error}<Button variant="ghost" size="sm" onClick={() => { void refresh(); }}>{t('settings.harness.retry')}</Button></div> : null}
     {!snapshot ? <p role="status" className="py-6 typography-meta text-muted-foreground">{t('common.loading')}</p> : <div className="mt-6 min-w-0 @3xl/model-connections:grid @3xl/model-connections:grid-cols-[240px_minmax(0,1fr)] @3xl/model-connections:gap-7">
       <aside className={cn('min-w-0 self-start @3xl/model-connections:sticky @3xl/model-connections:top-0 @3xl/model-connections:border-r @3xl/model-connections:border-border/60 @3xl/model-connections:pr-5', showDetail ? 'hidden @3xl/model-connections:block' : 'block')}>
@@ -298,7 +311,7 @@ function ModelConnectionsEditor({ host }: { host: number }) {
         {!preview && step === null ? <div className="py-16 text-center"><Icon name="cloud" className="mx-auto mb-3 size-7 text-muted-foreground" /><p className="typography-meta text-muted-foreground">{t('settings.models.emptyTitle')}</p><Button variant="outline" className="mt-4" onClick={begin}>{t('settings.models.addChannel')}</Button></div> : null}
       </div>
     </div>}
-    <div className="mt-8 border-t border-border/60 pt-3"><SettingsPageLink page="sessions">{t('settings.page.sessions.title')}</SettingsPageLink><SettingsPageLink page="agents">{t('settings.experience.agentModels')}</SettingsPageLink></div>
+    <div className="mt-8 border-t border-border/60 pt-3"><SettingsPageLink page="model-roles">{t('settings.roles.title')}</SettingsPageLink><SettingsPageLink page="sessions">{t('settings.page.sessions.title')}</SettingsPageLink><SettingsPageLink page="agents">{t('settings.experience.agentModels')}</SettingsPageLink></div>
     {selectedModel && type && savedChannel ? <ModelConfigurationDrawer key={`${savedChannel.id}:${selectedModel.id}`} reset={reset} open={drawerOpen} onOpenChange={setDrawerOpen} model={selectedModel} type={type} defaults={type.catalog?.find(model => model.id === selectedModel.id)}
       inheritedImageApi={typeof savedChannel.parameters.imageApi === 'string' ? savedChannel.parameters.imageApi : undefined} inheritedDecisionApi={typeof savedChannel.parameters.decisionApi === 'string' ? savedChannel.parameters.decisionApi : undefined} inheritedPaths={savedChannel.connection?.paths}
       onChange={patch => { void mutateModels(models => models.map(model => model.id === selectedModel.id ? editModel(model, patch, type.catalog?.find(value => value.id === model.id)) : model)); }}

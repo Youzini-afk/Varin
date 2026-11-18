@@ -10,7 +10,6 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { LocalSttModelPicker } from './LocalSttModelPicker';
-import { speechLanguageLabel } from '@/lib/voice/speech-language';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NumberInput } from '@/components/ui/number-input';
@@ -28,7 +27,7 @@ import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint'
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { Icon } from '@/components/icon/Icon';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged, runtimeFetch, type LocalSttModelStatus } from '@varin/application-client';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged, runtimeFetch } from '@varin/application-client';
 import { useI18n } from '@/lib/i18n';
 import { useLocalTTS } from '@/hooks/useLocalTTS';
 import { disposePreviewAudio } from './voicePreviewAudio';
@@ -199,7 +198,7 @@ const OPENAI_VOICE_OPTIONS = [
 ];
 
 export const VoiceSettings: React.FC = () => {
-    const { t, locale } = useI18n();
+    const { t } = useI18n();
     const { isMobile } = useDeviceInfo();
     const voiceProvider = usePreferencesStore((state) => state.voiceProvider);
     const setVoiceProvider = usePreferencesStore((state) => state.setVoiceProvider);
@@ -256,15 +255,6 @@ export const VoiceSettings: React.FC = () => {
     const sttLocalModel = usePreferencesStore((state) => state.sttLocalModel);
     const setSttLocalModel = usePreferencesStore((state) => state.setSttLocalModel);
     const sttLanguage = usePreferencesStore((state) => state.sttLanguage);
-    const [localModelInfo, setLocalModelInfo] = useState<LocalSttModelStatus>();
-    const languageNames = useMemo(() => new Intl.DisplayNames([locale], { type: 'language' }), [locale]);
-    const localLanguages = useMemo(() => [...(localModelInfo?.languages ?? [])].sort((left, right) =>
-        speechLanguageLabel(languageNames, left).localeCompare(speechLanguageLabel(languageNames, right), locale)),
-    [localModelInfo, languageNames, locale]);
-    let selectedLanguage = sttLanguage.trim().toLowerCase().split('-')[0] || 'auto';
-    if (selectedLanguage === 'fil' && localLanguages.includes('tl')) selectedLanguage = 'tl';
-    if (selectedLanguage === 'tl' && localLanguages.includes('fil')) selectedLanguage = 'fil';
-    if (selectedLanguage === 'jv' && localLanguages.includes('jw')) selectedLanguage = 'jw';
     const setSttLanguage = usePreferencesStore((state) => state.setSttLanguage);
     const sttSilenceThresholdDb = usePreferencesStore((state) => state.sttSilenceThresholdDb);
     const setSttSilenceThresholdDb = usePreferencesStore((state) => state.setSttSilenceThresholdDb);
@@ -304,10 +294,11 @@ export const VoiceSettings: React.FC = () => {
         void updateDesktopSettings({ sttModel: model });
     }, [setSttModel]);
 
-    const persistSttLocalModel = useCallback((model: string) => {
+    const persistSttLocalModel = useCallback((model: string, language: string) => {
         setSttLocalModel(model);
-        void updateDesktopSettings({ sttLocalModel: model });
-    }, [setSttLocalModel]);
+        setSttLanguage(language);
+        void updateDesktopSettings({ sttLocalModel: model, sttLanguage: language });
+    }, [setSttLocalModel, setSttLanguage]);
 
     const persistSttLanguage = useCallback((lang: string) => {
         setSttLanguage(lang);
@@ -823,7 +814,7 @@ export const VoiceSettings: React.FC = () => {
                             label={t('settings.voice.page.field.provider')}
                             info={(
                                 <ul className="space-y-1">
-                                    <li><strong>{t('settings.voice.page.provider.local')}</strong> {t('settings.voice.page.tooltip.sttLocal')}</li>
+                                    <li><strong>{t('settings.voice.hostRecognition')}</strong> {t('settings.voice.page.tooltip.sttLocal')}</li>
                                     <li><strong>{t('settings.voice.page.provider.server')}</strong> {t('settings.voice.page.tooltip.sttServer')}</li>
                                 </ul>
                             )}
@@ -834,7 +825,7 @@ export const VoiceSettings: React.FC = () => {
                                 aria-label={t('settings.voice.page.field.provider')}
                                 className="w-full gap-1.5 sm:gap-2"
                                 options={[
-                                    { value: 'local', label: t('settings.voice.page.provider.local') },
+                                    { value: 'local', label: t('settings.voice.hostRecognition') },
                                     { value: 'openai-compatible', label: t('settings.voice.page.provider.server') },
                                 ]}
                             />
@@ -843,7 +834,7 @@ export const VoiceSettings: React.FC = () => {
                         {sttProvider === 'local' && (
                             <div className="space-y-1.5">
                                 <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.model')}</span>
-                                <LocalSttModelPicker selectedModelId={sttLocalModel} onSelect={persistSttLocalModel} onSelectionInfo={setLocalModelInfo} />
+                                <LocalSttModelPicker selectedModelId={sttLocalModel} onSelect={persistSttLocalModel} language={sttLanguage} onLanguageChange={persistSttLanguage} />
                             </div>
                         )}
 
@@ -863,27 +854,14 @@ export const VoiceSettings: React.FC = () => {
                                 <span className="typography-meta text-muted-foreground">{t('settings.voice.page.field.millisecondsUnit')}</span>
                             </SettingsFieldRow>
                         </>}
-                        <SettingsFieldRow label={t('settings.voice.page.field.language')}>
-                            {sttProvider === 'local' && localModelInfo?.supportsLanguageSelection === false
-                                ? <span className="typography-ui-label text-muted-foreground">{t('settings.voice.page.stt.autoLanguage')}</span>
-                                : sttProvider === 'local' ? <Select value={selectedLanguage} onValueChange={(value) => persistSttLanguage(value === 'auto' ? '' : value)}>
-                                    <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('settings.voice.page.field.language')}>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="auto">{t('settings.voice.page.stt.autoLanguage')}</SelectItem>
-                                        {selectedLanguage !== 'auto' && !localLanguages.includes(selectedLanguage) ? <SelectItem value={selectedLanguage} disabled>
-                                            {speechLanguageLabel(languageNames, selectedLanguage)}
-                                        </SelectItem> : null}
-                                        {localLanguages.map(code => <SelectItem key={code} value={code}>{speechLanguageLabel(languageNames, code)}</SelectItem>)}
-                                    </SelectContent>
-                                </Select> : <div className="flex items-center gap-2">
+                        {sttProvider !== 'local' && <SettingsFieldRow label={t('settings.voice.page.field.language')}>
+                            <div className="flex items-center gap-2">
                                     <input type="text" value={sttLanguage} onChange={(event) => persistSttLanguage(event.target.value)} placeholder="auto"
                                         aria-label={t('settings.voice.page.field.language')}
                                         className="h-7 w-28 rounded-lg border border-input bg-transparent px-2 typography-ui-label focus:outline-none focus:ring-1 focus:ring-primary/50" />
                                     <SettingsInfoHint>{t('settings.voice.page.field.sttLanguageHint')}</SettingsInfoHint>
-                                </div>}
-                        </SettingsFieldRow>
+                                </div>
+                        </SettingsFieldRow>}
                     </>
                 )}
             </SettingsSection>

@@ -11,12 +11,18 @@ import { agentProfileLabels } from './agent-profile-presentation';
 import { AgentProfileEditor } from './AgentProfileEditor';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { useAgentProfiles } from './useAgentProfiles';
-import { cancelAgentProfileCreation, removeAgentProfile, saveAgentProfile, selectDelegationModelSelection } from './agent-profiles-store';
+import { cancelAgentProfileCreation, removeAgentProfile, saveAgentProfile, selectAgentProfile, setAgentProfilesQuery, selectDelegationModelSelection } from './agent-profiles-store';
 
 export function AgentsPage() {
   const profiles = useAgentProfiles();
   const target = useSettingsSearchTarget();
   React.useEffect(() => { if (target === 'harness.delegationModelSelection') selectDelegationModelSelection(); }, [target, profiles.host]);
+  React.useEffect(() => {
+    if (!target?.startsWith('harness.models.')) return;
+    const id = 'varin:builtin:' + target.slice('harness.models.'.length);
+    if (!profiles.snapshot?.profiles.some(profile => profile.id === id) || profiles.state.selectedId === id) return;
+    setAgentProfilesQuery(''); selectAgentProfile(id);
+  }, [target, profiles.snapshot, profiles.state.selectedId]);
   if (profiles.state.view === 'delegation-model-selection') return <DelegationModelSelectionPage key={profiles.host} />;
   return <AgentProfilesDetails key={profiles.host} {...profiles} />;
 }
@@ -33,6 +39,7 @@ function AgentProfilesDetails({ api, host, state, snapshot, refresh }: ReturnTyp
         {profile?.kind === 'custom' && snapshot && <Button variant="ghost" size="icon" disabled={state.saving} aria-label={t('settings.common.actions.delete')} onClick={() => setDeleting({ id: profile.id, name: profile.effective.name, revision: snapshot.revision })}><Icon name="delete-bin" className="size-4" /></Button>}</div>}>
       {!api && <p role="alert" className="mb-4 typography-meta text-destructive">{t('settings.agents.apiUnavailable')}</p>}
       {state.error && <p role="alert" className="mb-4 typography-meta text-destructive">{state.error}</p>}
+      {profile?.kind === 'builtin' ? <span data-settings-item={'harness.models.' + profile.id.replace('varin:builtin:', '')} /> : null}
       {api && snapshot && (profile || state.creating) ? <AgentProfileEditor key={profile?.id ?? 'new'} profile={profile} snapshot={snapshot} host={host} cwd={cwd} busy={state.saving}
         onCancel={state.creating ? cancelAgentProfileCreation : undefined} onSave={input => saveAgentProfile(api, input)} />
         : <p role="status" className="typography-meta text-muted-foreground">{state.loading ? t('common.loading') : t('settings.agents.page.empty.title')}</p>}

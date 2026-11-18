@@ -2,6 +2,11 @@ import { settingsDict as englishSettingsDict } from './en.js';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "settings.view.nav.group.models": "モデル",
+  "settings.view.nav.group.capabilities": "機能",
+  "settings.view.nav.group.data": "データ",
+  "settings.shell.return": "ワークスペースに戻る",
+  "settings.roles.title": "モデルの役割",
   "settings.models.modelDescription": "紹介",
   "settings.models.modelDescriptionHint": "モデルの特徴、使用経験、チャネルの好みをここに記録します。カタログ更新で編集内容が上書きされることはありません。",
   "settings.delegationModelSelection.title": "委任モデルの選択",

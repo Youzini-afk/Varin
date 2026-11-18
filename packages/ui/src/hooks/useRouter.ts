@@ -5,6 +5,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
 import type { RouteState, AppRouteState } from '@/lib/router';
 import type { MainTab } from '@/stores/useUIStore';
+import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { openThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
@@ -214,11 +215,6 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
     let prevDiffFile: string | null = useUIStore.getState().pendingDiffFile;
 
     const unsubscribe = useUIStore.subscribe((state) => {
-      // Skip if we're currently applying a route
-      if (isApplyingRouteRef.current) {
-        return;
-      }
-
       const tabChanged = state.activeMainTab !== prevTab;
       const settingsOpenChanged = state.isSettingsDialogOpen !== prevSettingsOpen;
       const settingsPathChanged = state.settingsPage !== prevSettingsPath;
@@ -231,8 +227,11 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
       prevDiffFile = state.pendingDiffFile;
 
       // Only sync if something relevant changed
-      if (tabChanged || settingsOpenChanged || settingsPathChanged || diffFileChanged) {
-        syncURLFromState();
+      if (!isApplyingRouteRef.current && (tabChanged || settingsOpenChanged || settingsPathChanged || diffFileChanged)) {
+        // One history entry per visit; paging/searching is not another workspace.
+        // Closing replaces the visit rather than leaving stale settings pages behind.
+        syncURLFromState({ replace: settingsPathChanged && !settingsOpenChanged && state.isSettingsDialogOpen
+          || settingsOpenChanged && !state.isSettingsDialogOpen });
       }
     });
 
@@ -245,25 +244,23 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
       return;
     }
 
+    let popSequence = 0;
     const handlePopState = () => {
-      // Parse the new URL and apply it
+      const sequence = ++popSequence;
       const route = parseRoute();
-
-      // Check if this is a route with any params, or if we should restore defaults
-      if (hasRouteParams()) {
-        void applyRoute(route);
-      } else {
-        // URL has no route params - this might be a "back to home" navigation
-        // Close settings if open, keep current session
-        const uiState = useUIStore.getState();
-        if (uiState.isSettingsDialogOpen) {
-          setSettingsDialogOpen(false);
-        }
-        // Reset to chat tab if not already there
-        if (uiState.activeMainTab !== 'chat') {
-          setActiveMainTab('chat');
-        }
-      }
+      const hasParams = hasRouteParams();
+      const proceed = () => {
+        if (sequence !== popSequence) return;
+        if (hasParams) { void applyRoute(route); return; }
+        const ui = useUIStore.getState();
+        if (ui.isSettingsDialogOpen) { setSettingsDialogOpen(false); return; }
+        if (ui.activeMainTab !== 'chat') setActiveMainTab('chat');
+      };
+      if (!useUIStore.getState().isSettingsDialogOpen) { proceed(); return; }
+      // The browser moved already. Keeping a draft must also put its URL back.
+      requestSettingsNavigation(proceed, () => {
+        if (sequence === popSequence) updateBrowserURL(getCurrentAppState());
+      });
     };
 
     window.addEventListener('popstate', handlePopState);
@@ -271,5 +268,5 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [applyRoute, enabled, isEmbeddedChat, setActiveMainTab, setSettingsDialogOpen]);
+  }, [applyRoute, enabled, getCurrentAppState, isEmbeddedChat, setActiveMainTab, setSettingsDialogOpen]);
 }

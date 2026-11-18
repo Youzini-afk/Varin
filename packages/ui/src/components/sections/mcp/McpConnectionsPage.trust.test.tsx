@@ -170,3 +170,15 @@ it('opens the requested connection and starts its sign-in through the settings o
   expect(fixture.api.authorization).toHaveBeenCalledWith('view:1', 'auth:notion', expect.any(AbortSignal));
   expect(useMcpSettingsTarget.getState().target).toBeUndefined();
 });
+
+it('groups effective servers by the exact configuration source without changing a connection or revealing other files', async () => {
+  fixture.multisource = true;
+  servers = [server({ name: 'global-tool' }), server({ name: 'project-tool', source: '/project/.mcp.json', override: '/user/mcp.json' })];
+  await act(async () => root.render(<McpConnectionsPage />));
+  expect(container.querySelector('[aria-label="settings.mcp.scope.global"]')?.textContent).toContain('global-tool');
+  expect(container.querySelector('[aria-label="settings.mcp.scope.project"]')?.textContent).toContain('project-tool');
+  expect(container.querySelector('[aria-label="settings.mcp.scope.global"]')?.textContent).not.toContain('project-tool');
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="settings.mcp.scope.project"] button')!.click());
+  expect(fixture.api.readDocument).toHaveBeenLastCalledWith('view:1','/project/.mcp.json',expect.any(AbortSignal));
+  expect(fixture.api.command).not.toHaveBeenCalled(); expect(fixture.api.signIn).not.toHaveBeenCalled();
+});

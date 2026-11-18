@@ -1,4 +1,9 @@
 export const settingsDict = {
+  "settings.view.nav.group.models": "모델",
+  "settings.view.nav.group.capabilities": "기능",
+  "settings.view.nav.group.data": "데이터",
+  "settings.shell.return": "작업 공간으로 돌아가기",
+  "settings.roles.title": "모델 역할",
   'settings.varin.visual.field.themeTransfer': 'Import a theme',
   'settings.varin.visual.field.copyTheme': 'Copy current theme',
   'settings.varin.visual.field.pasteTheme': 'Paste theme JSON here',
