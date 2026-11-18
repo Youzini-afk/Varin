@@ -49,6 +49,7 @@
 
 ## 持续演进的设计
 
+- [Agent 自主跨工作区与分角色发行](design/multi-workspace-and-distribution.md)讨论单轮跨设备调用、分支默认位置、桌面轻客户端和原生／Docker 资源节点。
 - [自建外部访问与节点接入](design/self-hosted-external-access.md)：主体已实施；FRP/已有反代适配、部署配套、入口启停、节点连接与持久设备授权。当前用法见[反代指南](ops/REVERSE_PROXY.md)，完整 VPS 链路仍待实测。
 - [会话协作与外部执行者](design/conversation-collaboration-and-executors.md)：设计提案；原生主任务与 Bot 跨会话协作、外部程序发现与无预设派发，以及 Codex／Claude Code／Pi／ACP 的能力、监控和生命周期完善。对外 MCP／CLI／Skill 协作桥接暂缓。
 - [聊天定点引用与可拖动输入标记](design/chat-quoting-and-draggable-markers.md)：实施中；按选区／正文块或具体对象引用，在输入框用可拖动的引用与图片标记安排位置，统一撤销、附件交付和历史定位，内部来源信息不再拼入模型正文。
