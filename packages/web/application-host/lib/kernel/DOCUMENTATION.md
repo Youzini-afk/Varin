@@ -8,6 +8,22 @@ Read [architecture](../../../../../docs/architecture.md), [Agent runtime](../../
 and [resource contracts](../../../../../docs/resources.md) for cross-cutting behavior. This document maps
 those responsibilities to Host entry points.
 
+## Resource-only assembly
+
+The full Host uses [host-resource-owners.ts](host-resource-owners.ts) for the local Storage, file and recovery
+adapters and the Documents-admitted process/Compute owners. [managed-resource-target.ts](../harness/managed-resource-target.ts)
+assembles inbound capacity, original job reconciliation and authenticated managed routes. It takes the Host identity from
+the authenticated kernel handshake; mounting requires the existing pairing middleware, not a new bearer or implicit local
+principal. A new kernel epoch discards the stale service context, then reads the original receipts. Detaching the
+observer does not report a process stopped or replay a job.
+
+A trusted launcher can start the paired kernel with `role: "resources"`. The role is negotiated before opening Storage.
+The kernel keeps the existing exclusive storage-root lock and persistent resource identity but starts no Agent worker
+and opens no conversation Catalog. Agent and model requests fail; the full installation still defaults to the Agent role.
+The profile is private, not an installable daemon: an independent launcher still has to assemble persistent Host identity
+and pairing, Documents root/trust/encoding policy, file recovery, enabled source services, and the host-wide admission
+and shutdown/drain barrier before exposing a listener. There is no standalone node image or Compose target yet.
+
 ## Transport and authority
 
 [kernel-client.ts](kernel-client.ts), [kernel-launch.ts](kernel-launch.ts) and the wire helpers start the real executable, verify packaged

@@ -265,6 +265,7 @@ fn pending_file_worker(method: &str) -> bool {
 }
 
 struct Kernel {
+    resources_only: bool,
     epoch: String,
     host_id: Option<String>,
     host_generation: Option<String>,
@@ -366,6 +367,7 @@ impl Kernel {
     }
     fn new(epoch: String) -> Self {
         Self {
+            resources_only: false,
             epoch,
             host_id: None,
             host_generation: None,
@@ -512,11 +514,20 @@ impl Kernel {
                 .get("capabilities")
                 .and_then(Value::as_array)
                 .ok_or_else(|| KernelError::Protocol("capabilities are required".to_string()))?;
+            // Negotiate the *active* role before opening anything on disk. An older binary
+            // that ignores the command-line flag cannot silently open the Agent Catalog.
+            let mut capabilities = KERNEL_CAPABILITIES.to_vec();
+            if self.resources_only {
+                capabilities.push("resourcesOnly");
+                if !requested_capabilities.iter().any(|cap| cap.as_str() == Some("resourcesOnly")) {
+                    return Err(KernelError::Protocol("resource role was not requested".into()));
+                }
+            }
             for capability in requested_capabilities {
                 let capability = capability
                     .as_str()
                     .ok_or_else(|| KernelError::Protocol("capability is malformed".to_string()))?;
-                if !KERNEL_CAPABILITIES.contains(&capability) {
+                if !capabilities.contains(&capability) {
                     return Err(KernelError::Protocol(format!(
                         "unsupported capability requested: {capability}"
                     )));
@@ -543,7 +554,7 @@ impl Kernel {
             self.collect_obsolete_materialized_views(completions)?;
             return Ok(Some(response_ok(
                 id,
-                json!({"protocolVersion": PROTOCOL_VERSION, "kernelVersion": KERNEL_VERSION, "kernelBuildIdentity": KERNEL_BUILD_IDENTITY, "targetTriple": KERNEL_TARGET, "arch": KERNEL_ARCH, "applicationBuildVersion": build_version, "buildVersion": KERNEL_BUILD_IDENTITY, "kernelEpoch": self.epoch, "requestWindow": KERNEL_REQUEST_WINDOW, "streamCredits": KERNEL_STREAM_CREDITS, "inlineMaxBytes": KERNEL_INLINE_MAX_BYTES, "hostId": host_id, "hostGeneration": host_generation, "storageRoot": canonical_root, "capabilities": KERNEL_CAPABILITIES}),
+                json!({"protocolVersion": PROTOCOL_VERSION, "kernelVersion": KERNEL_VERSION, "kernelBuildIdentity": KERNEL_BUILD_IDENTITY, "targetTriple": KERNEL_TARGET, "arch": KERNEL_ARCH, "applicationBuildVersion": build_version, "buildVersion": KERNEL_BUILD_IDENTITY, "kernelEpoch": self.epoch, "requestWindow": KERNEL_REQUEST_WINDOW, "streamCredits": KERNEL_STREAM_CREDITS, "inlineMaxBytes": KERNEL_INLINE_MAX_BYTES, "hostId": host_id, "hostGeneration": host_generation, "storageRoot": canonical_root, "capabilities": capabilities}),
             )));
         }
         if !self.handshaken {
@@ -560,6 +571,9 @@ impl Kernel {
             })?;
         if request_epoch != self.epoch {
             return Err(KernelError::Authorization("stale kernel epoch".to_string()));
+        }
+        if self.resources_only && (method.starts_with("runtime.") || method.starts_with("model.") || method == "source.handoff.claim") {
+            return Err(KernelError::Operation("Agent service is not running on this resource kernel".into()));
         }
         if method == "kernel.ping" {
             return Ok(Some(response_ok(
@@ -1450,7 +1464,7 @@ impl Kernel {
     }
 }
 
-pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn run(resources_only: bool) -> Result<(), Box<dyn std::error::Error>> {
     let transport = crate::transport::Transport::bootstrap()?;
     let transport_epoch = transport.epoch.clone();
     let (request_tx, request_rx) = mpsc::channel::<WorkerRequest>();
@@ -1497,7 +1511,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             let _ = file_terminal_commands.send(WorkerRequest::FileWriterStopped(
                 terminal.process_id.clone(),
             ));
-            if terminal_commands
+            if !resources_only && terminal_commands
                 .send(crate::agent_runtime::Command::ProcessTerminal(terminal))
                 .is_err()
             {
@@ -1697,7 +1711,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let credit_responses = response_tx.clone();
     let agent_control = crate::agent_runtime::AgentControl::default();
     let source_resources=resources.clone();
-    let agent_worker = crate::agent_runtime::spawn(
+    let agent_worker = (!resources_only).then(|| crate::agent_runtime::spawn(
         agent_rx,
         agent_tx.clone(),
         agent_control.clone(),
@@ -1720,7 +1734,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         move |id, method| {
             release_request_credit(&credit_cancellations, &credit_responses, id, method)
         },
-    );
+    ));
     let worker_agent_control = agent_control.clone();
     let worker_agent_tx = agent_tx.clone();
     let worker_cancellations = cancellations.clone();
@@ -1743,8 +1757,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let capture_completions = request_tx.clone();
     let worker = thread::spawn(move || {
         let mut kernel = Kernel::new(transport_epoch);
+        kernel.resources_only = resources_only;
         kernel.agent_control = worker_agent_control;
-        kernel.model_protocol = Some(worker_model_protocol.clone());
+        if !resources_only { kernel.model_protocol = Some(worker_model_protocol.clone()); }
         kernel.source_resources=Some(source_resources);
         let mut stopping = false;
         macro_rules! respond {
@@ -2473,17 +2488,19 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(|result| result.get("kernelEpoch"))
                     .and_then(Value::as_str)
                 {
-                    let _ = worker_credentials.initialize(epoch);
-                    worker_model_protocol.initialize(epoch);
-                    worker_mcp.initialize(epoch);
-                    worker_language.initialize(epoch);
-                    worker_memory.initialize(epoch);
-                    worker_context.initialize(epoch);
-                    worker_resource.initialize(epoch);
+                    if !resources_only {
+                        let _ = worker_credentials.initialize(epoch);
+                        worker_model_protocol.initialize(epoch);
+                        worker_mcp.initialize(epoch);
+                        worker_language.initialize(epoch);
+                        worker_memory.initialize(epoch);
+                        worker_context.initialize(epoch);
+                        worker_resource.initialize(epoch);
+                        worker_plan.initialize(epoch);
+                        worker_policy.initialize(epoch);
+                        worker_driver.initialize(epoch);
+                    }
                     worker_file_observation.initialize(epoch);
-                    worker_plan.initialize(epoch);
-                    worker_policy.initialize(epoch);
-                    worker_driver.initialize(epoch);
                     worker_source.initialize(epoch);
                     if let Some(storage) = kernel.storage.as_mut() {
                         let output = worker_response_tx.clone();
@@ -2507,7 +2524,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                         storage.set_process_subscriptions(storage_subscriptions.clone());
                     }
                     if let Some(root) = kernel.storage_root.as_ref() {
-                        if worker_agent_tx
+                        if !resources_only && worker_agent_tx
                             .send(crate::agent_runtime::Command::Initialize {
                                 root: root.clone(),
                                 epoch: epoch.to_string(),
@@ -2630,7 +2647,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .clone();
                 // The transport orders inline arrivals and stream offers before body decoding.
                 // Cancellation and input reservation are registered before dispatch in both cases.
-                let input_order = agent_control.reserve_input(&meta, epoch.as_deref(), &cancel)?;
+                let input_order = if resources_only { None } else {
+                    agent_control.reserve_input(&meta, epoch.as_deref(), &cancel)?
+                };
                 let wire_lane = if meta["method"].as_str().is_some_and(|method| KERNEL_CONTROL_RESPONSE_METHODS.contains(&method)) {
                     WireLane::Control
                 } else { WireLane::Data };
@@ -2911,7 +2930,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             continue;
         }
-        if request
+        if !resources_only && request
             .get("method")
             .and_then(Value::as_str)
             .is_some_and(|method| method.starts_with("runtime."))
@@ -3020,7 +3039,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _ = worker.join();
     let _ = agent_tx.send(crate::agent_runtime::Command::Stop);
     drop(agent_tx);
-    let _ = agent_worker.join();
+    if let Some(worker) = agent_worker { let _ = worker.join(); }
     drop(subscriptions);
     drop(response_tx);
 
@@ -3030,6 +3049,47 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resource_role_negotiates_before_open_and_keeps_native_authority_on_restart() {
+        let root = std::env::temp_dir().join(format!("resource-role-{}", Uuid::new_v4()));
+        let (tx, _rx) = mpsc::channel();
+        let call = |kernel: &mut Kernel, method: &str, params: Value| {
+            let mut request = json!({"v":PROTOCOL_VERSION,"kind":"request","id":"fixture","method":method,"params":params});
+            if method != "kernel.handshake" { request["epoch"] = json!(kernel.epoch); }
+            kernel.handle(&request, Arc::new(AtomicBool::new(false)), &tx)
+        };
+        let open = |kernel: &mut Kernel, caps: Value| call(kernel, "kernel.handshake", json!({
+            "protocolVersion":PROTOCOL_VERSION, "buildVersion":KERNEL_BUILD_IDENTITY,
+            "hostId":"fixture", "hostGeneration":"original-host", "storageRoot":root, "capabilities":caps
+        }));
+        let mut full = Kernel::new("wrong-role".into());
+        assert!(open(&mut full, json!(["resourcesOnly"])).is_err());
+        for epoch in ["first", "second"] {
+            let mut kernel = Kernel::new(epoch.into());
+            kernel.resources_only = true;
+            assert!(open(&mut kernel, json!(["storage"])).is_err());
+            if epoch == "first" { assert!(!root.exists()); }
+            let handshake = open(&mut kernel, json!(["storage", "resourcesOnly"])).unwrap().unwrap();
+            assert!(handshake["result"]["capabilities"].as_array().unwrap().iter().any(|cap| cap == "resourcesOnly"));
+            assert!(root.join("catalog.sqlite").is_file());
+            assert!(!root.join("agent-runtime").exists());
+            let params = json!({"ownerPrincipalId":"fixture","claimLegacy":false});
+            let error = call(&mut kernel, "runtime.principals.initialize", params).unwrap_err();
+            assert!(error.to_string().contains("Agent service is not running"));
+            let error = call(&mut kernel, "model.adapters.publish", json!({"expectedRevision":0,"adapters":[]})).unwrap_err();
+            assert!(error.to_string().contains("Agent service is not running"));
+            let selected = call(&mut kernel, "source.capabilities", json!({
+                "mode":"live_root","clientCapabilities":["filesystem:read"]
+            })).unwrap().unwrap();
+            let tools = selected["result"]["tools"].as_array().unwrap();
+            assert!(tools.iter().any(|tool| tool["name"] == "file_read"));
+            assert!(!tools.iter().any(|tool| tool["name"] == "process_spawn" || tool["name"] == "file_edit"));
+            // Both roles keep the native exclusive-writer and host identity check.
+            assert!(open(&mut full, json!(["storage"])).is_err());
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn revoke_admission_requires_a_fully_valid_envelope() {

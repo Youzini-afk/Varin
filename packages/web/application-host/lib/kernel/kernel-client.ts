@@ -70,6 +70,8 @@ import {
 } from "./protocol.generated.js";
 
 export interface KernelClientOptions {
+  /** Trusted launcher selection, never a remote request or a user setting. */
+  role?: "agent" | "resources";
   hostId: string;
   storageRoot: string;
   buildVersion: string;
@@ -1042,7 +1044,7 @@ export class KernelClient {
     });
     this.transport = transport;
     let child: ChildProcessWithoutNullStreams;
-    try { child = this.spawnProcess(command.command, [...command.args, "--stdio"], {
+    try { child = this.spawnProcess(command.command, [...command.args, "--stdio", ...(this.options.role === "resources" ? ["--resources-only"] : [])], {
       cwd: this.options.cwd ?? process.cwd(),
       env: {
         ...process.env,
@@ -1086,6 +1088,8 @@ export class KernelClient {
       this.failAll(error);
       if (!this.closed) this.options.onExit?.(error);
     });
+    const requiredCapabilities = ["storage", "workingState", "recovery", "branchCas", "pins", "gc"];
+    if (this.options.role === "resources") requiredCapabilities.push("resourcesOnly");
     let result: KernelHandshakeResult;
     try {
     await new Promise<void>((resolve, reject) => child.stdin.write(controlFrame(transport.bootstrap()), error => error ? reject(error) : resolve()));
@@ -1097,13 +1101,12 @@ export class KernelClient {
         hostId: this.options.hostId,
         hostGeneration: this.options.hostGeneration ?? `${this.options.hostId}:${process.pid}`,
         storageRoot: this.options.storageRoot,
-        capabilities: ["storage", "workingState", "recovery", "branchCas", "pins", "gc"],
+        capabilities: requiredCapabilities,
       }, { allowBootstrap: true });
     } catch (error) {
       await this.close().catch(() => undefined);
       throw error;
     }
-    const requiredCapabilities = ["storage", "workingState", "recovery", "branchCas", "pins", "gc"];
     const expectedHostGeneration = this.options.hostGeneration ?? `${this.options.hostId}:${process.pid}`;
     if (result.protocolVersion !== KERNEL_PROTOCOL_VERSION || result.requestWindow !== KERNEL_REQUEST_WINDOW || result.streamCredits !== KERNEL_STREAM_CREDITS || result.inlineMaxBytes !== KERNEL_INLINE_MAX_BYTES || !result.kernelEpoch || result.kernelEpoch !== transport.kernelEpoch || result.applicationBuildVersion !== this.options.buildVersion
       || result.buildVersion !== result.kernelBuildIdentity
@@ -1111,6 +1114,7 @@ export class KernelClient {
       || (this.options.kernelBuildIdentity !== undefined && result.kernelBuildIdentity !== this.options.kernelBuildIdentity)
       || result.hostId !== this.options.hostId || result.hostGeneration !== expectedHostGeneration
       || normalizeStorageIdentity(result.storageRoot) !== normalizeStorageIdentity(canonicalStoragePath(this.options.storageRoot))
+      || result.capabilities.includes("resourcesOnly") !== (this.options.role === "resources")
       || !requiredCapabilities.every((capability) => result.capabilities.includes(capability))) {
       await this.close().catch(() => undefined);
       throw new KernelClientError({ code: "kernel-protocol-mismatch", message: "Rust kernel handshake returned an incompatible protocol", retryable: false });

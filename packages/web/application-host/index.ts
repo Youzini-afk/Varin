@@ -118,7 +118,6 @@ import { createManagedMcpProcesses } from './lib/kernel/managed-mcp-processes.js
 import { createManagedMcpLease } from './lib/kernel/managed-mcp-lease.js';
 import { createManagedMcpInteractions } from './lib/kernel/managed-mcp-interactions.js';
 import { createManagedMcpPreparer, selectMcpServers } from './lib/kernel/managed-mcp-preparation.js';
-import { createManagedSourceService } from './lib/harness/managed-source-service.js';
 import { createManagedChildSourceService } from './lib/kernel/managed-source-collaboration.js';
 import { createManagedIntegrationService, createManagedIntegrationOwner } from './lib/kernel/managed-source-integration.js';
 import { createThreadIntegrations, createUserIntegrationService } from './lib/kernel/thread-integrations.js';
@@ -176,13 +175,11 @@ import { registerRuntimeMaintenanceRoutes } from './lib/kernel/runtime-maintenan
 import { createModelAuthority } from './lib/kernel/model-authority.js';
 import 'reflect-metadata';
 import { createBotDataCleanup } from './lib/bots/bot-data-cleanup.js';
-import { createKernelComputeService } from './lib/kernel/compute-service.js';
+import { createHostResourceStorage, createHostResourceExecution } from './lib/kernel/host-resource-owners.js';
 import { createExperimentService } from './lib/harness/experiments.js';
-import { createResourceService } from './lib/harness/resources.js';
+import { createManagedResourceTarget } from './lib/harness/managed-resource-target.js';
 import { createSourceService } from './lib/harness/sources.js';
-import { createManagedRemoteExecutionService } from './lib/harness/managed-remote-service.js';
 import { createManagedRemoteTargetRegistry, configuredHosts, type ManagedRemoteTargetRegistry } from './lib/harness/managed-remote-client.js';
-import { registerManagedRemoteRoutes } from './lib/harness/managed-remote-routes.js';
 import compression from 'compression';
 import crypto from 'crypto';
 import express, { type Request, type Response } from 'express';
@@ -263,10 +260,10 @@ import { attachDesktopMedia } from './lib/computer/desktop-media.js';
 import { attachServiceForward } from './lib/harness/environment-forward-server.js';
 import { createVmGuestRegistration } from './lib/computer/vm-guest-register.js';
 
-import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from './lib/kernel/storage-adapter.js';
+import { createKernelWorkspaceWorkingStateAccess } from './lib/kernel/storage-adapter.js';
 import { KernelFileResourceBackend } from './lib/kernel/file-resource-backend.js';
 
-import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from './lib/kernel/kernel-recovery-store.js';
+import { createKernelRecoveryDirectFacade } from './lib/kernel/kernel-recovery-store.js';
 import { createWebMaterialStore, type WebMaterialStore } from './lib/harness/web-materials.js';
 import { createMaterialCollections as createMaterialCollectionsService } from './lib/harness/material-collections.js';
 
@@ -1124,32 +1121,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const scopeDirectory = async (scopeId: string): Promise<string> => { if (isBotScopeId(scopeId)) return botScopeRoot(scopeId); return (await documentsAuthority.inspectWorkspace(scopeId)).root; };
   const scopeDocumentWorkspace = async (scopeId: string): Promise<string> => isBotScopeId(scopeId) ? (await documentsAuthority.resolveWorkspace({ path: await scopeDirectory(scopeId) })).workspaceId : scopeId;
-  const recoveryCoordinatorWorkspace = `recovery-coordinator:${extensionRuntime.services.hostId}`;
-  const kernelStorageAdapter = new KernelStorageAdapter({
-    client: kernelClient,
-    hostId: extensionRuntime.services.hostId,
-    storageRoot: path.join(VARIN_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
-    recoveryCoordinatorWorkspace,
+  const { kernelStorageAdapter, kernelFileResources, kernelRecoveryFileResources, kernelRecoveryContentStore,
+    kernelRecoveryStore, recoveryCoordinatorWorkspace } = createHostResourceStorage({
+    kernel: kernelClient, documents: () => documentsAuthority,
     resolveWorkspaceRoot: async (workspaceId) => isBotScopeId(workspaceId) ? scopeDirectory(workspaceId)
       : (await documentsAuthority.admitWorkspaceRegistration(workspaceId)).canonicalPath,
   });
-  const resolveKernelExecutionRoot = async (canonicalRoot: string, _owningWorkspaceId: string) => { const resolved = await documentsAuthority.resolveWorkspace({ path: canonicalRoot }); const workspace = await documentsAuthority.getWorkspace(resolved.workspaceId); return { workspaceId: resolved.workspaceId, canonicalRoot: workspace.root }; };
-  kernelStorageAdapter.bindFileRootResolver(resolveKernelExecutionRoot);
-  const kernelFileResources = new KernelFileResourceBackend(kernelStorageAdapter, {
-    resolveExecutionRoot: resolveKernelExecutionRoot,
-  });
-  const kernelRecoveryFileResources = new KernelFileResourceBackend(kernelStorageAdapter, {
-    resolveExecutionRoot: resolveKernelExecutionRoot,
-    authorityPurpose: 'recovery-maintenance',
-    authorityCapabilities: ['recovery.maintenance'],
-  });
-  const kernelRecoveryContentStore = new KernelRecoveryContentStore(
-    kernelStorageAdapter,
-    kernelRecoveryFileResources,
-  );
-  kernelStorageAdapter.bindFileStore(kernelRecoveryContentStore);
-  kernelStorageAdapter.bindFileResources(kernelFileResources);
-  const kernelRecoveryStore = new KernelRecoveryStore(kernelStorageAdapter, kernelRecoveryContentStore);
   const workspaceConfig = createWorkspaceConfig({
     env: process.env,
     cwd: process.cwd(),
@@ -1290,7 +1267,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     console.error('[WorkspaceRecovery] Startup workspace recovery requires attention:', errorMessage(error));
   }
   extensionRuntime.workbench.setWorkspaceScopeResolver((scopeId: unknown) => documentsAuthority.resolveScopeId(scopeId));
-  const kernelProcesses = createKernelProcessService({ client: kernelClient, resolveIdentity: createKernelProcessIdentityResolver({ documents: documentsAuthority }), onError: error => console.error('[VarinProcess]', error.message) });
+  const { kernelProcesses, kernelCompute } = createHostResourceExecution(kernelClient, documentsAuthority,
+    error => console.error('[VarinProcess]', error.message));
   const externalAgentDirectory = path.join(VARIN_DATA_DIR, 'external-agents');
   const externalAgentIdentity = createKernelProcessIdentityResolver({ documents: documentsAuthority });
   const externalAgentProcesses = createKernelProcessService({ client: kernelClient, resolveIdentity: async cwd => {
@@ -1365,7 +1343,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   for (const [providerId, languageId] of managedLanguageProviders) {
     languageSupervisor.registerProvider({ providerId, command: providerId, languageIds: [languageId], source: 'builtin' });
   }
-  const kernelCompute = createKernelComputeService({ client: kernelClient, resolveIdentity: createKernelProcessIdentityResolver({ documents: documentsAuthority }) });
   // Experiment/resource/source authority (7C/7D, D-300). The service grant is
   // Host-internal — the same trust level as the native process host — so a
   // detached reconciler can inspect, stop and collect jobs after restarts.
@@ -1382,21 +1359,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }
   };
   let managedRemoteTargets: ManagedRemoteTargetRegistry | null = null;
-  const resourceService = createResourceService({
-    client: kernelClient,
-    onError: (error) => console.error("[VarinResource]", error.message),
-    onChange: (workspaceId) => broadcastResearchFacts(workspaceId, 'machine'),
-    onCapacityAvailable: (workspaceId) => experimentService.refreshQueue(workspaceId),
-    refreshTargets: (workspaceId) => managedRemoteTargets?.refresh(workspaceId),
-    resolveExternalAuthority: (machineId, machine) => managedRemoteTargets?.externalAuthority(machineId, machine) ?? null,
+  const managedTarget = createManagedResourceTarget({
+    kernel: kernelClient, storageAvailable: true,
+    onError: error => console.error("[VarinManagedRemote]", error.message),
+    capacity: {
+      onError: (error) => console.error("[VarinResource]", error.message),
+      onChange: (workspaceId) => broadcastResearchFacts(workspaceId, 'machine'),
+      onCapacityAvailable: (workspaceId) => experimentService.refreshQueue(workspaceId),
+      refreshTargets: (workspaceId) => managedRemoteTargets?.refresh(workspaceId),
+      resolveExternalAuthority: (machineId, machine) => managedRemoteTargets?.externalAuthority(machineId, machine) ?? null,
+    },
   });
-  const managedRemoteExecution = createManagedRemoteExecutionService({
-    client: kernelClient,
-    storageAvailable: true,
-    hostId: extensionRuntime.services.hostId,
-    resources: resourceService,
-    onError: (error) => console.error("[VarinManagedRemote]", error.message),
-  });
+  const resourceService = managedTarget.resources;
   managedRemoteTargets = createManagedRemoteTargetRegistry({
     coordinatorHostId: extensionRuntime.services.hostId,
     kernel: kernelClient,
@@ -1512,7 +1486,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
     },
   });
-  void managedRemoteExecution.reconcile().catch((error) => console.error("[VarinManagedRemote]", error.message));
   const workspaceContentSearch = createWorkspaceContentSearch({ documents: documentsAuthority, compute: kernelCompute });
   // ── Harness service host ──────────────────────────────────────────
   // Global services (output store, path locks, search, diagnostics) plus
@@ -2662,7 +2635,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   kernelClient.subscribeExit(() => { void targetMcpService.close(); });
   let projectGitDispatcher: import('./lib/git/project-dispatch.js').ProjectGitDispatcher | undefined;
   let projectGitHubReader: import('./lib/github/project-read.js').GitHubProjectReader | undefined;
-  managedRemoteExecution.setSourceOwner(createManagedSourceService({ kernel: kernelClient, hostId,
+  managedTarget.attachSources({
     terminal:createManagedTerminalOwner({terminal:()=>terminalRuntime,documents:documentsAuthority,nativeWorkspaces}),
     projectManagement: createManagedProjectManagementOwner({ kernel: kernelClient, documents: documentsAuthority,
       githubDispatch: (command, signal) => { if (!projectGitHubReader?.dispatch) throw new Error('Target GitHub owner is unavailable'); return projectGitHubReader.dispatch(command, signal); },
@@ -2714,7 +2687,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         default: return targetSourceQuery(scope, operation, signal);
       }
     },
-  }));
+  });
   const threadRecoveryOwners = { threads, runtime: agentRuntime, store: kernelRecoveryStore, storage: kernelStorageAdapter, kernel: kernelClient, liveSources };
   const threadRecoveryNavigation = createThreadRecoveryNavigation(threadRecoveryOwners);
   const recoveryCheckpoints = createCheckpointLifecycle({
@@ -2915,12 +2888,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     originAllowed: isRequestOriginAllowed,
   });
   void connections.restore().catch((error) => console.error('[HostConnections]', errorMessage(error)));
-  registerManagedRemoteRoutes(app, {
-    isDraining: () => isShuttingDown,
-    documents: documentsAuthority,
-    service: managedRemoteExecution,
-    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
-    ...(uiAuthController?.resolveAuthContext ? { resolveAuthContext: uiAuthController.resolveAuthContext } : {}),
+  managedTarget.mount(app, {
+    isDraining: () => isShuttingDown, documents: documentsAuthority,
+    requireAuth: uiAuthController.requireAuth, resolveAuthContext: uiAuthController.resolveAuthContext,
   });
   const promptToolCatalog = createPromptToolCatalog({ runtime: agentRuntime, extensions: extensionRuntime, mcp: mcpAuthority, mcpScope: resolveMcpSettingsScope });
   registerAgentPersonalizationRoutes(app, agentPersonalization, uiAuthController?.requireAuth ?? ((_req, _res, next) => next()), resourceManagement.prompt, resourceManagement.toolCatalog);
@@ -3643,7 +3613,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         await shutdown.run('mcpInteractionRuntime.dispose', () => mcpInteractionRuntime.dispose());
         await shutdown.run('mcpResourceRuntime.dispose', () => mcpResourceRuntime.dispose());
         await shutdown.run('mcpTaskRuntime.dispose', () => mcpTaskRuntime.dispose());
-        await shutdown.run('resourceService.dispose', () => resourceService.dispose());
+        await shutdown.run('managedTarget.dispose', () => managedTarget.dispose());
         await shutdown.run('experimentService.detachObservers', () => experimentService.detachObservers());
         await shutdown.run('unregisterWorkbenchLayoutService', () => unregisterWorkbenchLayoutService());
         if (ownsExtensionRuntime) await shutdown.run('extensionRuntime.stop', () => extensionRuntime.stop());

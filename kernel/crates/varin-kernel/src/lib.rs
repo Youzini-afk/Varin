@@ -75,7 +75,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().any(|arg| arg == "--process-worker") {
         return process::worker::run();
     }
-    runtime::run()
+    runtime::run(std::env::args().any(|arg| arg == "--resources-only"))
 }
 
 mod integration_reconciliation;
