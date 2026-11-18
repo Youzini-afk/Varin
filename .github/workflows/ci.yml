@@ -526,7 +526,20 @@ jobs:
             ~/.cargo/git
             kernel/target/debug
           key: ${{ steps.rust-cache.outputs.cache-primary-key }}
-      - if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+      # The Rust workspace suite also starts the real TypeScript managed Host.
+      # Prepare its loader and built workspace imports on this Windows runner.
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: 1.3.14
+      - name: Prepare managed Host runtime for workspace tests
+        id: host
+        shell: bash
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          bun install --frozen-lockfile
+          bun run build:runtime-dependencies
+      - if: ${{ !cancelled() && steps.compile.outcome == 'success' && steps.host.outcome == 'success' }}
         name: Verify native workspace storage and runtime on Windows
         shell: cmd
         working-directory: kernel

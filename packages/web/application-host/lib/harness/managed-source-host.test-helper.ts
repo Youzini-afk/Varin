@@ -1,7 +1,7 @@
 /** Original managed Source client/authenticated Router/target service over the
  * existing Rust↔Host stdio fixture. No HTTP or product IPC listener is started. */
 import assert from 'node:assert/strict';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -359,7 +359,9 @@ async function run(frame: Record<string, unknown>) {
 
 async function runWithHosts(frame: Record<string, unknown>, a: KernelClient, b: KernelClient) {
   assert.equal(typeof frame.runId, 'string'); const runId = frame.runId as string;
-  const root = String(frame.root), storageRootB = String(frame.storageRootB);
+  // Seed the same canonical directory identities that Documents actually admits.
+  // The runner's temp path can use a Windows 8.3 alias or a symlink.
+  const root = await realpath(String(frame.root)), storageRootB = String(frame.storageRootB);
   const aRoot = join(root, 'a-project'), bRoot = join(root, 'b-project');
   await Promise.all([mkdir(aRoot, { recursive: true }), mkdir(bRoot, { recursive: true })]);
   await writeFile(join(aRoot, 'source.txt'), 'A_PRIVATE_SOURCE\n');
