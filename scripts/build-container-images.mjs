@@ -148,7 +148,7 @@ export async function buildContainerImages(config, { run, resolveBase, now = () 
     // filesystem entitlement is intentionally limited to that exact context,
     // rather than disabling its guard or silently reading the tooling checkout.
     await run(['buildx', 'bake', `--allow=fs.read=${config.sourceDirectory}`,
-      '--file', planPath, '--progress=plain', '--metadata-file', metadataPath], { logPath });
+      '--file', planPath, '--progress=plain', '--metadata-file', metadataPath], { logPath, phase });
     const images = builtImageReferences(config, plan, JSON.parse(fs.readFileSync(metadataPath, 'utf8')));
     Object.assign(result.images, images);
     result.phases.push({ name: phase, seconds: (now() - started) / 1000,
@@ -183,7 +183,8 @@ function environmentConfig(env) {
     slimBase: env.CONTAINER_SLIM_BASE, toolbeltBase: env.CONTAINER_TOOLBELT_BASE });
 }
 
-async function runDocker(args, { logPath }) {
+async function runDocker(args, { logPath, phase }) {
+  console.log(`[container] Building ${phase}`);
   const log = fs.createWriteStream(logPath);
   try {
     await new Promise((resolve, reject) => {

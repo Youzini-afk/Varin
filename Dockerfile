@@ -54,7 +54,7 @@ RUN set -eux; \
   cargo build --release --bin varin-kernel --locked --target "$kernel_target"; \
   install -D -m 0755 "target/$kernel_target/release/varin-kernel" /out/varin-kernel
 
-FROM --platform=$BUILDPLATFORM oven/bun:1.3.14 AS builder
+FROM --platform=$BUILDPLATFORM oven/bun:1.3.14 AS web-build-inputs
 WORKDIR /app
 
 # Keep dependency installation cacheable while still presenting every Bun
@@ -83,6 +83,11 @@ RUN bun install --frozen-lockfile --ignore-scripts \
   && node ./scripts/fix-deprecation.js
 
 COPY . .
+# Browser assets are identical for every target. Build them on the native
+# builder before the graph branches by kernel and Application Host architecture.
+RUN bun run build:frontend
+
+FROM web-build-inputs AS builder
 COPY --from=kernel-builder /out/varin-kernel /tmp/varin-kernel
 # Revision and target affect packaging, not the shared workspace install.
 ARG VARIN_SOURCE_REVISION
@@ -91,7 +96,7 @@ RUN VARIN_SOURCE_REVISION="${VARIN_SOURCE_REVISION}" \
   VARIN_KERNEL_PREBUILT=/tmp/varin-kernel \
   VARIN_TARGET_PLATFORM=linux \
   VARIN_TARGET_ARCH="${TARGETARCH}" \
-  bun run build:cloud-runtime -- --output /app/artifacts/cloud-runtime --no-archive
+  bun run build:cloud-runtime -- --output /app/artifacts/cloud-runtime --no-archive --prepared-frontend
 
 # Select the resource-only executable from the same versioned Host/kernel build.
 # The full frontend, Agent entrypoint and Application CLI do not enter the

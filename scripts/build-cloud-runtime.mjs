@@ -492,8 +492,8 @@ export const installCloudRuntimeDependencies = (
   run('node', [path.join(resolvedOutput, 'verify-kernel.mjs'), path.join(resolvedOutput, 'packages/web')], { cwd: resolvedOutput, json, label: 'Cloud release kernel authority smoke' });
 };
 
-const buildSourcePackages = ({ json }) => {
-  run(process.execPath, ['scripts/build-products.mjs', 'web'], {
+const buildSourcePackages = ({ json, preparedFrontend }) => {
+  run(process.execPath, ['scripts/build-products.mjs', 'web', ...(preparedFrontend ? ['--prepared-frontend'] : [])], {
     json,
     label: 'Varin web and runtime dependencies build',
   });
@@ -574,6 +574,7 @@ export const buildCloudRuntime = ({
   outputDir,
   archivePath = null,
   build = true,
+  preparedFrontend = false,
   generateLock = true,
   updateLock = false,
   install = false,
@@ -582,7 +583,7 @@ export const buildCloudRuntime = ({
 } = {}) => {
   const resolvedOutput = path.resolve(outputDir || path.join(repoRoot, 'artifacts', 'cloud-runtime'));
   if (generateLock && !updateLock) verifyCloudRuntimeLock();
-  if (build) buildSourcePackages({ json });
+  if (build) buildSourcePackages({ json, preparedFrontend });
   const runtimeManifest = stageRuntimeTree(resolvedOutput, build);
 
   if (updateLock && !generateLock) {
@@ -634,6 +635,7 @@ const parseArgs = (argv) => {
       case '--archive': options.archivePath = value(); break;
       case '--no-archive': options.archivePath = null; break;
       case '--skip-build': options.build = false; break;
+      case '--prepared-frontend': options.preparedFrontend = true; break;
       case '--no-lock': options.generateLock = false; break;
       case '--update-lock': options.updateLock = true; break;
       case '--update-lock-only': options.updateLockOnly = true; break;
@@ -642,7 +644,7 @@ const parseArgs = (argv) => {
       case '--cache-dir': options.cacheDir = value(); break;
       case '--json': options.json = true; break;
       case '--help':
-        console.log(`Usage: node scripts/build-cloud-runtime.mjs [options]\n\nOptions:\n  --output <dir>      Runtime tree output (default: artifacts/cloud-runtime)\n  --archive <file>    Create a .tgz archive\n  --no-archive        Do not create an archive\n  --skip-build        Stage existing package build outputs\n  --no-lock           Skip production lockfile generation\n  --update-lock       Regenerate the lock while staging the runtime\n  --update-lock-only  Regenerate the production lock without building or staging runtime outputs\n  --check-lock        Check committed production manifests without building\n  --install           Install target-platform production dependencies\n  --cache-dir <dir>   Bun cache used by --install\n  --json              Print the final metadata as JSON only`);
+        console.log(`Usage: node scripts/build-cloud-runtime.mjs [options]\n\nOptions:\n  --output <dir>      Runtime tree output (default: artifacts/cloud-runtime)\n  --archive <file>    Create a .tgz archive\n  --no-archive        Do not create an archive\n  --skip-build        Stage existing package build outputs\n  --prepared-frontend Use browser assets already built in artifacts/build/frontend\n  --no-lock           Skip production lockfile generation\n  --update-lock       Regenerate the lock while staging the runtime\n  --update-lock-only  Regenerate the production lock without building or staging runtime outputs\n  --check-lock        Check committed production manifests without building\n  --install           Install target-platform production dependencies\n  --cache-dir <dir>   Bun cache used by --install\n  --json              Print the final metadata as JSON only`);
         return null;
       default: throw new Error(`Unknown option: ${arg}`);
     }

@@ -8,6 +8,7 @@ import kernelIdentity from './kernel-binary-identity.cjs';
 
 export const repository = path.resolve(import.meta.dirname, '..');
 export const productRoot = path.join(repository, 'artifacts/build');
+const frontendDirectory = path.join(productRoot, 'frontend');
 const runtimePackages = ['settings-store', 'protocol', 'script-runtime', 'extension-contract', 'application-client',
   'extension-surface', 'extension-sdk', 'extension-builtins', 'extension-host', 'extension-loader'];
 const cache = new BuildCache(repository);
@@ -48,7 +49,7 @@ export function prepareRuntime() {
 }
 
 export async function prepareFrontend({ importDirectory = process.env.VARIN_FRONTEND_ARTIFACT } = {}) {
-  const destination = path.join(productRoot, 'frontend');
+  const destination = frontendDirectory;
   const inputs = frontendInputs, values = frontendValues();
   // Shared UI transfers contain plain browser assets only, never a platform-specific Host or native library.
   if (importDirectory) {
@@ -108,9 +109,15 @@ export async function prepareKernel(platform = process.env.VARIN_TARGET_PLATFORM
   return { directory, name, ...result };
 }
 
-export async function prepareWebProduct() {
+async function readPreparedFrontend() {
+  await fs.access(path.join(frontendDirectory, 'index.html'));
+  return { directory: frontendDirectory, digest: await cache.outputs([frontendDirectory]) };
+}
+
+export async function prepareWebProduct({ preparedFrontend = false } = {}) {
   const host = await prepareHost();
-  const frontend = await prepareFrontend();
+  // Docker takes these assets from an earlier stage of the same build graph.
+  const frontend = preparedFrontend ? await readPreparedFrontend() : await prepareFrontend();
   const kernel = await prepareKernel();
   const directory = path.join(productRoot, 'web');
   const cliDirectory = path.join(productRoot, 'cli');
@@ -163,7 +170,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
   } else if (command === 'host') await prepareHost();
   else if (command === 'web') {
-    const product = await prepareWebProduct();
+    const product = await prepareWebProduct({ preparedFrontend: args.includes('--prepared-frontend') });
     if (args.includes('--publish')) for (const name of ['server', 'dist', 'kernel', 'bin']) {
       await publishDirectory(path.join(product, name), path.join(repository, 'packages/web', name));
     }

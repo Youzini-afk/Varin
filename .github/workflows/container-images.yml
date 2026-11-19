@@ -103,6 +103,9 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build both bases and applications with one shared builder
         id: build
+        # The previous two-architecture publish built in 29 minutes. Leave
+        # room for a cold graph without letting a stalled vertex take six hours.
+        timeout-minutes: 90
         run: node scripts/build-container-images.mjs build
       - name: Record builder storage use
         if: always()
@@ -117,3 +120,10 @@ jobs:
           path: artifacts/container-build/*.json
           if-no-files-found: warn
           overwrite: false
+      - name: Preserve BuildKit phase logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: varin-container-logs-${{ github.run_attempt }}
+          path: artifacts/container-build/*.log
+          if-no-files-found: ignore
