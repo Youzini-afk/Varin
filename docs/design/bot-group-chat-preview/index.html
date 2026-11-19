@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Varin · Bot 群聊原型</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="timeline.css">
+  <link rel="stylesheet" href="composer-panel.css">
+</head>
+<body>
+  <!-- Prototype controls, not product UI. -->
+  <div class="proto">
+    <b>Bot 群聊</b><span class="sep"></span>
+    <div class="seg" id="scenes"></div>
+    <div class="step"><span class="step-label" id="stepLabel"></span><button class="btn ghost" data-act="restart">重来</button><button class="btn" id="next" data-act="next">下一步</button></div>
+    <span class="sep"></span>
+    <div class="seg" id="device"></div>
+    <div class="seg" id="theme"></div>
+  </div>
+  <div class="stagewrap" id="stagewrap"></div>
+  <script src="icons.js"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+  <script src="timeline.js"></script>
+  <script src="composer.js"></script>
+  <script src="panel.js"></script>
+  <script src="sim.js"></script>
+</body>
+</html>

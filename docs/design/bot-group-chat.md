@@ -4,6 +4,8 @@
 
 The user can coordinate a group personally or ask any member to coordinate a particular release, project, or the group over time. Coordination is work a Bot accepts through ordinary conversation. Group creation only asks for a name and members. It requires no lead, speaking order, extra Bot profile, or shared model.
 
+The interface is prototyped in [bot-group-chat-preview](bot-group-chat-preview/README.md).
+
 ## A release conversation
 
 1. The user creates **Release** with Varin and Ops. They write “@Varin, look after unaddressed messages here.” Varin enables that setting for itself in Release. The member list reflects the change.

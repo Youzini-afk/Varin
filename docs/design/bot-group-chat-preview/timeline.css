@@ -1,0 +1,168 @@
+/* ── Timeline ────────────────────────────────────────────────────────────────────── */
+.timeline { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; overscroll-behavior: contain; }
+.tl-inner { max-width: 860px; margin: 0 auto; padding: 22px 32px 18px; }
+.day { display: flex; justify-content: center; margin: 6px 0 14px; font-size: var(--fs-micro); color: var(--faint); }
+.unread-line { display: flex; align-items: center; gap: 10px; margin: 16px 0; font-size: var(--fs-micro); color: var(--info); }
+.unread-line::before, .unread-line::after { content: ''; flex: 1; height: 1px; background: color-mix(in srgb, var(--info) 35%, transparent); }
+
+/* System facts: membership and listening changes. Not speech, so no bubble. */
+.event { display: flex; justify-content: center; align-items: center; gap: 6px; margin: 14px 0; font-size: var(--fs-micro); color: var(--muted); text-align: center; }
+.event .i { color: var(--faint); }
+.event time { color: var(--faint); }
+.event button { color: var(--muted); text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
+.event button:hover { color: var(--fg); }
+
+.msg { position: relative; display: flex; gap: 10px; margin-top: 16px; min-width: 0; }
+.msg.cont { margin-top: 3px; }
+.msg.user { flex-direction: row-reverse; }
+.msg .gutter { width: 30px; flex: none; }
+.msg .col { min-width: 0; max-width: min(100% - 40px, 640px); display: flex; flex-direction: column; align-items: flex-start; }
+.msg.user .col { align-items: flex-end; max-width: min(78%, 560px); }
+.msg.wide .col { max-width: calc(100% - 40px); }
+.msg[data-arrive] { animation: arrive var(--settle) var(--ease-settle) both; }
+@keyframes arrive { from { opacity: 0; transform: translateY(6px); } }
+.who { display: flex; align-items: baseline; gap: 6px; margin: 0 0 4px 2px; font-size: var(--fs-micro); color: var(--muted); min-width: 0; }
+.who b { color: var(--fg); font-weight: 600; font-size: 12.5px; }
+.who .to { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.who .to .i { color: var(--faint); }
+.who .to b { font-weight: 500; }
+.who .kind { color: var(--faint); }
+.who .kind.sched { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; border-radius: 5px; }
+.who .kind.sched:hover { color: var(--fg); }
+.who time { color: var(--faint); font-variant-numeric: tabular-nums; }
+
+.bubble { position: relative; min-width: 0; max-width: 100%; padding: 9px 13px; border-radius: 14px; background: var(--bot-bubble); box-shadow: var(--bubble-ring);
+  font-size: var(--fs-chat); line-height: 1.7; overflow-wrap: anywhere; transition: box-shadow var(--snap); }
+.msg.bot:not(.cont) .bubble { border-top-left-radius: 5px; }
+.msg.user .bubble { background: var(--user-bubble); box-shadow: none; }
+.msg.user:not(.cont) .bubble { border-top-right-radius: 5px; }
+.msg.wide .bubble { width: 100%; }
+.bubble p { margin: 0; }
+.bubble p + p, .bubble p + ul, .bubble ul + p, .bubble p + pre, .bubble pre + p, .bubble p + .att, .bubble p + .work, .bubble .work + p, .bubble p + .ask, .bubble p + table, .bubble table + p { margin-top: 8px; }
+.bubble ul, .bubble ol { margin: 0; padding-left: 20px; }
+.bubble li + li { margin-top: 2px; }
+.bubble code { font-family: var(--mono); font-size: .88em; padding: 1px 5px; border-radius: 5px; background: color-mix(in srgb, var(--fg) 7%, transparent); }
+.bubble pre { margin: 0; padding: 10px 12px; border-radius: 9px; background: color-mix(in srgb, var(--fg) 5%, transparent); font-family: var(--mono); font-size: 12.5px; line-height: 1.6; overflow-x: auto; white-space: pre; }
+.bubble pre code { background: none; padding: 0; font-size: inherit; }
+.bubble table { border-collapse: collapse; font-size: 13px; width: 100%; }
+.bubble th, .bubble td { text-align: left; padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line); }
+.bubble th { color: var(--muted); font-weight: 500; }
+.bubble.flash { animation: flash 1.3s var(--ease); }
+@keyframes flash { 0%, 35% { box-shadow: 0 0 0 2px var(--ring), var(--bubble-ring); } }
+.mention { font-weight: 600; white-space: nowrap; }
+.mention.gone { text-decoration: line-through; text-decoration-color: var(--err); color: var(--muted); }
+.caret { display: inline-block; width: 7px; height: 1.05em; margin-left: 1px; vertical-align: -2px; border-radius: 2px; background: var(--fg); opacity: .55; animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* Reply quote: author and one line, jumps to the original. Shown when the answer is not right below its target. */
+.quote { display: flex; align-items: center; gap: 6px; max-width: 100%; margin: 0 0 6px; padding: 2px 8px 2px 8px; border-left: 2px solid var(--border); font-size: 12.5px; line-height: 1.5; color: var(--muted); text-align: left; cursor: pointer; border-radius: 0 6px 6px 0; }
+.quote:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); color: var(--fg); }
+.quote b { font-weight: 600; color: var(--fg); flex: none; }
+.quote span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bubble.has-quote { min-width: min(240px, 100%); }
+.bubble.has-quote .quote { width: 0; min-width: 100%; }
+.msg.user .quote { border-left-color: color-mix(in srgb, var(--fg) 22%, transparent); }
+
+/* Folded long answer keeps its real opening. */
+.fold { position: relative; max-height: 10.6em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 calc(100% - 3.2em), transparent); mask-image: linear-gradient(#000 calc(100% - 3.2em), transparent); }
+.unfold { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; font-size: var(--fs-micro); color: var(--muted); }
+.unfold:hover { color: var(--fg); }
+
+/* Attachments, shared work and approvals inside a bubble. */
+.att { display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--fg) 4%, transparent); max-width: 320px; }
+.msg.user .att { background: color-mix(in srgb, var(--bg) 70%, transparent); }
+.att .ft { width: 30px; height: 34px; border-radius: 6px; display: grid; place-items: center; font-size: 9.5px; font-weight: 700; letter-spacing: .02em; color: var(--muted); background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); flex: none; }
+.att b { display: block; font-weight: 500; font-size: 13px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.att small { display: block; font-size: 11.5px; color: var(--muted); line-height: 1.35; }
+
+.work { display: flex; align-items: center; gap: 11px; width: min(100%, 380px); padding: 9px 12px; border-radius: 11px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); text-align: left; cursor: pointer; transition: box-shadow var(--snap), background-color var(--snap); }
+.work:hover { box-shadow: inset 0 0 0 1px var(--border); }
+.work .wi { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: color-mix(in srgb, var(--fg) 6%, transparent); color: var(--muted); flex: none; }
+.work .wt { flex: 1; min-width: 0; line-height: 1.35; }
+.work .wt b { display: block; font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.work .wt small { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
+.work .wt small.ok { color: var(--ok); }
+.work .bar { height: 3px; border-radius: 3px; background: color-mix(in srgb, var(--fg) 8%, transparent); overflow: hidden; margin-top: 6px; }
+.work .bar i { display: block; height: 100%; background: var(--muted); border-radius: 3px; transition: width 600ms var(--ease); }
+.work > .i { color: var(--faint); }
+
+.ask { width: min(100%, 460px); border-radius: 11px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+.ask .ah { display: flex; align-items: center; gap: 7px; padding: 9px 12px 0; font-size: 12.5px; font-weight: 600; color: var(--warn); }
+.ask .ab { padding: 4px 12px 10px; font-size: 13px; line-height: 1.55; }
+.ask .ab small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.ask pre { margin: 8px 0 0; padding: 7px 10px; border-radius: 7px; background: color-mix(in srgb, var(--fg) 5%, transparent); font-family: var(--mono); font-size: 12px; white-space: pre-wrap; }
+.ask .aa { display: flex; gap: 6px; padding: 8px 12px 10px; border-top: 1px solid var(--line); }
+.ask.pending { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.ask.done { background: none; box-shadow: none; }
+.ask.done .ah { color: var(--muted); font-weight: 500; padding: 0; }
+.btn { height: 28px; padding: 0 12px; border-radius: 8px; font-size: 12.5px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; box-shadow: inset 0 0 0 1px var(--border); background: var(--surface); white-space: nowrap; transition: background-color var(--snap), box-shadow var(--snap); }
+.btn:hover { background: var(--hover); }
+.btn.primary { background: var(--fg); color: var(--bg); box-shadow: none; }
+.btn.primary:hover { background: color-mix(in srgb, var(--fg) 86%, var(--bg)); }
+.btn.quiet { box-shadow: none; background: none; color: var(--muted); }
+.btn.quiet:hover { background: var(--hover); color: var(--fg); }
+.btn.danger { color: var(--err); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.sm { height: 24px; padding: 0 9px; font-size: 12px; border-radius: 7px; }
+
+/* Hover actions on a message. */
+.acts { position: absolute; top: -14px; display: flex; gap: 1px; padding: 2px; border-radius: 9px; background: var(--surface); box-shadow: var(--shadow-pop); opacity: 0; pointer-events: none; transform: translateY(2px); transition: opacity var(--snap), transform var(--snap); z-index: 5; }
+.msg .bwrap { position: relative; max-width: 100%; display: flex; flex-direction: column; align-items: inherit; }
+.msg.bot .bwrap .acts { top: 0; left: calc(100% + 6px); }
+.msg.user .bwrap .acts { top: 0; right: calc(100% + 6px); }
+.msg.wide .bwrap .acts { top: -14px; left: auto; right: 8px; }
+.msg:hover .acts, .msg:focus-within .acts { opacity: 1; pointer-events: auto; transform: none; }
+.acts button { height: 26px; padding: 0 8px; border-radius: 7px; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
+.acts button:hover { background: var(--hover); color: var(--fg); }
+.acts button.icon { width: 26px; padding: 0; justify-content: center; }
+
+/* Who received a post. Quiet when all is well; the affected member speaks up when not. */
+.rcpt { display: flex; align-items: center; gap: 6px; margin: 5px 2px 0; font-size: 11.5px; color: var(--faint); min-height: 18px; }
+.msg.user .rcpt { justify-content: flex-end; }
+.rcpt time { font-variant-numeric: tabular-nums; }
+.rcpt .arrow { color: var(--faint); }
+.rcpt .who-list { display: flex; align-items: center; gap: 3px; }
+.rc { position: relative; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; cursor: default; }
+.rc .av { --s: 16px; transition: opacity var(--glide), filter var(--glide); }
+.rc[data-state="queued"] .av { opacity: .55; }
+.rc[data-state="silent"] .av { opacity: .42; filter: grayscale(.6); }
+.rc[data-state="working"]::after { content: ''; position: absolute; inset: 0; border-radius: 50%; border: 1.5px solid transparent; border-top-color: var(--muted); border-right-color: var(--muted); animation: spin 1s linear infinite; }
+.rc[data-state="asleep"] .av, .rc[data-state="failed"] .av { opacity: .5; filter: grayscale(.8); }
+.rc .badge { position: absolute; right: -2px; bottom: -2px; width: 10px; height: 10px; border-radius: 50%; display: grid; place-items: center; background: var(--bg); color: var(--warn); }
+.rc[data-state="failed"] .badge { color: var(--err); }
+.rc .badge svg { width: 9px; height: 9px; stroke-width: 2.2; }
+.rcpt .note { color: var(--faint); }
+.trouble { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 2px 0; padding: 5px 6px 5px 10px; border-radius: 9px; background: var(--warn-soft); font-size: 12px; color: color-mix(in srgb, var(--warn) 80%, var(--fg)); animation: arrive var(--settle) var(--ease-settle) both; }
+.trouble.err { background: var(--err-soft); color: color-mix(in srgb, var(--err) 85%, var(--fg)); }
+.trouble .btn { height: 24px; font-size: 12px; padding: 0 9px; background: var(--surface); }
+.msg.user .trouble { align-self: flex-end; }
+
+/* Members who are working on a delivery but have not said anything yet. */
+.presence { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 2px; font-size: 12px; color: var(--muted); transition: opacity var(--glide); }
+.presence:empty { display: none; }
+.presence .dots { display: inline-flex; gap: 3px; }
+.presence .dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--faint); animation: dot 1.2s infinite var(--ease); }
+.presence .dots i:nth-child(2) { animation-delay: .15s; } .presence .dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes dot { 0%, 60%, 100% { opacity: .3; transform: none; } 30% { opacity: 1; transform: translateY(-2px); } }
+.presence .av-stack .av { --s: 18px; box-shadow: 0 0 0 2px var(--bg); }
+
+/* Empty group */
+.empty { max-width: 520px; margin: 9vh auto 0; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 4px; animation: arrive var(--settle) var(--ease-settle) both; }
+.empty .faces { display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
+.empty .faces .av { box-shadow: 0 0 0 3px var(--bg); }
+.empty .faces > * + * { margin-left: -10px; }
+.empty .faces .more { position: relative; height: 44px; min-width: 44px; padding: 0 10px; border-radius: 22px; display: grid; place-items: center; font-size: 13px; color: var(--muted); background: var(--hover); box-shadow: 0 0 0 3px var(--bg); }
+.empty .who-line { font-size: 12.5px; color: var(--faint); }
+.empty h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.01em; }
+.empty p { margin: 6px 0 0; color: var(--muted); font-size: 13.5px; line-height: 1.7; }
+.empty .starters { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
+.empty .starters button { height: 32px; padding: 0 12px; border-radius: 16px; font-size: 13px; color: var(--muted); box-shadow: inset 0 0 0 1px var(--border); background: var(--surface); display: inline-flex; align-items: center; gap: 6px; }
+.empty .starters button:hover { color: var(--fg); background: var(--hover); }
+
+.msg.show-acts .acts { opacity: 1; pointer-events: auto; transform: none; }
+.acts button.hl { background: var(--active); color: var(--fg); }
+.input .quote-tok { font-weight: 400; color: var(--muted); }
+.tip { position: absolute; z-index: 90; max-width: 260px; padding: 6px 9px; border-radius: 8px; background: var(--fg); color: var(--bg); font-size: 12px; line-height: 1.5; pointer-events: none; box-shadow: 0 6px 18px #0000002e; }
+.toast { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); z-index: 95; padding: 8px 14px; border-radius: 10px; background: var(--fg); color: var(--bg); font-size: 12.5px; box-shadow: var(--shadow-pop); animation: arrive var(--glide) var(--ease-settle) both; }
+.prow.flash { animation: rowflash 1.6s var(--ease); }
+@keyframes rowflash { 0%, 40% { background: var(--selection); } }
