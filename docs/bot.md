@@ -4,6 +4,8 @@ A **Bot** is a persistent assistant that coordinates work across conversations a
 
 New configs open in the `varin.bot` shell ("Varin") and auto-create a default general assistant when none exists; multiple Bots remain supported with separate identities, home dirs, memory, schedules, and appearances ([bot-appearances.md](bot-appearances.md)).
 
+For the proposed shared conversation between a user and several Bots, see [Bot group chat](design/bot-group-chat.md).
+
 ## Profile, Model Resolution & Sessions
 
 - **Model & thinking precedence** for a new Bot conversation:
