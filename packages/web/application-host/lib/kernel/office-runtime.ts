@@ -4,11 +4,9 @@ import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import type { AgentSettingsSnapshot } from '@varin/application-client';
 import type { OfficeCreateContent, OfficeEdit, OfficeReadRequest } from '@varin/protocol';
-import { compileToolJsonSchema, describeToolSchemaFailure } from '../models/schema.js';
+import { deferToolJsonSchema, describeToolSchemaFailure } from '../models/schema.js';
 import type { DocumentReaderContext } from '../harness/document-reading.js';
 import type { OfficeReader } from '../office/reader.js';
-import { OfficePackage } from '../office/package.js';
-import { createOfficeFile } from '../office/create.js';
 import { OfficeRenderFailure, type OfficeRenderer, type OfficeExportFormat } from '../office/renderer.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { DocumentSources } from './document-sources.js';
@@ -39,7 +37,7 @@ export function createOfficeRuntime(options: {
 }) {
   const settings = createToolFamilySettings(OFFICE_TOOL_DECLARATIONS, options.settings);
   const declarations = new Map(OFFICE_TOOL_DECLARATIONS.map(declaration => [declaration.id.slice('varin.office.'.length),
-    { declaration, validate: compileToolJsonSchema(declaration.tool!.inputSchema) }]));
+    { declaration, validator: deferToolJsonSchema(declaration.tool!.inputSchema) }]));
   const materialContext = async (invocation: ToolInvocationAuthority, signal: AbortSignal): Promise<DocumentReaderContext> => {
     const run = await options.runtime.run(invocation.runId, signal);
     if (run.thread_id !== invocation.threadId) throw new Error('The original Office invocation changed its Thread');
@@ -50,7 +48,8 @@ export function createOfficeRuntime(options: {
   const capability: HostCapabilityHandler = async (method, value, call) => {
     const selected = declarations.get(method);
     if (!selected) throw new Error('Unknown Office operation');
-    if (!selected.validate(value)) throw new Error(`Invalid Office arguments: ${describeToolSchemaFailure(selected.validate, value)}`);
+    const validate = selected.validator();
+    if (!validate(value)) throw new Error(`Invalid Office arguments: ${describeToolSchemaFailure(validate, value)}`);
     const input = parseVarinToolJson(value);
     return runToolDomainCall(call, { domain: OFFICE_CAPABILITY, toolName: selected.declaration.tool!.name,
       operation: selected.declaration.tool!.operation, arguments: input }, async invocation => {
@@ -63,6 +62,7 @@ export function createOfficeRuntime(options: {
           let bytes: Buffer, changes: { changedParts?: string[]; requiresRecalculation?: boolean } = {};
           const originalPath = object(invocation.arguments) ? invocation.arguments.path : undefined;
           if (request.action === 'create' && isModelReference(originalPath,'file')) throw new Error('Create requires a new output path, not an existing file observation');
+          const { OfficePackage } = await import('../office/package.js');
           if (request.action === 'replace' && isModelReference(originalPath,'file')) {
             const original = new OfficePackage((await sources.readRef!(originalPath,call.signal)).source);
             if (request.expectedRevision !== undefined && request.expectedRevision !== original.revision) throw new Error('The replacement revision conflicts with its original file observation');
@@ -77,7 +77,10 @@ export function createOfficeRuntime(options: {
             if (document.revision !== request.expectedRevision) return receipt({ status: 'conflict', path: request.path, revision: document.revision, message: 'The document changed after it was read. Read the current revision before editing.' },
               { status: 'conflict', path: request.path, revision: document.revision, operationId: invocation.operationId, executorStopped: true, fileJournal: true });
             const edited = document.edit(request.edits); bytes = edited.bytes; changes = { changedParts: edited.changedParts, requiresRecalculation: edited.requiresRecalculation };
-          } else bytes = await createOfficeFile(request.content, async path => (await sources.readPath!(path, call.signal)).source, call.signal);
+          } else {
+            const { createOfficeFile } = await import('../office/create.js');
+            bytes = await createOfficeFile(request.content, async path => (await sources.readPath!(path, call.signal)).source, call.signal);
+          }
           const format = new OfficePackage(bytes).format;
           const written = await options.files.write(invocation, { path: request.path, bytes,
             expectedRevision: request.action === 'create' ? null : request.expectedRevision! }, call.signal);

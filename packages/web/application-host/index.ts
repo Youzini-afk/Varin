@@ -178,7 +178,6 @@ import { createContextAgent } from './lib/kernel/context-agent.js';
 import { registerAgentProfileRoutes } from './lib/kernel/agent-profile-routes.js';
 import { registerRuntimeMaintenanceRoutes } from './lib/kernel/runtime-maintenance-routes.js';
 import { createModelAuthority } from './lib/kernel/model-authority.js';
-import 'reflect-metadata';
 import { createBotDataCleanup } from './lib/bots/bot-data-cleanup.js';
 import { createHostResourceStorage, createHostResourceExecution } from './lib/kernel/host-resource-owners.js';
 import { createExperimentService } from './lib/harness/experiments.js';
@@ -196,7 +195,6 @@ import path from 'path';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
-import webPush from 'web-push';
 import { ApplicationExtensionCatalog, ApplicationExtensionRuntime, ExtensionPackageManager } from '@varin/extension-host';
 import { VARIN_BUNDLED_LANGUAGE_SERVERS } from '@varin/extension-builtins';
 import { createDocumentAuthority, type DocumentAuthority, type DocumentMutationObservation } from './lib/documents/authority.js';
@@ -595,7 +593,6 @@ const {
 } = requestSecurityRuntime;
 
 const pushRuntime = createPushRuntime({
-  webPush,
   PUSH_SUBSCRIPTIONS_FILE_PATH,
   readSettingsFromDisk,
   updateSettingsOnDisk,

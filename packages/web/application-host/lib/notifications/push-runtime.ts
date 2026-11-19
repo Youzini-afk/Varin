@@ -40,7 +40,7 @@ interface PushRuntimeDependencies {
   updateSettingsOnDisk: (
     mutate: (settings: Record<string, unknown>) => Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
-  webPush: WebPushLike;
+  webPush?: WebPushLike;
 }
 
 interface VisibilityState {
@@ -61,11 +61,11 @@ const isLoopbackHttpOrigin = (value: unknown): boolean => {
 
 export const createPushRuntime = (deps: PushRuntimeDependencies) => {
   const {
-    webPush,
     PUSH_SUBSCRIPTIONS_FILE_PATH,
     readSettingsFromDisk,
     updateSettingsOnDisk,
   } = deps;
+  const loadWebPush = async (): Promise<WebPushLike> => deps.webPush ?? (await import('web-push')).default;
 
   const emptyPushSubscriptions = (): PushSubscriptionStore => ({
     version: PUSH_SUBSCRIPTIONS_VERSION,
@@ -132,7 +132,7 @@ export const createPushRuntime = (deps: PushRuntimeDependencies) => {
       return { publicKey: existing.publicKey, privateKey: existing.privateKey };
     }
 
-    const generated = webPush.generateVAPIDKeys();
+    const generated = (await loadWebPush()).generateVAPIDKeys();
     const updated = await updateSettingsOnDisk((current) => {
       const currentKeys = isRecord(current.vapidKeys) ? current.vapidKeys : null;
       if (currentKeys && typeof currentKeys.publicKey === 'string' && typeof currentKeys.privateKey === 'string') {
@@ -270,7 +270,7 @@ export const createPushRuntime = (deps: PushRuntimeDependencies) => {
     };
 
     try {
-      await webPush.sendNotification(pushSubscription, body);
+      await (await loadWebPush()).sendNotification(pushSubscription, body);
     } catch (error) {
       const statusCode = isRecord(error) && typeof error.statusCode === 'number' ? error.statusCode : null;
       if (statusCode === 410 || statusCode === 404) {
@@ -405,7 +405,7 @@ export const createPushRuntime = (deps: PushRuntimeDependencies) => {
       console.warn('[Push] No public origin configured for VAPID; set VARIN_VAPID_SUBJECT or enable push once from a real origin.');
     }
 
-    webPush.setVapidDetails(subject, keys.publicKey, keys.privateKey);
+    (await loadWebPush()).setVapidDetails(subject, keys.publicKey, keys.privateKey);
     pushInitialized = true;
   };
 

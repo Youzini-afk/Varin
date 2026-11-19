@@ -1,11 +1,5 @@
 import crypto from 'crypto';
 import path from 'path';
-import {
-  generateAuthenticationOptions,
-  generateRegistrationOptions,
-  verifyAuthenticationResponse,
-  verifyRegistrationResponse,
-} from '@simplewebauthn/server';
 import type {
   AuthenticationResponseJSON,
   AuthenticatorTransport,
@@ -17,6 +11,12 @@ import { createSettingsFileStore } from '@varin/settings-store';
 import type { SettingsFileStore } from '@varin/settings-store';
 import { resolveVarinDataDir } from '../platform/data-paths.js';
 import type { IncomingHttpHeaders } from 'node:http';
+
+const loadPasskeyLibrary = async () => {
+  // The certificate stack requires Reflect metadata at module evaluation.
+  await import('reflect-metadata');
+  return import('@simplewebauthn/server');
+};
 
 const DEFAULT_STORE_VERSION = 2;
 const DEFAULT_CHALLENGE_TTL_MS = 5 * 60 * 1000;
@@ -360,6 +360,7 @@ export const createUiPasskeys = ({
 
     const registrationUserID = new Uint8Array(userID.length);
     registrationUserID.set(userID);
+    const { generateRegistrationOptions } = await loadPasskeyLibrary();
     const options = await generateRegistrationOptions({
       rpName,
       rpID,
@@ -410,6 +411,7 @@ export const createUiPasskeys = ({
 
     registrationChallenges.delete(requestId);
 
+    const { verifyRegistrationResponse } = await loadPasskeyLibrary();
     const verification = await verifyRegistrationResponse({
       response,
       expectedChallenge: matchingRecord.challenge,
@@ -471,6 +473,7 @@ export const createUiPasskeys = ({
       throw httpError('No passkeys are registered for this host yet', 404);
     }
 
+    const { generateAuthenticationOptions } = await loadPasskeyLibrary();
     const options = await generateAuthenticationOptions({
       rpID,
       userVerification: 'required',
@@ -508,6 +511,7 @@ export const createUiPasskeys = ({
     }
 
     authenticationChallenges.delete(requestId);
+    const { verifyAuthenticationResponse } = await loadPasskeyLibrary();
     return mutateStore(async (store) => {
       const passkey = store.passkeys.find((item) => item.id === response?.id);
       if (!passkey) {

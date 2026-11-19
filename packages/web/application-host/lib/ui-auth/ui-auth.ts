@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import { SignJWT, jwtVerify } from 'jose';
 import fs from 'fs';
 import path from 'path';
 import { browserClientCookie, browserClientCookieName } from '../client-auth/browser-pairing.js';
@@ -562,6 +561,7 @@ export const createUiAuth = ({
   const verifySessionPrincipal = async (token: string | null): Promise<string | null> => {
     if (!token) return null;
     try {
+      const { jwtVerify } = await import('jose');
       const { payload } = await jwtVerify(token, jwtSecret, { algorithms: ['HS256'] });
       if (payload.type !== 'ui-session') return null;
       // Only cryptographically valid old password sessions migrate to the existing owner.
@@ -577,9 +577,12 @@ export const createUiAuth = ({
     if (!result) { result = verifySessionPrincipal(token); sessions.set(token, result); }
     return result;
   };
-  const signSubject = async (principalId: string, ttlMs: number) => new SignJWT({ type: 'ui-session' })
-    .setProtectedHeader({ alg: 'HS256' }).setSubject(principalId).setIssuedAt()
-    .setExpirationTime(ttlMs / 1000 + 's').sign(jwtSecret);
+  const signSubject = async (principalId: string, ttlMs: number) => {
+    const { SignJWT } = await import('jose');
+    return new SignJWT({ type: 'ui-session' })
+      .setProtectedHeader({ alg: 'HS256' }).setSubject(principalId).setIssuedAt()
+      .setExpirationTime(ttlMs / 1000 + 's').sign(jwtSecret);
+  };
   const urlAuthTokens = new Map<string, { ingressOrigin: string | null; expiresAt: number; sessionToken: string; bearerToken?: string; expiryTimer: ReturnType<typeof setTimeout> }>();
   const removeUrlAuthToken = (token: string): void => {
     const entry = urlAuthTokens.get(token);

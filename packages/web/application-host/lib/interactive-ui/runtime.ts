@@ -8,7 +8,7 @@ import type { UiBranchScope, UiFragmentRegistrationInput, UiMessageFragment, UiC
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import { runToolDomainCall } from '../kernel/tool-invocation.js';
-import { compileToolJsonSchema } from '../models/schema.js';
+import { deferToolJsonSchema } from '../models/schema.js';
 import { createUiContentStore, UiContentError, UiMutationUnknownError } from './store.js';
 import { READ_PAGE_CHUNK_BYTES } from '../harness/read-page.js';
 import type { MediaResourceStore } from '../harness/media-resources.js';
@@ -295,9 +295,9 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
     }
     return store.render(root, input, origin, readMedia, undefined, branch);
   };
-  const validate = compileToolJsonSchema(INTERACTIVE_UI_TOOL_DECLARATIONS[0]!.tool!.inputSchema);
+  const validator = deferToolJsonSchema(INTERACTIVE_UI_TOOL_DECLARATIONS[0]!.tool!.inputSchema);
   const capability: HostCapabilityHandler = async (method, input, call) => {
-    if (method !== 'render' || !validate(input)) throw new UiContentError('Arguments do not match render_ui');
+    if (method !== 'render' || !validator()(input)) throw new UiContentError('Arguments do not match render_ui');
     return runToolDomainCall(call, { domain: INTERACTIVE_UI_CAPABILITY, toolName: 'render_ui', operation: 'effect', arguments: parseVarinToolJson(input) }, async invocation => {
       try {
         call.signal.throwIfAborted();

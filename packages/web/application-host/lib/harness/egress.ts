@@ -25,9 +25,13 @@
 
 import { lookup } from "node:dns/promises";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import { isIP } from "node:net";
-import { Agent, ProxyAgent, fetch as undiciFetch, type Dispatcher } from "undici";
+import type { Agent, Dispatcher } from "undici";
 import { classifyIp, type EgressAddressClass } from "./http-target.js";
+
+const require = createRequire(import.meta.url);
+const loadUndici = () => require("undici") as typeof import("undici");
 
 export type EgressErrorKind =
   | "dns"
@@ -391,7 +395,12 @@ export const createEgressRuntime = (options: {
     );
   };
 
-  const directDispatcher = new Agent({ connect: { lookup: directLookup as never } });
+  let directDispatcher: Agent | undefined;
+  const directDispatcherFor = () => {
+    if (directDispatcher) return directDispatcher;
+    const { Agent } = loadUndici();
+    return directDispatcher = new Agent({ connect: { lookup: directLookup as never } });
+  };
 
   const proxyDispatchers = new Map<string, Dispatcher>();
   // A fetch can use either protocol after redirects. Lease both candidate
@@ -453,6 +462,7 @@ export const createEgressRuntime = (options: {
         (error) => callback(classifyEgressError(error)),
       );
     };
+    const { ProxyAgent } = loadUndici();
     const dispatcher = new ProxyAgent({
       uri: policy.proxyOrigin!,
       // Undici 8 forwards plain HTTP by default; retain the existing CONNECT path.
@@ -495,10 +505,10 @@ export const createEgressRuntime = (options: {
     if (closed) return failure("connect", "egress runtime is closed");
     if (policy.mode === "system") return { policy };
     if (policy.mode !== "proxy") {
-      return { policy, ...(allocateDispatcher ? { dispatcher: directDispatcher } : {}) };
+      return { policy, ...(allocateDispatcher ? { dispatcher: directDispatcherFor() } : {}) };
     }
     if (matchesNoProxy(url, policy.noProxy)) {
-      return { policy, ...(allocateDispatcher ? { dispatcher: directDispatcher } : {}), bypassedProxy: true };
+      return { policy, ...(allocateDispatcher ? { dispatcher: directDispatcherFor() } : {}), bypassedProxy: true };
     }
     if (!allocateDispatcher) return { policy };
     // NOTE: explicit proxy URI keeps credentials — dispatcher cache is
@@ -607,7 +617,7 @@ export const createEgressRuntime = (options: {
           return hop.dispatcher!.dispatch(opts, handler);
         },
       } as Dispatcher;
-      return await undiciFetch(targetUrl, {
+      return await loadUndici().fetch(targetUrl, {
         ...init,
         signal: signal as never,
         dispatcher: redirectDispatcher,
@@ -724,7 +734,7 @@ export const createEgressRuntime = (options: {
     if (closePromise) return closePromise;
     closed = true;
     closePromise = Promise.all([
-      directDispatcher.close(),
+      directDispatcher?.close(),
       ...[...proxyDispatchers.values()].map((dispatcher) => dispatcher.close()),
       ...retiringDispatchers,
     ]).then(() => {

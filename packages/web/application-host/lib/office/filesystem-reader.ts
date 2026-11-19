@@ -1,10 +1,10 @@
 /** Shared read-only Office package and rendering boundary for admitted files. */
 import path from 'node:path';
 import type { OfficeReadRequest } from '@varin/protocol';
-import { OfficePackage } from './package.js';
 export type OfficeFilesystemInput = Omit<OfficeReadRequest, 'path' | 'snapshotId'> & { expectedRevision?: string };
 export type OfficeFilesystemRenderer = (bytes: Buffer, format: import('@varin/protocol').OfficeFormat, signal: AbortSignal) => Promise<{bytes:Buffer;engine:{name:string;version:string}}>;
 export async function readOfficeFilesystem(bytes: Buffer, filename: string, input: OfficeFilesystemInput | {view:'preview';expectedRevision?:string}, render?: OfficeFilesystemRenderer, signal?:AbortSignal): Promise<Response> {
+  const { OfficePackage } = await import('./package.js');
   signal?.throwIfAborted();
   const file = new OfficePackage(bytes);
   if (input.expectedRevision !== undefined && input.expectedRevision !== file.revision) return Response.json({error:'The Office file changed. Refresh to read its current revision.',revision:file.revision},{status:409});

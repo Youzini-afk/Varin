@@ -1,7 +1,7 @@
 /** Structured MCP edits preserve omitted credentials and unrelated JSONC source text. */
 import { applyEdits, modify, parse, type ParseError } from 'jsonc-parser';
 import { ModelConfigurationError, object } from '../models/configuration.js';
-import { compileToolJsonSchema } from '../models/schema.js';
+import { deferToolJsonSchema } from '../models/schema.js';
 import type { McpConfigurationDocument } from '@varin/application-client';
 
 export interface McpDocumentWriteReceipt extends McpConfigurationDocument {
@@ -41,9 +41,9 @@ export const MCP_DOCUMENT_PATCH_SCHEMA = {
   properties: { ...MCP_SERVER_PATCH_SCHEMA.properties,
     path: { type: 'string', minLength: 1 }, expectedRevision: { type: 'string', minLength: 1 } },
 };
-const validate = compileToolJsonSchema(MCP_SERVER_PATCH_SCHEMA);
+const validator = deferToolJsonSchema(MCP_SERVER_PATCH_SCHEMA);
 export function patchMcpServerDocument(content: string, patch: McpServerPatch): string {
-  if (!validate(patch) || Object.values(patch.set ?? {}).some(value => value === undefined)) throw new ModelConfigurationError('mcp-patch-invalid', 'Use declared MCP server set/reset paths and valid values');
+  if (!validator()(patch) || Object.values(patch.set ?? {}).some(value => value === undefined)) throw new ModelConfigurationError('mcp-patch-invalid', 'Use declared MCP server set/reset paths and valid values');
   const errors: ParseError[] = [], document: unknown = parse(content, errors, { allowTrailingComma: true });
   if (errors.length || !object(document) || document.mcpServers !== undefined && !object(document.mcpServers)) {
     throw new ModelConfigurationError('mcp-config-invalid', 'Cannot patch a malformed MCP document');

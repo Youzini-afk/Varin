@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import { CODE_EXCHANGE_CAPABILITY, CODE_EXCHANGE_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { parseVarinToolJson } from '@varin/extension-contract';
-import { compileToolJsonSchema } from '../models/schema.js';
+import { deferToolJsonSchema } from '../models/schema.js';
 import type { FamilyMember, LaunchIntent, LaunchSource } from './protocol.generated.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import { runToolDomainCall, type ToolInvocationAuthority } from './tool-invocation.js';
@@ -35,7 +35,7 @@ export interface CodeExchangeOwners extends IntegrationTargetOwners {
   queue?: CodeExchangeQueueOwner;
 }
 const validators = new Map(CODE_EXCHANGE_TOOL_DECLARATIONS.map(d => [d.id.slice('varin.code.'.length),
-  { tool: d.tool!, validate: compileToolJsonSchema(d.tool!.inputSchema) }]));
+  { tool: d.tool!, validator: deferToolJsonSchema(d.tool!.inputSchema) }]));
 
 /** Publish the existing peer notice after the callback's actual receipt is committed.
  * Reconciling inside that callback would retire its own invocation before it returns. */
@@ -327,7 +327,7 @@ export async function acknowledgedCode(store: WorkingStateRootStore, sourceThrea
 export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabilityHandler {
   return async (method, params, context) => {
     const selected = validators.get(method);
-    if (!selected || !selected.validate(params)) throw new Error('Select an Agent and files or exact code fragments');
+    if (!selected || !selected.validator()(params)) throw new Error('Select an Agent and files or exact code fragments');
     const input = params as { source?: string; target?: string; files?: CodeSelection[]; afterCurrent?: boolean };
     return runToolDomainCall(context, { domain: CODE_EXCHANGE_CAPABILITY, toolName: selected.tool.name,
       operation: 'effect', arguments: params }, async authority => {

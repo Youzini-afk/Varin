@@ -1,7 +1,7 @@
 /** Partial channel edits operate on the owner's original record, never a redacted projection. */
 import { MODEL_CATALOG_FIELDS, type ModelChannel } from '@varin/application-client';
 import { ModelConfigurationError, object } from './configuration.js';
-import { compileToolJsonSchema } from './schema.js';
+import { deferToolJsonSchema } from './schema.js';
 
 export interface ModelChannelPatch { set?: Record<string, unknown>; reset?: string[] }
 const stringMap = { type: 'object', additionalProperties: { type: 'string' } };
@@ -32,9 +32,9 @@ export const MODEL_CHANNEL_PATCH_SCHEMA = {
   properties: { ...MODEL_CHANNEL_PATCH_FIELDS_SCHEMA.properties,
     id: { type: 'string', minLength: 1 }, expectedRevision: { type: 'string', minLength: 1 } },
 };
-const validate = compileToolJsonSchema(MODEL_CHANNEL_PATCH_FIELDS_SCHEMA);
+const validator = deferToolJsonSchema(MODEL_CHANNEL_PATCH_FIELDS_SCHEMA);
 export function applyModelChannelPatch(current: ModelChannel, patch: ModelChannelPatch): ModelChannel {
-  if (!validate(patch) || Object.values(patch.set ?? {}).some(value => value === undefined)) throw new ModelConfigurationError('channel-patch-invalid', 'Use declared channel set/reset paths and valid values');
+  if (!validator()(patch) || Object.values(patch.set ?? {}).some(value => value === undefined)) throw new ModelConfigurationError('channel-patch-invalid', 'Use declared channel set/reset paths and valid values');
   const paths = [...Object.keys(patch.set ?? {}), ...(patch.reset ?? [])];
   if (paths.some((path, index) => paths.some((other, otherIndex) => index !== otherIndex && (other === path || (modelDescriptionId(path) === undefined || modelDescriptionId(other) === undefined) && other.startsWith(`${path}.`))))) {
     throw new ModelConfigurationError('channel-patch-invalid', 'Channel patch paths cannot overlap');

@@ -14,7 +14,7 @@ import type { createBinaryFileOwner } from './binary-file-owner.js';
 import type { DocumentReader, DocumentReaderContext } from '../harness/document-reading.js';
 import type { WebMaterialStore } from '../harness/web-materials.js';
 import type { OfficeReader } from '../office/reader.js';
-import { compileToolJsonSchema } from '../models/schema.js';
+import { deferToolJsonSchema } from '../models/schema.js';
 import { runToolDomainCall, type ToolInvocationAuthority } from './tool-invocation.js';
 import { createToolFamilySettings } from './tool-family-settings.js';
 import { threadMaterialScope } from './material-storage.js';
@@ -29,7 +29,7 @@ export function createBrowserRuntime(options: {
 }) {
   const settings = createToolFamilySettings(BROWSER_TOOL_DECLARATIONS, options.settings, () => Boolean(options.resources || options.browser));
   const declarations = new Map(BROWSER_TOOL_DECLARATIONS.map(declaration => [declaration.id.slice('varin.browser.'.length),
-    { declaration, validate: compileToolJsonSchema(declaration.tool!.inputSchema) }]));
+    { declaration, validator: deferToolJsonSchema(declaration.tool!.inputSchema) }]));
   const materialContext = async (invocation: ToolInvocationAuthority, signal: AbortSignal, originalRun?: Awaited<ReturnType<AgentRuntimeClient['run']>>): Promise<DocumentReaderContext> => {
     const run = originalRun ?? await options.runtime.run(invocation.runId, signal);
     if (run.thread_id !== invocation.threadId) throw new Error('The browser invocation changed its original Thread');
@@ -39,7 +39,7 @@ export function createBrowserRuntime(options: {
   };
   const capability: HostCapabilityHandler = async (method, value, call) => {
     const selected = declarations.get(method);
-    if (!selected || !selected.validate(value)) throw new Error('Browser arguments do not match this operation; use the declared browserId, instanceId, pageId, ref and source fields');
+    if (!selected || !selected.validator()(value)) throw new Error('Browser arguments do not match this operation; use the declared browserId, instanceId, pageId, ref and source fields');
     const input = parseVarinToolJson(value) as Record<string, unknown>;
     return runToolDomainCall(call, { domain: BROWSER_CAPABILITY, toolName: selected.declaration.tool!.name,
       operation: selected.declaration.tool!.operation, arguments: parseVarinToolJson(input) }, async invocation => {

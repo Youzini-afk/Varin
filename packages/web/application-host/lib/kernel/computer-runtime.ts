@@ -7,7 +7,7 @@ import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import type { ThreadComputerAPI, ThreadIdentity } from '@varin/application-client';
 import { computerWorkKey, sameComputerWork, sameComputerExecution, parseComputerWorkRef, type ComputerActParams, type ComputerObserveParams, type ComputerQueryParams, type ComputerAwaitParams, type ComputerWorkRef, type ComputerActor, type ComputerAccessRequest, type ComputerExecutionRef, type ComputerWorkScope } from '@varin/protocol';
-import { compileToolJsonSchema } from '../models/schema.js';
+import { deferToolJsonSchema } from '../models/schema.js';
 import { ComputerEffectError, type ComputerService, type ComputerExecutionEvidence } from '../computer/computer-service.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import type { PendingComputerControlEvent, PendingComputerControlCancellation } from '../computer/computer-records.js';
@@ -24,7 +24,7 @@ import type { ToolExecutionReceipt } from './tool-bridge.js';
 
 export { COMPUTER_CAPABILITY };
 const declarations = new Map(COMPUTER_TOOL_DECLARATIONS.map(declaration => [declaration.id.slice('varin.computer.'.length),
-  { declaration, validate: compileToolJsonSchema(declaration.tool!.inputSchema) }]));
+  { declaration, validator: deferToolJsonSchema(declaration.tool!.inputSchema) }]));
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 function configuration(identity: string | null | undefined): { version: 1; defaultDesktopId: string | null } {
   let value: unknown;
@@ -217,7 +217,7 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
   };
   const capability: HostCapabilityHandler = async (method, value, context) => {
     const selected = declarations.get(method);
-    if (!selected || !selected.validate(value)) throw new ComputerError('computer-request-invalid', 'Arguments do not match the selected Computer capability');
+    if (!selected || !selected.validator()(value)) throw new ComputerError('computer-request-invalid', 'Arguments do not match the selected Computer capability');
     const input = parseVarinToolJson(value);
     const authority = requireToolInvocation(context);
     const configured = configuration(authority.configurationIdentity);

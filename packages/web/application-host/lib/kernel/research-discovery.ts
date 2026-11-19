@@ -3,7 +3,7 @@ import type { AgentSettingsSnapshot } from '@varin/application-client';
 import { RESEARCH_DISCOVERY_CAPABILITY, RESEARCH_DISCOVERY_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
-import { compileToolJsonSchema } from '../models/schema.js';
+import { deferToolJsonSchema } from '../models/schema.js';
 import type { ScholarlySearchParams, ScholarlyPaper } from '@varin/protocol';
 import type { ScholarlySearchService } from '../harness/research-search.js';
 import { HarnessServiceError } from '../harness/service-error.js';
@@ -14,7 +14,7 @@ import { runToolDomainCall, type ToolInvocationAuthority } from './tool-invocati
 
 export { RESEARCH_DISCOVERY_CAPABILITY };
 const declarations = new Map(RESEARCH_DISCOVERY_TOOL_DECLARATIONS.map(declaration => [declaration.id.slice('varin.research.'.length),
-  { declaration, validate: compileToolJsonSchema(declaration.tool!.inputSchema) }]));
+  { declaration, validator: deferToolJsonSchema(declaration.tool!.inputSchema) }]));
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 interface ResearchDiscoveryConfiguration { version: 1; enabled: boolean }
 function capture(snapshot: AgentSettingsSnapshot): ResearchDiscoveryConfiguration {
@@ -43,7 +43,7 @@ export interface ResearchDiscoveryRuntimeOptions {
 export function createResearchDiscoveryRuntime(options: ResearchDiscoveryRuntimeOptions) {
   const capability: HostCapabilityHandler = async (method, value, call) => {
     const selected = declarations.get(method);
-    if (!selected || !selected.validate(value)) throw new HarnessServiceError('invalid-params', 'Arguments do not match scholarly search; select search, paper or relations and its required fields');
+    if (!selected || !selected.validator()(value)) throw new HarnessServiceError('invalid-params', 'Arguments do not match scholarly search; select search, paper or relations and its required fields');
     const input = parseVarinToolJson(value);
     return runToolDomainCall(call, { domain: RESEARCH_DISCOVERY_CAPABILITY, toolName: selected.declaration.tool!.name,
       operation: selected.declaration.tool!.operation, arguments: input }, async invocation => {

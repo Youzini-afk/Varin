@@ -3,8 +3,8 @@ import { isDeepStrictEqual } from 'node:util';
 import { SCRIPT_CAPABILITY, SCRIPT_TOOL_DECLARATIONS, VARIN_BUILTIN_SCRIPT_EXTENSION_ID } from '@varin/extension-builtins';
 import { parseVarinToolJson, type JsonValue, type NestedToolInput, type NestedToolReceipt } from '@varin/extension-contract';
 import type { HostCapabilityCallContext, HostCapabilityHandler } from '@varin/extension-host';
-import { SCRIPT_PROTOCOL_VERSION, ScriptFrameDecoder, encodeScriptFrame, parseScriptWorkerFrame, type ScriptHostFrame, type ScriptWorkerFrame } from '@varin/script-runtime';
-import { compileToolJsonSchema } from '../models/schema.js';
+import { SCRIPT_PROTOCOL_VERSION, ScriptFrameDecoder, encodeScriptFrame, parseScriptWorkerFrame, type ScriptHostFrame, type ScriptWorkerFrame } from '@varin/script-runtime/frames';
+import { deferToolJsonSchema } from '../models/schema.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import { KernelClientError, type KernelClient } from './kernel-client.js';
 import type { ExtensionToolOwnerOptions } from './extension-tool-owner.js';
@@ -22,7 +22,7 @@ import { assertNoScriptCellCycle, requireToolInvocation, runNestedToolCall, runT
 
 export { SCRIPT_CAPABILITY };
 const declarations = new Map(SCRIPT_TOOL_DECLARATIONS.map(declaration => [declaration.id.slice('varin.script.'.length),
-  { declaration, validate: compileToolJsonSchema(declaration.tool!.inputSchema) }]));
+  { declaration, validator: deferToolJsonSchema(declaration.tool!.inputSchema) }]));
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const result = (content: unknown, effect: 'none' | 'confirmed' | 'partial' | 'unknown', stopped: boolean, outcome: 'succeeded' | 'failed' | 'cancelled' | 'indeterminate' = 'succeeded', parts: OutputPart<IncomingMedia>[] = []): ToolExecutionReceipt => ({
@@ -319,7 +319,7 @@ export function createScriptRuntime(options: {
   };
   const capability: HostCapabilityHandler = async (method, value, context) => {
     const selected = declarations.get(method);
-    if (!selected || !selected.validate(value)) throw new Error('script_arguments_invalid');
+    if (!selected || !selected.validator()(value)) throw new Error('script_arguments_invalid');
     const input = parseVarinToolJson(value), params = input as Record<string, JsonValue>;
     return runToolDomainCall(context, { domain: SCRIPT_CAPABILITY, toolName: selected.declaration.tool!.name, operation: 'effect', arguments: input }, async authority => {
       try {

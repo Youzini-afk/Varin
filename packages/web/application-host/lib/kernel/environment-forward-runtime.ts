@@ -5,7 +5,7 @@ import { ENVIRONMENT_FORWARD_CAPABILITY, ENVIRONMENT_FORWARD_TOOL_DECLARATIONS }
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import type { EnvironmentServiceAccess } from '@varin/protocol';
-import { compileToolJsonSchema } from '../models/schema.js';
+import { deferToolJsonSchema } from '../models/schema.js';
 import { managedEndpointIdentity, type ManagedRemoteTargetRegistry, type ManagedTarget } from '../harness/managed-remote-client.js';
 import type { EnvironmentForwardOwner, EnvironmentForwardRuntime } from '../harness/environment-forwards.js';
 import type { KernelClient } from './kernel-client.js';
@@ -15,7 +15,7 @@ import { runToolDomainCall, type ToolInvocationAuthority } from './tool-invocati
 import type { ToolExecutionReceipt } from './tool-bridge.js';
 export { ENVIRONMENT_FORWARD_CAPABILITY };
 const declarations = new Map(ENVIRONMENT_FORWARD_TOOL_DECLARATIONS.map(declaration => [declaration.id.slice('varin.environment.'.length),
-  { declaration, validate: compileToolJsonSchema(declaration.tool!.inputSchema) }]));
+  { declaration, validator: deferToolJsonSchema(declaration.tool!.inputSchema) }]));
 const DOMAIN = 'environment.forward';
 type Subject = Extract<HostJobBinding['subject'], { kind: 'environment_forward' }>;
 const result = (data: unknown, effect: Effect = 'none', stopped = true,
@@ -221,7 +221,7 @@ export function createEnvironmentForwardJobRuntime(options: {
   const capability: HostCapabilityHandler = async (method, input, context) => {
     if (disposed || closing) throw new Error('Service-forward owner is detached');
     const selected = declarations.get(method);
-    if (!selected || !selected.validate(input)) throw new Error('Arguments do not match the selected environment-forward tool');
+    if (!selected || !selected.validator()(input)) throw new Error('Arguments do not match the selected environment-forward tool');
     const params = parseVarinToolJson(input) as Record<string, unknown>;
     return runToolDomainCall(context, { domain: DOMAIN, operation: selected.declaration.tool!.operation,
       toolName: selected.declaration.tool!.name, arguments: parseVarinToolJson(input) }, authority => {

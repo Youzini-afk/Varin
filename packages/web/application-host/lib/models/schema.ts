@@ -1,14 +1,19 @@
 /** JSON Schema compiler shared by trusted Host tool boundaries. No runtime, owner or permission state. */
-import { Ajv, type ValidateFunction } from 'ajv';
-import { Ajv2020 } from 'ajv/dist/2020.js';
-import { Ajv2019 } from 'ajv/dist/2019.js';
-import addFormats from 'ajv-formats';
+import { createRequire } from 'node:module';
+import type { ValidateFunction } from 'ajv';
+const require = createRequire(import.meta.url);
 const annotationsByValidator = new WeakMap<ValidateFunction, readonly string[]>();
 const diagnosticValidators = new WeakMap<ValidateFunction, ValidateFunction>();
 
 /** Compile without coercion, defaults, property removal, external loading or asynchronous execution. */
 export function compileToolJsonSchema(input: unknown, annotations: readonly string[] = []): ValidateFunction {
   return compile(input, annotations, false);
+}
+
+/** Repository-owned declarations can wait until their operation is actually used. */
+export function deferToolJsonSchema(input: unknown): () => ValidateFunction {
+  let validate: ValidateFunction | undefined;
+  return () => validate ??= compileToolJsonSchema(input);
 }
 
 function compile(input: unknown, annotations: readonly string[], allErrors: boolean): ValidateFunction {
@@ -20,12 +25,14 @@ function compile(input: unknown, annotations: readonly string[], allErrors: bool
   const dialect = typeof schema === 'object' && typeof schema.$schema === 'string' ? schema.$schema : undefined;
   const options = { allErrors, strictSchema: true, strictTypes: false, allowUnionTypes: true,
     ownProperties: true, logger: false, coerceTypes: false, useDefaults: false, removeAdditional: false } as const;
-  const ajv = dialect?.includes('draft-07') ? new Ajv(options)
-    : dialect?.includes('2019-09') ? new Ajv2019(options) : new Ajv2020(options);
+  const Ajv = dialect?.includes('draft-07') ? (require('ajv') as typeof import('ajv')).Ajv
+    : dialect?.includes('2019-09') ? (require('ajv/dist/2019.js') as typeof import('ajv/dist/2019.js')).Ajv2019
+    : (require('ajv/dist/2020.js') as typeof import('ajv/dist/2020.js')).Ajv2020;
+  const ajv = new Ajv(options);
   // Protocol owners validate annotation semantics; these never relax JSON value constraints.
   for (const keyword of annotations) ajv.addKeyword({ keyword, valid: true });
   // ajv-formats is CommonJS and publishes its callable on the explicit default export.
-  addFormats.default(ajv);
+  (require('ajv-formats') as typeof import('ajv-formats')).default(ajv);
   const validate = ajv.compile(schema);
   if ('$async' in validate && validate.$async === true) throw new Error('tool_schema_async_unsupported');
   annotationsByValidator.set(validate, annotations);

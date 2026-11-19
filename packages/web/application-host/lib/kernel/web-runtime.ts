@@ -7,7 +7,7 @@ import type { ThreadIdentity, ThreadMaterialsAPI, ThreadMaterialArtifactReadRequ
 import { WEB_CAPABILITY, WEB_TOOL_DECLARATIONS } from '@varin/extension-builtins';
 import { parseVarinToolJson } from '@varin/extension-contract';
 import type { HostCapabilityHandler } from '@varin/extension-host';
-import { compileToolJsonSchema } from '../models/schema.js';
+import { deferToolJsonSchema } from '../models/schema.js';
 import {
   resolveHarnessDocumentReadingSettings, parseHarnessWebSearchSettings,
   DOCUMENT_MIME_TYPES, formatWebSourceCitation, parseWebSourceCitation, materialAttachmentRef,
@@ -37,7 +37,7 @@ import { MaterialCollectionMutationError, type createMaterialCollections } from 
 
 export { WEB_CAPABILITY };
 const declarations = new Map(WEB_TOOL_DECLARATIONS.map(declaration => [declaration.id.slice('varin.web.'.length),
-  { declaration, validate: compileToolJsonSchema(declaration.tool!.inputSchema) }]));
+  { declaration, validator: deferToolJsonSchema(declaration.tool!.inputSchema) }]));
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const sourceCitation = (result: FetchResult): FetchResult => {
   if (result.status !== 'ok' || !result.snapshot || result.snapshot.document?.kind === 'pdf') return result;
@@ -98,7 +98,7 @@ function configuration(identity: string | null | undefined): WebConfiguration {
 }
 function decode(method: string, value: unknown) {
   const selected = declarations.get(method);
-  if (!selected || !selected.validate(value)) throw new HarnessServiceError('invalid-params',
+  if (!selected || !selected.validator()(value)) throw new HarnessServiceError('invalid-params',
     'Arguments do not match the Web capability. Select a supported search request, page or document source.');
   return { selected, input: parseVarinToolJson(value) };
 }

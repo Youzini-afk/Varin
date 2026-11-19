@@ -10,7 +10,7 @@ import {
 } from '@varin/protocol';
 import { ManagedTargetClient, managedEndpointIdentity, type ManagedRemoteTargetRegistry } from '../harness/managed-remote-client.js';
 import type { ManagedHostSourceOwner } from '../harness/managed-remote-types.js';
-import { compileToolJsonSchema } from '../models/schema.js';
+import { deferToolJsonSchema } from '../models/schema.js';
 import type { BrowserResources } from './browser-resources.js';
 import type { BrowserManagementSnapshot, BrowserSettingsSnapshot } from '@varin/protocol';
 import type { BrowserSettingsOwner } from './browser-settings.js';
@@ -34,7 +34,7 @@ interface Call {
   args: unknown[];
   threadId?: string;
 }
-const inputValidators = new Map(BROWSER_TOOL_DECLARATIONS.map(item => [item.id.slice('varin.browser.'.length), compileToolJsonSchema(item.tool!.inputSchema)]));
+const inputValidators = new Map(BROWSER_TOOL_DECLARATIONS.map(item => [item.id.slice('varin.browser.'.length), deferToolJsonSchema(item.tool!.inputSchema)]));
 const exact = (value: Record<string, unknown>, allowed: string[]) => Object.keys(value).every(key => allowed.includes(key));
 const bytes = (value: unknown): value is string => typeof value === 'string' && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value);
 
@@ -49,9 +49,9 @@ function parseCall(value: unknown): Call {
   switch (method) {
     case 'list': valid = args.length === 0; break;
     case 'open': case 'read': valid = args.length === 1 && object(first)
-      && !('browserId' in first) && !('instanceId' in first) && !!inputValidators.get(method)?.(first); break;
+      && !('browserId' in first) && !('instanceId' in first) && !!inputValidators.get(method)?.()(first); break;
     case 'act': valid = args.length === 2 && text(first) && object(second) && !('pageId' in second)
-      && !('browserId' in second) && !('instanceId' in second) && !!inputValidators.get('act')?.({ ...second, pageId: first }); break;
+      && !('browserId' in second) && !('instanceId' in second) && !!inputValidators.get('act')?.()({ ...second, pageId: first }); break;
     case 'activate': case 'usage': case 'downloads': valid = args.length === 1 && text(first); break;
     case 'controlPage': valid = args.length === 2 && text(first) && oneOf(second, ['takeover', 'resume', 'activate']); break;
     case 'readDownload': case 'releaseDownload': valid = args.length === 2 && text(first) && text(second); break;

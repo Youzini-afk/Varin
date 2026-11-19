@@ -66,7 +66,9 @@ export async function prepareKernelCommand(options: KernelLaunchOptions = {}): P
   if (fs.existsSync(manifestPath)) {
     try {
       manifest = JSON.parse(await fs.promises.readFile(manifestPath, 'utf8')) as KernelManifest;
-      const digest = createHash('sha256').update(await fs.promises.readFile(executable)).digest('hex');
+      const hash = createHash('sha256');
+      for await (const chunk of fs.createReadStream(executable)) hash.update(chunk);
+      const digest = hash.digest('hex');
       if (manifest.schema !== 3 || manifest.sha256 !== digest || manifest.protocolVersion !== KERNEL_PROTOCOL_VERSION
         || manifest.platform !== process.platform || manifest.arch !== (options.targetArch ?? process.arch)
         || (options.targetTriple !== undefined && manifest.targetTriple !== options.targetTriple)

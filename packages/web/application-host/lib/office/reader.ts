@@ -2,7 +2,7 @@ import { OFFICE_FORMAT_MIME_TYPES, type DocumentReadRequest, type FetchResult, t
 import type { DocumentIngestInput, DocumentReader, DocumentReaderContext } from '../harness/document-reading.js';
 import type { DocumentMaterialSources } from '../harness/document-material.js';
 import type { WebMaterialStore } from '../harness/web-materials.js';
-import { OfficePackage } from './package.js';
+import type { OfficePackage } from './package.js';
 import type { OfficeRenderer } from './renderer.js';
 
 export const OFFICE_MIME = OFFICE_FORMAT_MIME_TYPES;
@@ -16,6 +16,7 @@ export function createOfficeReader(options: { materials: Pick<WebMaterialStore, 
     sources: DocumentMaterialSources, captured?: DocumentIngestInput): Promise<{ package: OfficePackage; bytes: Buffer; snapshot: WebSnapshotRef; fileObservation?: DocumentIngestInput['fileObservation'] }> => {
     context.signal?.throwIfAborted();
     if (!captured && [input.path, input.snapshotId, input.ref].filter(Boolean).length !== 1) throw new Error('Choose exactly one Office ref, path or snapshotId');
+    const { OfficePackage } = await import('./package.js');
     let source = captured;
     if (input.snapshotId) {
       const snapshot = await options.materials.read(context.workspaceId, input.snapshotId, context.authority, { includeSource: true, ...(context.signal ? { signal: context.signal } : {}) });

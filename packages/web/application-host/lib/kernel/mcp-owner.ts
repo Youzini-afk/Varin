@@ -23,7 +23,7 @@ import type {
   ToolExecutionReceipt,
 } from './tool-bridge.js';
 import { MCP_CAPABILITIES, type McpBinding, type McpBuiltinOperation } from './protocol.generated.js';
-import { compileToolJsonSchema } from '../models/schema.js';
+import { deferToolJsonSchema } from '../models/schema.js';
 import { projectMcpOutput } from './mcp-output.js';
 import { McpAuthorityError, requiresMcpTask } from '../mcp/authority.js';
 import type { McpTaskRuntime } from './mcp-task-runtime.js';
@@ -32,7 +32,7 @@ import { HostToolAdmissionError } from './tool-admission.js';
 import { KernelClientError } from './kernel-error.js';
 import { createMcpDiscoveryReader, McpDiscoveryError, mcpDiscoverySelection, type McpDiscoveryQuery } from './mcp-discovery.js';
 
-const builtins = new Map(MCP_CAPABILITIES.map(value => [value.name, { ...value, validate: compileToolJsonSchema(value.schema) }]));
+const builtins = new Map(MCP_CAPABILITIES.map(value => [value.name, { ...value, validator: deferToolJsonSchema(value.schema) }]));
 export const MCP_DISCOVER = MCP_CAPABILITIES.find(value => value.operation === 'discover')!.name;
 export const MCP_CALL = MCP_CAPABILITIES.find(value => value.operation === 'call')!.name;
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -203,7 +203,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
     const args = call.arguments;
     const builtin = builtins.get(call.name);
     if (builtin) {
-      if (!builtin.validate(args) || (args.server !== undefined && !servers.has(String(args.server)))) throw new HostToolAdmissionError('mcp_arguments_invalid');
+      if (!builtin.validator()(args) || (args.server !== undefined && !servers.has(String(args.server)))) throw new HostToolAdmissionError('mcp_arguments_invalid');
       if(builtin.route.kind==='resource_subscribe')return {kind:'subscribe',args};
       if(builtin.route.kind==='resource_unsubscribe')return {kind:'unsubscribe',operationId:args[builtin.route.argument] as string};
       if (builtin.route.kind === 'task_control') return {kind:'control',action:builtin.route.action,operationId:args[builtin.route.argument] as string};
