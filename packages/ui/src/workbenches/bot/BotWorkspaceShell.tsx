@@ -30,6 +30,7 @@ import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
 import { noteSwitchDirection } from '@/lib/motion/switchDirection';
+import { activationPoint } from '@/lib/motion/pointer';
 import { BotNameDialog } from '@/components/sections/bots/BotNameDialog';
 import type { BotMenuAction } from '@/components/sections/bots/BotMenu';
 import { BotActivityBanner } from '@/components/sections/bots/BotActivityBanner';
@@ -72,8 +73,8 @@ const momentOf = (event: BotStageEvent, nameOf: (key: string) => string): BotTea
   return null;
 };
 
-const openSettings = () => {
-  useUIStore.getState().setSettingsDialogOpen(true);
+const openSettings = (event: React.MouseEvent<HTMLButtonElement>) => {
+  useUIStore.getState().setSettingsDialogOpen(true, activationPoint(event));
 };
 
 function useMatchMedia(query: string): boolean {
@@ -163,7 +164,6 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const [groupId, setGroupId] = React.useState<string | null>(null);
   const [groupPanel, setGroupPanel] = React.useState(true);
   const [groupPanelTarget, setGroupPanelTarget] = React.useState<HTMLDivElement | null>(null);
-  const [groupSearchRequest, searchGroup] = React.useReducer((request: number) => request + 1, 0);
   const [creatingGroup, setCreatingGroup] = React.useState(false);
   const currentGroup = groupChats.groups.find(group => group.id === groupId);
   React.useEffect(() => { setGroupId(null); setGroupPanel(true); setCreatingGroup(false); }, [groupScope]);
@@ -726,22 +726,25 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     ? branchIndex >= 0 ? t('bot.session.branchOf', { bot: selected.name, session: sessionTitleOf(currentSession) }) : selected.name
     : undefined;
 
+  const groupPanelShown = floating ? narrowPanelOpen : groupPanel;
+  const changeGroupPanel = (open: boolean) => { if (floating) setNarrowPanelOpen(open); else setGroupPanel(open); };
   const togglePanel = () => {
+    if (currentGroup) { changeGroupPanel(!groupPanelShown); return; }
     if (conversationTab) { closeConversationPanel(); if (floating) setNarrowPanelOpen(true); else setPanelOpen(true); return; }
     if (floating) setNarrowPanelOpen(open => !open); else setPanelOpen(!panelOpen);
   };
-  const botPanelShown = panelVisible && !conversationTab;
-  const panelLabel = t(botPanelShown ? 'bot.panel.close' : 'bot.panel.open');
+  const panelShown = currentGroup ? groupPanelShown : panelVisible && !conversationTab;
+  const panelLabel = currentGroup ? groupLabel(panelShown ? 'closePanel' : 'openPanel') : t(panelShown ? 'bot.panel.close' : 'bot.panel.open');
   const panelControl = <>
-    {selectedEntry && !activeDraftKey && <Tooltip><TooltipTrigger asChild><button type="button" aria-label={t('conversationTools.title')} aria-expanded={Boolean(conversationTab)}
+    {!currentGroup && selectedEntry && !activeDraftKey && <Tooltip><TooltipTrigger asChild><button type="button" aria-label={t('conversationTools.title')} aria-expanded={Boolean(conversationTab)}
       className={`workbench-icon-button app-region-no-drag flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${conversationTab ? 'bg-interactive-selection text-foreground' : ''}`}
       onClick={toggleBotConversationTools}><Icon name="conversation-tree" className="size-4" /></button></TooltipTrigger><TooltipContent>{t('conversationTools.title')}</TooltipContent></Tooltip>}
     {!isMobile && <Tooltip>
     <TooltipTrigger asChild>
-      <button type="button" aria-label={panelLabel} aria-expanded={botPanelShown} onClick={togglePanel}
+      <button type="button" aria-label={panelLabel} aria-expanded={panelShown} onClick={togglePanel}
         className="workbench-icon-button app-region-no-drag relative flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <Icon name="layout-right" className="size-4" />
-        {!botPanelShown && needs.length ? <span className="bot-titlebar-dot" data-tone="warn" aria-hidden="true" /> : null}
+        {!currentGroup && !panelShown && needs.length ? <span className="bot-titlebar-dot" data-tone="warn" aria-hidden="true" /> : null}
       </button>
     </TooltipTrigger>
     <TooltipContent side="bottom">{panelLabel}</TooltipContent>
@@ -753,19 +756,16 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
 
   const navigator = () => <BotNavigator bots={bots} organization={organization} selectedId={selectedId} sessions={sessionsWithWork} current={!currentGroup && !activeDraftKey && ownsConversation ? selectedEntry : null}
     figures={figures} busy={busy || actionBusy !== null} showArchived={showArchived} isMobile={isMobile} sessionTitle={sessionTitleOf}
-    groupChats={groupChats.groups} currentGroup={currentGroup?.id ?? null} onGroup={setGroupId}
+    groupChats={groupChats.groups} currentGroup={currentGroup?.id ?? null} onGroup={id => { useUIStore.getState().closeMainSurfaces(); setGroupId(id); }}
     onCreateGroup={() => setCreatingGroup(true)}
     onSelectBot={id => { setGroupId(null); selectBot(id); }} onSelectSession={identity => { setGroupId(null); openSession(identity); }} onNewSession={() => { setGroupId(null); void newSession(); }}
     onSessionAction={(session, identity, action) => { void sessionAction(session, identity, action); }}
     onBotAction={(bot, action) => { void mutateBot(bot, action); }} onCreateBot={openCreateDialog}
     onToggleArchived={() => setShowArchived(value => !value)} onRefresh={refresh} onOpenSettings={openSettings} />;
 
-  const groupPanelShown = floating ? narrowPanelOpen : groupPanel;
-  const changeGroupPanel = (open: boolean) => { if (floating) setNarrowPanelOpen(open); else setGroupPanel(open); };
   const conversation = (active: boolean) => currentGroup
     ? <BotGroupChat key={currentGroup.id} group={currentGroup} bots={bots ?? []} api={threads} sequence={groupChats.sequence}
       panelTarget={groupPanelTarget} onOpenPanel={() => changeGroupPanel(true)} onRevealChat={() => { if (floating) setNarrowPanelOpen(false); }} refresh={groupChats.refresh}
-      searchRequest={groupSearchRequest}
       onDelete={() => setGroupId(null)} onDirect={id => { setGroupId(null); selectBot(id); }}
       onProfile={bot => setDetails({ id: bot.id, name: bot.name, tab: 'profile' })}
       onWake={bot => { void mutateBot(bot, 'wake'); }} />
@@ -852,13 +852,11 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       {conversationPanelMounted && !isMobile && <React.Suspense fallback={null}>{conversationTools()}</React.Suspense>}</>;
 
   return <ConversationToolsContext.Provider value={{ identity: !currentGroup && ownsConversation && !activeDraftKey ? selectedEntry : null, target: conversationTarget, mode: selectedConversationTab?.mode, bots: bots ?? [], bot: selected ?? undefined }}><BotWorkspaceNavigationContext.Provider value={spaces}><MainLayout renderNavigator={navigator} renderConversation={conversation} renderSecondaryPanel={secondaryPanel}
+    scheduledTasksGroup={currentGroup}
     secondaryPanelFocus={!currentGroup && spaces.activeKey ? `${spaces.activeKey}:${spaces.focusRevision}` : null}
     secondaryPanelLabel={currentGroup?.name ?? t('bot.panel.aria')} secondaryPanelToggleLabels={{ open: t('bot.panel.open'), close: t('bot.panel.close') }}
     navigationTitle={currentGroup?.name ?? navigationTitle} navigationSubtitle={currentGroup ? currentGroup.members.map(member => member.name).join('、') : navigationSubtitle}
-    headerPanelControl={currentGroup ? <div className="flex items-center gap-0.5">
-      <Button variant="ghost" size="icon" aria-label={groupLabel('search')} title={groupLabel('search')} onClick={() => { if (floating) changeGroupPanel(false); searchGroup(); }}><Icon name="search" className="size-4" /></Button>
-      <Button variant="ghost" size="sm" aria-label={groupLabel('members')} aria-expanded={groupPanelShown} onClick={() => changeGroupPanel(!groupPanelShown)}><GroupFaces group={currentGroup} bots={bots ?? []} /></Button>
-    </div> : panelControl} sidebarAttention={sidebarAttention}
+    headerPanelControl={panelControl} sidebarAttention={sidebarAttention}
     floatingSidebar={floatingSidebar}
     renderMobileTitle={isMobile && currentGroup ? panel => <button className="flex min-w-0 items-center gap-2" type="button" aria-expanded={panel.open} onClick={panel.toggle}><GroupFaces group={currentGroup} bots={bots ?? []} /><span className="truncate">{currentGroup.name}</span></button>
       : isMobile && selected && line ? panel => <BotMobileTitle bot={selected} model={shownPanel} figure={figure} line={line} open={panel.open} onToggle={panel.toggle} /> : undefined} />

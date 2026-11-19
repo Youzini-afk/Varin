@@ -139,8 +139,6 @@
 .group-chat-person:hover { background: var(--muted); border-radius: 7px; }
 .group-chat-person > input { margin-inline-start: auto; accent-color: var(--primary); }
 .group-chat-person small { display: block; color: var(--muted-foreground); }
-.group-chat-list-actions { display: flex; align-items: center; gap: 8px; padding: 8px 6px; color: var(--muted-foreground); }
-.group-chat-list-actions > select { flex: 1; min-width: 0; }
 @media (hover: none), (max-width: 640px) {
   .group-chat-message-actions { opacity: 1; }
   .group-chat-stack { max-width: 88%; }

@@ -98,6 +98,7 @@ interface TabConfig {
 
 interface HeaderProps {
   navigationTitle?: string;
+  settingsVisible?: boolean;
   /** A second line under a workbench-owned title (the Bot conversation's Bot). */
   navigationSubtitle?: string;
   /** Replaces the context panel controls for a workbench that owns its own secondary panel. */
@@ -119,6 +120,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   navigationTitle,
+  settingsVisible,
   navigationSubtitle,
   panelControl,
   sidebarAttention,
@@ -196,7 +198,8 @@ export const Header: React.FC<HeaderProps> = ({
     return isDesktopShell();
   });
   const titlebarLeftInset = useTitlebarLeftInset();
-  const settingsOpen = useUIStore((state) => state.isSettingsDialogOpen);
+  const settingsRequested = useUIStore((state) => state.isSettingsDialogOpen);
+  const settingsOpen = settingsVisible ?? settingsRequested;
 
   const isMacPlatform = React.useMemo(() => {
     if (typeof navigator === 'undefined') {

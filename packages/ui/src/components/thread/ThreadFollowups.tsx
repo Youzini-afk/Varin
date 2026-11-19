@@ -354,9 +354,10 @@ export function FollowupOccurrences({ api, family, mediaRead, identity, item }: 
 }
 
 /** Original definitions and delivery facts; no client timer or execution queue. */
-export function ThreadFollowups({ api, botId, family, mediaRead, research, identity, run, operations, followups, pending, act, cancelObservation, createOpen, onCreateOpenChange, onContentChange, focusId, focusToken, visibleArrangementIds }: {
+export function ThreadFollowups({ api, botId, family, mediaRead, research, identity, run, operations, followups, pending, act, cancelObservation, createOpen, onCreateOpenChange, onContentChange, focusId, focusToken, visibleArrangementIds, fixedDestination }: {
   api: ThreadFollowupsAPI; botId?: string | null; family?: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; research?: ThreadResearchAPI; identity: ThreadIdentity; run?: Run; operations: Operation[]; followups: Followup[];
   focusId?: string; focusToken?: number; visibleArrangementIds?: Set<string>;
+  fixedDestination?: string;
   createOpen?: boolean; onCreateOpenChange?(open: boolean): void;
   onContentChange?(present: boolean): void;
   pending: boolean; act(work: () => Promise<unknown>): Promise<void>; cancelObservation(operationId: string): Promise<void>;
@@ -515,7 +516,7 @@ export function ThreadFollowups({ api, botId, family, mediaRead, research, ident
       <p className="break-all text-xs text-muted-foreground">{item.id} · original run {item.sourceRunId} · {item.paths.join(', ')}</p>
       <Button variant="ghost" size="sm" disabled={pending} onClick={() => void discardRegistration(item)}>Cancel unconfirmed registration</Button>
     </div>)}
-    <ThreadEventArrangements focusId={focusId} focusToken={focusToken} visibleArrangementIds={visibleArrangementIds} createOpen={createOpen} onCreateOpenChange={onCreateOpenChange} api={api} identity={identity} botId={botId} followups={followups} pending={pending} act={act}
+    <ThreadEventArrangements focusId={focusId} focusToken={focusToken} visibleArrangementIds={visibleArrangementIds} createOpen={createOpen} onCreateOpenChange={onCreateOpenChange} api={api} identity={identity} botId={botId} followups={followups} pending={pending} act={act} fixedDestination={fixedDestination}
       records={item => <FollowupOccurrences api={api} family={family} mediaRead={mediaRead} identity={identity} item={item} />} />
     {pastCount > 0 && <Button variant="ghost" size="sm" aria-expanded={showPast} onClick={() => setShowPast(value => !value)}>
       <Icon name={showPast ? 'arrow-up-s' : 'arrow-down-s'} className="mr-1 size-3.5" />{t(showPast ? 'followups.hideHistory' : 'followups.history', { count: pastCount })}

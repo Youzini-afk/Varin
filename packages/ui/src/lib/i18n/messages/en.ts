@@ -938,6 +938,7 @@ export const dict = {
   'followupEditor.pr.merged': "PR is merged",
   'followupEditor.pr.closed': "PR is closed",
   'tasksHub.title': "Scheduled & follow-ups",
+  'bot.group.scheduleBot': "Bot responsible",
   'tasksHub.scheduled': "Scheduled tasks",
   'tasksHub.followUps': "Follow-ups",
   'tasksHub.followUpsDescription': "Waits across conversations on this host. When the time or condition is met, the original conversation continues.",

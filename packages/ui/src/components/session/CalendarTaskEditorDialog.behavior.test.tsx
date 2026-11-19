@@ -101,6 +101,16 @@ it('uses Chinese labels without resetting the draft or translating saved schedul
   expect(api.schedules.listSources).toHaveBeenCalledOnce();
 });
 
+it('saves a group schedule against its receiving branch using the shared editor', async () => {
+  await render({ task: null, projectId: 'bot:ops', initialTarget: { runtime: 'agent', threadId: 'release-ops', branchId: 'group-main' }, fixedDestination: 'Release group' });
+  expect(container.textContent).toContain('Release group');
+  expect(control('Calendar target')).toBeNull();
+  expect(api.schedules.listSources).not.toHaveBeenCalled();
+  await editField('Name', 'Daily review'); await editField('Instruction', 'Share build progress');
+  await click('Save definition');
+  expect(save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ target: { kind: 'existing_work', threadId: 'release-ops', branchId: 'group-main' } }));
+});
+
 it('defaults new work to the project source and can save when source discovery fails', async () => {
   api.schedules.listSources.mockRejectedValueOnce(new Error('Directory unavailable'));
   await render({ task: null });

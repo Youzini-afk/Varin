@@ -15,10 +15,11 @@ const sourceOwnerKey = (owner: SourceResourceOwner) => owner.kind === 'local'
   ? 'local' : JSON.stringify([owner.connectionId, owner.endpointIdentity, owner.hostId]);
 
 /** Edits external definitions only. Preview/admission and every occurrence stay with the Host. */
-export function CalendarTaskEditorDialog({ open, projectId, project, task, initialTarget, conversation, onOpenChange, onSave }: {
+export function CalendarTaskEditorDialog({ open, projectId, project, task, initialTarget, conversation, fixedDestination, onOpenChange, onSave }: {
   project?: ProjectEntry;
   conversation?: CalendarConversationContext;
   initialTarget?: import('@varin/application-client').ThreadIdentity | undefined;
+  fixedDestination?: string;
   open: boolean; projectId: string; task: ScheduledTask | null; onOpenChange(open: boolean): void; onSave(task: Partial<ScheduledTask>): Promise<void>;
 }) {
   const { threads } = useRuntimeAPIs();
@@ -84,7 +85,7 @@ export function CalendarTaskEditorDialog({ open, projectId, project, task, initi
     setTimes(task?.schedule.times?.join(', ') ?? task?.schedule.time ?? '09:00'); setDate(task?.schedule.date ?? '');
     setWeekdays(task?.schedule.weekdays?.join(', ') ?? '1'); setCron(task?.schedule.cron ?? '0 9 * * *');
     setEnabled(task?.enabled ?? false); setMissed(task?.missedPolicy ?? (task?.schedule.kind === 'once' ? 'coalesce_once' : 'skip'));
-    setTarget(task?.target?.kind ?? (initialTarget?.threadId ? 'existing_work' : 'new_work')); setError(''); setSaving(false);
+    setTarget(fixedDestination ? 'existing_work' : task?.target?.kind ?? (initialTarget?.threadId ? 'existing_work' : 'new_work')); setError(''); setSaving(false);
     const selection = task?.target;
     const selectedSource: CalendarSource = selection?.kind === 'new_work' ? selection.source : { kind: 'project' };
     setSourceKind(selectedSource.kind); setSource(selectedSource);
@@ -95,6 +96,8 @@ export function CalendarTaskEditorDialog({ open, projectId, project, task, initi
     } else { setModel(!task && (conversation?.model?.providerId || conversation?.model?.modelId) ? JSON.stringify([conversation.model.providerId, conversation.model.modelId]) : ''); setThinking(!task ? conversation?.model?.thinkingLevel ?? 'off' : 'off'); setSourceMode('materialized'); setGoal(false); setBudget(''); }
     setThreadId(selection?.kind === 'existing_work' ? selection.threadId : initialTarget?.threadId ?? conversation?.identity?.threadId ?? ''); setBranchId(selection?.kind === 'existing_work' ? selection.branchId : initialTarget?.branchId ?? conversation?.identity?.branchId ?? '');
     setModels([]);
+    const cleanup = () => { controller.abort(); editorGeneration.current += 1; retireResolution(); };
+    if (fixedDestination) { setLoadingSources(false); return cleanup; }
     void threads?.listModels().then(async value => {
       if (!isCurrent()) return;
       setModels(value);
@@ -114,8 +117,8 @@ export function CalendarTaskEditorDialog({ open, projectId, project, task, initi
     }, value => {
       if (isCurrent()) setDirectoryError(value instanceof Error ? value.message : effectText('calendar.error.hosts'));
     }).finally(() => { if (isCurrent()) setLoadingSources(false); });
-    return () => { controller.abort(); editorGeneration.current += 1; retireResolution(); };
-  }, [open, projectId, task, threads, retireResolution, initialTarget?.threadId, initialTarget?.branchId, conversation, project?.path, project?.source?.resourceOwner.kind]);
+    return cleanup;
+  }, [open, projectId, task, threads, retireResolution, initialTarget?.threadId, initialTarget?.branchId, conversation, fixedDestination, project?.path, project?.source?.resourceOwner.kind]);
   const selectedHost = resourceOwner ? sourceTargets.targets.find(value => sourceOwnerKey(value.resourceOwner) === sourceOwnerKey(resourceOwner)) : undefined;
   const resolveSource = async () => {
     if (saving || resolving || !resourceOwner || !selectedHost || !path.trim()) return;
@@ -178,7 +181,8 @@ export function CalendarTaskEditorDialog({ open, projectId, project, task, initi
     {kind === 'once' && field(t('calendar.date'), date, setDate, 'date')}
     {kind === 'weekly' && field(t('calendar.weekdays'), weekdays, setWeekdays)}
     <label className="text-sm">{t('calendar.missed')} <select aria-label={t('calendar.missedLabel')} value={missed} onChange={event => setMissed(event.target.value as typeof missed)}><option value="skip">{t('calendar.missed.skip')}</option><option value="coalesce_once">{t('calendar.missed.once')}</option></select></label>
-    <label className="text-sm">{t('calendar.target')} <select aria-label={t('calendar.targetLabel')} value={target} onChange={event => { retireResolution(); setResolving(false); setSourceError(''); setTarget(event.target.value as typeof target); }}><option value="new_work">{t('calendar.target.new')}</option><option value="existing_work">{t('calendar.target.existing')}</option></select></label>
+    {fixedDestination ? <p className="text-sm">{t('calendar.target')} · {fixedDestination}</p> : <>
+      <label className="text-sm">{t('calendar.target')} <select aria-label={t('calendar.targetLabel')} value={target} onChange={event => { retireResolution(); setResolving(false); setSourceError(''); setTarget(event.target.value as typeof target); }}><option value="new_work">{t('calendar.target.new')}</option><option value="existing_work">{t('calendar.target.existing')}</option></select></label>
     {target === 'existing_work' ? <>{field(t('calendar.threadId'), threadId, setThreadId)}{field(t('calendar.branchId'), branchId, setBranchId)}<p className="text-sm text-muted-foreground">{t('calendar.existingHint')}</p></> : <>
       <label className="text-sm">{t('calendar.model')} <select aria-label={t('calendar.modelLabel')} value={model} onChange={event => { modelEdited.current = true; setModel(event.target.value); }}><option value="">{t('calendar.selectModel')}</option>{model && !models.some(value => JSON.stringify([value.providerId, value.modelId]) === model) && <option value={model} disabled>{JSON.parse(model).join(' / ')} ({t('calendar.unavailable')})</option>}{models.map(value => <option key={JSON.stringify([value.providerId, value.modelId])} value={JSON.stringify([value.providerId, value.modelId])}>{value.providerId} / {value.name ?? value.modelId}</option>)}</select></label>
       {field(t('calendar.thinking'), thinking, value => { thinkingEdited.current = true; setThinking(value); })}
@@ -212,7 +216,7 @@ export function CalendarTaskEditorDialog({ open, projectId, project, task, initi
       <label className="text-sm">{t('calendar.access')} <select aria-label={t('calendar.accessLabel')} value={sourceMode} onChange={event => setSourceMode(event.target.value as typeof sourceMode)}><option value="fixed_branch">{t('calendar.access.readOnly')}</option><option value="materialized">{t('calendar.access.isolated')}</option><option value="live_root">{t('calendar.access.live')}</option></select></label>
       <label className="text-sm"><input type="checkbox" checked={goal} onChange={event => setGoal(event.target.checked)} /> {t('calendar.goal')}</label>
       {goal && field(t('calendar.budget'), budget, setBudget, 'number')}
-    </>}
+    </>}</>}
     <label className="text-sm"><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} /> {t('calendar.enabled')}</label>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     <Button disabled={saving || (target === 'new_work' && (!source || resolving))} onClick={() => void save()}>{t(saving ? 'calendar.saving' : 'calendar.save')}</Button>

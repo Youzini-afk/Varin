@@ -915,6 +915,7 @@ export const dict: Record<I18nKey, string> = {
   'followupEditor.pr.merged': "PR 已合并",
   'followupEditor.pr.closed': "PR 已关闭",
   'tasksHub.title': "定时与接续",
+  'bot.group.scheduleBot': "负责的 Bot",
   'tasksHub.scheduled': "定时任务",
   'tasksHub.followUps': "接续任务",
   'tasksHub.followUpsDescription': "集中查看本实例各对话的等待任务；时间到达或条件满足后，接着原对话继续。",

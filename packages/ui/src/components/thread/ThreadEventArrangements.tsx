@@ -19,6 +19,7 @@ import { followupStatus } from '@/lib/followupPresentation';
 
 type Props = { api: ThreadFollowupsAPI; identity: ThreadIdentity; botId?: string | null; followups: Followup[];
   focusId?: string; focusToken?: number; createOpen?: boolean; onCreateOpenChange?(open: boolean): void; visibleArrangementIds?: Set<string>;
+  fixedDestination?: string;
   pending: boolean; act(work: () => Promise<unknown>): Promise<void>; records(item: Followup): React.ReactNode };
 const schedules = createScheduledTasksHttpAPI();
 const sourceKey = (value: { extensionId: string; sourceId: string; host?: VarinEventSourceHost }) => JSON.stringify([value.extensionId, value.sourceId, ...(value.host ? [value.host.hostId, value.host.connectionId, value.host.endpointIdentity] : [])]);
@@ -43,7 +44,7 @@ export function ThreadEventArrangements(props: Props) {
   const identity = React.useMemo<ThreadIdentity>(() => ({ runtime, threadId, branchId }), [runtime, threadId, branchId]);
   return <EventArrangements key={JSON.stringify([host, getRuntimeEndpointGeneration(), threadId, branchId])} {...props} identity={identity} />;
 }
-function EventArrangements({ api, identity, botId, followups, pending, act, records, focusId, focusToken, createOpen, onCreateOpenChange, visibleArrangementIds }: Props) {
+function EventArrangements({ api, identity, botId, followups, pending, act, records, focusId, focusToken, createOpen, onCreateOpenChange, visibleArrangementIds, fixedDestination }: Props) {
   const { t } = useI18n();
   const [creating, setCreating] = React.useState(false);
   const [created, setCreated] = React.useState(false);
@@ -69,15 +70,15 @@ function EventArrangements({ api, identity, botId, followups, pending, act, reco
     <CollapsibleTrigger asChild className="w-auto"><Button size="sm" variant="outline">
       <Icon name="add" className="mr-1 size-3.5" />{t(creating ? 'arrangements.cancelEdit' : 'arrangements.create')}
     </Button></CollapsibleTrigger>
-    <CollapsibleContent keepMounted>{created && <div className="pt-3"><ArrangementEditor key={creationKey} api={api} identity={identity} botId={botId} pending={pending}
+    <CollapsibleContent keepMounted>{created && <div className="pt-3"><ArrangementEditor key={creationKey} api={api} identity={identity} botId={botId} pending={pending} fixedDestination={fixedDestination}
       act={act} onSaved={() => { resetCreation.current = true; setCreating(false); }} /></div>}</CollapsibleContent>
     </Collapsible>}
     {items.map(item => <div key={item.id} hidden={visibleArrangementIds ? !visibleArrangementIds.has(item.id) : undefined}><ArrangementRow api={api} identity={identity}
-      focusId={focusId} focusToken={focusToken} descriptor={item.trigger.kind === 'plugin_event' ? directory.find(source => sourceKey(source) === sourceKey(item.trigger.kind === 'plugin_event' ? item.trigger.source : { extensionId: '', sourceId: '' })) : undefined} item={item} pending={pending} act={act} records={records} /></div>)}
+      focusId={focusId} focusToken={focusToken} fixedDestination={fixedDestination} descriptor={item.trigger.kind === 'plugin_event' ? directory.find(source => sourceKey(source) === sourceKey(item.trigger.kind === 'plugin_event' ? item.trigger.source : { extensionId: '', sourceId: '' })) : undefined} item={item} pending={pending} act={act} records={records} /></div>)}
   </section>;
 }
 
-function ArrangementRow({ api, identity, item, pending, act, records, focusId, focusToken, descriptor }: Omit<Props, 'followups' | 'botId'> & { item: Followup; descriptor?: VarinEventSourceDescriptor }) {
+function ArrangementRow({ api, identity, item, pending, act, records, focusId, focusToken, descriptor, fixedDestination }: Omit<Props, 'followups' | 'botId'> & { item: Followup; descriptor?: VarinEventSourceDescriptor }) {
   const { t } = useI18n();
   const [open, setOpen] = React.useState(focusId === item.id);
   React.useEffect(() => { if (focusId === item.id) setOpen(true); }, [focusId, focusToken, item.id]);
@@ -136,7 +137,7 @@ function ArrangementRow({ api, identity, item, pending, act, records, focusId, f
         <Button size="sm" variant="outline" disabled={pending} onClick={() => void act(async () => { await api.backlog({ ...identity, followupId: item.id, expectedRevision: item.revision, action: 'discard' }); setDiscarding(false); })}>{t('arrangements.confirmDiscard')}</Button>
         <Button size="sm" variant="ghost" onClick={() => setDiscarding(false)}>{t('arrangements.keep')}</Button>
       </div>}
-      {botId && <Collapsible open={editing}><CollapsibleContent keepMounted>{instruction !== undefined && <ArrangementEditor key={editKey} api={api} identity={identity} botId={botId}
+      {botId && <Collapsible open={editing}><CollapsibleContent keepMounted>{instruction !== undefined && <ArrangementEditor key={editKey} api={api} identity={identity} botId={botId} fixedDestination={fixedDestination}
         original={basis ?? item} instruction={instruction} pending={pending} act={act} onSaved={() => { refreshEdit.current = true; setEditing(false); setSaved(true); }} />}</CollapsibleContent></Collapsible>}
       {botId && <Collapsible open={routesOpen} onOpenChange={value => { setRoutesOpen(value); setRoutesVisited(true); }}>
         <CollapsibleTrigger>{t('arrangements.routes.title')}</CollapsibleTrigger><CollapsibleContent keepMounted>{routesVisited && <ArrangementSourceRoutes api={api} identity={identity} item={item} pending={pending} act={act} />}</CollapsibleContent>
@@ -147,8 +148,9 @@ function ArrangementRow({ api, identity, item, pending, act, records, focusId, f
 }
 
 /** Source refresh changes choices, never the draft or its original revision. */
-function ArrangementEditor({ api, identity, botId, original, instruction = '', pending, act, onSaved }: {
+function ArrangementEditor({ api, identity, botId, original, instruction = '', pending, act, onSaved, fixedDestination }: {
   api: ThreadFollowupsAPI; identity: ThreadIdentity; botId: string; original?: Followup; instruction?: string;
+  fixedDestination?: string;
   pending: boolean; act(work: () => Promise<unknown>): Promise<void>; onSaved(): void;
 }) {
   const { t } = useI18n();
@@ -202,14 +204,14 @@ function ArrangementEditor({ api, identity, botId, original, instruction = '', p
   const source = sources?.find(value => sourceKey(value) === selectedSource);
   const connection = source?.connections.find(value => value.connectionId === connectionId && value.accountId === accountId);
   const targets = new Map<string, { threadId: string; branchId: string; externalConversationId?: string | null; label: string; reason?: string }>();
-  for (const thread of threads.filter(value => !value.deleted_at_ms && !value.archived && (!value.bot_id || value.bot_id === botId || value.parent_thread_id))) {
+  for (const thread of fixedDestination ? [] : threads.filter(value => !value.deleted_at_ms && !value.archived && (!value.bot_id || value.bot_id === botId || value.parent_thread_id))) {
     for (const branch of thread.branches) {
       const value = { threadId: thread.thread_id, branchId: branch.branch_id };
       targets.set(targetKey(value), { ...value, label: `${thread.title || thread.thread_id}${thread.branches.length > 1 ? ` · ${branch.branch_id}` : ''}` });
     }
   }
   // The current explicitly selected identity remains a choice even before catalog discovery finishes.
-  if (!targets.has(targetKey(identity))) targets.set(targetKey(identity), { ...identity, label: identity.threadId });
+  if (!targets.has(targetKey(identity))) targets.set(targetKey(identity), { ...identity, label: fixedDestination ?? identity.threadId });
   for (const entry of external.entries) targets.set(targetKey({ ...anchor, externalConversationId: entry.id }), { ...anchor, externalConversationId: entry.id, label: entry.label, reason: entry.reason });
   const selectedTarget = targets.get(target);
   const parsedFilter = source && filterValid && eventConditionsValid(source.filterSchema, filter) ? filter : null;
@@ -267,6 +269,7 @@ function ArrangementEditor({ api, identity, botId, original, instruction = '', p
       <EventSourceConditions key={selectedSource} schema={source.filterSchema} value={filter} disabled={disabled} onChange={setFilter} onValidityChange={setFilterValid} />
     </>}
     <label className="block">{t('arrangements.instruction')}<Textarea aria-label={t('arrangements.instruction')} value={intent} disabled={disabled} onChange={event => setIntent(event.target.value)} rows={3} /></label>
+    {fixedDestination ? <p>{t('arrangements.target')} · {fixedDestination}</p> : <>
     <label className="block">{t('arrangements.target')}<select aria-label={t('arrangements.target')} className="block max-w-full" value={target} disabled={disabled} onChange={event => { setTarget(event.target.value); if (externalTargetId(event.target.value)) setFirstContact(false); }}>
       {targetMissing && <option value={target} disabled>{t('arrangements.targetMissing')}</option>}
       {[...targets].map(([key, value]) => <option key={key} value={key} disabled={!!value.reason}>{value.label}{value.reason ? ` · ${value.reason}` : ''}</option>)}
@@ -275,6 +278,7 @@ function ArrangementEditor({ api, identity, botId, original, instruction = '', p
     {external.directoryError && <p role="status">{external.directoryError}</p>}
     {!external.id && <div className="space-y-1"><label className="flex gap-2"><input type="checkbox" aria-label={t('arrangements.firstContact')} checked={firstContact} disabled={disabled} onChange={event => setFirstContact(event.target.checked)} />{t('arrangements.firstContact')}</label>
       <p className="text-xs text-muted-foreground">{t('arrangements.firstContactDescription')}</p></div>}
+    </>}
     <label className="block">{t('arrangements.timing')}<select aria-label={t('arrangements.timing')} className="block" value={timing} disabled={disabled} onChange={event => setTiming(event.target.value as FollowupEventTiming['kind'])}>
       {(['immediate', 'batch', 'scheduled', 'passive'] as const).map(value => <option key={value} value={value}>{t(`arrangements.${value}`)}</option>)}
     </select></label>

@@ -241,10 +241,14 @@ describe('Bot workbench', () => {
     const panel = container.querySelector('[data-secondary] .bot-panel');
     expect(panel?.getAttribute('data-open')).toBe('true');
     expect(panel?.querySelector('[role="tab"][aria-label="Members"]')).not.toBeNull();
-    await click('Members');
+    expect(container.querySelector('header[data-title="Release"] button[aria-label="Search group"]')).toBeNull();
+    await click('Close group panel');
     expect(panel?.getAttribute('data-open')).toBe('false');
-    await click('Members');
+    await click('Open group panel');
     expect(panel?.getAttribute('data-open')).toBe('true');
+    await click('Search group');
+    expect(container.querySelector('input[aria-label="Search group"]')).not.toBeNull();
+    await click('Cancel');
     const editor = EditorView.findFromDOM(composer.querySelector<HTMLElement>('.cm-content')!)!;
     await act(async () => { editor.dispatch({ changes: { from: 0, insert: '@Bot' }, selection: { anchor: 4 }, userEvent: 'input.paste' }); });
     expect(composer.querySelector('[role="listbox"]')).toBeNull();
@@ -256,6 +260,10 @@ describe('Bot workbench', () => {
     await act(async () => { composer.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
     expect(state.groupChat).toHaveBeenCalledWith('/release/post', expect.objectContaining({ text: '@Bot a', addressed: ['a'] }));
     expect(centre()).toBeNull();
+    await click('Schedule');
+    await click('tasksHub.title');
+    expect(useUIStore.getState().isScheduledTasksDialogOpen).toBe(true);
+    expect(useUIStore.getState().scheduledTasksConversation?.group).toMatchObject({ id: 'release' });
   });
 
   it('opens ordinary settings from the sidebar and preserves the last settings page', async () => {

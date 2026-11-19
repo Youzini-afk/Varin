@@ -1,10 +1,11 @@
 import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import { SettingsView } from './SettingsView';
+import type { RecentPointer } from '@/lib/motion/pointer';
 
 /** A workspace surface, not a dialog: chrome remains usable and the retained
  * conversation/editor stays mounted in its original shell. */
-export function SettingsWindow({ onClose }: { onClose(): void }) {
+export function SettingsWindow({ onClose }: { onClose(origin?: RecentPointer): void }) {
   const { t } = useI18n();
   const main = React.useRef<HTMLElement>(null);
   React.useLayoutEffect(() => {

@@ -8,6 +8,13 @@ export interface RecentPointer {
   y: number;
 }
 
+/** A keyboard or assistive-technology click uses the control's centre. */
+export function activationPoint(event: Pick<MouseEvent, 'clientX' | 'clientY' | 'detail'> & { currentTarget: HTMLElement }): RecentPointer {
+  if (event.detail > 0) return { x: event.clientX, y: event.clientY };
+  const rect = event.currentTarget.getBoundingClientRect();
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+}
+
 /** A press older than this did not ask for the change being animated now. */
 export const RECENT_POINTER_WINDOW_MS = 2000;
 

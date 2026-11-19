@@ -457,6 +457,8 @@
 .wb-lattice[data-mode="full"] .wb-lattice-sheet { display: none; }
 .wb-lattice:not([data-mode="full"]) .wb-lattice-field { display: none; }
 .wb-lattice[data-state="closed"] .wb-lattice-sheet { opacity: 1; }
+.workbench-settings-lattice { z-index: 50; }
+.workbench-settings-lattice[data-covering] { pointer-events: auto; }
 /* Only a cover that waits for the target Shell says what it is doing. */
 .wb-lattice-hold {
   position: absolute;

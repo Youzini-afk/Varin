@@ -1,5 +1,6 @@
 /* Settings shell context: layout mode, catalog list/detail stage on narrow screens, and navigation between pages. */
 import React from 'react';
+import type { RecentPointer } from '@/lib/motion/pointer';
 
 export type SettingsLayout = 'desktop' | 'narrow' | 'phone';
 export type CatalogStage = 'list' | 'detail';
@@ -34,7 +35,7 @@ export function useCatalogSelection<T extends string>(slug: string, initial: T |
 }
 
 /* Titlebar state published by the settings view and read by the app header. */
-export interface SettingsTitlebarState { title: string; stage: 'nav' | 'page'; compact: boolean; back?: () => void; close?: () => void; host?: { name: string; state: 'ok' | 'warn' | 'err'; hint?: string; open(): void } }
+export interface SettingsTitlebarState { title: string; stage: 'nav' | 'page'; compact: boolean; back?: () => void; close?: (origin?: RecentPointer) => void; host?: { name: string; state: 'ok' | 'warn' | 'err'; hint?: string; open(): void } }
 let titlebar: SettingsTitlebarState | null = null;
 const titlebarListeners = new Set<() => void>();
 export function publishSettingsTitlebar(state: SettingsTitlebarState | null) {

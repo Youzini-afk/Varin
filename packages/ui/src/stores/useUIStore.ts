@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
+import type { RecentPointer } from '@/lib/motion/pointer';
 import { CONTEXT_SURFACES, getContextRailMode } from '@/lib/surfaces/registry';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
@@ -25,7 +26,11 @@ import { isMotionPreference, type MotionPreference } from '@/lib/motion/preferen
 import { captureDialogOrigin } from '@/lib/motion/dialogOrigin';
 
 export type { MotionPreference } from '@/lib/motion/preference';
-export type CalendarConversationContext = { identity?: ThreadIdentity; model?: ThreadModel };
+export type CalendarConversationContext = {
+  identity?: ThreadIdentity;
+  model?: ThreadModel;
+  group?: { id: string; botId?: string; focus?: { kind: 'schedule' | 'followup'; id: string } };
+};
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged';
 export type ContextPanelMode = 'tree' | 'threads' | 'diff' | 'file' | 'context' | 'recovery' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal' | 'computer' | 'ui' | 'material';
@@ -562,6 +567,7 @@ interface UIStore {
   settingsPage: string;
   settingsModelFocus: { channelId: string; modelId: string } | null;
   settingsHasOpenedOnce: boolean;
+  settingsTransitionOrigin: RecentPointer | null;
   settingsProjectsSelectedId: string | null;
   settingsRemoteInstancesSelectedId: string | null;
   eventStreamStatus: EventStreamStatus;
@@ -725,7 +731,7 @@ interface UIStore {
   setWorktreesPageProjectId: (projectId: string | null) => void;
   /** Close every full-page surface (Scheduled, Archive, Worktrees, Multi-run). */
   closeMainSurfaces: () => void;
-  setSettingsDialogOpen: (open: boolean) => void;
+  setSettingsDialogOpen: (open: boolean, origin?: RecentPointer) => void;
   setNewWorktreeDialogOpen: (open: boolean) => void;
   setModelSelectorOpen: (open: boolean) => void;
   applyTheme: () => void;
@@ -893,6 +899,7 @@ export const useUIStore = create<UIStore>()(
         settingsPage: 'home',
         settingsModelFocus: null,
         settingsHasOpenedOnce: false,
+        settingsTransitionOrigin: null,
         settingsProjectsSelectedId: null,
         settingsRemoteInstancesSelectedId: null,
         eventStreamStatus: 'idle',
@@ -1579,7 +1586,7 @@ export const useUIStore = create<UIStore>()(
 
         setScheduledTasksDialogOpen: (open, conversation) => {
           set(state => open
-            ? { mainSurfaceSelectionRevision: state.mainSurfaceSelectionRevision + 1, scheduledTasksConversation: conversation ?? null, isScheduledTasksDialogOpen: true, isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false }
+            ? { mainSurfaceSelectionRevision: state.mainSurfaceSelectionRevision + 1, scheduledTasksConversation: conversation ?? null, scheduledTasksFocus: null, isScheduledTasksDialogOpen: true, isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false }
             : { isScheduledTasksDialogOpen: false, scheduledTasksConversation: null, scheduledTasksFocus: null });
         },
 
@@ -1602,6 +1609,7 @@ export const useUIStore = create<UIStore>()(
           }
           set({
             isScheduledTasksDialogOpen: false,
+            scheduledTasksConversation: null,
             scheduledTasksFocus: null,
             isArchivePageOpen: false,
             worktreesPageProjectId: null,
@@ -1610,15 +1618,11 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        setSettingsDialogOpen: (open) => {
-          set((state) => {
-            if (!open) {
-              return { isSettingsDialogOpen: false };
-            }
-            if (state.settingsHasOpenedOnce) {
-              return { isSettingsDialogOpen: true };
-            }
-            return { isSettingsDialogOpen: true, settingsHasOpenedOnce: true };
+        setSettingsDialogOpen: (open, origin) => {
+          set(state => state.isSettingsDialogOpen === open ? state : {
+            isSettingsDialogOpen: open,
+            settingsHasOpenedOnce: open || state.settingsHasOpenedOnce,
+            settingsTransitionOrigin: origin ?? null,
           });
         },
 

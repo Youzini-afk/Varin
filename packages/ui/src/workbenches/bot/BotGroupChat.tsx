@@ -18,7 +18,6 @@ import { threadComposerKey, threadHostKey } from '@/stores/useThreadStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { Followup } from '@varin/protocol';
 import { followupStatus, followupTrigger, pendingFollowup } from '@/lib/followupPresentation';
-import { CalendarTaskEditorDialog } from '@/components/session/CalendarTaskEditorDialog';
 import { formatSchedule } from '@/components/session/scheduleFormat';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
@@ -69,9 +68,8 @@ export function GroupChatCreate({ bots, open, onClose, onCreated }: { bots: BotS
   </Dialog>;
 }
 
-export function BotGroupChat({ group, bots, api, sequence, panelTarget, onOpenPanel, onRevealChat, searchRequest, refresh, onDelete, onDirect, onProfile, onWake }: {
+export function BotGroupChat({ group, bots, api, sequence, panelTarget, onOpenPanel, onRevealChat, refresh, onDelete, onDirect, onProfile, onWake }: {
   group: BotGroupSummary; bots: BotSummary[]; api: ThreadsAPI | null | undefined; sequence: number; panelTarget: HTMLDivElement | null;
-  searchRequest: number;
   onOpenPanel(): void; onRevealChat(): void; refresh(): void; onDelete(): void; onDirect(botId: string): void; onProfile(bot: BotSummary): void; onWake(bot: BotSummary): void;
 }) {
   const id = pathFor(group.id);
@@ -104,14 +102,6 @@ export function BotGroupChat({ group, bots, api, sequence, panelTarget, onOpenPa
   const jumpTimer = React.useRef<number | undefined>(undefined);
   const members = page?.members ?? group.members;
   const setQuery = React.useCallback((value: string | null) => { setSearch(value); setOlder([]); setBefore(undefined); setAnchor(undefined); }, []);
-  const lastSearchRequest = React.useRef(searchRequest);
-  const searchInput = React.useRef<HTMLInputElement>(null);
-  React.useEffect(() => {
-    if (lastSearchRequest.current === searchRequest) return;
-    lastSearchRequest.current = searchRequest;
-    setQuery('');
-    searchInput.current?.focus();
-  }, [searchRequest, setQuery]);
   React.useEffect(() => {
     const controller = new AbortController();
     const query = search ? '?q=' + encodeURIComponent(search) : '';
@@ -275,7 +265,7 @@ export function BotGroupChat({ group, bots, api, sequence, panelTarget, onOpenPa
     </div>)}
     {addable.length > 0 && <button type="button" className="bot-row text-muted-foreground" onClick={() => setAdding(true)}><Icon name="add" className="size-4" />{L('add')}</button>}
     <p className="group-chat-panel-note">{L('listeningHint')}</p>
-  </div> : tab === 'schedule' ? <GroupCalendar groupPath={id} members={members} refresh={refresh} api={api} /> : <div className="group-chat-panel-section">
+  </div> : tab === 'schedule' ? <GroupCalendar groupId={group.id} members={members} revealChat={revealChat} api={api} /> : <div className="group-chat-panel-section">
     {([
       ['needs', deliveries.filter(item => troubled(item.delivery))],
       ['inProgress', deliveries.filter(item => working(item.delivery))],
@@ -327,7 +317,7 @@ export function BotGroupChat({ group, bots, api, sequence, panelTarget, onOpenPa
   return <div className="group-chat">
     <main className="group-chat-center" onPointerDown={onRevealChat}>
       {search !== null && <div className="group-chat-search"><Icon name="search" className="size-4 shrink-0 text-muted-foreground" />
-        <input ref={searchInput} autoFocus value={search} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') setQuery(null); }} placeholder={L('search')} aria-label={L('search')} className="group-chat-field" />
+        <input autoFocus value={search} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') setQuery(null); }} placeholder={L('search')} aria-label={L('search')} className="group-chat-field" />
         <Button variant="ghost" size="icon" aria-label={L('cancel')} onClick={() => setQuery(null)}><Icon name="close" className="size-4" /></Button>
       </div>}
       <div className="group-chat-scroll" ref={scroller} onScroll={event => { const element = event.currentTarget; atEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < 45; }}>
@@ -459,12 +449,10 @@ function GroupPanelTabs({ active, paneId, needsAttention, onChange }: { active: 
 const scheduleApi = createScheduledTasksHttpAPI();
 const botScheduleScope = (botId: string) => `bot:${botId}`;
 
-function GroupCalendar({ groupPath, members, refresh, api }: { groupPath: string; members: BotGroupMember[]; refresh(): void; api: ThreadsAPI | null | undefined }) {
+function GroupCalendar({ groupId, members, revealChat, api }: { groupId: string; members: BotGroupMember[]; revealChat(): void; api: ThreadsAPI | null | undefined }) {
   const { t } = useI18n();
   const [tasks, setTasks] = React.useState<{ member: BotGroupMember; task: ScheduledTask }[]>();
-  const [watches, setWatches] = React.useState<{ owner: string; task: Followup; target: ThreadIdentity }[]>([]);
-  const [owner, setOwner] = React.useState('');
-  const [editor, setEditor] = React.useState<{ member: BotGroupMember; target: ThreadIdentity; task: ScheduledTask | null }>();
+  const [watches, setWatches] = React.useState<{ botId: string; owner: string; task: Followup }[]>([]);
   const [error, setError] = React.useState('');
   const [expanded, setExpanded] = React.useState<string>();
   const [revision, reload] = React.useReducer((value: number) => value + 1, 0);
@@ -493,8 +481,8 @@ function GroupCalendar({ groupPath, members, refresh, api }: { groupPath: string
       pending = controller;
       void Promise.all(targets.map(async ([botId, owner, target]) => {
         const records = await api.followups.arrangements(target, botId, controller.signal);
-        return records.filter(task => task.thread_id === target.threadId && task.branch_id === target.branchId && pendingFollowup(task))
-          .map(task => ({ owner, task, target }));
+        return records.filter(task => task.thread_id === target.threadId && task.branch_id === target.branchId && !task.external_conversation_id && pendingFollowup(task))
+          .map(task => ({ botId, owner, task }));
       })).then(value => { if (!controller.signal.aborted) setWatches(value.flat()); },
         error => { if (!controller.signal.aborted) setError(messageError(error)); });
     };
@@ -502,15 +490,9 @@ function GroupCalendar({ groupPath, members, refresh, api }: { groupPath: string
     load();
     return () => { pending?.abort(); stops.forEach(stop => stop()); };
   }, [api, watchScope]);
-  const chosen = members.find(member => member.botId === owner) ?? members[0];
-  const create = async () => {
-    if (!chosen) return;
-    try {
-      const target = await botGroupRequest<ThreadIdentity>(groupPath + '/calendar-target', { botId: chosen.botId });
-      setEditor({ member: chosen, target, task: null });
-      setError('');
-      refresh();
-    } catch (error) { setError(messageError(error)); }
+  const openSchedules = (botId?: string, focus?: { kind: 'schedule' | 'followup'; id: string }) => {
+    useUIStore.getState().setScheduledTasksDialogOpen(true, { group: { id: groupId, botId, focus } });
+    revealChat();
   };
   const upcoming = (tasks ?? []).filter(({ task }) => task.enabled && task.calendar?.definition.next_at_ms)
     .sort((a, b) => a.task.calendar!.definition.next_at_ms! - b.task.calendar!.definition.next_at_ms!);
@@ -534,7 +516,7 @@ function GroupCalendar({ groupPath, members, refresh, api }: { groupPath: string
         <dl className="bot-schedule-detail">
           <dt>{t('bot.schedule.rule')}</dt><dd>{formatSchedule(task, t)}</dd>
           <dt>{t('bot.schedule.missed')}</dt><dd>{(task.calendar?.definition.missed_policy ?? task.missedPolicy) === 'coalesce_once' ? t('bot.schedule.missedOnce') : t('bot.schedule.missedSkip')}</dd>
-          <dd className="col-span-2"><Button variant="outline" size="sm" onClick={() => setEditor({ member, target: member.calendar!, task })}>{t('bot.schedule.edit')}</Button></dd>
+          <dd className="col-span-2"><Button variant="outline" size="sm" onClick={() => openSchedules(member.botId, { kind: 'schedule', id: task.id })}>{t('bot.schedule.edit')}</Button></dd>
         </dl>
       </div></div>
     </div>;
@@ -542,8 +524,8 @@ function GroupCalendar({ groupPath, members, refresh, api }: { groupPath: string
   return <div className="group-chat-panel-section">
     {error && <div role="alert" className="group-chat-trouble">{error}</div>}
     {watches.length > 0 && <section><div className="group-chat-section-heading"><b>{L('watches')}</b></div>
-      {watches.map(({ owner, task, target }) => <button type="button" className="bot-schedule flex w-full items-center gap-3 px-3 py-2.5 text-left"
-        key={task.id} onClick={() => useUIStore.getState().openArrangements(target, task.id)}>
+      {watches.map(({ botId, owner, task }) => <button type="button" className="bot-schedule flex w-full items-center gap-3 px-3 py-2.5 text-left"
+        key={JSON.stringify([botId, task.id])} onClick={() => openSchedules(botId, { kind: 'followup', id: task.id })}>
         <Icon name="time" className="size-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0"><b className="block truncate">{task.name || followupTrigger(task, t)}</b>
           <small className="block truncate">{owner} · {followupStatus(task, t)}</small></span>
@@ -552,17 +534,9 @@ function GroupCalendar({ groupPath, members, refresh, api }: { groupPath: string
     {upcoming.length > 0 && <section><div className="group-chat-section-heading"><b>{L('upcoming')}</b></div>{upcoming.map(item => scheduleRow(item, false))}</section>}
     {rules.length > 0 && <section><div className="group-chat-section-heading"><b>{L('recurring')}</b></div>{rules.map(item => scheduleRow(item, true))}</section>}
     {!tasks ? <p className="group-chat-panel-note" role="status">{L('loading')}</p> : !tasks.length && !watches.length ? <p className="group-chat-panel-note">{L('emptySchedule')}</p> : null}
-    {chosen && <div className="group-chat-list-actions">
-      <select aria-label={L('members')} className="group-chat-field" value={chosen.botId} onChange={event => setOwner(event.target.value)}>
-        {members.map(member => <option key={member.membership} value={member.botId}>{member.name}</option>)}
-      </select>
-      <Button variant="outline" size="sm" onClick={() => void create()}>{L('newSchedule')}</Button>
-    </div>}
-    {editor && <CalendarTaskEditorDialog open projectId={botScheduleScope(editor.member.botId)} task={editor.task} initialTarget={editor.target}
-      onOpenChange={value => { if (!value) setEditor(undefined); }} onSave={async task => {
-        await scheduleApi.upsert(botScheduleScope(editor.member.botId), task);
-        reload(); setEditor(undefined);
-      }} />}
+    <Button variant="outline" size="sm" className="my-2 w-full" onClick={() => openSchedules()}>
+      <Icon name="calendar-schedule" className="size-4" />{t('tasksHub.title')}
+    </Button>
   </div>;
 }
 

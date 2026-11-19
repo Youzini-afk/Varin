@@ -7,7 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
-import { useUIStore } from '@/stores/useUIStore';
+import { useUIStore, type CalendarConversationContext } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
@@ -15,11 +15,12 @@ import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/pro
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import type { ProjectEntry, BotSummary } from '@varin/application-client';
+import type { ProjectEntry, BotSummary, BotGroupSummary } from '@varin/application-client';
 import { listBots, useBotNavigation } from '@/lib/bots';
 import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
+import { useWorkbenchShellActive } from '@/lib/workbench/shell-activity';
 import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
-import { createScheduledTasksHttpAPI, ScheduleRequestError, getRuntimeKey, getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange, type ScheduledTask, type ThreadIdentity } from '@varin/application-client';
+import { botGroupRequest, createScheduledTasksHttpAPI, ScheduleRequestError, getRuntimeKey, getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange, type ScheduledTask, type ThreadIdentity } from '@varin/application-client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { ThreadConversation } from '@/components/thread/ThreadConversation';
@@ -45,11 +46,25 @@ const toneStyle = (tone: StatusTone): React.CSSProperties => {
   };
 };
 
-export function ScheduledTasksDialog() {
+type GroupRequest = NonNullable<CalendarConversationContext['group']>;
+
+export function ScheduledTasksDialog({ activeGroup }: { activeGroup?: BotGroupSummary } = {}) {
+  const request = useUIStore(state => state.scheduledTasksConversation?.group);
+  const group = request && activeGroup?.id === request.id ? activeGroup : undefined;
+  const setOpen = useUIStore(state => state.setScheduledTasksDialogOpen);
+  const active = useWorkbenchShellActive();
+  React.useEffect(() => { if (active && request && !group) setOpen(false); }, [active, request, group, setOpen]);
+  if (request && !group) return null;
+  return <ScheduledTasksContent key={group ? JSON.stringify(request) : 'general'} group={group} groupRequest={request} />;
+}
+
+function ScheduledTasksContent({ group, groupRequest }: { group?: BotGroupSummary; groupRequest?: GroupRequest }) {
   const { t } = useI18n();
   const { threads } = useRuntimeAPIs();
   const [calendarEditorOpen, setCalendarEditorOpen] = React.useState(false);
   const [calendarEditorTask, setCalendarEditorTask] = React.useState<ScheduledTask | null>(null);
+  const [loopEditorTask, setLoopEditorTask] = React.useState<ScheduledTask | null>(null);
+  const [createFollowUp, setCreateFollowUp] = React.useState(false);
   const [calendarWork, setCalendarWork] = React.useState<ThreadIdentity | null>(null);
   const runKeys = React.useRef(new Map<string, string>());
   type RunReplacement = { projectId: string; taskId: string; taskName: string; key: string; host: number };
@@ -57,28 +72,73 @@ export function ScheduledTasksDialog() {
   const replacementRef = React.useRef<RunReplacement | null>(null);
   const runContextGeneration = React.useRef(0);
   const dismissRunReplacement = React.useCallback(() => { replacementRef.current = null; setRunReplacement(null); }, []);
-  React.useEffect(() => subscribeRuntimeEndpointWillChange(() => { replacementRef.current = null; setRunReplacement(null); setCalendarWork(null); setCalendarEditorOpen(false); setCalendarEditorTask(null); useUIStore.setState({ scheduledTasksConversation: null }); }), []);
   const open = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const setOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
+  React.useEffect(() => subscribeRuntimeEndpointWillChange(() => {
+    replacementRef.current = null; setRunReplacement(null); setCalendarWork(null); setCalendarEditorOpen(false); setCalendarEditorTask(null);
+    if (groupRequest) setOpen(false);
+    else useUIStore.setState({ scheduledTasksConversation: null });
+  }), [groupRequest, setOpen]);
   const conversation = useUIStore(state => state.scheduledTasksConversation);
   const isMobile = useUIStore((state) => state.isMobile);
   const projectEntries = useProjectsStore((state) => state.projects);
   const [botEntries, setBotEntries] = React.useState<BotSummary[]>([]);
   const selectedBot = useBotNavigation(state => state.botId);
   const botWorkbench = useWorkbenchProfileId() === VARIN_WORKBENCH_BOT_PROFILE_ID;
+  const groupMembers = group?.members;
+  const groupScoped = Boolean(group);
   React.useEffect(() => {
-    if (!open) return;
+    if (!open || groupScoped) return;
     const controller = new AbortController();
     void listBots(controller.signal).then(rows => { if (!controller.signal.aborted) setBotEntries(rows.filter(bot => !bot.archived && !bot.deletion)); })
       .catch(cause => { if (!controller.signal.aborted) toast.error(cause instanceof Error ? cause.message : String(cause)); });
     return () => controller.abort();
-  }, [open]);
-  const projects = React.useMemo(() => [...projectEntries, ...botEntries.map(bot => ({ id: `bot:${bot.id}`, path: bot.homeDir, label: bot.name }))], [projectEntries, botEntries]);
+  }, [open, groupScoped]);
+  const projects = React.useMemo(() => groupMembers
+    ? groupMembers.map(member => ({ id: `bot:${member.botId}`, path: '', label: member.name }))
+    : [...projectEntries, ...botEntries.map(bot => ({ id: `bot:${bot.id}`, path: bot.homeDir, label: bot.name }))], [projectEntries, botEntries, groupMembers]);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   const { currentTheme } = useThemeSystem();
 
-  const [selectedProjectID, setSelectedProjectID] = React.useState<string>('');
+  const [selectedProjectID, setSelectedProjectID] = React.useState(() => group
+    ? (projects.find(project => project.id === `bot:${groupRequest?.botId ?? selectedBot}`) ?? projects[0])?.id ?? '' : '');
+  const groupMember = groupMembers?.find(member => `bot:${member.botId}` === selectedProjectID);
+  const membership = groupMember?.membership;
+  const [preparedTarget, setPreparedTarget] = React.useState<{ membership: string; identity: ThreadIdentity }>();
+  const calendarTarget = groupMember?.calendar ?? (preparedTarget?.membership === membership ? preparedTarget?.identity : undefined);
+  const groupTarget = calendarTarget ?? groupMember?.conversation;
+  const [preparingTarget, setPreparingTarget] = React.useState(false);
+  const targetRequest = React.useRef<AbortController | null>(null);
+  React.useLayoutEffect(() => {
+    setPreparingTarget(false);
+    if (groupScoped) {
+      setCalendarEditorOpen(false);
+      setCalendarEditorTask(null);
+      setLoopEditorTask(null);
+      setCreateFollowUp(false);
+    }
+    return () => { targetRequest.current?.abort(); targetRequest.current = null; };
+  }, [open, membership, groupScoped]);
+  const resolveGroupTarget = async (kind: 'schedule' | 'followup') => {
+    const existing = kind === 'schedule' ? calendarTarget : groupTarget;
+    if (existing) return existing;
+    if (!group || !groupMember || targetRequest.current) return undefined;
+    const controller = new AbortController();
+    targetRequest.current = controller;
+    setPreparingTarget(true);
+    try {
+      const identity = await botGroupRequest<ThreadIdentity>(`/${encodeURIComponent(group.id)}/calendar-target`, { botId: groupMember.botId }, controller.signal);
+      if (controller.signal.aborted) return undefined;
+      setPreparedTarget({ membership: groupMember.membership, identity });
+      return identity;
+    } catch (error) {
+      if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : String(error));
+      return undefined;
+    } finally {
+      if (targetRequest.current === controller) { targetRequest.current = null; setPreparingTarget(false); }
+    }
+  };
   React.useEffect(() => {
     runContextGeneration.current += 1;
     dismissRunReplacement();
@@ -86,20 +146,18 @@ export function ScheduledTasksDialog() {
   const selectedManually = React.useRef(false);
   React.useEffect(() => { if (!open) selectedManually.current = false; }, [open]);
   const arrangementFocus = useUIStore(state => state.scheduledTasksFocus);
-  const [view, setView] = React.useState<'scheduled' | 'followups'>('scheduled');
+  const [view, setView] = React.useState<'scheduled' | 'followups'>(groupRequest?.focus?.kind === 'followup' ? 'followups' : 'scheduled');
   const [visitedFollowups, setVisitedFollowups] = React.useState(false);
   React.useEffect(() => { if (open && view === 'followups') setVisitedFollowups(true); }, [open, view]);
   React.useEffect(() => { if (open && arrangementFocus) setView('followups'); }, [open, arrangementFocus]);
   const [query, setQuery] = React.useState('');
   const [filter, setFilter] = React.useState<'all' | 'enabled' | 'paused' | 'completed'>('all');
-  const [createFollowUp, setCreateFollowUp] = React.useState(false);
   const [tasks, setTasks] = React.useState<ScheduledTask[]>([]);
   // Start in loading state so the first frame after open shows the spinner,
   // not an empty/select-project flash before the fetch effect runs.
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const reloadGeneration = React.useRef(0);
-  const [loopEditorTask, setLoopEditorTask] = React.useState<ScheduledTask | null>(null);
   const [mutatingTaskID, setMutatingTaskID] = React.useState<string | null>(null);
 
   const selectedProject = React.useMemo(
@@ -114,7 +172,7 @@ export function ScheduledTasksDialog() {
     const fallbackIcon = projectIconName ? (
       <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
     ) : (
-      <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80"  style={iconColor ? { color: iconColor } : undefined}/>
+      <Icon name={project.id.startsWith('bot:') ? 'user' : 'folder'} className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80"  style={iconColor ? { color: iconColor } : undefined}/>
     );
 
     return (
@@ -178,21 +236,27 @@ export function ScheduledTasksDialog() {
   }, [t]);
 
   React.useEffect(() => {
-    if (!open || view !== 'scheduled') {
-      return;
-    }
-    const preferredProjectID = selectedManually.current && projects.some(project => project.id === selectedProjectID) ? selectedProjectID
-      : botWorkbench && selectedBot && projects.some(project => project.id === `bot:${selectedBot}`) ? `bot:${selectedBot}` : activeProject?.id || projects[0]?.id || '';
-    setSelectedProjectID(preferredProjectID);
-    if (preferredProjectID) {
-      void reloadTasks(preferredProjectID);
+    if (!open || (!groupScoped && view !== 'scheduled')) return;
+    setSelectedProjectID(current => {
+      const currentAvailable = projects.some(project => project.id === current);
+      if (groupScoped) return currentAvailable ? current : projects[0]?.id ?? '';
+      if (selectedManually.current && currentAvailable) return current;
+      if (botWorkbench && selectedBot && projects.some(project => project.id === `bot:${selectedBot}`)) return `bot:${selectedBot}`;
+      return activeProject?.id || projects[0]?.id || '';
+    });
+  }, [open, view, activeProject, projects, botWorkbench, selectedBot, groupScoped]);
+
+  React.useEffect(() => {
+    if (!open || view !== 'scheduled') return;
+    if (selectedProjectID) {
+      void reloadTasks(selectedProjectID);
     } else {
       setTasks([]);
       setLoading(false);
       setLoadError(null);
     }
     return () => { reloadGeneration.current += 1; };
-  }, [open, view, activeProject, projects, reloadTasks, botWorkbench, selectedBot]);
+  }, [open, view, selectedProjectID, reloadTasks]);
 
   React.useEffect(() => {
     if (!open || view !== 'scheduled') {
@@ -341,16 +405,10 @@ export function ScheduledTasksDialog() {
         value={selectedProjectID || '__none'}
         onValueChange={(value) => {
           selectedManually.current = true;
-          const nextProjectID = value === '__none' ? '' : value;
-          setSelectedProjectID(nextProjectID);
-          if (nextProjectID) {
-            void reloadTasks(nextProjectID);
-          } else {
-            setTasks([]);
-          }
+          setSelectedProjectID(value === '__none' ? '' : value);
         }}
       >
-        <SelectTrigger className="h-8 w-auto max-w-48 border-0 bg-transparent shadow-none" aria-label={t('sessions.scheduledTasks.dialog.project.label')}>
+        <SelectTrigger className="h-8 w-auto max-w-48 border-0 bg-transparent shadow-none" aria-label={t(group ? 'bot.group.scheduleBot' : 'sessions.scheduledTasks.dialog.project.label')}>
           {selectedProject ? (
             <SelectValue>{renderProjectLabel(selectedProject)}</SelectValue>
           ) : (
@@ -369,14 +427,34 @@ export function ScheduledTasksDialog() {
     </div>
   );
 
-  const openNewTaskEditor = () => {
+  const openNewTaskEditor = async () => {
+    if (group && !await resolveGroupTarget('schedule')) return;
     setView('scheduled');
     setCalendarEditorTask(null);
     setCalendarEditorOpen(true);
   };
+  const openNewFollowup = async () => {
+    if (group && !await resolveGroupTarget('followup')) return;
+    setView('followups');
+    setCreateFollowUp(true);
+  };
 
   const completed = (task: ScheduledTask) => task.schedule.kind === 'once' && Boolean(task.calendar && !task.calendar.definition.calculation_pending && task.calendar.definition.next_at_ms === null && task.calendar.occurrences.some(value => value.reason.kind === 'scheduled') && task.calendar.occurrences.every(value => ['completed', 'failed', 'cancelled'].includes(value.state)));
-  const visibleTasks = tasks.filter((task) => {
+  const scopedTasks = group ? tasks.filter(task => task.target.kind === 'existing_work'
+    && task.target.threadId === groupTarget?.threadId && task.target.branchId === groupTarget?.branchId) : tasks;
+  const groupFocus = groupRequest?.focus;
+  const openedSchedule = React.useRef(false);
+  React.useEffect(() => {
+    if (!open || loading || openedSchedule.current || groupFocus?.kind !== 'schedule' || groupRequest?.botId !== groupMember?.botId) return;
+    const task = tasks.find(task => task.id === groupFocus.id && task.target.kind === 'existing_work'
+      && task.target.threadId === groupTarget?.threadId && task.target.branchId === groupTarget?.branchId);
+    if (task) { openedSchedule.current = true; handleEditTask(task); }
+  }, [open, loading, groupFocus, groupTarget, tasks, handleEditTask, groupMember?.botId, groupRequest?.botId]);
+  const followupFocus = React.useMemo(() => groupScoped
+    ? groupTarget && groupFocus?.kind === 'followup' && groupRequest?.botId === groupMember?.botId
+      ? { identity: groupTarget, followupId: groupFocus.id, token: 1 } : undefined
+    : arrangementFocus ?? undefined, [groupScoped, groupTarget, groupFocus, groupRequest?.botId, groupMember?.botId, arrangementFocus]);
+  const visibleTasks = scopedTasks.filter((task) => {
     const state = completed(task) ? 'completed' : task.enabled ? 'enabled' : 'paused';
     return (filter === 'all' || filter === state)
       && (!query.trim() || `${task.name} ${task.execution.prompt} ${formatSchedule(task, t)}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
@@ -392,7 +470,7 @@ export function ScheduledTasksDialog() {
         </div>
       ) : visibleTasks.length === 0 ? (
         <div className="py-12 text-center typography-meta text-muted-foreground">
-          {tasks.length > 0 ? t('tasksHub.noMatches') : selectedProjectID ? t('sessions.scheduledTasks.dialog.empty.noTasks') : t('sessions.scheduledTasks.dialog.empty.selectProject')}
+          {scopedTasks.length > 0 ? t('tasksHub.noMatches') : selectedProjectID ? t('sessions.scheduledTasks.dialog.empty.noTasks') : t('sessions.scheduledTasks.dialog.empty.selectProject')}
         </div>
       ) : (
         <div className="space-y-1">
@@ -496,30 +574,33 @@ export function ScheduledTasksDialog() {
   const createButton = <DropdownMenu>
     <DropdownMenuTrigger asChild><Button size="sm" className="shrink-0 gap-1 rounded-full px-3">{t('tasksHub.create')}<Icon name="arrow-down-s" className="size-3.5" /></Button></DropdownMenuTrigger>
     <DropdownMenuContent align="end">
-      <DropdownMenuItem disabled={projects.length === 0 || !threads} onSelect={() => { setCalendarEditorTask(null); setCalendarEditorOpen(true); }}>{t('calendar.title')}</DropdownMenuItem>
-      <DropdownMenuItem disabled={projects.length === 0} onSelect={openNewTaskEditor}><Icon name="calendar-schedule" className="mr-2 size-4" />{t('tasksHub.scheduled')}</DropdownMenuItem>
-      <DropdownMenuItem onSelect={() => { setView('followups'); setCreateFollowUp(true); }}><Icon name="timer" className="mr-2 size-4" />{t(botWorkbench ? 'arrangements.title' : 'tasksHub.followUps')}</DropdownMenuItem>
+      {!group && <DropdownMenuItem disabled={projects.length === 0 || !threads} onSelect={() => { setCalendarEditorTask(null); setCalendarEditorOpen(true); }}>{t('calendar.title')}</DropdownMenuItem>}
+      <DropdownMenuItem disabled={projects.length === 0 || preparingTarget} onSelect={() => void openNewTaskEditor()}><Icon name="calendar-schedule" className="mr-2 size-4" />{t('tasksHub.scheduled')}</DropdownMenuItem>
+      <DropdownMenuItem disabled={Boolean(group && !groupMember) || preparingTarget} onSelect={() => void openNewFollowup()}><Icon name="timer" className="mr-2 size-4" />{t(botWorkbench ? 'arrangements.title' : 'tasksHub.followUps')}</DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>;
 
   const tasksContent = <div className="space-y-6">
     <div className="flex items-start justify-between gap-4">
-      <div className="min-w-0 space-y-2"><h1 className="text-2xl font-semibold tracking-tight text-foreground">{t(view === 'scheduled' ? 'tasksHub.scheduled' : botWorkbench ? 'arrangements.title' : 'tasksHub.followUps')}</h1><p className="typography-meta text-muted-foreground">{t(view === 'scheduled' ? 'tasksHub.scheduledDescription' : botWorkbench ? 'arrangements.description' : 'tasksHub.followUpsDescription')}</p></div>
+      <div className="min-w-0 space-y-2"><h1 className="text-2xl font-semibold tracking-tight text-foreground">{t(view === 'scheduled' ? 'tasksHub.scheduled' : botWorkbench ? 'arrangements.title' : 'tasksHub.followUps')}</h1><p className="typography-meta text-muted-foreground">{group?.name ?? t(view === 'scheduled' ? 'tasksHub.scheduledDescription' : botWorkbench ? 'arrangements.description' : 'tasksHub.followUpsDescription')}</p></div>
       <div className="flex shrink-0 items-center gap-2">
         {createButton}
         {!isMobile && <Button variant="ghost" size="icon" aria-label={t('dialog.common.actions.close')} onClick={() => setOpen(false)}><Icon name="close" className="size-4" /></Button>}
       </div>
     </div>
-    {sectionTabs}
+    {group ? <div className="flex flex-wrap items-center gap-2">{sectionTabs}{projectSelector}</div> : sectionTabs}
     {view === 'scheduled' ? <div className="space-y-5">
       <TaskSearch value={query} onChange={setQuery} label={t('tasksHub.search')} />
       <div className="flex flex-wrap items-center gap-1" role="group" aria-label={t('tasksHub.scheduled')}>
         {(['all', 'enabled', 'paused', 'completed'] as const).map((value) => <Button key={value} size="sm" variant={filter === value ? 'secondary' : 'ghost'} className="h-7 rounded-full px-2.5 typography-meta" aria-pressed={filter === value} onClick={() => setFilter(value)}>{t(`tasksHub.${value}`)}</Button>)}
-        {projectSelector}
+        {!group && projectSelector}
       </div>
       {tasksList}
     </div> : null}
-    {open && (view === 'followups' || visitedFollowups) && <div hidden={view !== 'followups'}><FollowUpTasksPanel focus={arrangementFocus ?? undefined} createOpen={createFollowUp} onCreateOpenChange={setCreateFollowUp} /></div>}
+    {open && (view === 'followups' || visitedFollowups) && <div hidden={view !== 'followups'}>
+      <FollowUpTasksPanel key={group ? membership : undefined} focus={followupFocus} createOpen={createFollowUp} onCreateOpenChange={setCreateFollowUp}
+        conversationScope={group ? { label: group.name, identity: groupTarget } : undefined} />
+    </div>}
   </div>;
 
   return (
@@ -527,13 +608,13 @@ export function ScheduledTasksDialog() {
       {isMobile ? (
         <MobileOverlayPanel
           open={open}
-          title={t(botWorkbench ? 'arrangements.title' : 'tasksHub.title')}
+          title={t(botWorkbench && !group ? 'arrangements.title' : 'tasksHub.title')}
           onClose={() => setOpen(false)}
           contentMaxHeightClassName="max-h-[min(80vh,640px)]"
           renderHeader={(closeButton) => (
             <div className="flex flex-col gap-1 border-b border-border/40 px-3 py-2">
               <div className="flex items-center justify-between gap-2">
-                <h2 className="typography-ui-label font-semibold text-foreground">{t(botWorkbench ? 'arrangements.title' : 'tasksHub.title')}</h2>
+                <h2 className="typography-ui-label font-semibold text-foreground">{t(botWorkbench && !group ? 'arrangements.title' : 'tasksHub.title')}</h2>
                 {closeButton}
               </div>
             </div>
@@ -558,7 +639,9 @@ export function ScheduledTasksDialog() {
         </div>
       </DialogContent></Dialog>
 
-      <CalendarTaskEditorDialog open={calendarEditorOpen} projectId={selectedProjectID} task={calendarEditorTask} conversation={conversation ?? undefined} project={selectedProject ?? undefined} initialTarget={botEntries.find(bot => `bot:${bot.id}` === selectedProjectID)?.entry} onOpenChange={setCalendarEditorOpen} onSave={handleSaveTask} />
+      <CalendarTaskEditorDialog open={calendarEditorOpen} projectId={selectedProjectID} task={calendarEditorTask} conversation={group ? undefined : conversation ?? undefined} project={selectedProject ?? undefined}
+        initialTarget={group ? groupTarget : botEntries.find(bot => `bot:${bot.id}` === selectedProjectID)?.entry} fixedDestination={group?.name}
+        onOpenChange={setCalendarEditorOpen} onSave={handleSaveTask} />
       <Dialog open={calendarWork !== null} onOpenChange={value => { if (!value) setCalendarWork(null); }}><DialogContent className="h-[85vh] max-w-5xl overflow-hidden"><DialogTitle>{t('calendar.work')}</DialogTitle>
         {calendarWork && threads && <ThreadConversation api={threads} identity={calendarWork} onBranchCreated={setCalendarWork} />}
       </DialogContent></Dialog>

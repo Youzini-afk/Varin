@@ -2,16 +2,16 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { ScheduleRequestError, type ScheduledTask } from '@varin/application-client';
+import { ScheduleRequestError, type BotGroupSummary, type ScheduledTask, type ThreadIdentity } from '@varin/application-client';
 import { ScheduledTasksDialog } from './ScheduledTasksDialog';
 
 const state = vi.hoisted(() => {
   const project = { id: 'project', path: '/project', label: 'Project' };
-  return { projects: [project], project, uiOpen: true, generation: 1, conversation: undefined as React.ComponentProps<typeof import('./CalendarTaskEditorDialog').CalendarTaskEditorDialog>['conversation'], editor: vi.fn(), list: vi.fn(), run: vi.fn(), setOpen: vi.fn(), t: (key: string) => key,
+  return { projects: [project], project, uiOpen: true, generation: 1, conversation: undefined as React.ComponentProps<typeof import('./CalendarTaskEditorDialog').CalendarTaskEditorDialog>['conversation'], editor: vi.fn(), list: vi.fn(), run: vi.fn(), setOpen: vi.fn(), groupRequest: vi.fn(), followups: vi.fn(), t: (key: string) => key,
     selectProject: null as null | ((id: string) => void), endpointChanged: null as null | (() => void), events: null as null | ((event: { type: string }) => void), toast: { error: vi.fn(), success: vi.fn() } };
 });
 vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(),
-  createScheduledTasksHttpAPI: () => ({ list: state.list, run: state.run }), getRuntimeKey: () => "runtime", getRuntimeEndpointGeneration: () => state.generation,
+  createScheduledTasksHttpAPI: () => ({ list: state.list, run: state.run }), botGroupRequest: state.groupRequest, getRuntimeKey: () => "runtime", getRuntimeEndpointGeneration: () => state.generation,
   subscribeRuntimeEndpointWillChange: (callback: () => void) => { state.endpointChanged = callback; return () => {}; } }));
 vi.mock('@/stores/useUIStore', () => ({ useUIStore: Object.assign((selector: (v: unknown) => unknown) => selector({ isScheduledTasksDialogOpen: state.uiOpen, scheduledTasksConversation: state.conversation, setScheduledTasksDialogOpen: state.setOpen, isMobile: false }), { setState: () => { state.conversation = undefined; } }) }));
 vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (selector: (v: unknown) => unknown) => selector({ projects: state.projects, getActiveProject: () => state.project }) }));
@@ -33,11 +33,11 @@ vi.mock('@/components/ui/dialog', () => ({ Dialog: ({ open, children }: React.Pr
   DialogContent: ({ children }: React.PropsWithChildren) => <div>{children}</div>, DialogTitle: ({ children }: React.PropsWithChildren) => <h2>{children}</h2> }));
 vi.mock('@/components/ui/select', () => { const Part = ({ children }: React.PropsWithChildren) => <div>{children}</div>; return { Select: ({ onValueChange, children }: React.PropsWithChildren<{ onValueChange: (id: string) => void }>) => { state.selectProject = onValueChange; return <div>{children}</div>; }, SelectContent: Part, SelectItem: Part, SelectTrigger: Part, SelectValue: Part }; });
 vi.mock('@/components/ui/dropdown-menu', () => { const Part = ({ children }: React.PropsWithChildren) => <div>{children}</div>; return { DropdownMenu: Part, DropdownMenuContent: Part, DropdownMenuItem: ({ onSelect, children, disabled }: React.PropsWithChildren<{ onSelect(): void; disabled?: boolean }>) => <button disabled={disabled} onClick={onSelect}>{children}</button>, DropdownMenuTrigger: Part }; });
-vi.mock('./TaskListPrimitives', () => ({ TaskListRow: ({ children }: React.PropsWithChildren) => <div>{children}</div>, TaskSearch: () => null }));
+vi.mock('./TaskListPrimitives', () => ({ TaskListRow: ({ title, children }: React.PropsWithChildren<{ title: string }>) => <div>{title}{children}</div>, TaskSearch: () => null }));
 vi.mock('./CalendarTaskStatus', () => ({ CalendarTaskStatus: () => null }));
 vi.mock('./CalendarTaskEditorDialog', () => ({ CalendarTaskEditorDialog: (props: React.ComponentProps<typeof import('./CalendarTaskEditorDialog').CalendarTaskEditorDialog>) => { state.editor(props); return null; } }));
 vi.mock('./ScheduledTaskLoopEditorDialog', () => ({ ScheduledTaskLoopEditorDialog: () => null }));
-vi.mock('./FollowUpTasksPanel', () => ({ FollowUpTasksPanel: () => null }));
+vi.mock('./FollowUpTasksPanel', () => ({ FollowUpTasksPanel: (props: React.ComponentProps<typeof import('./FollowUpTasksPanel').FollowUpTasksPanel>) => { state.followups(props); return null; } }));
 vi.mock('@/components/thread/ThreadConversation', () => ({ ThreadConversation: () => null }));
 vi.mock('./scheduleFormat', () => ({ formatSchedule: () => 'Daily' }));
 let root: Root, container: HTMLDivElement;
@@ -161,4 +161,29 @@ it('discards the opening conversation when the Application Host changes', async 
   await act(async () => { state.endpointChanged!(); state.generation += 1; });
   await click('tasksHub.scheduled');
   expect(state.editor.mock.lastCall?.[0]).toMatchObject({ open: true, conversation: undefined });
+});
+
+it('uses one Tasks Hub for a group Bot, preserving the group branch for schedules and watches', async () => {
+  const target: ThreadIdentity = { runtime: 'agent', threadId: 'group-ops', branchId: 'group-main' };
+  const group: BotGroupSummary = { id: 'release', name: 'Release group', members: [
+    { botId: 'varin', name: 'Varin', membership: 'first', listening: false },
+    { botId: 'ops', name: 'Ops', membership: 'second', listening: false },
+  ], updatedAt: 1, active: false, needsAttention: false };
+  const groupTask: ScheduledTask = { ...task, id: 'group-task', name: 'Group review',
+    target: { kind: 'existing_work', threadId: target.threadId, branchId: target.branchId } };
+  state.list.mockResolvedValue([task, groupTask]);
+  state.conversation = { group: { id: group.id } };
+  state.groupRequest.mockResolvedValue(target);
+  await act(async () => root.render(<ScheduledTasksDialog activeGroup={group} />));
+  expect(container.textContent).toContain(group.name);
+  expect(state.groupRequest).not.toHaveBeenCalled();
+  await act(async () => state.selectProject!('bot:ops'));
+  await click('tasksHub.followUps');
+  expect(state.groupRequest).toHaveBeenCalledExactlyOnceWith('/release/calendar-target', { botId: 'ops' }, expect.any(AbortSignal));
+  expect(state.followups.mock.lastCall?.[0]).toMatchObject({ createOpen: true, conversationScope: { identity: target, label: group.name } });
+  await click('tasksHub.scheduled');
+  expect(state.editor.mock.lastCall?.[0]).toMatchObject({ open: true, task: null, projectId: 'bot:ops', initialTarget: target, fixedDestination: group.name });
+  expect(state.groupRequest).toHaveBeenCalledTimes(1);
+  expect(container.textContent).toContain('Group review');
+  expect(container.querySelectorAll('button[aria-label="sessions.scheduledTasks.dialog.actions.editAria"]')).toHaveLength(1);
 });

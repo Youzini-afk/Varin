@@ -12,6 +12,7 @@ import { FlipList } from './FlipList';
 import { useHoverPill, useSelectionGlide } from './sidebarHighlights';
 import { pauseLoopsOffscreen } from '@/lib/motion/loops';
 import { noteSwitchDirection } from '@/lib/motion/switchDirection';
+import { activationPoint } from '@/lib/motion/pointer';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { BotFigure } from '@/workbenches/bot/BotFigure';
 import { toast } from '@/components/ui';
@@ -713,10 +714,10 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
     onRequestClose?.();
   }, [mobileVariant, onRequestClose, setArchivePageOpen, setSessionSwitcherOpen]);
 
-  const handleOpenSettings = React.useCallback(() => {
+  const handleOpenSettings = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     if (mobileVariant) setSessionSwitcherOpen(false);
     onRequestClose?.();
-    setSettingsDialogOpen(true);
+    setSettingsDialogOpen(true, activationPoint(event));
   }, [mobileVariant, onRequestClose, setSessionSwitcherOpen, setSettingsDialogOpen]);
 
   const handleOpenShortcuts = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
@@ -1472,6 +1473,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
                   variant="ghost"
                   size="icon"
                   onClick={handleOpenSettings}
+                  data-varin-settings-origin="open"
                   className="size-9 text-muted-foreground hover:text-foreground"
                   aria-label={t('sessions.sidebar.footer.actions.settings')}
                 >

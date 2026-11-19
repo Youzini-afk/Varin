@@ -6,6 +6,7 @@ import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControls
 import { useI18n } from '@/lib/i18n';
 import { useSettingsTitlebar } from '@/components/sections/shared/kit/shell-context';
 import { SwapText } from '@/components/motion/SwapText';
+import { activationPoint } from '@/lib/motion/pointer';
 
 const BUTTON = 'app-region-no-drag inline-flex h-7 items-center gap-1.5 rounded-lg pl-[7px] pr-2.5 text-[13px] text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40';
 
@@ -21,7 +22,8 @@ export function SettingsTitlebar({ leftInset }: { leftInset: string }) {
     <span className="pl-1" />
     {back ? <Tooltip>
       <TooltipTrigger asChild>
-        <button type="button" className={BUTTON} onClick={back}>
+        <button type="button" className={BUTTON} data-varin-settings-origin="return"
+          onClick={event => { if (inPage) state?.back?.(); else state?.close?.(activationPoint(event)); }}>
           <Icon name="arrow-left-s" className="size-4" />{inPage ? t('settings.view.home.title') : t('settings.shell.back')}
         </button>
       </TooltipTrigger>

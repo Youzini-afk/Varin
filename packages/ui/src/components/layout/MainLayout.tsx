@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { animate, motion, useMotionValue } from 'motion/react';
 import { Header } from './Header';
+import { useDesktopSettingsTransition } from './useDesktopSettingsTransition';
 import { Sidebar } from './Sidebar';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { ContextPanel } from './ContextPanel';
@@ -11,6 +12,7 @@ import { CommandPalette } from '../ui/CommandPalette';
 import { HelpDialog } from '../ui/HelpDialog';
 import { ThreadSidebar } from '@/components/thread/ThreadSidebar';
 import { ScheduledTasksDialog } from '@/components/session/ScheduledTasksDialog';
+import type { BotGroupSummary } from '@varin/application-client';
 import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
 import { ArchiveView } from '@/components/views/ArchiveView';
 import { WorktreesView } from '@/components/views/WorktreesView';
@@ -46,7 +48,6 @@ const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView
 const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then(m => ({ default: m.FilesView })));
 const DiagramView = lazyWithChunkRecovery(() => import('@/components/views/DiagramView').then(m => ({ default: m.DiagramView })));
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
-const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
 
 interface MainLayoutProps {
     renderConversation?: (active: boolean) => React.ReactNode;
@@ -68,9 +69,10 @@ interface MainLayoutProps {
     floatingSidebar?: boolean;
     /** Mobile title-bar centre that opens and closes the secondary panel's bottom sheet. */
     renderMobileTitle?: (panel: { open: boolean; toggle(): void }) => React.ReactNode;
+    scheduledTasksGroup?: BotGroupSummary;
 }
 
-export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, renderNavigator, renderSecondaryPanel, secondaryPanelLabel, secondaryPanelToggleLabels, secondaryPanelFocus, navigationTitle, navigationSubtitle, headerPanelControl, sidebarAttention, floatingSidebar = false, renderMobileTitle }) => {
+export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, renderNavigator, renderSecondaryPanel, secondaryPanelLabel, secondaryPanelToggleLabels, secondaryPanelFocus, navigationTitle, navigationSubtitle, headerPanelControl, sidebarAttention, floatingSidebar = false, renderMobileTitle, scheduledTasksGroup }) => {
     const shellActive = useWorkbenchShellActive();
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
     const isContextRailOpen = useUIStore((state) => state.isContextRailOpen);
@@ -107,6 +109,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
         };
     }, [shellActive]);
     const { isMobile } = useDeviceInfo();
+    const settings = useDesktopSettingsTransition(shellActive && !isMobile);
     const mobilePanelsResetRef = React.useRef(false);
 
     // Mobile drawer state
@@ -366,7 +369,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                                     </ErrorBoundary>
                                 </div>
                             )}
-                            <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
+                            <ErrorBoundary><ScheduledTasksDialog activeGroup={scheduledTasksGroup} /></ErrorBoundary>
                             <ErrorBoundary><ArchiveView /></ErrorBoundary>
                             <ErrorBoundary><WorktreesView /></ErrorBoundary>
                             {/* Always mount SessionSidebar on mobile to match desktop behavior.
@@ -431,9 +434,9 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                 </DrawerProvider>
             ) : (
                 <>
-                    <Header navigationTitle={navigationTitle} navigationSubtitle={navigationSubtitle} panelControl={headerPanelControl} sidebarAttention={sidebarAttention} />
+                    <Header navigationTitle={navigationTitle} navigationSubtitle={navigationSubtitle} panelControl={headerPanelControl} sidebarAttention={sidebarAttention} settingsVisible={settings.open} />
                     {/* Desktop navigation and work area share the row below the titlebar. */}
-                    <div style={isSettingsDialogOpen ? { display: 'none' } : undefined} inert={isSettingsDialogOpen} className="agent-workspace-row relative flex min-h-0 min-w-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
+                    <div style={settings.open ? { display: 'none' } : undefined} inert={settings.open} className="agent-workspace-row relative flex min-h-0 min-w-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
                         {floatingSidebar && isSidebarOpen ? (
                             <div aria-hidden="true" className="absolute inset-0 z-20 bg-black/10" onPointerDown={() => useUIStore.getState().setSidebarOpen(false)} />
                         ) : null}
@@ -476,7 +479,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                                                         </ErrorBoundary>
                                                     </div>
                                                 )}
-                                                <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
+                                                <ErrorBoundary><ScheduledTasksDialog activeGroup={scheduledTasksGroup} /></ErrorBoundary>
                                                 <ErrorBoundary><ArchiveView /></ErrorBoundary>
                                                 <ErrorBoundary><WorktreesView /></ErrorBoundary>
                                             </main>
@@ -500,19 +503,8 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                         </div>
                     </div>
 
-                    {/* Keep the workspace mounted; settings replaces only the row beneath the titlebar. */}
-                    {isSettingsDialogOpen ? (
-                        <WorkbenchReplacement
-                            target={WORKBENCH_REPLACEMENT_TARGETS.settings}
-                            fallback={(
-                                <React.Suspense fallback={null}>
-                                    <SettingsWindow
-                                        onClose={() => setSettingsDialogOpen(false)}
-                                    />
-                                </React.Suspense>
-                            )}
-                        />
-                    ) : null}
+                    {settings.content}
+                    {settings.layer}
                 </>
             )}
 

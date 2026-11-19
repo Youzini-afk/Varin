@@ -19,6 +19,10 @@ import type { IconName } from '@/components/icon/icons';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { WorkbenchProfileSwitcher } from '@/components/layout/WorkbenchProfileSwitcher';
+import { SettingsTitlebar } from '@/components/layout/SettingsTitlebar';
+import { useDesktopSettingsTransition } from '@/components/layout/useDesktopSettingsTransition';
+import { useWorkbenchShellActive } from '@/lib/workbench/shell-activity';
+import { activationPoint } from '@/lib/motion/pointer';
 import { WorkbenchServices } from '@/components/layout/WorkbenchServices';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { IdeSessionHeader } from './IdeSessionHeader';
@@ -95,7 +99,6 @@ import {
 } from '@/lib/workbench/ide-git';
 
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((module) => ({ default: module.GitView })));
-const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then((module) => ({ default: module.SettingsWindow })));
 type IdeSearchDraft = { mode: IdeSearchMode; query: string };
 
 const ACTIVITIES: ReadonlyArray<{ id: IdeWorkbenchActivityId; icon: IconName; labelKey: I18nKey; ariaKey: I18nKey }> = [
@@ -188,7 +191,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   const branchLabel = useGitBranchLabel(gitDirectory);
   const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
   const titlebarLeftInset = useTitlebarLeftInset('0.5rem');
-  const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
+  const settings = useDesktopSettingsTransition(useWorkbenchShellActive());
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setCommandPaletteOpen = useUIStore((state) => state.setCommandPaletteOpen);
   const isMultiRunLauncherOpen = useUIStore((state) => state.isMultiRunLauncherOpen);
@@ -446,7 +449,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
         ref={shellRootRef}
         data-page-scroll-lock="true"
         data-workbench-chrome="ide"
-        className="workbench-frame flex h-[100dvh] min-h-0 flex-col"
+        className="workbench-frame relative flex h-[100dvh] min-h-0 flex-col"
       >
         <CommandPalette fileOpenTarget="editor" />
         <HelpDialog />
@@ -470,6 +473,10 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
             if (isDesktopShell()) void startDesktopWindowDrag();
           }}
         >
+          {settings.open ? <>
+            <SettingsTitlebar leftInset="0px" />
+            <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
+          </> : <>
           {usesFramelessChrome && windowControlsSide === 'left' ? (
             <WindowsWindowControls visible position="left" />
           ) : null}
@@ -542,9 +549,10 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
               <WindowsWindowControls visible position="right" />
             ) : null}
           </div>
+          </>}
         </header>
 
-        {layoutState?.errorMessage ? (
+        {!settings.open && layoutState?.errorMessage ? (
           <div className="flex shrink-0 items-center gap-2 border-b border-status-warning/30 bg-status-warning/10 px-3 py-1 typography-meta text-status-warning">
             <Icon name="error-warning" className="size-3.5" />
             <span className="min-w-0 truncate" title={layoutState.errorMessage}>{layoutState.errorMessage}</span>
@@ -556,7 +564,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
           </div>
         ) : null}
 
-        {workspace.status === 'error' ? (
+        {!settings.open && workspace.status === 'error' ? (
           <div className="flex shrink-0 items-center gap-2 border-b border-status-warning/30 bg-status-warning/10 px-3 py-1 typography-meta text-status-warning">
             <Icon name="error-warning" className="size-3.5" />
             <span className="min-w-0 truncate" title={workspace.errorMessage}>{workspace.errorMessage}</span>
@@ -566,7 +574,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
           </div>
         ) : null}
 
-        {compact || readingFocus ? <nav className="ide-region-navigation flex shrink-0 items-center gap-1 px-2 pb-1" aria-label={t('workbench.ide.title')}>
+        {!settings.open && (compact || readingFocus) ? <nav className="ide-region-navigation flex shrink-0 items-center gap-1 px-2 pb-1" aria-label={t('workbench.ide.title')}>
           {(['primary', 'editor', 'secondary'] as const).map(pane => <button key={pane} type="button"
             aria-pressed={selectedPane === pane} className={cn('workbench-icon-button flex items-center gap-1.5 rounded-md px-2 py-1 typography-meta text-muted-foreground hover:bg-interactive-hover hover:text-foreground', selectedPane === pane && 'bg-interactive-selection text-foreground')}
             onClick={() => setReadingFocus(current => current === pane ? null : pane)}>
@@ -578,7 +586,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
             <Icon name="layout-column" className="size-3.5" />{t(readingFocus ? 'workbench.ide.restoreLayout' : 'workbench.ide.columns')}
           </button>
         </nav> : null}
-        <div style={isSettingsDialogOpen ? { display: 'none' } : undefined} inert={isSettingsDialogOpen} ref={mainAreaRef} className="ide-workspace-row flex min-h-0 flex-1 overflow-hidden">
+        <div style={settings.open ? { display: 'none' } : undefined} inert={settings.open} ref={mainAreaRef} className="ide-workspace-row flex min-h-0 flex-1 overflow-hidden">
           {layout.activityVisible ? (
           <nav className="ide-activity flex w-11 shrink-0 flex-col items-center gap-1 py-2" aria-label={t('workbench.ide.title')}>
             <WorkbenchReplacement
@@ -643,7 +651,8 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                   variant="ghost"
                   size="icon"
                   aria-label={t('workbench.ide.settingsAria')}
-                  onClick={() => setSettingsDialogOpen(true)}
+                  data-varin-settings-origin="open"
+                  onClick={event => setSettingsDialogOpen(true, activationPoint(event))}
                 >
                   <Icon name="settings-3" className="size-4" />
                 </Button>
@@ -845,7 +854,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
         </div>
 
         {layout.statusVisible ? (
-        <footer style={isSettingsDialogOpen ? { display: 'none' } : undefined} className="ide-statusbar flex h-7 shrink-0 items-center gap-3 px-3 typography-micro text-muted-foreground">
+        <footer style={settings.open ? { display: 'none' } : undefined} className="ide-statusbar flex h-7 shrink-0 items-center gap-3 px-3 typography-micro text-muted-foreground">
           <WorkbenchReplacement
             target={WORKBENCH_REPLACEMENT_TARGETS.status}
             fallback={(
@@ -877,18 +886,8 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
         </footer>
         ) : null}
 
-        {isSettingsDialogOpen ? (
-          <WorkbenchReplacement
-            target={WORKBENCH_REPLACEMENT_TARGETS.settings}
-            fallback={(
-              <React.Suspense fallback={null}>
-                <SettingsWindow
-                  onClose={() => setSettingsDialogOpen(false)}
-                />
-              </React.Suspense>
-            )}
-          />
-        ) : null}
+        {settings.content}
+        {settings.layer}
       </div>
     </DiffWorkerProvider>
   );

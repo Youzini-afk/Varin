@@ -54,6 +54,7 @@ export class LatticeStage {
     private readonly field: HTMLElement,
     private readonly sheet: HTMLElement,
     readonly mode: LatticeMode,
+    private readonly durationScale = 1,
   ) {
     root.dataset.mode = mode;
     this.canvas = mode === 'full' ? createLatticeCanvas(field, () => {
@@ -79,7 +80,7 @@ export class LatticeStage {
     const easing = cubic(EASE_OUT);
     return this.play(this.cells.map((cell, index) => cell.animate(
       [{ transform: 'scale(0)', opacity: 0.35 }, { transform: CLOSED, opacity: 1 }],
-      { duration: LATTICE_COVER_CELL_MS, delay: latticeDelayMs(reach[index] ?? 1), easing, fill: 'both' },
+      { duration: LATTICE_COVER_CELL_MS * this.durationScale, delay: latticeDelayMs(reach[index] ?? 1) * this.durationScale, easing, fill: 'both' },
     )), 'closed');
   }
 
@@ -111,7 +112,7 @@ export class LatticeStage {
     this.setState('clear');
     return this.play(this.cells.map((cell, index) => cell.animate(
       [{ transform: CLOSED, opacity: 1 }, { transform: 'scale(0)', opacity: 0.2 }],
-      { duration: LATTICE_REVEAL_CELL_MS, delay: latticeDelayMs(reach[index] ?? 1, inward), easing, fill: 'both' },
+      { duration: LATTICE_REVEAL_CELL_MS * this.durationScale, delay: latticeDelayMs(reach[index] ?? 1, inward) * this.durationScale, easing, fill: 'both' },
     )), 'clear');
   }
 
@@ -120,6 +121,8 @@ export class LatticeStage {
     this.stop();
     this.canvas?.dispose();
     this.canvas = null;
+    this.field.replaceChildren();
+    this.cells = [];
   }
 
   /**
@@ -156,7 +159,7 @@ export class LatticeStage {
       return { cancel: () => undefined, finished: Promise.resolve() as unknown as Promise<Animation> };
     }
     return this.sheet.animate([{ opacity: from }, { opacity: to }], {
-      duration: LATTICE_REDUCED_MS,
+      duration: LATTICE_REDUCED_MS * this.durationScale,
       easing: cubic(EASE_OUT),
       fill: 'both',
     });
@@ -218,7 +221,7 @@ export class LatticeStage {
       cancelAnimationFrame(frame); fallback.forEach(a => a.cancel()); reject(new Error('Lattice superseded'));
     } };
     const tick = (now: number) => {
-      const elapsed = Math.min(duration, Math.max(0, now - started));
+      const elapsed = Math.min(duration, Math.max(0, now - started) / this.durationScale);
       if (!this.canvas?.draw(elapsed, phase)) {
         // A lost graphics context uses the original DOM renderer at the same playhead.
         this.canvas?.dispose(); this.canvas = null; this.plan = null;
@@ -227,11 +230,11 @@ export class LatticeStage {
           const animation = cell.animate(phase === 'covering'
             ? [{ transform: 'scale(0)', opacity: .35 }, { transform: CLOSED, opacity: 1 }]
             : [{ transform: CLOSED, opacity: 1 }, { transform: 'scale(0)', opacity: .2 }], {
-            duration: phase === 'covering' ? LATTICE_COVER_CELL_MS : LATTICE_REVEAL_CELL_MS,
-            delay: latticeDelayMs(this.plan?.reach[index] ?? 1, inward),
+            duration: (phase === 'covering' ? LATTICE_COVER_CELL_MS : LATTICE_REVEAL_CELL_MS) * this.durationScale,
+            delay: latticeDelayMs(this.plan?.reach[index] ?? 1, inward) * this.durationScale,
             easing: cubic(phase === 'covering' ? EASE_OUT : EASE_EXIT), fill: 'both',
           });
-          animation.currentTime = elapsed; return animation;
+          animation.currentTime = elapsed * this.durationScale; return animation;
         });
         void Promise.all(fallback.map(a => a.finished)).then(() => finish({} as Animation), reject);
         return;
