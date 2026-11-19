@@ -544,7 +544,12 @@ impl Catalog {
         };
         let target = match (resolved_thread.as_deref(), resolved_branch.as_deref()) {
             (Some(thread), Some(branch)) => {
-                if caller!=thread {super::threads::require_public(&self.db,thread)?;}
+                if caller != thread {
+                    if thread.starts_with("thread:bot-group:") {
+                        return Err(RuntimeError::NotFound(thread.into()));
+                    }
+                    super::threads::require_public(&self.db, thread)?;
+                }
                 super::threads::require_branch_available(&self.db, branch)?;
                 let (actual, head): (String, Option<String>) = self
                     .db
@@ -850,7 +855,7 @@ impl FamilyRead {
         let scope_filter = match scope { "current"=>CURRENT.to_owned(),"history"=>format!("NOT {CURRENT}"),_=>"1".into() };
         let limit=query.limit.unwrap_or(usize::MAX);
         let read_limit:i64=-1;
-        let sql=format!("WITH RECURSIVE family(id) AS (SELECT ?1 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id), readable(id) AS (SELECT candidate.id FROM threads candidate JOIN threads caller ON caller.id=?5 WHERE candidate.principal_id IS caller.principal_id AND candidate.hidden_kind IS NULL AND caller.hidden_kind IS NULL AND caller.deleted_at_ms IS NULL AND (?14!='family' OR candidate.id IN family)) SELECT t.id,t.rowid,{CURRENT},t.updated_at_ms FROM threads t JOIN readable f ON t.id=f.id WHERE t.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id=t.id AND json_extract(owner.body,'$.executor')='code_retrieval') AND t.rowid<=?2 AND t.rowid<?3 AND (?4 OR t.id!=?5) AND ({scope_filter}) AND (?6 IS NULL OR t.id=?6 OR instr(lower(t.title),lower(?6))>0 OR t.agent_code=?6 COLLATE NOCASE)
+        let sql=format!("WITH RECURSIVE family(id) AS (SELECT ?1 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id), readable(id) AS (SELECT candidate.id FROM threads candidate JOIN threads caller ON caller.id=?5 WHERE candidate.principal_id IS caller.principal_id AND candidate.hidden_kind IS NULL AND (candidate.id=caller.id OR candidate.id NOT GLOB 'thread:bot-group:*') AND caller.hidden_kind IS NULL AND caller.deleted_at_ms IS NULL AND (?14!='family' OR candidate.id IN family)) SELECT t.id,t.rowid,{CURRENT},t.updated_at_ms FROM threads t JOIN readable f ON t.id=f.id WHERE t.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id=t.id AND json_extract(owner.body,'$.executor')='code_retrieval') AND t.rowid<=?2 AND t.rowid<?3 AND (?4 OR t.id!=?5) AND ({scope_filter}) AND (?6 IS NULL OR t.id=?6 OR instr(lower(t.title),lower(?6))>0 OR t.agent_code=?6 COLLATE NOCASE)
           AND (?8 IS NULL OR EXISTS(SELECT 1 FROM child_tasks c WHERE c.child_thread_id=t.id AND json_extract(c.body,'$.parent_thread_id')=?8 AND (?9 IS NULL OR json_extract(c.body,'$.parent_branch_id')=?9)))
           AND (?10 IS NULL OR EXISTS(SELECT 1 FROM runs r JOIN branches b ON b.id=r.branch_id JOIN run_launches l ON l.id=r.id WHERE b.thread_id=t.id AND json_extract(l.body,'$.selection.source.workspace_id')=?10))
           AND (?11 IS NULL OR t.updated_at_ms>=?11) AND (?12 IS NULL OR t.updated_at_ms<=?12)

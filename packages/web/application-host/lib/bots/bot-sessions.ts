@@ -1,12 +1,13 @@
 import type { BotSession, BotSummary, ConversationOrganizationPlacement, ThreadIdentity } from '@varin/application-client';
 import { currentRequestPrincipal } from '../kernel/request-principal.js';
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
+import { GROUP_THREAD_PREFIX } from './bot-group-chat.js';
 
 export function createBotSessions(getRuntime: () => Pick<AgentRuntimeClient, 'botScope' | 'thread' | 'createBotThread' | 'resolveBotEntry'>, prepareOrganization?: (identity: ThreadIdentity, placement: ConversationOrganizationPlacement) => Promise<import('@varin/application-client').ConversationCreationDefaults | null>) {
   async function listSessions(bot: BotSummary): Promise<BotSession[]> {
     const scope = await getRuntime().botScope(bot.id, undefined, true, currentRequestPrincipal());
     const threads = new Map(scope.threads.map(thread => [thread.thread_id, thread]));
-    return scope.sessions.flatMap(threadId => {
+    return scope.sessions.filter(threadId => !threadId.startsWith(GROUP_THREAD_PREFIX)).flatMap(threadId => {
       const thread = threads.get(threadId);
       return thread && thread.deleted_at_ms === null ? [{
         identity: { runtime: 'agent', threadId, branchId: thread.main_branch_id },

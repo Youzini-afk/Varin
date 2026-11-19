@@ -19,6 +19,11 @@ const state = vi.hoisted(() => ({
   list: vi.fn(), ensure: vi.fn(), primary: vi.fn(), work: vi.fn(), sessions: vi.fn(), createSession: vi.fn(), memory: vi.fn(), schedules: vi.fn(),
   create: vi.fn(), update: vi.fn(), archive: vi.fn(), open: vi.fn(), change: vi.fn(), openWork: vi.fn(), activity: vi.fn(), presence: vi.fn(),
   fork: vi.fn(), copy: vi.fn(), arrangements: vi.fn(), eventSources: vi.fn(),
+  groupChat: vi.fn(),
+}));
+vi.mock('@varin/application-client', async original => ({
+  ...await original<typeof import('@varin/application-client')>(),
+  botGroupRequest: state.groupChat,
 }));
 vi.mock('@/lib/bots', async original => ({
   ...await original<typeof import('@/lib/bots')>(),
@@ -186,6 +191,7 @@ describe('Bot workbench', () => {
     useBotLayout.setState({ panelOpen: true, panelWidth: 360, tab: 'overview', seen: {}, activityScope: 'all', memoryScope: 'current', ordinarySidebar: null, sidebarOpen: false });
     state.profileId = 'varin.bot'; state.mobile = false;
     state.list.mockReset().mockResolvedValue([bot('a'), bot('b')]);
+    state.groupChat.mockReset().mockResolvedValue([]);
     state.ensure.mockReset().mockImplementation(async (id: string) => ({ bot: bot(id), model: null, entry: { runtime: 'agent', threadId: `entry-${id}`, branchId: `branch-${id}` } }));
     state.primary.mockReset().mockResolvedValue({ ...bot('primary'), name: 'Varin' });
     state.work.mockReset().mockResolvedValue([]);
@@ -215,6 +221,17 @@ describe('Bot workbench', () => {
     container.remove();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it('opens a shared group separately from a Bot direct conversation', async () => {
+    const group = { id: 'release', name: 'Release', members: [{ botId: 'a', membership: 'first', name: 'Bot a', listening: true }],
+      active: false, needsAttention: false, updatedAt: 1 };
+    state.groupChat.mockImplementation(async (path: string) => path ? { ...group, posts: [] } : [group]);
+    await render();
+    await click('Release');
+    expect(state.groupChat).toHaveBeenCalledWith('/release', undefined, expect.any(AbortSignal));
+    expect(container.querySelector('.group-chat-composer')).not.toBeNull();
+    expect(centre()).toBeNull();
   });
 
   it('opens ordinary settings from the sidebar and preserves the last settings page', async () => {

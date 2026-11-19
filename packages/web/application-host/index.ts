@@ -245,7 +245,11 @@ import { createAgentPersonalization } from './lib/memory/agent-personalization.j
 import { registerAgentPersonalizationRoutes } from './lib/memory/agent-personalization-routes.js';
 import { createPromptToolCatalog } from './lib/memory/prompt-tool-catalog.js';
 
-import { createBotService } from './lib/bots/bot-service.js';
+import { BOT_CATALOG_WORKSPACE_ID, createBotService } from './lib/bots/bot-service.js';
+import { createBotGroupChats } from './lib/bots/bot-group-chat.js';
+import { registerBotGroupChatRoutes } from './lib/bots/bot-group-chat-routes.js';
+import { createBotGroupToolOwner } from './lib/bots/bot-group-tool-owner.js';
+import { BOT_GROUP_CAPABILITY } from '@varin/extension-builtins';
 import { createBotSessions } from './lib/bots/bot-sessions.js';
 import { resolveBotModelSelection } from './lib/bots/bot-model.js';
 import { createBotLifecycleRuntime } from './lib/bots/bot-lifecycle-runtime.js';
@@ -1573,6 +1577,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // BC0: durable Bot identity. The profile record lives in the kernel catalog;
   // the Bot's work is ordinary Threads under the `bot:<id>` owner scope, and
   // its entry conversation is a native Thread and branch.
+  let reconcileBotGroupDelivery: ((botId: string) => void) | undefined;
   const botService = createBotService({
     client: kernelClient,
     hostId,
@@ -1634,7 +1639,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (!botLifecycleRuntime) throw new Error('Bot lifecycle is not ready');
       return botLifecycleRuntime;
     },
-    onChange: (bot) => { broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId: bot.id } }); botPresence.schedule(); },
+    onChange: (bot) => { broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId: bot.id } }); botPresence.schedule(); reconcileBotGroupDelivery?.(bot.id); },
     onDeleted: (botId) => { broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId } }); botPresence.schedule(); },
     onOrganizationChange: () => { broadcastGlobalUiEvent?.({ type: 'varin:bot-organization-changed', properties: {} }); },
     onAppearanceLibraryChange: () => { broadcastGlobalUiEvent?.({ type: 'varin:bot-appearance-library-changed', properties: {} }); },
@@ -2831,6 +2836,20 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       withRequestPrincipal(auth?.principalId ?? null, next);
     } catch (error) { next(error); }
   });
+  const botGroupChats = createBotGroupChats({ client: botService.catalogClient, workspaceId: BOT_CATALOG_WORKSPACE_ID,
+    bots: botService, runtime: agentRuntime, threads, attachments: threadAttachments, model: botAgentModel,
+    async pauseCalendar(botId, target) {
+      const scope = botScopeId(botId);
+      const tasks = (await projectConfigRuntime.listScheduledTasks(scope)).filter(task => task.enabled
+        && task.target.kind === 'existing_work' && task.target.threadId === target.threadId && task.target.branchId === target.branchId);
+      for (const task of tasks) await projectConfigRuntime.upsertScheduledTask(scope, { ...task, enabled: false });
+      if (tasks.length) await scheduledTasksRuntime.syncProject(scope);
+    },
+    changed: () => broadcastGlobalUiEvent?.({ type: 'varin:bot-group-chat-changed', properties: {} }),
+    onError: error => console.warn('[Bot group chat] Delivery reconciliation requires attention', error instanceof Error ? error.name : 'unknown'),
+  });
+  reconcileBotGroupDelivery = botGroupChats.botChanged;
+  registerBotGroupChatRoutes(app, botGroupChats);
   registerBotRoutes(app, {
     bots: botService,
     work: agentRuntime,
@@ -3191,6 +3210,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const unregisterRunDriverCapability = extensionRuntime.capabilities.register(VARIN_AGENT_DRIVER_CAPABILITY, createRunDriverOwner(kernelClient));
   const unregisterScriptCapability = extensionRuntime.capabilities.register(SCRIPT_CAPABILITY, scriptRuntimeOwner.current.capability);
   const unregisterComputerCapability = extensionRuntime.capabilities.register(COMPUTER_CAPABILITY, computerRuntimeOwner.current.capability);
+  const unregisterBotGroupCapability = extensionRuntime.capabilities.register(BOT_GROUP_CAPABILITY, createBotGroupToolOwner(botGroupChats, agentRuntime));
   const unregisterSettingsCapability = extensionRuntime.capabilities.register(SETTINGS_CAPABILITY, createSettingsToolOwner({ service: settingsService, runtime: agentRuntime,
     localWorkspace: authority => authority.source?.resource_owner.kind === 'local' && authority.source.mode === 'live_root' ? authority.source.workspace_id : null,
   }));
@@ -3490,6 +3510,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   terminalRuntime = startupResult.terminalRuntime;
 
   await botService.reconcile();
+  const stopBotGroupChats = botGroupChats.start();
   const terminalCommandSubscription = terminalRuntime.subscribeCommands((record) => {
     void terminalCommandProjector.project(record);
   });
@@ -3585,6 +3606,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         await shutdown.run('fileObservations.stop', () => fileObservations.stop());
         await shutdown.run('scheduledTasksRuntime.stop', () => scheduledTasksRuntime.stop());
         await shutdown.run('botPresence.dispose', () => botPresence.dispose());
+        await shutdown.run('botGroupChats.stop', stopBotGroupChats);
         await shutdown.run('botService.dispose', () => botService.dispose());
         await shutdown.run('pluginEventTransport.close', () => pluginEventTransport.close());
         await shutdown.run('pluginEventSources.close', () => pluginEventSources.close());
@@ -3595,6 +3617,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         await shutdown.run('unregisterNestedToolCapability', () => unregisterNestedToolCapability());
         await shutdown.run('unregisterRunDriverCapability', () => unregisterRunDriverCapability());
         await shutdown.run('unregisterComputerCapability', () => unregisterComputerCapability());
+        await shutdown.run('unregisterBotGroupCapability', unregisterBotGroupCapability);
         await shutdown.run('unregisterSettingsCapability', () => unregisterSettingsCapability());
         await shutdown.run('unregisterEnvironmentForwardCapability', () => unregisterEnvironmentForwardCapability());
         await shutdown.run('unregisterScriptCapability', () => unregisterScriptCapability());

@@ -152,6 +152,7 @@ const parseActivity = (value: unknown): BotActivity => {
 };
 
 export interface BotService {
+  catalogClient(): Promise<KernelScopedClient>;
   appearances: ReturnType<typeof createBotAppearances>;
   organization: import('@varin/application-client').BotOrganizationAPI;
   primary(): Promise<BotSummary>;
@@ -621,6 +622,7 @@ export function createBotService(options: BotServiceOptions): BotService {
   });
 
   return {
+    catalogClient: scoped,
     appearances,
     organization: createBotOrganization({ client: scoped, workspaceId: BOT_CATALOG_WORKSPACE_ID,
       botIds: async () => (await list()).map(bot => bot.id), changed: options.onOrganizationChange }),

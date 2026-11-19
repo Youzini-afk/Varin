@@ -3708,6 +3708,7 @@ pub(crate) struct MessageSendParams {
     pub(crate) key: String,
     pub(crate) sender_thread_id: String,
     pub(crate) sender_branch_id: String,
+    pub(crate) sender_group_operation_id: Option<String>,
     pub(crate) target_thread_id: Option<String>,
     pub(crate) target_branch_id: Option<String>,
     pub(crate) reply_to: Option<String>,

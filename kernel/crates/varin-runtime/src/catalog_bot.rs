@@ -526,7 +526,7 @@ impl Catalog {
             identity::validate_public(&self.db,thread_id,branch_id,Some(bot_id),principal.as_deref())?;
             return Ok(forks::BranchForkReceipt{thread_id:thread_id.into(),branch_id:branch_id.into()});
         } }
-        let active: Option<(String,String)> = self.db.query_row("SELECT t.id,c.initial_branch_id FROM bot_thread_bindings b JOIN threads t ON t.id=b.thread_id JOIN thread_creations c ON c.thread_id=t.id WHERE b.bot_id=?1 AND t.principal_id IS ?2 AND t.deleted_at_ms IS NULL AND t.archived=0 AND NOT EXISTS(SELECT 1 FROM events e WHERE e.subject=c.initial_branch_id AND e.kind='branch.deleted') ORDER BY t.updated_at_ms DESC,t.rowid DESC LIMIT 1", params![bot_id,principal], |r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+        let active: Option<(String,String)> = self.db.query_row("SELECT t.id,c.initial_branch_id FROM bot_thread_bindings b JOIN threads t ON t.id=b.thread_id JOIN thread_creations c ON c.thread_id=t.id WHERE b.bot_id=?1 AND t.principal_id IS ?2 AND t.deleted_at_ms IS NULL AND t.archived=0 AND t.id NOT GLOB 'thread:bot-group:*' AND NOT EXISTS(SELECT 1 FROM events e WHERE e.subject=c.initial_branch_id AND e.kind='branch.deleted') ORDER BY t.updated_at_ms DESC,t.rowid DESC LIMIT 1", params![bot_id,principal], |r|Ok((r.get(0)?,r.get(1)?))).optional()?;
         if let Some((thread_id,branch_id))=active { identity::validate_public(&self.db,&thread_id,&branch_id,Some(bot_id),principal.as_deref())?; return Ok(forks::BranchForkReceipt{thread_id,branch_id}); }
         let (thread_id,branch_id)=if original.is_none() {(thread_id.to_owned(),branch_id.to_owned())} else {let key=id();(format!("thread:bot:{bot_id}:{key}"),format!("branch:bot:{bot_id}:{key}"))};
         let tx=self.db.transaction()?;
@@ -560,7 +560,7 @@ impl Catalog {
         let active: Option<(String,Option<String>)> = tx.query_row(
             "SELECT t.id,c.initial_branch_id FROM bot_thread_bindings binding JOIN threads t ON t.id=binding.thread_id
              LEFT JOIN thread_creations c ON c.thread_id=t.id
-             WHERE binding.bot_id=?1 AND t.principal_id IS ?2 AND t.deleted_at_ms IS NULL AND t.archived=0
+             WHERE binding.bot_id=?1 AND t.principal_id IS ?2 AND t.deleted_at_ms IS NULL AND t.archived=0 AND t.id NOT GLOB 'thread:bot-group:*'
              ORDER BY t.updated_at_ms DESC,t.rowid DESC LIMIT 1", params![bot_id,principal], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
         if let Some((thread_id, branch_id)) = active {
             let branch_id = branch_id.ok_or_else(|| RuntimeError::IdentityUnavailable(thread_id.clone()))?;

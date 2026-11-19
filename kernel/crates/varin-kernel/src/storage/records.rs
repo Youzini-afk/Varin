@@ -677,6 +677,11 @@ impl Storage {
                     return Err(KernelError::Operation("Bot organization requires groups and ungrouped lists".into()));
                 }
             }
+            "bot.group-chat" => {
+                derived("bot.group-chat")?;
+                required("name")?;
+                state_in(&["active"])?;
+            }
             "bot.appearance" => {
                 derived("bot.appearance")?;
                 required("name")?;
@@ -940,6 +945,7 @@ impl Storage {
             "settings.operation",
             "bot.profile",
             "bot.organization",
+            "bot.group-chat",
             "bot.appearance",
             "agent.personalization",
             "ui.work",

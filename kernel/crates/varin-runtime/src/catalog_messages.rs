@@ -372,6 +372,32 @@ impl Catalog {
             None,
         )
     }
+    /// A room handoff uses the original Bot tool's authorship while each recipient owns
+    /// an ordinary collaboration delivery. The Host has already resolved room membership.
+    pub fn prepare_group_message(
+        &self,
+        key: String,
+        sender: String,
+        branch: String,
+        operation_id: &str,
+        input: MessageInput,
+    ) -> Result<MessagePreparation> {
+        let operation = self.operation(operation_id)?;
+        let run = self.run(&operation.run_id)?;
+        let intent = ToolIntent::from_operation(&operation)?;
+        if run.thread_id != sender || run.branch_id != branch
+            || operation.executor.as_deref() != Some("bot_group_write")
+            || super::bot::thread_bot(&self.db, &sender)?.is_none()
+            || !input.target_thread_id.as_deref().is_some_and(|id| id.starts_with("thread:bot-group:"))
+        {
+            return Err(RuntimeError::Invalid("Invalid Bot group message origin".into()));
+        }
+        self.prepare_message(
+            format!("group-message:{key}"), sender, branch,
+            MessageActor::Agent { run_id: run.id, operation_id: operation.id.clone(), origin: intent.origin().clone() },
+            input, None, None,
+        )
+    }
     pub fn prepare_tool_message(
         &self,
         context: &ToolExecutionContext,
@@ -435,7 +461,7 @@ impl Catalog {
                 source_agent: input.source_agent.clone(),
                 message_id: match &actor {
                     MessageActor::WorkReport { .. } => format!("message:{key}"),
-                    MessageActor::Agent { .. } | MessageActor::AgentReport { .. } if key.starts_with("bot-report:") => format!("message:{key}"),
+                    MessageActor::Agent { .. } | MessageActor::AgentReport { .. } if key.starts_with("bot-report:") || key.starts_with("group-message:") => format!("message:{key}"),
                     MessageActor::Agent { operation_id, .. } | MessageActor::AgentReport { operation_id, .. } => format!("message:{operation_id}"),
                     MessageActor::User => id(),
                 },

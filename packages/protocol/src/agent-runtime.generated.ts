@@ -1008,6 +1008,7 @@ export interface MessageSendParams {
   key: string;
   senderThreadId: string;
   senderBranchId: string;
+  senderGroupOperationId?: string;
   targetThreadId?: string;
   targetBranchId?: string;
   replyTo?: string;

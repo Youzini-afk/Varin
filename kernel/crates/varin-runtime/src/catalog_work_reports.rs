@@ -259,8 +259,8 @@ impl Catalog {
                 wait: None,
                 target_thread_id: Some(body.request.sender_thread_id.clone()),
                 target_branch_id: Some(body.request.sender_branch_id),
-                reply_to: Some(body.request.message_id),
-                kind: if requester_run.cancel_requested
+                kind: if body.request.message_id.starts_with("message:group-message:")
+                    || requester_run.cancel_requested
                     || requester_run.state == RunState::Cancelled
                     || super::super::bot::thread_bot(&self.db, &body.request.sender_thread_id)?
                         .is_none()
@@ -269,6 +269,7 @@ impl Catalog {
                 } else {
                     MessageKind::Request
                 },
+                reply_to: Some(body.request.message_id),
                 text: body.text,
             },
             None,

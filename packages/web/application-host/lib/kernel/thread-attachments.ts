@@ -34,6 +34,7 @@ const filename = (value: string) => {
   if (!value.trim() || value === '.' || value === '..' || /[\\/]/.test(value) || [...value].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) throw new HarnessServiceError('invalid-params', 'The attachment filename is invalid');
   return value;
 };
+export { filename as validateAttachmentFilename };
 interface Scope { workspaceId: string; threadId: string }
 interface StoredAttachment { attachment: Attachment; contentHash: string; selection?: AttachmentSelection; operationId?: string; materials?: Array<{ snapshotId: string; contentHash: string; sourceHash?: string }> }
 type RecordValue = Awaited<ReturnType<KernelStorageContext['records']['get']>>;

@@ -293,8 +293,13 @@ pub(super) fn execute(
                 kind: p.kind,
                 text: p.text,
             };
-            let preparation = catalog.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?
-                .prepare_user_message(p.key,p.sender_thread_id,p.sender_branch_id,input).map_err(domain)?;
+            let preparation = {
+                let owner = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+                match p.sender_group_operation_id {
+                    Some(operation) => owner.prepare_group_message(p.key, p.sender_thread_id, p.sender_branch_id, &operation, input),
+                    None => owner.prepare_user_message(p.key,p.sender_thread_id,p.sender_branch_id,input),
+                }.map_err(domain)?
+            };
             let source=varin_runtime::output::OutputSource::Conversation {provenance:varin_runtime::execution::Provenance::UserInstruction {input_id:preparation.identity().message_id.clone()}};
             let media=p.prepared_attachment_media.unwrap_or_default().into_iter().map(|media|varin_runtime::output::ResolvedMedia {media_type:media.media_type,data_base64:media.data_base64,source:source.clone()}).collect();
             let user_content = if p.content_references.is_some() || p.content_reference_occurrences.is_some() || p.attachment_image_references.is_some() {

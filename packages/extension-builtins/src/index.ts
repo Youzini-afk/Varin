@@ -1,4 +1,6 @@
 import { SETTINGS_CAPABILITY, SETTINGS_TOOL_DECLARATIONS } from './settings-tools.js';
+import { BOT_GROUP_CAPABILITY, BOT_GROUP_TOOLS } from './bot-group-tools.js';
+export { BOT_GROUP_CAPABILITY } from './bot-group-tools.js';
 import { OFFICE_CAPABILITY, OFFICE_TOOL_DECLARATIONS, VARIN_BUILTIN_OFFICE_EXTENSION_ID } from './office-tools.js';
 import { BROWSER_CAPABILITY, BROWSER_TOOL_DECLARATIONS, VARIN_BUILTIN_BROWSER_EXTENSION_ID } from './browser-tools.js';
 export * from './office-tools.js';
@@ -476,7 +478,7 @@ export const VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION: VarinBuiltinExtensionDef
   enabledByDefault: true,
   manifest: { id: VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION_ID, displayName: 'Runtime contracts', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
     entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
-    capabilities: { host: [VARIN_RUNTIME_CONTRACTS_CAPABILITY, VARIN_EXTENSION_PACKAGES_CAPABILITY, SETTINGS_CAPABILITY] }, provides: { services: [...RUNTIME_CONTRACT_TOOL_DECLARATIONS, EXTENSION_PACKAGE_TOOL_DECLARATION, ...SETTINGS_TOOL_DECLARATIONS] } },
+    capabilities: { host: [VARIN_RUNTIME_CONTRACTS_CAPABILITY, VARIN_EXTENSION_PACKAGES_CAPABILITY, SETTINGS_CAPABILITY, BOT_GROUP_CAPABILITY] }, provides: { services: [...RUNTIME_CONTRACT_TOOL_DECLARATIONS, EXTENSION_PACKAGE_TOOL_DECLARATION, ...SETTINGS_TOOL_DECLARATIONS, ...BOT_GROUP_TOOLS] } },
 };
 
 export const VARIN_BUILTIN_SCRIPT_EXTENSION: VarinBuiltinExtensionDefinition = {
