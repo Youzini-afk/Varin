@@ -1,21 +1,5 @@
 import React from 'react';
-import type { MotionValue } from 'motion/react';
-
-export interface DrawerContextValue {
-    leftDrawerOpen: boolean;
-    rightDrawerOpen: boolean;
-    toggleLeftDrawer: () => void;
-    toggleRightDrawer: () => void;
-    // Motion values for real-time drawer dragging
-    leftDrawerX: MotionValue<number>;
-    rightDrawerX: MotionValue<number>;
-    leftDrawerWidth: React.MutableRefObject<number>;
-    rightDrawerWidth: React.MutableRefObject<number>;
-    setMobileLeftDrawerOpen: (open: boolean) => void;
-    setRightSidebarOpen: (open: boolean) => void;
-}
-
-const DrawerContext = React.createContext<DrawerContextValue | null>(null);
+import { DrawerContext, type DrawerContextValue } from './drawer-context-value';
 
 export const DrawerProvider: React.FC<{
     children: React.ReactNode;

@@ -173,7 +173,7 @@ export function BotNavigator({ bots, selectedId, sessions, current, figures, bus
     {conversationScope === 'bots' && !showArchived && !!displayedChats.length && <div className="px-2.5 pb-2 max-h-[40%] overflow-auto">
       <div className="px-1.5 py-1 typography-micro text-muted-foreground">{groupLabel('groups')}</div>
       {displayedChats.map(group => <button type="button" data-sidebar-row={`group-chat:${group.id}`} aria-current={currentGroup === group.id ? 'page' : undefined}
-        data-current={currentGroup === group.id || undefined} key={group.id} onClick={() => onGroup?.(group.id)} className="bot-nav-row w-full text-left">
+        data-current={currentGroup === group.id || undefined} key={group.id} onClick={() => onGroup?.(group.id)} className="bot-nav-row group-chat-nav-row">
         <GroupFaces group={group} bots={bots ?? []} /><span className="min-w-0 flex-1"><span className="block truncate">{group.name}</span>{group.preview && <span className="group-chat-nav-preview">{group.preview}</span>}</span>
         <SessionMark waiting={group.needsAttention} running={group.active} unread={false} />
       </button>)}

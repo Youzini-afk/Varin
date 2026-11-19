@@ -33,6 +33,7 @@ import type { ComposerReference } from '@/components/chat/composer/editor/refere
 import { useWorkbenchCommandRegistrations } from '@/lib/commands/surface-command-registry';
 import type { ComposerCommandAction, ComposerCommandDraftContext, WorkbenchCommandExecutionContext } from '@/lib/commands/surface-command-types';
 import { FileMentionAutocomplete, type ComposerAttachmentCandidate, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
+import { ComposerMenu, type ComposerMenuItem } from '@/components/chat/composer/ComposerMenu';
 import { resolveAutocompleteTrigger, type FileMentionAutocompleteInputSource, type AutocompleteTrigger } from '@/components/chat/composer/language/triggers';
 import { useMessageHistory } from '@/components/chat/composer/state/useMessageHistory';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
@@ -46,7 +47,7 @@ const COMPOSER_LAYOUT_TRANSITION = { layout: springTransition('travel') };
 
 export function ThreadComposer({ editorRef, value, onChange, interactions, models, providerId, modelId, thinkingLevel, onModelChange,
   modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, stopping = false, retrying, suggestion, suggestionError, onSuggestionDismiss, prepareSendMode,
-  onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, imageReferences, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls, backendControls, api, identity, source, references, commandActions, onReferenceSelect, backendCommands, referenceScope, pendingSource, attachmentCandidates, backendIdentity, external, connectionStatus }: {
+  onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, imageReferences, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls, backendControls, api, identity, source, references, commandActions, onReferenceSelect, backendCommands, referenceScope, pendingSource, attachmentCandidates, backendIdentity, external, connectionStatus, groupDelivery }: {
   editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string, references?: readonly ComposerReference[], interactions?: readonly InteractionRange[]): void;
   interactions?: readonly InteractionRange[];
   referenceScope?: string; references?: readonly ComposerReference[]; api?: ThreadsAPI; identity?: ThreadIdentity; source?: ThreadSource | null; pendingSource?: ThreadDraftSkillOptions['source'];
@@ -70,6 +71,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   children?: React.ReactNode; attachmentNames: string[]; imageReferences?: readonly number[]; skills: string[];
   agentControls?: React.ReactNode;
   backendControls?: React.ReactNode;
+  groupDelivery?: { control: React.ReactNode; members: readonly ComposerMenuItem[]; mentionLabel: string; placeholder: string };
 }) {
   const { t } = useI18n();
   const markerDraft = useThreadDraftStore(state => identityKey ? state.drafts[identityKey] ?? EMPTY_THREAD_DRAFT : EMPTY_THREAD_DRAFT);
@@ -133,6 +135,8 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
     pendingHistoryTextRef.current = null; resetHistory();
   }, [scope, resetHistory]);
   const sending = pending;
+  const nativeControls = backendControls === undefined && !groupDelivery;
+  const placeholder = groupDelivery?.placeholder ?? t('chat.chatInput.placeholder.task');
   const loading = false;
   const aborting = active && stopping;
   const stopLabel = t(aborting ? 'chat.timeline.tools.stopping' : 'chat.chatInput.actions.stopGeneratingAria');
@@ -161,14 +165,14 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   const submit = (mode?: 'boundary' | 'next_run') => {
     if (references?.some(reference => reference.target.kind === 'backend-command' && value.slice(reference.from, reference.to) === reference.text && (reference.target.backend !== backendIdentity || reference.host !== getRuntimeEndpointGeneration()))) { setCommandError(t('composer.scope.changed')); return; }
     const backend = references?.some(reference => reference.target.kind === 'backend-command' && reference.target.backend === backendIdentity && reference.host === getRuntimeEndpointGeneration() && value.slice(reference.from, reference.to) === reference.text && value.trim() === `/${reference.target.name}`);
-    const exact = !backend && (external ? varinCommands : knownCommands).find(command => value.trim() === `/${command.name}` && !command.isSkill && command.source !== 'backend');
+    const exact = !groupDelivery && !backend && (external ? varinCommands : knownCommands).find(command => value.trim() === `/${command.name}` && !command.isSkill && command.source !== 'backend');
     if (exact) { void runCommand(exact, { kind: 'command', query: exact.name, from: value.indexOf('/'), to: value.trimEnd().length }); return; }
     if (sendDisabled) return;
     if (ghostSuggestion) flushSync(acceptSuggestion);
     prepareSendMode?.(mode);
     messageHistory.reset(); frameRef.current?.closest('form')?.requestSubmit();
   };
-  const insertTranscript = (text: string) => { onChange([value.trimEnd(), text.trim()].filter(Boolean).join('\n')); requestAnimationFrame(() => inputRef.current?.focus()); };
+  const insertTranscript = (text: string) => { onChange([value.trimEnd(), text.trim()].filter(Boolean).join('\n'), references, interactions); requestAnimationFrame(() => inputRef.current?.focus()); };
   const submitText = (text: string) => { flushSync(() => insertTranscript(text)); frameRef.current?.closest('form')?.requestSubmit(); };
   const selected = models.find(model => model.providerId === providerId && model.modelId === modelId);
   const settings = (section?: string) => { const ui = useUIStore.getState(); ui.setSettingsDialogOpen(true); if (section) ui.setSettingsPage(section as Parameters<typeof ui.setSettingsPage>[0]); };
@@ -179,11 +183,11 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
   };
   const actions: Record<string, ComposerCommandAction | undefined> = {
     settings: { run: () => settings() }, shortcuts: { run: () => settings('shortcuts') },
-    skills: backendControls === undefined ? { run: () => settings('skills') } : undefined,
+    skills: nativeControls ? { run: () => settings('skills') } : undefined,
     ...(onCompact ? { compact: { run: onCompact } } : {}), ...(onOpenHistory ? { tree: { run: onOpenHistory } } : {}),
-    ...(onGoal && backendControls === undefined ? { goal: { run: onGoal } } : {}),
+    ...(onGoal && nativeControls ? { goal: { run: onGoal } } : {}),
     attachments: { content: <div>{children || <p>{t('composer.emptyAttachments')}</p>}</div> },
-    ...(backendControls === undefined ? {
+    ...(nativeControls ? {
       model: { disabled: modelDisabled ? t('composer.menu.unavailable') : undefined, value: selected?.name ?? modelId,
         content: <div className="space-y-2"><p className="typography-meta text-muted-foreground">{t('composer.model.scope')}</p>{models.map(model => <button type="button" key={`${model.providerId}:${model.modelId}`} className="flex w-full items-center justify-between rounded px-2 py-2 text-left hover:bg-interactive-hover" disabled={modelDisabled}
           onClick={() => { const levels = model.thinkingLevels ?? ['off']; void chooseModel(model.providerId, model.modelId, levels.includes(thinkingLevel) ? thinkingLevel : levels[0] ?? 'off', true); }}><span>{model.name ?? model.modelId} · {model.providerId}</span>{model.providerId === providerId && model.modelId === modelId && '✓'}</button>)}</div> },
@@ -254,13 +258,17 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
         {agentControls}
         </>}
   </div>;
+  const groupMentions = groupDelivery?.members.filter(member => member.label.toLocaleLowerCase().includes(autocomplete?.query.toLocaleLowerCase() ?? ''));
+  const groupComposer = Boolean(groupDelivery);
   const updateAutocomplete = React.useCallback((next: string, cursorPosition: number, inputSource: FileMentionAutocompleteInputSource = 'manual', insertedText?: string) => {
-    if (dismissed.current === next && next === value) return;
+    if (dismissed.current === next && (groupComposer || next === value)) return;
     dismissed.current = undefined;
     const trigger = resolveAutocompleteTrigger(next, cursorPosition, { inputMode: 'normal', inputSource, insertedText, active: autocomplete });
-    setAutocomplete(trigger);
+    if (groupComposer && inputSource === 'paste' && !trigger) dismissed.current = next;
+    const bound = latestDraft.current.references?.some(ref => ref.target.kind === 'group-member' && ref.from === trigger?.from && cursorPosition <= ref.to);
+    setAutocomplete(bound || (groupComposer && trigger?.kind === 'command') ? null : trigger);
     if (!trigger) setLayer(undefined);
-  }, [autocomplete, value]);
+  }, [autocomplete, groupComposer, value]);
   const openPicker = (kind: AutocompleteTrigger['kind']) => {
     const editor = inputRef.current;
     if (!editor) return;
@@ -413,7 +421,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
           {t(external.delivery.mode === 'steer' ? 'external.sendCurrentTurn' : 'external.sendNextTurn')} · {t('external.nextTurnOptionsHint')}
         </p>}
 
-          {isMobile ? (
+          {isMobile && !groupDelivery ? (
             <div className="flex min-w-0 items-center justify-end border-b border-border/40 px-2 py-1">
               {modelControls}
             </div>
@@ -456,7 +464,7 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                 setAutocomplete(null);
                 return;
               }
-              updateAutocomplete(value, selection.end);
+              updateAutocomplete(groupComposer ? latestDraft.current.value : value, selection.end);
             }}
             onPaste={(event) => {
               const files = event.clipboardData ? [...event.clipboardData.files] : [];
@@ -465,10 +473,11 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
               acceptFiles(files);
             }}
             onKeyDown={handleEditorKeyDown}
+            editable={!groupDelivery || !sending}
             spellCheck={spellCheck}
-            aria-label={t('chat.chatInput.placeholder.task')}
+            aria-label={placeholder}
             languageContext={languageContext}
-            placeholder={t('chat.chatInput.placeholder.task')}
+            placeholder={placeholder}
             suggestion={ghostSuggestion}
             className={cn(
               'min-h-[48px] w-full px-3 pb-1 pt-3 typography-markdown text-foreground md:typography-ui-label',
@@ -497,7 +506,11 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
             onCommandSelect={handleCommandSelect} onClose={closeMenu} title={layer?.label} onBack={() => { setLayer(undefined); setCommandError(undefined); inputRef.current?.focus(); }}>
               {layer ? typeof actions[layer.name]?.content === 'function' ? (actions[layer.name]!.content as (complete: () => void, context?: ComposerCommandDraftContext) => React.ReactNode)(() => { if (scope === currentIdentity.current) consumeFragment(); }, { text: value.slice(0, autocomplete.from) + value.slice(autocomplete.to), selectedText: (() => { const selection = inputRef.current?.getSelection(); return selection ? value.slice(selection.start, selection.end) : ''; })() }) : actions[layer.name]?.content as React.ReactNode : undefined}
             </CommandAutocomplete> : null}
-          {autocomplete?.kind === 'mention' ? <FileMentionAutocomplete key="mention" ref={mentionRef} searchQuery={autocomplete.query}
+          {autocomplete?.kind === 'mention' && groupMentions ? <ComposerMenu key="mention" ref={mentionRef} id={menuId} scope={scope}
+            query={autocomplete.query} items={groupMentions} onActive={setActiveOption} onClose={closeMenu}
+            status={!groupMentions.length ? <p className="px-2 py-3 typography-meta text-muted-foreground">{t('chat.fileMentionAutocomplete.empty')}</p> : undefined}
+            onChoose={id => { const member = groupMentions.find(item => item.id === id); if (member) applyReference(`@${member.label}`, { kind: 'group-member', botId: id }); }} />
+            : autocomplete?.kind === 'mention' ? <FileMentionAutocomplete key="mention" ref={mentionRef} searchQuery={autocomplete.query}
             api={backendControls === undefined ? api : undefined} identity={identity} source={source} pendingSource={pendingSource} menuId={menuId} onActive={setActiveOption} workspacePath={workspacePath}
             attachments={attachmentCandidates} fileSelectionDisabled={backendControls === undefined ? undefined : t('external.attachments')}
             onAttachmentSelect={candidate => { if (candidate.attachment) applyReference(`@${candidate.name}`, { kind: 'attachment', attachment: candidate.attachment }); else if (candidate.fileId) applyReference(`@${candidate.name}`, { kind: 'draft-file', fileId: candidate.fileId }); }}
@@ -524,16 +537,16 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                   inputRef.current?.focus({ preventScroll: true });
                   return false;
                 }}>
-                  <DropdownMenuItem onSelect={() => openPicker('mention')} className="gap-2.5 py-1.5">
-                    <Icon name="file" className="size-4" />
-                    {t(backendControls !== undefined ? 'chat.composer.referenceAttachment' : botWorkbench ? 'chat.composer.botReference' : 'chat.composer.reference')}
+                  <DropdownMenuItem disabled={groupComposer && sending} onSelect={() => openPicker('mention')} className="gap-2.5 py-1.5">
+                    <Icon name={groupDelivery ? 'group' : 'file'} className="size-4" />
+                    {groupDelivery?.mentionLabel ?? t(backendControls !== undefined ? 'chat.composer.referenceAttachment' : botWorkbench ? 'chat.composer.botReference' : 'chat.composer.reference')}
                     <span className="ml-auto pl-4 text-muted-foreground" aria-hidden="true">@</span>
                   </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => openPicker('command')} className="gap-2.5 py-1.5">
+                  {!groupDelivery && <DropdownMenuItem onSelect={() => openPicker('command')} className="gap-2.5 py-1.5">
                     <Icon name="command" className="size-4" />
                     {t(backendControls !== undefined ? 'chat.chatInput.actions.commands' : 'chat.composer.commands')}
                     <span className="ml-auto pl-4 text-muted-foreground" aria-hidden="true">/</span>
-                  </DropdownMenuItem>
+                  </DropdownMenuItem>}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem disabled={attachmentDisabled || imageDisabled} title={external && imageDisabled ? t(external.capabilities ? 'external.imagesUnsupported' : 'external.capabilitiesUnknown') : undefined} onClick={onAttachImages} className="gap-2.5 py-1.5">
                     <Icon name="attachment-2" className="size-4" />
@@ -545,13 +558,13 @@ export function ThreadComposer({ editorRef, value, onChange, interactions, model
                 </DropdownMenuContent>
               </DropdownMenu>
               {external && <ExternalModeControls key={backendIdentity} options={external} />}
-              {backendControls === undefined && <ThreadPermissionControl workspacePath={permissionWorkspacePath} className={footerIconButtonClass} />}
-              {backendControls === undefined && goalEnabled && onGoal && <button type="button" className={cn(footerIconButtonClass, goalArmed && 'text-primary bg-primary/10')} onClick={onGoal} aria-pressed={Boolean(goalArmed)} aria-label={t('chat.draftPresets.craftGoal.label')}><Icon name="target" className="size-4" /></button>}
+              {nativeControls && <ThreadPermissionControl workspacePath={permissionWorkspacePath} className={footerIconButtonClass} />}
+              {nativeControls && goalEnabled && onGoal && <button type="button" className={cn(footerIconButtonClass, goalArmed && 'text-primary bg-primary/10')} onClick={onGoal} aria-pressed={Boolean(goalArmed)} aria-label={t('chat.draftPresets.craftGoal.label')}><Icon name="target" className="size-4" /></button>}
 
               <WorkbenchContributionSlot kind="composer-action" slot={VARIN_CONVERSATION_SLOTS.composerLeading} props={{ identityKey, workspacePath, text: value, onChange, onSend: submit }} />
             </div>
 
-            {!isMobile ? <div className="conversation-composer-models">{modelControls}</div> : null}
+            {groupDelivery ? <div className="group-composer-delivery">{groupDelivery.control}</div> : !isMobile ? <div className="conversation-composer-models">{modelControls}</div> : null}
             <div className="conversation-composer-actions">
               <WorkbenchContributionSlot kind="composer-action" slot={VARIN_CONVERSATION_SLOTS.composerTrailing} props={{ identityKey, workspacePath, text: value, onChange, onSend: submit }} />
               <ComposerDictation

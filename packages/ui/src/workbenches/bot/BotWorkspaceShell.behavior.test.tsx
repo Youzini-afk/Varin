@@ -68,6 +68,7 @@ vi.mock('@/components/layout/ContextPanel', () => ({ ContextPanel: ({ layoutScop
 // own tests and must not create a real observation connection for this DOM.
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/components/thread/ThreadDraftConversation', () => ({ ThreadDraftConversation: ({ draftKey }: { draftKey: string }) => <div data-bot-draft={draftKey} /> }));
+vi.mock('@/components/dictation/ComposerDictation', () => ({ ComposerDictation: () => null }));
 vi.mock('@/components/thread/ThreadConversation', () => ({ ThreadConversation: ({ identity, readOnly, preferredModel, surface }: { identity: { threadId: string; branchId: string }; readOnly: boolean; preferredModel?: { providerId: string; modelId: string } | null; surface?: 'workbench' | 'bot' }) => { const openThreadContext = useOpenThreadContext(); return <div data-agent={identity.threadId} data-branch={identity.branchId} data-readonly={String(readOnly)} data-model={JSON.stringify(preferredModel)} data-surface={surface}><button onClick={() => openThreadContext({ runtime: 'agent', ...identity }, undefined, undefined, readOnly)}>Open context</button></div>; } }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: { getState: () => ({ setDirectory: () => {} }) } }));
 vi.mock('@/lib/workbench/profile-context', () => ({ useWorkbenchProfileId: () => state.profileId }));
@@ -183,6 +184,11 @@ describe('Bot workbench', () => {
     vi.stubGlobal('HTMLElement', window.HTMLElement);
     vi.stubGlobal('Element', window.Element);
     vi.stubGlobal('Node', window.Node);
+    vi.stubGlobal('MutationObserver', window.MutationObserver);
+    vi.stubGlobal('requestAnimationFrame', () => 1);
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+    vi.stubGlobal('getComputedStyle', () => ({ lineHeight: '20px' }));
+    Object.assign(document, { getSelection: () => null, hasFocus: () => false });
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     container = document.createElement('div');
     document.body.append(container);
@@ -224,13 +230,31 @@ describe('Bot workbench', () => {
   });
 
   it('opens a shared group separately from a Bot direct conversation', async () => {
-    const group = { id: 'release', name: 'Release', members: [{ botId: 'a', membership: 'first', name: 'Bot a', listening: true }],
+    const group = { id: 'release', name: 'Release', members: [{ botId: 'a', membership: 'first', name: 'Bot a', listening: false }],
       active: false, needsAttention: false, updatedAt: 1 };
     state.groupChat.mockImplementation(async (path: string) => path ? { ...group, posts: [] } : [group]);
     await render();
     await click('Release');
     expect(state.groupChat).toHaveBeenCalledWith('/release', undefined, expect.any(AbortSignal));
-    expect(container.querySelector('.group-chat-composer')).not.toBeNull();
+    const composer = container.querySelector('.group-chat-composer')!;
+    expect(composer.querySelector('[data-conversation-composer-input-frame] .cm-content')).not.toBeNull();
+    const panel = container.querySelector('[data-secondary] .bot-panel');
+    expect(panel?.getAttribute('data-open')).toBe('true');
+    expect(panel?.querySelector('[role="tab"][aria-label="Members"]')).not.toBeNull();
+    await click('Members');
+    expect(panel?.getAttribute('data-open')).toBe('false');
+    await click('Members');
+    expect(panel?.getAttribute('data-open')).toBe('true');
+    const editor = EditorView.findFromDOM(composer.querySelector<HTMLElement>('.cm-content')!)!;
+    await act(async () => { editor.dispatch({ changes: { from: 0, insert: '@Bot' }, selection: { anchor: 4 }, userEvent: 'input.paste' }); });
+    expect(composer.querySelector('[role="listbox"]')).toBeNull();
+    expect(composer.querySelector('.cm-group-member')).toBeNull();
+    await act(async () => { composer.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
+    expect(state.groupChat).toHaveBeenCalledWith('/release/post', expect.objectContaining({ text: '@Bot', addressed: [] }));
+    await click('@Bot a');
+    expect(composer.querySelector('.cm-group-member')?.textContent).toBe('@Bot a');
+    await act(async () => { composer.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
+    expect(state.groupChat).toHaveBeenCalledWith('/release/post', expect.objectContaining({ text: '@Bot a', addressed: ['a'] }));
     expect(centre()).toBeNull();
   });
 
@@ -857,3 +881,4 @@ describe('Bot workbench', () => {
   });
 
 });
+import { EditorView } from '@codemirror/view';

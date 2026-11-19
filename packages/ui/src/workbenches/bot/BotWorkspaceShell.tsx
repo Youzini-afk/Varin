@@ -161,10 +161,12 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   const groupScope = useThreadStore(state => state.hostKey);
   const groupChats = useBotGroupChats(committed && !settingsOpen, groupScope);
   const [groupId, setGroupId] = React.useState<string | null>(null);
-  const [groupPanel, setGroupPanel] = React.useState(false);
+  const [groupPanel, setGroupPanel] = React.useState(true);
+  const [groupPanelTarget, setGroupPanelTarget] = React.useState<HTMLDivElement | null>(null);
+  const [groupSearchRequest, searchGroup] = React.useReducer((request: number) => request + 1, 0);
   const [creatingGroup, setCreatingGroup] = React.useState(false);
   const currentGroup = groupChats.groups.find(group => group.id === groupId);
-  React.useEffect(() => { setGroupId(null); setGroupPanel(false); setCreatingGroup(false); }, [groupScope]);
+  React.useEffect(() => { setGroupId(null); setGroupPanel(true); setCreatingGroup(false); }, [groupScope]);
   const organization = useBotOrganization(bots, committed && !settingsOpen);
   const [showArchived, setShowArchived] = React.useState(false);
   const [details, setDetails] = React.useState<{ id: string; name: string; tab: 'profile' | 'memory' } | null>(null);
@@ -751,17 +753,21 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
 
   const navigator = () => <BotNavigator bots={bots} organization={organization} selectedId={selectedId} sessions={sessionsWithWork} current={!currentGroup && !activeDraftKey && ownsConversation ? selectedEntry : null}
     figures={figures} busy={busy || actionBusy !== null} showArchived={showArchived} isMobile={isMobile} sessionTitle={sessionTitleOf}
-    groupChats={groupChats.groups} currentGroup={currentGroup?.id ?? null} onGroup={id => { setGroupId(id); setGroupPanel(false); }}
+    groupChats={groupChats.groups} currentGroup={currentGroup?.id ?? null} onGroup={setGroupId}
     onCreateGroup={() => setCreatingGroup(true)}
     onSelectBot={id => { setGroupId(null); selectBot(id); }} onSelectSession={identity => { setGroupId(null); openSession(identity); }} onNewSession={() => { setGroupId(null); void newSession(); }}
     onSessionAction={(session, identity, action) => { void sessionAction(session, identity, action); }}
     onBotAction={(bot, action) => { void mutateBot(bot, action); }} onCreateBot={openCreateDialog}
     onToggleArchived={() => setShowArchived(value => !value)} onRefresh={refresh} onOpenSettings={openSettings} />;
 
+  const groupPanelShown = floating ? narrowPanelOpen : groupPanel;
+  const changeGroupPanel = (open: boolean) => { if (floating) setNarrowPanelOpen(open); else setGroupPanel(open); };
   const conversation = (active: boolean) => currentGroup
     ? <BotGroupChat key={currentGroup.id} group={currentGroup} bots={bots ?? []} api={threads} sequence={groupChats.sequence}
-      panel={groupPanel} mobile={isMobile || floating} closePanel={() => setGroupPanel(false)} refresh={groupChats.refresh}
+      panelTarget={groupPanelTarget} onOpenPanel={() => changeGroupPanel(true)} onRevealChat={() => { if (floating) setNarrowPanelOpen(false); }} refresh={groupChats.refresh}
+      searchRequest={groupSearchRequest}
       onDelete={() => setGroupId(null)} onDirect={id => { setGroupId(null); selectBot(id); }}
+      onProfile={bot => setDetails({ id: bot.id, name: bot.name, tab: 'profile' })}
       onWake={bot => { void mutateBot(bot, 'wake'); }} />
     : <div className="flex h-full min-h-0 flex-col"
     onPointerDown={() => { if (floating && narrowPanelOpen) setNarrowPanelOpen(false); }}>
@@ -832,23 +838,33 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
   </div>;
 
   const workspaceArea = (visible: boolean) => shownPanel && <BotWorkspaceArea model={shownPanel} active={committed && !settingsOpen && visible} expanded={spaceExpanded} onExpand={() => setSpaceExpanded(value => !value)} />;
-  const secondaryPanel = (placement: 'docked' | 'drawer', visible: boolean) => placement === 'drawer'
+  const secondaryPanel = (placement: 'docked' | 'drawer', visible: boolean) => currentGroup
+    ? placement === 'drawer'
+      ? <div ref={setGroupPanelTarget} className="h-full min-h-0 bg-background" />
+      : <BotPanel model={null} open={groupPanelShown} floating={floating} onOpenChange={changeGroupPanel}>
+        <div ref={setGroupPanelTarget} className="h-full min-h-0" />
+      </BotPanel>
+    : placement === 'drawer'
     ? <div className="flex h-full min-h-0 flex-col bg-background">{workspaceArea(visible)}</div>
     : <><BotPanel model={panelModel} open={!conversationTab && panelVisible && panelModel !== null} floating={floating}
       workspace={Boolean(spaces.activeKey)} expanded={Boolean(spaces.activeKey) && spaceExpanded}
       onOpenChange={open => { if (floating) setNarrowPanelOpen(open); else setPanelOpen(open); }}>{workspaceArea(!conversationTab && panelVisible)}</BotPanel>
       {conversationPanelMounted && !isMobile && <React.Suspense fallback={null}>{conversationTools()}</React.Suspense>}</>;
 
-  return <ConversationToolsContext.Provider value={{ identity: !currentGroup && ownsConversation && !activeDraftKey ? selectedEntry : null, target: conversationTarget, mode: selectedConversationTab?.mode, bots: bots ?? [], bot: selected ?? undefined }}><BotWorkspaceNavigationContext.Provider value={spaces}><MainLayout renderNavigator={navigator} renderConversation={conversation} {...(!currentGroup ? { renderSecondaryPanel: secondaryPanel } : {})}
-    secondaryPanelFocus={spaces.activeKey ? `${spaces.activeKey}:${spaces.focusRevision}` : null}
-    secondaryPanelLabel={t('bot.panel.aria')} secondaryPanelToggleLabels={{ open: t('bot.panel.open'), close: t('bot.panel.close') }}
+  return <ConversationToolsContext.Provider value={{ identity: !currentGroup && ownsConversation && !activeDraftKey ? selectedEntry : null, target: conversationTarget, mode: selectedConversationTab?.mode, bots: bots ?? [], bot: selected ?? undefined }}><BotWorkspaceNavigationContext.Provider value={spaces}><MainLayout renderNavigator={navigator} renderConversation={conversation} renderSecondaryPanel={secondaryPanel}
+    secondaryPanelFocus={!currentGroup && spaces.activeKey ? `${spaces.activeKey}:${spaces.focusRevision}` : null}
+    secondaryPanelLabel={currentGroup?.name ?? t('bot.panel.aria')} secondaryPanelToggleLabels={{ open: t('bot.panel.open'), close: t('bot.panel.close') }}
     navigationTitle={currentGroup?.name ?? navigationTitle} navigationSubtitle={currentGroup ? currentGroup.members.map(member => member.name).join('、') : navigationSubtitle}
-    headerPanelControl={currentGroup ? <Button variant="ghost" size="sm" aria-label={groupLabel('members')} aria-pressed={groupPanel} onClick={() => setGroupPanel(value => !value)}><GroupFaces group={currentGroup} bots={bots ?? []} /></Button> : panelControl} sidebarAttention={sidebarAttention}
+    headerPanelControl={currentGroup ? <div className="flex items-center gap-0.5">
+      <Button variant="ghost" size="icon" aria-label={groupLabel('search')} title={groupLabel('search')} onClick={() => { if (floating) changeGroupPanel(false); searchGroup(); }}><Icon name="search" className="size-4" /></Button>
+      <Button variant="ghost" size="sm" aria-label={groupLabel('members')} aria-expanded={groupPanelShown} onClick={() => changeGroupPanel(!groupPanelShown)}><GroupFaces group={currentGroup} bots={bots ?? []} /></Button>
+    </div> : panelControl} sidebarAttention={sidebarAttention}
     floatingSidebar={floatingSidebar}
-    renderMobileTitle={isMobile && currentGroup ? () => <button className="flex min-w-0 items-center gap-2" type="button" onClick={() => setGroupPanel(value => !value)}><GroupFaces group={currentGroup} bots={bots ?? []} /><span className="truncate">{currentGroup.name}</span></button>
+    renderMobileTitle={isMobile && currentGroup ? panel => <button className="flex min-w-0 items-center gap-2" type="button" aria-expanded={panel.open} onClick={panel.toggle}><GroupFaces group={currentGroup} bots={bots ?? []} /><span className="truncate">{currentGroup.name}</span></button>
       : isMobile && selected && line ? panel => <BotMobileTitle bot={selected} model={shownPanel} figure={figure} line={line} open={panel.open} onToggle={panel.toggle} /> : undefined} />
     <GroupChatCreate bots={bots ?? []} open={creatingGroup} onClose={() => setCreatingGroup(false)} onCreated={group => {
-      setCreatingGroup(false); setGroupId(group.id); groupChats.refresh(); setGroupPanel(false);
+      setCreatingGroup(false); setGroupId(group.id); groupChats.refresh();
     }} />
+    {currentGroup && details ? <React.Suspense fallback={null}><BotDetailsDialog bot={details} onClose={() => { setDetails(null); refresh(); }} /></React.Suspense> : null}
   </BotWorkspaceNavigationContext.Provider></ConversationToolsContext.Provider>;
 };

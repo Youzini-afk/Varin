@@ -1,8 +1,15 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
+import { AnimatePresence, motion } from 'motion/react';
 import { botGroupRequest, downloadBotGroupFile, uploadBotGroupFile, createScheduledTasksHttpAPI, getRuntimeEndpointGeneration, getThreadObservationBus, type BotGroupMember, type BotGroupPage, type BotGroupPost, type BotGroupSummary, type BotSummary, type GroupChange, type GroupChatFile, type GroupDelivery, type ScheduledTask, type ThreadIdentity, type ThreadsAPI, type ThreadSnapshot } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Icon } from '@/components/icon/Icon';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Switch } from '@/components/ui/switch';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import type { ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { CollaborationConversation } from '@/components/thread/CollaborationConversation';
 import { ThreadPermission } from '@/components/thread/ThreadPermission';
@@ -15,8 +22,14 @@ import { CalendarTaskEditorDialog } from '@/components/session/CalendarTaskEdito
 import { formatSchedule } from '@/components/session/scheduleFormat';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
+import { useOptionalDrawer } from '@/contexts/drawer-context-value';
+import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
+import { springTransition } from '@/lib/motion/tokens';
 import { BotFigure } from './BotFigure';
-import { groupLabel as L, groupChatError as messageError } from './botGroupChatModel';
+import { GroupAvatar, GroupAvatarStack } from './GroupAvatar';
+import { BotGroupComposer } from './BotGroupComposer';
+import { useSegmentKnob } from './segmentKnob';
+import { groupLabel as L, groupChatError as messageError, groupMemberCount, emptyGroupDraft, groupDraftRecipients, placeGroupMention, type GroupDraftFile, type GroupQuote } from './botGroupChatModel';
 import './bot-group-chat.css';
 
 const pathFor = (id: string) => '/' + encodeURIComponent(id);
@@ -25,10 +38,8 @@ const troubled = (delivery: GroupDelivery) => ['asleep', 'failed', 'execution-fa
 const clock = (ms: number) => new Date(ms).toLocaleTimeString(getCurrentIntlLocale(), { hour: '2-digit', minute: '2-digit' });
 
 export function GroupFaces({ group, bots, size = 22 }: { group: BotGroupSummary; bots: BotSummary[]; size?: number }) {
-  return <span className="group-chat-faces" aria-hidden="true">{group.members.slice(0, 2).map(member => {
-    const bot = bots.find(value => value.id === member.botId);
-    return <span key={member.membership} style={{ width: size, height: size }}>{bot ? <BotFigure bot={bot} state="idle" size={size} still /> : member.name.slice(0, 1)}</span>;
-  })}</span>;
+  return <GroupAvatarStack ids={group.members.slice(0, 2).map(member => member.botId)} bots={bots}
+    displayName={id => group.members.find(member => member.botId === id)?.name ?? ''} size={size} />;
 }
 
 export function GroupChatCreate({ bots, open, onClose, onCreated }: { bots: BotSummary[]; open: boolean; onClose(): void; onCreated(group: BotGroupSummary): void }) {
@@ -58,23 +69,26 @@ export function GroupChatCreate({ bots, open, onClose, onCreated }: { bots: BotS
   </Dialog>;
 }
 
-export function BotGroupChat({ group, bots, api, sequence, panel, mobile, closePanel, refresh, onDelete, onDirect, onWake }: {
-  group: BotGroupSummary; bots: BotSummary[]; api: ThreadsAPI | null | undefined; sequence: number; panel: boolean; mobile: boolean;
-  closePanel(): void; refresh(): void; onDelete(): void; onDirect(botId: string): void; onWake(bot: BotSummary): void;
+export function BotGroupChat({ group, bots, api, sequence, panelTarget, onOpenPanel, onRevealChat, searchRequest, refresh, onDelete, onDirect, onProfile, onWake }: {
+  group: BotGroupSummary; bots: BotSummary[]; api: ThreadsAPI | null | undefined; sequence: number; panelTarget: HTMLDivElement | null;
+  searchRequest: number;
+  onOpenPanel(): void; onRevealChat(): void; refresh(): void; onDelete(): void; onDirect(botId: string): void; onProfile(bot: BotSummary): void; onWake(bot: BotSummary): void;
 }) {
   const id = pathFor(group.id);
+  const drawer = useOptionalDrawer();
+  const reduced = usePrefersReducedMotion();
+  const revealChat = () => { drawer?.setRightSidebarOpen(false); onRevealChat(); };
+  const revealPanel = () => { if (drawer) drawer.setRightSidebarOpen(true); else onOpenPanel(); };
   const [page, setPage] = React.useState<BotGroupPage>();
   const [older, setOlder] = React.useState<BotGroupPost[]>([]);
   const [before, setBefore] = React.useState<string>();
   const [anchor, setAnchor] = React.useState<string>();
+  const [spotlight, setSpotlight] = React.useState<string>();
   const [search, setSearch] = React.useState<string | null>(null);
   const [files, setFiles] = React.useState<GroupChatFile[]>();
-  const [draftFiles, setDraftFiles] = React.useState<{ id: string; file: File }[]>([]);
-  const [draft, setDraft] = React.useState('');
-  const [addressed, setAddressed] = React.useState<string[]>([]);
-  const [quote, setQuote] = React.useState<{ post: BotGroupPost; reply: boolean }>();
-  const [picker, setPicker] = React.useState(false);
-  const [mentionQuery, setMentionQuery] = React.useState<string | null>(null);
+  const [draftFiles, setDraftFiles] = React.useState<GroupDraftFile[]>([]);
+  const [draft, setDraft] = React.useState(emptyGroupDraft);
+  const [quote, setQuote] = React.useState<GroupQuote>();
   const [error, setError] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [tab, setTab] = React.useState<'members' | 'activity' | 'schedule'>('members');
@@ -84,12 +98,20 @@ export function BotGroupChat({ group, bots, api, sequence, panel, mobile, closeP
   const [work, setWork] = React.useState<{ title: string; identity: NonNullable<GroupDelivery['identity']> }>();
   const [streaming, setStreaming] = React.useState<Record<string, Record<string, string>>>({});
   const scroller = React.useRef<HTMLDivElement>(null);
-  const composer = React.useRef<HTMLTextAreaElement>(null);
-  const fileInput = React.useRef<HTMLInputElement>(null);
+  const composer = React.useRef<ComposerEditorHandle>(null);
   const draftId = React.useRef<string | null>(null);
   const atEnd = React.useRef(true);
+  const jumpTimer = React.useRef<number | undefined>(undefined);
   const members = page?.members ?? group.members;
-  const setQuery = (value: string | null) => { setSearch(value); setOlder([]); setBefore(undefined); setAnchor(undefined); };
+  const setQuery = React.useCallback((value: string | null) => { setSearch(value); setOlder([]); setBefore(undefined); setAnchor(undefined); }, []);
+  const lastSearchRequest = React.useRef(searchRequest);
+  const searchInput = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    if (lastSearchRequest.current === searchRequest) return;
+    lastSearchRequest.current = searchRequest;
+    setQuery('');
+    searchInput.current?.focus();
+  }, [searchRequest, setQuery]);
   React.useEffect(() => {
     const controller = new AbortController();
     const query = search ? '?q=' + encodeURIComponent(search) : '';
@@ -128,38 +150,47 @@ export function BotGroupChat({ group, bots, api, sequence, panel, mobile, closeP
     }
     if (atEnd.current && scroller.current && search === null) scroller.current.scrollTop = scroller.current.scrollHeight;
   }, [page, streaming, search, anchor]);
+  React.useEffect(() => {
+    const element = scroller.current;
+    if (!element || !('ResizeObserver' in window)) return;
+    const observer = new window.ResizeObserver(() => { if (atEnd.current && search === null && !anchor) element.scrollTop = element.scrollHeight; });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [search, anchor]);
+  React.useEffect(() => () => window.clearTimeout(jumpTimer.current), []);
 
-  const replyId = quote?.reply && quote.post.author.kind === 'bot' ? quote.post.author.botId : null;
-  const recipientIds = addressed.length ? addressed : replyId ? [replyId] : members.filter(member => member.listening).map(member => member.botId);
-  const unknown = recipientIds.filter(botId => !members.some(member => member.botId === botId));
-  const sleeping = bots.filter(bot => recipientIds.includes(bot.id) && bot.activity?.state === 'asleep');
   const displayName = (botId: string) => bots.find(bot => bot.id === botId)?.name ?? members.find(member => member.botId === botId)?.name ?? (quote?.post.author.kind === 'bot' && quote.post.author.botId === botId ? quote.post.author.name : L('left'));
   const authorName = (post: BotGroupPost) => post.author.kind === 'bot' ? displayName(post.author.botId) === L('left') ? post.author.name : displayName(post.author.botId) : '';
   const openDelivery = (delivery: GroupDelivery) => {
-    if (delivery.identity) setWork({ identity: delivery.identity, title: displayName(delivery.botId) });
+    if (delivery.identity) openWork({ identity: delivery.identity, title: displayName(delivery.botId) });
+  };
+  const openWork = (value: NonNullable<BotGroupPost['work']>) => {
+    setWork(value); setMemberDetail(undefined); setFiles(undefined); revealPanel();
   };
   const change = async (input: GroupChange) => {
     setError('');
     try { await botGroupRequest(id + '/change', input); if (input.kind === 'delete') onDelete(); refresh(); }
     catch (error) { setError(messageError(error)); }
   };
-  const send = async (event?: React.FormEvent) => {
-    event?.preventDefault();
-    if ((!draft.trim() && !draftFiles.length) || unknown.length || busy) return;
+  const send = async () => {
+    const { addressed, replyId, gone } = groupDraftRecipients(draft, members, quote);
+    if ((!draft.text.trim() && !draftFiles.length) || gone.length || busy) return;
     setBusy(true); setError('');
     draftId.current ??= crypto.randomUUID();
     try {
       const uploads = await Promise.all(draftFiles.map(entry => uploadBotGroupFile(id, entry.id, entry.file)));
-      await botGroupRequest(id + '/post', { id: draftId.current, text: draft.trim(), addressed, quoteId: quote?.post.id, reply: quote?.reply, files: uploads.map(file => file.id) });
-      draftId.current = null; setDraft(''); setDraftFiles([]); setAddressed([]); setQuote(undefined); setPicker(false); atEnd.current = true; refresh();
+      await botGroupRequest(id + '/post', { id: draftId.current, text: draft.text.trim(), addressed, quoteId: quote?.post.id, reply: Boolean(replyId), files: uploads.map(file => file.id) });
+      draftId.current = null; setDraft(emptyGroupDraft); setDraftFiles([]); setQuote(undefined); atEnd.current = true; refresh();
     } catch (error) { setError(messageError(error)); }
     finally { setBusy(false); composer.current?.focus(); }
   };
-  const cite = (post: BotGroupPost, reply: boolean) => { setQuote({ post, reply }); composer.current?.focus(); };
-  const closePicker = () => { setPicker(false); setMentionQuery(null); };
+  const cite = (post: BotGroupPost, reply: boolean) => { if (!busy) { setQuote({ post, reply }); composer.current?.focus(); } };
   const jump = (postId: string) => {
+    window.clearTimeout(jumpTimer.current);
+    setSpotlight(postId);
+    jumpTimer.current = window.setTimeout(() => setSpotlight(undefined), 900);
     const node = scroller.current?.querySelector<HTMLElement>(`[data-post="${CSS.escape(postId)}"]`);
-    if (node) node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (node) node.scrollIntoView({ block: 'center', behavior: reduced ? 'instant' : 'smooth' });
     else { setQuery(null); setAnchor(postId); }
   };
   const download = async (file: GroupChatFile) => {
@@ -171,44 +202,134 @@ export function BotGroupChat({ group, bots, api, sequence, panel, mobile, closeP
     } catch (error) { setError(messageError(error)); }
   };
 
-  const memberPane = <div className="group-chat-panel">
-    <header><GroupFaces group={group} bots={bots} size={31} /><b>{group.name}</b>
-      <Button variant="ghost" size="icon" aria-label={L('cancel')} onClick={closePanel}><Icon name="close" className="size-4" /></Button>
-      <small>{members.filter(member => member.listening).map(member => displayName(member.botId)).join('、')}{members.some(member => member.listening) && ' · ' + L('listening')}</small>
-    </header>
-    <nav>{(['members', 'activity', 'schedule'] as const).map(value => <button key={value} type="button" aria-pressed={tab === value} onClick={() => { setTab(value); setMemberDetail(undefined); }}>{L(value)}</button>)}</nav>
-    {tab === 'members' ? <div className="group-chat-members">
-      <div className="group-chat-list-actions"><button onClick={() => setAdding(value => !value)}>{L('add')}</button><button onClick={() => { setQuery(search === null ? '' : null); if (mobile) closePanel(); }}>{L('search')}</button>
-        <button onClick={() => { void botGroupRequest<GroupChatFile[]>(id + '/files').then(setFiles, error => setError(messageError(error))); }}>{L('files')}</button></div>
-      {adding && bots.filter(bot => !bot.archived && !bot.deletion && !members.some(member => member.botId === bot.id)).map(bot => <button className="group-chat-person w-full" key={bot.id} onClick={() => void change({ kind: 'add', botId: bot.id })}><BotFigure bot={bot} state="idle" size={24} still />{bot.name}<Icon name="add" className="ml-auto size-4" /></button>)}
-      {members.map(member => {
-        const bot = bots.find(value => value.id === member.botId);
-        const state = active.some(delivery => delivery.botId === member.botId) ? L('thinking') : bot?.activity?.state === 'asleep' ? L('asleep') : '';
-        return <React.Fragment key={member.membership}>
-          <div className="group-chat-person"><button className="min-w-0 flex flex-1 items-center gap-2 text-left" onClick={() => setMemberDetail(memberDetail === member.botId ? undefined : member.botId)}>
-            {bot && <BotFigure bot={bot} state="idle" size={26} still />}<span className="truncate">{displayName(member.botId)}{state && <small>{state}</small>}</span></button>
-            <input type="checkbox" role="switch" title={L('listen')} aria-label={displayName(member.botId) + ' · ' + L('listen')} checked={member.listening} onChange={event => void change({ kind: 'listen', botId: member.botId, enabled: event.target.checked })} />
-          </div>
-          {memberDetail === member.botId && <div className="group-chat-member-detail">
-            {bot && <BotFigure bot={bot} state="idle" size={72} still />}
-            <p>{L('listen')}</p>
-            {bot?.activity?.state === 'asleep' && <button onClick={() => onWake(bot)}>{L('wake')}</button>}
-            <button onClick={() => onDirect(member.botId)}>{L('private')}</button>
-            <button onClick={() => void change({ kind: 'remove', botId: member.botId })}>{L('remove')}</button>
-          </div>}
-        </React.Fragment>;
-      })}
-      <button className="group-chat-delete" onClick={() => setDeleting(true)}>{L('delete')}</button>
-    </div> : tab === 'schedule' ? <GroupCalendar groupPath={id} members={members} refresh={refresh} api={api} /> : <div className="group-chat-activity">{[...posts].reverse().flatMap(post => post.delivery.filter(runningOrNotable).map(delivery =>
-      <button key={post.id + delivery.membership} onClick={() => { if (delivery.identity) openDelivery(delivery); else { jump(post.id); if (mobile) closePanel(); } }}>
-        <b>{displayName(delivery.botId)}</b><small>{working(delivery) ? L('thinking') : troubled(delivery) ? L('failed') : L('silent')}</small>
-        <span>{post.text}</span>
-      </button>))}</div>}
+  const listeners = members.filter(member => member.listening);
+  const detail = members.find(member => member.botId === memberDetail);
+  const detailBot = detail && bots.find(bot => bot.id === detail.botId);
+  const addable = bots.filter(bot => !bot.archived && !bot.deletion && !members.some(member => member.botId === bot.id));
+  const newestFirst = [...posts].reverse();
+  const deliveries = newestFirst.flatMap(post => post.delivery.filter(runningOrNotable).map(delivery => ({ post, delivery })));
+  const listen = (member: BotGroupMember) => <Switch checked={member.listening} title={L('listen')}
+    aria-label={displayName(member.botId) + ' · ' + L('listen')}
+    onCheckedChange={enabled => void change({ kind: 'listen', botId: member.botId, enabled })} />;
+  const memberState = (botId: string) => active.some(delivery => delivery.botId === botId) ? L('thinking')
+    : bots.find(bot => bot.id === botId)?.activity?.state === 'asleep' ? L('asleep') : L('idle');
+  const listenSource = (member: BotGroupMember) => member.listening && member.changedBy
+    ? L(member.changedBy === 'bot' ? 'listeningByBot' : 'listeningByUser') : undefined;
+  const openMessage = (postId: string) => { jump(postId); revealChat(); };
+  const deliveryRow = ({ post, delivery }: (typeof deliveries)[number]) => <button type="button" className="bot-row group-chat-activity-row"
+    key={post.id + delivery.membership} onClick={() => { if (delivery.identity && (working(delivery) || delivery.state === 'execution-failed')) openDelivery(delivery); else openMessage(post.id); }}>
+    <GroupAvatar bot={bots.find(bot => bot.id === delivery.botId)} name={displayName(delivery.botId)} size={25} />
+    <span className="min-w-0 flex-1"><b className="block truncate">{displayName(delivery.botId)}</b><small className="block truncate">{post.text}</small></span>
+    <small data-tone={troubled(delivery) ? 'warn' : undefined}>{L(working(delivery) ? 'inProgress' : delivery.state === 'asleep' ? 'asleep' : delivery.state === 'execution-failed' ? 'workFailed' : delivery.state === 'failed' ? 'failed' : 'silent')}</small>
+  </button>;
+  const historyPosts = newestFirst.filter(post => post.fact || post.work || post.scheduleName || post.watchName || post.informs || (post.author.kind === 'bot' && post.addressed.length));
+  const date = (at: number) => new Date(at).toLocaleDateString(getCurrentIntlLocale(), { month: 'short', day: 'numeric' });
+  const historyByDate = new Map<string, BotGroupPost[]>();
+  for (const post of historyPosts) {
+    const key = new Date(post.at).toDateString();
+    const entries = historyByDate.get(key);
+    if (entries) entries.push(post); else historyByDate.set(key, [post]);
+  }
+  const subpage = Boolean(detail || files || work || adding);
+  const paneId = `group-panel-${group.id}-pane`;
+  const panelTabs = <GroupPanelTabs active={tab} paneId={paneId} needsAttention={group.needsAttention || deliveries.some(item => troubled(item.delivery))} onChange={setTab} />;
+  const panelBody = work ? <div className="flex h-full min-h-0 flex-col">
+    <h3 className="group-chat-panel-title truncate">{work.title}</h3>
+    {api && <div className="flex min-h-0 flex-1"><CollaborationConversation identity={work.identity} api={api} host={getRuntimeEndpointGeneration()}
+      onQuote={text => { if (!busy) { composer.current?.insertText(text); setWork(undefined); revealChat(); composer.current?.focus(); } }} /></div>}
+  </div> : files ? <div className="group-chat-panel-section">
+    <h3 className="group-chat-panel-title">{L('files')}</h3>
+    {!files.length && <p className="group-chat-panel-note">{L('emptyFiles')}</p>}
+    {files.map(file => <button key={file.id} className="bot-row" type="button" onClick={() => void download(file)}>
+      <Icon name="file" className="size-4 shrink-0" /><span className="truncate">{file.filename}</span>
+    </button>)}
+  </div> : detail ? <div className="group-chat-panel-section">
+    <div className="group-chat-member-stage">
+      {detailBot && <><span className="bot-stage-floor" aria-hidden="true" /><BotFigure bot={detailBot} state="idle" size={154} wide label={detailBot.name} /></>}
+      <h3>{displayName(detail.botId)}</h3><p>{memberState(detail.botId)}</p>
+    </div>
+    <div className="group-chat-listening-detail">
+      <div><b>{L('listening')}</b><small>{listenSource(detail) ?? L('listeningHint')}</small></div>{listen(detail)}
+    </div>
+    <div className="group-chat-member-actions">
+      {detailBot?.activity?.state === 'asleep' && <Button size="sm" onClick={() => onWake(detailBot)}>{L('wake')}</Button>}
+      <Button variant="outline" size="sm" onClick={() => { revealChat(); onDirect(detail.botId); }}>{L('private')}</Button>
+      {detailBot && <Button variant="ghost" size="sm" onClick={() => onProfile(detailBot)}>{L('profile')}</Button>}
+      <Button variant="ghost" size="sm" className="text-destructive" onClick={() => void change({ kind: 'remove', botId: detail.botId })}>{L('remove')}</Button>
+    </div>
+  </div> : adding ? <div className="group-chat-panel-section">
+    <h3 className="group-chat-panel-title">{L('add')}</h3>
+    {addable.map(bot => <button className="bot-row" type="button" key={bot.id} onClick={() => void change({ kind: 'add', botId: bot.id })}>
+      <GroupAvatar bot={bot} name={bot.name} size={27} /> <span className="min-w-0 flex-1 truncate">{bot.name}</span><Icon name="add" className="size-4" />
+    </button>)}
+  </div> : tab === 'members' ? <div className="group-chat-panel-section">
+    <div className="group-chat-section-heading"><b>{L('members')}</b><span title={L('listen')}>{L('listening')}</span></div>
+    {members.map(member => <div className="group-chat-member-row" key={member.membership}>
+      <button className="bot-row" type="button" onClick={() => setMemberDetail(member.botId)}>
+        <GroupAvatar bot={bots.find(bot => bot.id === member.botId)} name={displayName(member.botId)} size={31} />
+        <span className="min-w-0 flex-1"><b className="block truncate">{displayName(member.botId)}</b>
+          <small className="block truncate">{[memberState(member.botId), listenSource(member)].filter(Boolean).join(' · ')}</small>
+        </span>
+        <Icon name="arrow-right-s" className="size-3.5 shrink-0 text-muted-foreground" />
+      </button>{listen(member)}
+    </div>)}
+    {addable.length > 0 && <button type="button" className="bot-row text-muted-foreground" onClick={() => setAdding(true)}><Icon name="add" className="size-4" />{L('add')}</button>}
+    <p className="group-chat-panel-note">{L('listeningHint')}</p>
+  </div> : tab === 'schedule' ? <GroupCalendar groupPath={id} members={members} refresh={refresh} api={api} /> : <div className="group-chat-panel-section">
+    {([
+      ['needs', deliveries.filter(item => troubled(item.delivery))],
+      ['inProgress', deliveries.filter(item => working(item.delivery))],
+      ['history', deliveries.filter(item => item.delivery.state === 'silent')],
+    ] as const).map(([section, rows]) => rows.length > 0 && <section key={section}>
+      <div className="group-chat-section-heading"><b>{L(section)}</b></div>{rows.map(deliveryRow)}
+    </section>)}
+    {[...historyByDate].map(([day, entries]) => <section key={day}>
+      <div className="group-chat-section-heading"><b>{date(entries[0]!.at)}</b></div>
+      <div className="group-chat-activity-timeline">{entries.map(post => <button type="button" key={post.id} onClick={() => post.work ? openWork(post.work) : openMessage(post.id)}>
+        <time>{clock(post.at)}</time><span className="group-chat-activity-copy"><b className="block truncate">
+          {post.fact ? `${post.fact.name} · ${post.fact.enabled ? L('listening') : L('listenOff')}` : post.work?.title ?? post.scheduleName ?? post.watchName ?? authorName(post)}
+        </b>{post.text && <small className="block truncate">{post.text}</small>}</span>
+      </button>)}</div>
+    </section>)}
+    {!deliveries.length && !historyByDate.size && <p className="group-chat-panel-note">{L('emptyActivity')}</p>}
   </div>;
+  const memberPane = <aside className="bot-panel-body group-chat-panel" aria-label={group.name} onKeyDown={event => {
+    if (event.key === 'Escape' && drawer) drawer.setRightSidebarOpen(false);
+  }}>
+    {subpage ? <div className="group-chat-panel-back"><Button variant="ghost" size="sm" onClick={() => {
+      setMemberDetail(undefined); setAdding(false); setFiles(undefined); setWork(undefined);
+    }}><Icon name="arrow-left-s" className="size-4" />{L('back')}</Button></div> : <>
+      <header className="group-chat-panel-header">
+        <GroupFaces group={group} bots={bots} size={32} />
+        <div className="min-w-0"><h2 className="truncate">{group.name}</h2>
+          <p className="truncate" title={listeners.map(member => displayName(member.botId)).join('、')}>
+            {groupMemberCount(members.length)} · {listeners.length ? `${listeners.map(member => displayName(member.botId)).join('、')} ${L('listening')}` : L('noListeners')}
+          </p>
+        </div>
+        <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label={L('groupMenu')}><Icon name="more" className="size-4" /></Button></DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem disabled={!addable.length} onSelect={() => setAdding(true)}><Icon name="add" className="size-4" />{L('add')}</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => { void botGroupRequest<GroupChatFile[]>(id + '/files').then(setFiles, error => setError(messageError(error))); }}><Icon name="file" className="size-4" />{L('files')}</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => { setQuery(''); revealChat(); }}><Icon name="search" className="size-4" />{L('search')}</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => setDeleting(true)} className="text-destructive"><Icon name="delete-bin" className="size-4" />{L('delete')}</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </header>
+      {panelTabs}
+    </>}
+    <div className="bot-panes"><div className="bot-pane group-chat-pane" key={work ? 'work' : files ? 'files' : detail ? detail.membership : adding ? 'add' : tab}
+      data-enter="" id={paneId} role={subpage ? undefined : 'tabpanel'} aria-labelledby={subpage ? undefined : `${paneId}-${tab}`}>
+      {panelBody}
+    </div></div>
+  </aside>;
 
   return <div className="group-chat">
-    <main className="group-chat-center">
-      {search !== null && <div className="group-chat-search"><input autoFocus value={search} onChange={event => setQuery(event.target.value)} placeholder={L('search')} className="group-chat-field" /><Button variant="ghost" size="icon" aria-label={L('cancel')} onClick={() => setQuery(null)}><Icon name="close" className="size-4" /></Button></div>}
+    <main className="group-chat-center" onPointerDown={onRevealChat}>
+      {search !== null && <div className="group-chat-search"><Icon name="search" className="size-4 shrink-0 text-muted-foreground" />
+        <input ref={searchInput} autoFocus value={search} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') setQuery(null); }} placeholder={L('search')} aria-label={L('search')} className="group-chat-field" />
+        <Button variant="ghost" size="icon" aria-label={L('cancel')} onClick={() => setQuery(null)}><Icon name="close" className="size-4" /></Button>
+      </div>}
       <div className="group-chat-scroll" ref={scroller} onScroll={event => { const element = event.currentTarget; atEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < 45; }}>
         <div className="group-chat-timeline">
           {anchor && <button className="group-chat-older" onClick={() => { atEnd.current = true; setQuery(null); }}>{L('latest')}</button>}
@@ -217,31 +338,41 @@ export function BotGroupChat({ group, bots, api, sequence, panel, mobile, closeP
             if (search) params.set('q', search);
             void botGroupRequest<BotGroupPage>(id + '?' + params).then(value => { setOlder(items => [...value.posts, ...items]); setBefore(value.before); }, error => setError(messageError(error)));
           }}>{L('older')}</button>}
-          {!posts.length && <div className="group-chat-empty"><GroupFaces group={group} bots={bots} size={36} /><h2>{group.name}</h2><p>{page ? L('empty') : L('loading')}</p>{page && members[0] && <Button variant="outline" size="sm" onClick={() => { setAddressed([members[0]!.botId]); composer.current?.focus(); }}>@{displayName(members[0].botId)}</Button>}</div>}
+          {!posts.length && <div className="group-chat-empty"><GroupFaces group={group} bots={bots} size={45} /><h2>{group.name}</h2><p>{search ? L('noResults') : page ? L('empty') : L('loading')}</p>{page && !search && members[0] && <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => {
+            const first = members[0]!;
+            if (!groupDraftRecipients(draft, members, quote).addressed.includes(first.botId)) placeGroupMention(composer.current, first.botId, displayName(first.botId));
+            composer.current?.focus();
+          }}>@{displayName(members[0].botId)}</Button>}</div>}
           {posts.map((post, index) => {
             const previous = posts[index - 1];
             const bot = post.author.kind === 'bot' ? bots.find(value => value.id === (post.author as { botId: string }).botId) : undefined;
-            const consecutive = previous && post.at - previous.at < 300_000 && JSON.stringify(previous.author) === JSON.stringify(post.author);
+            const dayBreak = !previous || new Date(previous.at).toDateString() !== new Date(post.at).toDateString();
+            const consecutive = !dayBreak && post.at - previous.at < 300_000 && JSON.stringify(previous.author) === JSON.stringify(post.author);
             const showQuote = post.quoteId && previous?.id !== post.quoteId && previous?.quoteId !== post.quoteId;
-            if (post.author.kind === 'system') return <div className="group-chat-fact" key={post.id}>{post.fact && <>{post.fact.name} · {L('listening')} {post.fact.enabled ? '✓' : '–'}{post.fact.actor === 'bot' && ' · Bot'} · {clock(post.at)}</>}</div>;
-            return <article className="group-chat-line" data-user={post.author.kind === 'user'} data-post={post.id} key={post.id}>
-              <div className="group-chat-face">{bot && !consecutive && <BotFigure bot={bot} state="idle" size={29} still />}</div>
+            return <React.Fragment key={post.id}>
+              {dayBreak && <div className="group-chat-day">{date(post.at)}</div>}
+              {post.author.kind === 'system' ? <div className="group-chat-fact" data-post={post.id}>{post.fact && <>{post.fact.name} · {L(post.fact.enabled ? 'listening' : 'listenOff')} · {clock(post.at)}</>}</div>
+                : <ContextMenu><ContextMenuTrigger asChild>
+                <motion.article className="group-chat-line" data-user={post.author.kind === 'user'} data-consecutive={consecutive || undefined} data-post={post.id} data-spotlight={spotlight === post.id || undefined}
+                  initial={reduced || search !== null || Boolean(anchor) || index !== posts.length - 1 ? false : { opacity: 0, y: 5 }}
+                  animate={{ opacity: 1, y: 0 }} transition={springTransition('settle')}>
+              <div className="group-chat-face">{post.author.kind === 'bot' && !consecutive && <GroupAvatar bot={bot} name={post.author.name} size={31} />}</div>
               <div className="group-chat-stack">
                 {post.author.kind === 'bot' && (!consecutive || !!post.addressed.length || post.scheduleName || post.watchName) && <div className="group-chat-author">{authorName(post)}{post.addressed.length ? ' → ' + post.addressed.map(displayName).join('、') : ''}{post.informs && ' · ' + L('informed')}{post.scheduleName && ' · ' + L('schedule') + ' 「' + post.scheduleName + '」'}{post.watchName && ' · ' + L('watch') + ' 「' + post.watchName + '」'}</div>}
                 <div className="group-chat-bubble">
                   {showQuote && post.quote && <button className="group-chat-quote" onClick={() => jump(post.quoteId!)}>{post.quote.author && post.quote.author + ' · '}{post.quote.text}</button>}
-                  {post.text && <GroupText post={post} />}
+                  {post.text && <GroupText post={post} reduced={reduced} />}
                   {post.files?.map(file => <button key={file.id} className="group-chat-work" type="button" onClick={() => void download(file)}>
                     <Icon name="file" className="size-4 shrink-0" /><span>{file.filename}</span>
                   </button>)}
-                  {post.work && <button className="group-chat-work" type="button" onClick={() => setWork(post.work)}>
+                  {post.work && <button className="group-chat-work" type="button" onClick={() => openWork(post.work!)}>
                     <Icon name="chat-3" className="size-4 shrink-0" /><span>{post.work.title}</span><small>{L('openWork')}</small>
                   </button>}
                 </div>
                 <div className="group-chat-meta"><time>{clock(post.at)}</time>{post.delivery.map(delivery => {
                   const recipient = bots.find(value => value.id === delivery.botId);
                   return <span key={delivery.membership} className="group-chat-receipt" data-state={delivery.state} title={displayName(delivery.botId) + (delivery.state === 'silent' ? ' · ' + L('silent') : working(delivery) ? ' · ' + L('thinking') : '')}>
-                    {recipient ? <BotFigure bot={recipient} state="idle" size={16} still /> : displayName(delivery.botId).slice(0, 1)}
+                    <GroupAvatar bot={recipient} name={displayName(delivery.botId)} size={16} />
                   </span>;
                 })}<div className="group-chat-message-actions"><button onClick={() => cite(post, true)}>{L('reply')}</button><button onClick={() => cite(post, false)}>{L('quote')}</button></div></div>
                 {post.delivery.filter(troubled).map(delivery => <div className="group-chat-trouble" key={delivery.membership}>
@@ -249,72 +380,81 @@ export function BotGroupChat({ group, bots, api, sequence, panel, mobile, closeP
                   {delivery.state === 'execution-failed' ? <button onClick={() => openDelivery(delivery)}>{L('openWork')}</button> : <button title={delivery.detail} onClick={() => void change({ kind: 'retry', postId: post.id, botId: delivery.botId })}>{L(delivery.state === 'asleep' ? 'wakeRetry' : 'retry')}</button>}
                 </div>)}
               </div>
-            </article>;
+                </motion.article></ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuItem onClick={() => cite(post, true)}><Icon name="reply" className="size-4" />{L('reply')}</ContextMenuItem>
+                  <ContextMenuItem onClick={() => cite(post, false)}><Icon name="chat-quote" className="size-4" />{L('quote')}</ContextMenuItem>
+                </ContextMenuContent>
+                </ContextMenu>}
+            </React.Fragment>;
           })}
           {active.map(delivery => {
             const text = Object.values(streaming[delivery.runId!] ?? {}).join('\n\n');
             const bot = bots.find(value => value.id === delivery.botId);
             return <React.Fragment key={delivery.runId}>
-              {text && <article className="group-chat-line"><div className="group-chat-face">{bot && <BotFigure bot={bot} state="idle" size={29} still />}</div>
+              {text && <motion.article className="group-chat-line" initial={reduced ? false : { opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={springTransition('settle')}><div className="group-chat-face"><GroupAvatar bot={bot} name={displayName(delivery.botId)} size={31} /></div>
                 <div className="group-chat-stack"><div className="group-chat-author">{displayName(delivery.botId)}</div><div className="group-chat-bubble"><MarkdownRenderer messageId={delivery.runId!} content={text} isStreaming /></div></div>
-              </article>}
+              </motion.article>}
               {api && <GroupRunInteractions api={api} delivery={delivery} name={displayName(delivery.botId)} />}
             </React.Fragment>;
           })}
         </div>
       </div>
       <div className="group-chat-compose-space">
-        {!!active.length && <div className="group-chat-working"><span className="bot-ring" /> {active.map(value => displayName(value.botId)).join('、')} · {L('thinking')}</div>}
-        {error && <div role="alert" className="group-chat-trouble">{error}</div>}
-        <form className="group-chat-composer" onSubmit={event => void send(event)}>
-          <input ref={fileInput} type="file" multiple hidden onChange={event => {
-            const picked = Array.from(event.currentTarget.files ?? []).map(file => ({ file, id: crypto.randomUUID() }));
-            setDraftFiles(current => [...current, ...picked]); event.currentTarget.value = '';
-          }} />
-          {quote && <div className="group-chat-quote-draft"><span>{L(quote.reply && !addressed.length ? 'reply' : 'quote')} {authorName(quote.post)} · {quote.post.text}</span><button type="button" onClick={() => setQuote(undefined)} aria-label={L('cancel')}>×</button></div>}
-          {!!addressed.length && <div className="group-chat-addresses">{addressed.map(botId => <button type="button" key={botId} data-left={unknown.includes(botId)} onClick={() => setAddressed(value => value.filter(id => id !== botId))}>@{displayName(botId)} ×</button>)}</div>}
-          {!!draftFiles.length && <div className="group-chat-addresses">{draftFiles.map(entry => <button type="button" key={entry.id} disabled={busy} onClick={() => setDraftFiles(value => value.filter(file => file.id !== entry.id))}>{entry.file.name} ×</button>)}</div>}
-          {sleeping.map(bot => <div key={bot.id} className="group-chat-sleep-note">{bot.name} · {L('asleep')} <button type="button" onClick={() => onWake(bot)}>{L('wake')}</button></div>)}
-          <textarea ref={composer} rows={2} value={draft} readOnly={busy} aria-label={L('write')} placeholder={members.some(member => member.listening) ? L('write') : L('empty')}
-            onChange={event => {
-              const text = event.target.value;
-              setDraft(text);
-              if ((event.nativeEvent as InputEvent).inputType === 'insertFromPaste') { closePicker(); return; }
-              const token = /(^|\s)@([^\s]*)$/.exec(text);
-              if (token && event.target.selectionStart === text.length) { setMentionQuery(token[2] ?? ''); setPicker(true); }
-              else if (mentionQuery !== null) closePicker();
-            }}
-            onKeyDown={event => { if (event.nativeEvent.isComposing) return; if (event.key === 'Escape') closePicker(); if (event.key === 'Enter' && !event.shiftKey && !picker) { event.preventDefault(); void send(); } }} />
-          <div className="group-chat-composer-tools"><button type="button" onClick={() => fileInput.current?.click()} className="group-chat-at" aria-label={L('attach')} title={L('attach')}><Icon name="attachment-2" className="size-3.5" /></button>
-            <button type="button" className="group-chat-at" onClick={() => setPicker(value => !value)} aria-label={L('members')}>@</button>
-            <button type="button" className="group-chat-recipient" aria-expanded={picker} onClick={() => setPicker(value => !value)}>{recipientIds.length ? L('to') + ' ' + recipientIds.map(displayName).join('、') : L('record')}</button>
-            <Button type="submit" size="icon" className="rounded-full" aria-label={L('send')} disabled={busy || !!unknown.length || (!draft.trim() && !draftFiles.length)}><Icon name="arrow-up" className="size-4" /></Button>
-          </div>
-          {picker && <div className="group-chat-picker">{members.filter(member => !mentionQuery || displayName(member.botId).toLocaleLowerCase().includes(mentionQuery.toLocaleLowerCase())).map(member => <label key={member.membership}>
-            <input type="checkbox" checked={addressed.includes(member.botId)} onChange={event => {
-              setAddressed(current => event.target.checked ? [...current, member.botId] : current.filter(id => id !== member.botId));
-              if (mentionQuery !== null) { setDraft(text => text.replace(/(^|\s)@[^\s]*$/, '$1')); setMentionQuery(null); }
-            }} />
-            <span>{displayName(member.botId)}</span><small>{addressed.includes(member.botId) ? '@' : replyId === member.botId && !addressed.length ? L('reply') : member.listening && recipientIds.includes(member.botId) ? L('listening') : ''}</small>
-          </label>)}<button type="button" onClick={() => { closePicker(); composer.current?.focus(); }}>{L('cancel')}</button></div>}
-        </form>
+        <AnimatePresence initial={false}>
+          {!!active.length && <motion.div key="working" layout className="chat-input-column group-chat-compose-status" initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <div className="group-chat-working"><span className="bot-ring" /><span className="truncate">{[...new Set(active.map(value => displayName(value.botId)))].join('、')} · {L('thinking')}</span></div>
+          </motion.div>}
+        </AnimatePresence>
+        {error && <div className="chat-input-column"><div role="alert" className="group-chat-trouble">{error}</div></div>}
+        <BotGroupComposer groupId={group.id} editor={composer} draft={draft} onDraft={setDraft} quote={quote} onClearQuote={() => setQuote(undefined)}
+          members={members} bots={bots} displayName={displayName} files={draftFiles}
+          onFiles={files => { if (!busy) setDraftFiles(current => [...current, ...files.map(file => ({ file, id: crypto.randomUUID() }))]); }}
+          onRemoveFile={id => setDraftFiles(current => current.filter(file => file.id !== id))} busy={busy} onSend={() => void send()} onWake={onWake} />
       </div>
     </main>
-    {panel && (mobile ? <Dialog open onOpenChange={open => { if (!open) closePanel(); }}><DialogContent showCloseButton={false} className="p-0 max-h-[85dvh] overflow-auto"><DialogTitle className="sr-only">{group.name}</DialogTitle>{memberPane}</DialogContent></Dialog> : memberPane)}
+    {panelTarget && createPortal(memberPane, panelTarget)}
     <Dialog open={deleting} onOpenChange={setDeleting}><DialogContent className="max-w-sm"><DialogHeader><DialogTitle>{L('delete')}</DialogTitle><DialogDescription>{group.name}</DialogDescription></DialogHeader>
       <DialogFooter><Button variant="outline" onClick={() => setDeleting(false)}>{L('cancel')}</Button><Button variant="destructive" onClick={() => void change({ kind: 'delete' })}>{L('delete')}</Button></DialogFooter>
-    </DialogContent></Dialog>
-    <Dialog open={Boolean(files)} onOpenChange={open => { if (!open) setFiles(undefined); }}><DialogContent className="max-w-md"><DialogTitle>{L('files')}</DialogTitle>
-      <div className="max-h-72 overflow-auto">{files?.map(file => <button key={file.id} className="group-chat-person w-full text-left" onClick={() => void download(file)}>
-        <Icon name="file" className="size-4 shrink-0" />{file.filename}
-      </button>)}</div></DialogContent></Dialog>
-    <Dialog open={Boolean(work)} onOpenChange={open => { if (!open) setWork(undefined); }}><DialogContent className="flex max-w-4xl h-[80dvh] flex-col"><DialogTitle>{work?.title}</DialogTitle>
-      {api && work?.identity && <div className="flex min-h-0 flex-1"><CollaborationConversation identity={work.identity} api={api} host={getRuntimeEndpointGeneration()} onQuote={text => { setDraft(value => value ? value + '\n' + text : text); setWork(undefined); }} /></div>}
     </DialogContent></Dialog>
   </div>;
 }
 
 function runningOrNotable(delivery: GroupDelivery) { return working(delivery) || troubled(delivery) || delivery.state === 'silent'; }
+
+const GROUP_TABS = [
+  { id: 'members', icon: 'group' },
+  { id: 'activity', icon: 'history' },
+  { id: 'schedule', icon: 'calendar-schedule' },
+] as const;
+type GroupPanelTab = (typeof GROUP_TABS)[number]['id'];
+
+function GroupPanelTabs({ active, paneId, needsAttention, onChange }: { active: GroupPanelTab; paneId: string; needsAttention: boolean; onChange(tab: GroupPanelTab): void }) {
+  const row = React.useRef<HTMLDivElement>(null);
+  const knob = React.useRef<HTMLSpanElement>(null);
+  useSegmentKnob(row, knob, '[role="tab"][aria-selected="true"]', active);
+  const move = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const index = GROUP_TABS.findIndex(tab => tab.id === active);
+    const last = GROUP_TABS.length - 1;
+    const step = event.key === 'ArrowLeft' ? (index + last) % GROUP_TABS.length
+      : event.key === 'ArrowRight' ? (index + 1) % GROUP_TABS.length
+        : event.key === 'Home' ? 0 : event.key === 'End' ? last : undefined;
+    if (step === undefined) return;
+    event.preventDefault();
+    onChange(GROUP_TABS[step]!.id);
+    row.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[step]?.focus();
+  };
+  return <div className="bot-tabs-frame"><div ref={row} className="bot-tabs" role="tablist" onKeyDown={move}>
+    <span ref={knob} className="bot-tabs-knob" aria-hidden="true" data-hidden="" />
+    {GROUP_TABS.map(({ id, icon }) => <Tooltip key={id}>
+      <TooltipTrigger asChild><button type="button" className="bot-tab" role="tab" id={`${paneId}-${id}`}
+        aria-label={L(id)} aria-controls={paneId} aria-selected={active === id} tabIndex={active === id ? 0 : -1} onClick={() => onChange(id)}>
+        <Icon name={icon} className="size-4" />
+        {id === 'activity' && needsAttention && <span className="bot-dot" data-tone="warn" aria-hidden="true" />}
+      </button></TooltipTrigger><TooltipContent side="bottom">{L(id)}</TooltipContent>
+    </Tooltip>)}
+  </div></div>;
+}
 
 const scheduleApi = createScheduledTasksHttpAPI();
 const botScheduleScope = (botId: string) => `bot:${botId}`;
@@ -326,6 +466,7 @@ function GroupCalendar({ groupPath, members, refresh, api }: { groupPath: string
   const [owner, setOwner] = React.useState('');
   const [editor, setEditor] = React.useState<{ member: BotGroupMember; target: ThreadIdentity; task: ScheduledTask | null }>();
   const [error, setError] = React.useState('');
+  const [expanded, setExpanded] = React.useState<string>();
   const [revision, reload] = React.useReducer((value: number) => value + 1, 0);
   const scopeKey = JSON.stringify(members.filter(member => member.calendar).map(member => [member.botId, member.name, member.calendar]));
   const watchScope = JSON.stringify(members.filter(member => member.conversation).map(member => [member.botId, member.name, member.conversation]));
@@ -371,15 +512,46 @@ function GroupCalendar({ groupPath, members, refresh, api }: { groupPath: string
       refresh();
     } catch (error) { setError(messageError(error)); }
   };
-  return <div className="group-chat-activity">
+  const upcoming = (tasks ?? []).filter(({ task }) => task.enabled && task.calendar?.definition.next_at_ms)
+    .sort((a, b) => a.task.calendar!.definition.next_at_ms! - b.task.calendar!.definition.next_at_ms!);
+  const rules = (tasks ?? []).filter(item => item.task.schedule.kind !== 'once' || !upcoming.includes(item));
+  const scheduleRow = ({ member, task }: (typeof upcoming)[number], recurring: boolean) => {
+    const key = JSON.stringify([recurring, member.botId, task.id]);
+    const next = task.calendar?.definition.next_at_ms;
+    const open = expanded === key;
+    return <div className="bot-schedule" key={key} data-open={open} data-paused={!task.enabled || undefined}>
+      <button type="button" className="flex w-full items-center gap-3 px-3 py-2.5 text-left" aria-expanded={open} onClick={() => setExpanded(open ? undefined : key)}>
+        <span className="bot-schedule-when">{!recurring && next ? <>
+          <b>{clock(next)}</b><small>{new Date(next).toLocaleDateString(getCurrentIntlLocale(), { month: 'short', day: 'numeric' })}</small>
+        </> : <Icon name="history" className="size-4 text-muted-foreground" />}</span>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <b className="truncate">{task.name}{!task.enabled && <small className="ml-2">{t('bot.schedule.paused')}</small>}</b>
+          <small className="truncate">{member.name} · {formatSchedule(task, t)}</small>
+        </span>
+        <Icon name={open ? 'arrow-up-s' : 'arrow-down-s'} className="size-3.5 text-muted-foreground" />
+      </button>
+      <div className="bot-fold" data-open={open} inert={!open}><div>
+        <dl className="bot-schedule-detail">
+          <dt>{t('bot.schedule.rule')}</dt><dd>{formatSchedule(task, t)}</dd>
+          <dt>{t('bot.schedule.missed')}</dt><dd>{(task.calendar?.definition.missed_policy ?? task.missedPolicy) === 'coalesce_once' ? t('bot.schedule.missedOnce') : t('bot.schedule.missedSkip')}</dd>
+          <dd className="col-span-2"><Button variant="outline" size="sm" onClick={() => setEditor({ member, target: member.calendar!, task })}>{t('bot.schedule.edit')}</Button></dd>
+        </dl>
+      </div></div>
+    </div>;
+  };
+  return <div className="group-chat-panel-section">
     {error && <div role="alert" className="group-chat-trouble">{error}</div>}
-    {watches.map(({ owner, task, target }) => <button key={task.id} onClick={() => useUIStore.getState().openArrangements(target, task.id)}>
-      <b>{task.name || followupTrigger(task, t)}</b><small>{owner}</small><span>{followupStatus(task, t)}</span>
-    </button>)}
-    {!tasks ? <p>{L('loading')}</p> : !tasks.length ? <p>{L('emptySchedule')}</p> : tasks.map(({ member, task }) =>
-      <button key={member.botId + task.id} onClick={() => setEditor({ member, target: member.calendar!, task })}>
-        <b>{task.name}</b><small>{member.name}</small><span>{formatSchedule(task, t)}</span>
+    {watches.length > 0 && <section><div className="group-chat-section-heading"><b>{L('watches')}</b></div>
+      {watches.map(({ owner, task, target }) => <button type="button" className="bot-schedule flex w-full items-center gap-3 px-3 py-2.5 text-left"
+        key={task.id} onClick={() => useUIStore.getState().openArrangements(target, task.id)}>
+        <Icon name="time" className="size-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0"><b className="block truncate">{task.name || followupTrigger(task, t)}</b>
+          <small className="block truncate">{owner} · {followupStatus(task, t)}</small></span>
       </button>)}
+    </section>}
+    {upcoming.length > 0 && <section><div className="group-chat-section-heading"><b>{L('upcoming')}</b></div>{upcoming.map(item => scheduleRow(item, false))}</section>}
+    {rules.length > 0 && <section><div className="group-chat-section-heading"><b>{L('recurring')}</b></div>{rules.map(item => scheduleRow(item, true))}</section>}
+    {!tasks ? <p className="group-chat-panel-note" role="status">{L('loading')}</p> : !tasks.length && !watches.length ? <p className="group-chat-panel-note">{L('emptySchedule')}</p> : null}
     {chosen && <div className="group-chat-list-actions">
       <select aria-label={L('members')} className="group-chat-field" value={chosen.botId} onChange={event => setOwner(event.target.value)}>
         {members.map(member => <option key={member.membership} value={member.botId}>{member.name}</option>)}
@@ -432,13 +604,30 @@ function GroupRunInteractions({ api, delivery, name }: { api: ThreadsAPI; delive
   </article>;
 }
 
-function GroupText({ post }: { post: BotGroupPost }) {
+const GroupText = React.memo(function GroupText({ post, reduced }: { post: BotGroupPost; reduced: boolean }) {
   const [expanded, setExpanded] = React.useState(false);
+  const [height, setHeight] = React.useState<number>();
+  const content = React.useRef<HTMLDivElement>(null);
   const long = post.text.length > 1400 || post.text.split('\n').length > 15;
+  React.useLayoutEffect(() => {
+    if (!long || !content.current) return;
+    const element = content.current;
+    const measure = () => setHeight(element.offsetHeight);
+    measure();
+    if (!('ResizeObserver' in window)) return;
+    const observer = new window.ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [long, post.text]);
+  const text = <MarkdownRenderer content={post.text} messageId={post.id} />;
+  if (!long) return text;
+  const collapsible = height !== undefined && height > 250;
   return <>
-    <div className={long && !expanded ? 'group-chat-folded' : undefined}>
-      <MarkdownRenderer content={post.text} messageId={post.id} />
-    </div>
-    {long && <button className="group-chat-expand" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{L(expanded ? 'collapse' : 'expand')}</button>}
+    <motion.div className="group-chat-fold" data-collapsed={collapsible && !expanded || undefined} initial={false}
+      animate={{ height: collapsible && !expanded ? 250 : height ?? 'auto' }}
+      transition={reduced ? { duration: 0 } : springTransition('glide')}><div ref={content} className="flow-root">{text}</div></motion.div>
+    {collapsible && <button type="button" className="group-chat-expand" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
+      {L(expanded ? 'collapse' : 'expand')}<Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-3" />
+    </button>}
   </>;
-}
+});
