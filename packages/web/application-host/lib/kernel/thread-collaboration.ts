@@ -20,7 +20,8 @@ import type { ThreadIdentity, ThreadSource } from '@varin/application-client';
 import type { DocumentAuthority } from '../documents/authority.js';
 import type { ContextPreparer } from './thread-context.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
-import type { ChildPreparationProgress, DelegatedExecution, InputResourcePreparation, KernelWorkingResultCandidate, UnacceptedChildDependencies } from './protocol.generated.js';
+import type { ChildPreparationProgress, DelegatedExecution, InputResourcePreparation, KernelWorkingResultCandidate, RuntimeEvent, SourceResourceOwner, UnacceptedChildDependencies } from './protocol.generated.js';
+import type { ManagedHostSourceOwner } from '../harness/managed-remote-types.js';
 
 export interface ThreadCollaborationOwners {
   prepareProjectSource?: import('./child-project-source.js').ChildProjectSourcePreparer;
@@ -30,7 +31,7 @@ export interface ThreadCollaborationOwners {
   sourceCaptureOwners: StableSourcePreparationOwners & { documents: Pick<DocumentAuthority, 'admitWorkspaceRegistration'> };
   runtime: AgentRuntimeClient;
   continueRun(runId: string, signal: AbortSignal): Promise<void>;
-  canExecuteThread?(threadId: string): Promise<boolean>;
+  canExecuteThread?(threadId: string, botSubjects?: ReadonlySet<string>): Promise<boolean>;
   recoverLaunches(signal: AbortSignal): Promise<void>;
   recoverColdBotWork?(signal: AbortSignal): Promise<void>;
   onWorkChanged?(): void;
@@ -41,7 +42,49 @@ export interface ThreadCollaborationOwners {
   prepareSkillInput?: ThreadSkillInputPreparer;
   prepareMaterials?(threadId: string, signal: AbortSignal): Promise<void>;
   reconcileDomainReceipts?(signal: AbortSignal): Promise<void>;
-  onError(operationId: string | undefined, error: unknown): void;
+  onError(operationId: string | undefined, error: unknown, stage: string): void;
+}
+
+const childWakeEvents = new Set(['child.accepted', 'child.execution_accepted', 'child.report_ready', 'child.cancel_requested']);
+const writerStoppedEvents = new Set(['operation.executor_stopped', 'operation.kernel_executor_stopped', 'operation.invocation_executor_stopped']);
+const dispatchExecutors = new Set(['dispatch', 'code_retrieval', 'user_dispatch']);
+const arrangementChanges = new Set(['calendar.definition_changed', 'followup.changed', 'followup.source_status_changed']);
+const dependencyCleanupPending = 'child.dependencies_cleanup_pending';
+const childScopeChanges = new Set(['operation.settled', 'goal.changed', 'bot.execution_gate_published', 'mcp.resource_holder_released', 'mcp.resource_source_retired']);
+
+function mcpSourceOwners(selection: DelegatedExecution['launch']['mcp_binding']): SourceResourceOwner[] {
+  return Object.values(selection?.provenance.servers ?? {}).map(server => server.owner.resource_owner);
+}
+
+function childSourceOwners(child: DelegatedExecution): (SourceResourceOwner | undefined)[] {
+  return [child.launch.source?.resource_owner, child.source_basis?.source.resource_owner,
+    child.source_basis?.kind === 'refreshed' ? child.source_basis.incoming.source.resource_owner : undefined,
+    child.source?.kind !== 'absent' ? child.source?.handoff?.source.resource_owner : undefined,
+    child.source?.kind === 'ready' || child.source?.kind === 'shared' ? child.source.selection.resource_owner : undefined,
+    ...mcpSourceOwners(child.launch.mcp_binding)];
+}
+
+function affectsChild(child: DelegatedExecution, event: RuntimeEvent): boolean {
+  if (childWakeEvents.has(event.kind)) return event.subject === child.execution_id;
+  if (event.kind === 'goal.changed')
+    return !child.report && (event.branch_id === child.child_branch_id || event.branch_id === child.parent_branch_id);
+  if (arrangementChanges.has(event.kind)) {
+    if (child.report || child.receipt) return false;
+    return event.kind === 'calendar.definition_changed'
+      ? child.trigger.kind === 'calendar' && child.trigger.definition_id === event.subject
+      : child.trigger.kind === 'followup' && child.trigger.followup_id === event.subject;
+  }
+  if (!child.receipt || event.branch_id !== child.child_branch_id) return false;
+  const runId = (event.data as { run_id?: string } | null)?.run_id;
+  if (writerStoppedEvents.has(event.kind)) return !runId || runId === child.receipt.run_id;
+  if (event.kind === 'mcp.resource_source_retired') return Boolean(child.report) && event.subject === child.receipt.run_id;
+  if (event.kind === 'mcp.resource_holder_released') return Boolean(child.report);
+  return Boolean(child.report) && event.kind === 'operation.settled' && runId === child.receipt.run_id;
+}
+
+interface ReachedSource {
+  owner: ManagedHostSourceOwner;
+  active: ReadonlySet<string>;
 }
 /** Consumes committed child/process-wait/follow-up facts, including startup backlog. Maps hold only cancellable live
  * work; Catalog owns task identities, preparation receipts, reports and Wait delivery. */
@@ -56,6 +99,9 @@ export class ThreadCollaboration {
   private suspended = false;
   private pumping = false;
   private dirty = false;
+  private discoverPending = false;
+  private readonly reachedSources: ReachedSource[] = [];
+  private readonly recheckChildren = new Set<string>();
   private domainRecoveryNeeded = true;
   private domainRecovery: Promise<void> | undefined;
   private launchCursor: number | undefined;
@@ -63,14 +109,13 @@ export class ThreadCollaboration {
     this.capturePhysical = createChildPhysicalCapture(owners.kernel, owners.storageAdapter, owners.sourceCaptureOwners);
     const runtime = owners.runtime;
     this.removers = [runtime.onEvent(event => {
-      if (event.stream !== 'durable') return;
-      // Definition/Goal controls can release a hold without changing the child execution row.
-      for (const task of this.tasks.values()) if (task.preparing) task.recheck = true;
-      this.resumeEpoch(); void this.recover();
+      if (event.stream === 'resync') { this.resumeEpoch(); void this.recover(); }
+      if (event.stream === 'durable') { this.resumeEpoch(); void this.pump(); }
     }), runtime.onExit(() => {
       this.suspended = true; this.epoch.abort();
       for (const task of this.tasks.values()) task.controller.abort();
-      this.tasks.clear(); this.launchCursor = undefined; this.domainRecoveryNeeded = true;
+      this.tasks.clear(); this.cleaningSources.clear(); this.recheckChildren.clear(); this.reachedSources.length = 0;
+      this.launchCursor = undefined; this.domainRecoveryNeeded = true;
     }), runtime.onReady(() => { this.resumeEpoch(); void this.recover(); })];
   }
   private resumeEpoch(): void {
@@ -79,9 +124,12 @@ export class ThreadCollaboration {
   }
   /** A real Source connection recovery makes original domain receipts readable again.
    * Preserve a wake arriving during discovery; the existing owner coalesces its next pass. */
-  sourceReached(): void {
+  sourceReached(owner?: ManagedHostSourceOwner): void {
     this.domainRecoveryNeeded = true;
-    void this.recover();
+    // An attempt can announce reachability while resolving its own connection.
+    // It is already using that connection and must not wake itself.
+    if (owner) this.reachedSources.push({ owner, active: new Set([...this.tasks.keys(), ...this.cleaningSources.keys()]) });
+    void this.pump();
   }
   stop(): void {
     this.stopped = true; this.epoch.abort();
@@ -137,6 +185,23 @@ export class ThreadCollaboration {
   }
   /** Registration precedes discovery. Real events drive subsequent passes; no idle polling. */
   async recover(): Promise<void> {
+    this.discoverPending = true;
+    await this.pump();
+  }
+
+  private recoverDomainReceipts(): void {
+    if (!this.domainRecoveryNeeded || this.domainRecovery || this.stopped || this.suspended || !this.owners.reconcileDomainReceipts) return;
+    this.domainRecoveryNeeded = false;
+    const signal = this.epoch.signal;
+    this.domainRecovery = this.owners.reconcileDomainReceipts(signal).catch(error => {
+      if (!signal.aborted) this.owners.onError(undefined, error, 'Recover domain receipts');
+    }).finally(() => {
+      this.domainRecovery = undefined;
+      this.recoverDomainReceipts();
+    });
+  }
+
+  private async pump(): Promise<void> {
     if (this.stopped || this.suspended) return;
     this.dirty = true;
     if (this.pumping) return;
@@ -145,77 +210,125 @@ export class ThreadCollaboration {
     try {
       while (this.dirty && !epoch.signal.aborted) {
         this.dirty = false;
-        if (this.domainRecoveryNeeded && !this.domainRecovery && this.owners.reconcileDomainReceipts) {
-          this.domainRecoveryNeeded = false;
-          const work = this.owners.reconcileDomainReceipts(epoch.signal).catch(error => {
-            if (!epoch.signal.aborted) this.owners.onError(undefined, error);
-          }).finally(() => {
-            if (this.domainRecovery === work) this.domainRecovery = undefined;
-            if (this.domainRecoveryNeeded && !this.stopped && !this.suspended) void this.recover();
-          });
-          this.domainRecovery = work;
-        }
+        // Capture before discovery. A child or saved launch admitted while a
+        // startup scan is in flight will still be picked up by event replay.
+        const fromCursor = this.launchCursor ?? (await this.owners.runtime.status(epoch.signal)).eventCursor;
+        epoch.signal.throwIfAborted();
+        const discoverPending = this.discoverPending;
+        this.discoverPending = false;
+        const reached = this.reachedSources.splice(0);
+        const recheck = new Set(this.recheckChildren);
+        this.recheckChildren.clear();
+        this.recoverDomainReceipts();
         let resumed: string[] | undefined;
         try { resumed = await this.owners.runtime.reconcileObservations(epoch.signal); }
         catch (error) {
           // The native owner can commit independent ready work while preserving another
           // observation's error. Original saved launches/events still require discovery.
-          if (!epoch.signal.aborted) this.owners.onError(undefined, error);
+          if (!epoch.signal.aborted) this.owners.onError(undefined, error, 'Reconcile observations');
         }
         epoch.signal.throwIfAborted();
-        const children = await this.owners.runtime.children(epoch.signal);
-        this.owners.kernel.reconcileChildToolHandoffs(children);
-        const executions = await this.owners.runtime.childExecutions(undefined, epoch.signal);
-        let unaccepted: UnacceptedChildDependencies[] | undefined;
-        try { unaccepted = await this.owners.runtime.unacceptedChildDependencies(epoch.signal); }
+        if (discoverPending) await this.recoverChildren(true, [], [], new Set(), epoch.signal);
+        const changes: RuntimeEvent[] = [];
+        try { await this.discoverLaunches(epoch.signal, fromCursor, changes); }
         catch (error) {
-          // Failed cleanup discovery retains its original dependencies for a later wake;
-          // it cannot block accepted children or independently committed Run launches.
-          if (!epoch.signal.aborted) this.owners.onError(undefined, error);
+          if (!epoch.signal.aborted) this.owners.onError(undefined, error, 'Replay collaboration changes');
         }
         epoch.signal.throwIfAborted();
-        if (unaccepted) for (const source of unaccepted) {
-          if (this.cleaningSources.has(source.operation_id)) continue;
-          if (this.owners.canExecuteThread && !await this.owners.canExecuteThread(source.parent_thread_id)) continue;
-          const cleanup = this.releaseUnacceptedSource(source, epoch.signal).catch(error => {
-            if (!epoch.signal.aborted) this.owners.onError(source.operation_id, error);
-          }).finally(() => this.cleaningSources.delete(source.operation_id));
-          this.cleaningSources.set(source.operation_id, cleanup);
-        }
-        epoch.signal.throwIfAborted();
-        for (const child of executions) {
-          if (this.retiringThreads.has(child.child_thread_id)) continue;
-          if (this.owners.canExecuteThread && !await this.owners.canExecuteThread(child.child_thread_id)) continue;
-          const active = this.tasks.get(child.execution_id);
-          if (child.report && active?.preparing) {
-            active.recheck = true; active.controller.abort();
-          }
-          if (active && child.revision > active.revision) active.recheck = true;
-          if (!active && (!child.resources_released || child.state === 'preparing' || child.state === 'ready' || Boolean(child.report && child.receipt && ['pending', 'settling', 'candidate'].includes(child.code_result.kind)))) {
-            const controller = new AbortController();
-            const signal = AbortSignal.any([epoch.signal, controller.signal]);
-            const task = { controller, work: Promise.resolve(), revision: child.revision, preparing: !child.report, recheck: false };
-            this.tasks.set(child.execution_id, task);
-            task.work = this.advance(child, signal, epoch.signal).catch(error => {
-              if (!signal.aborted) this.owners.onError(child.execution_id, error);
-            }).finally(() => {
-              if (this.tasks.get(child.execution_id) !== task) return;
-              this.tasks.delete(child.execution_id);
-              if (task.recheck && !this.stopped && !this.suspended) void this.recover();
-            });
-          }
-        }
-        await this.discoverLaunches(epoch.signal);
+        this.recoverDomainReceipts();
+        if (changes.length || reached.length || recheck.size)
+          await this.recoverChildren(false, changes, reached, recheck, epoch.signal);
         await this.owners.recoverColdBotWork?.(epoch.signal);
         for (const runId of resumed ?? []) void this.continueRun(runId, epoch.signal).catch(error => {
-          if (!epoch.signal.aborted) this.owners.onError(undefined, error);
+          if (!epoch.signal.aborted) this.owners.onError(runId, error, 'Resume observed Run');
         });
       }
     } catch (error) {
-      if (!epoch.signal.aborted) this.owners.onError(undefined, error);
+      if (!epoch.signal.aborted) this.owners.onError(undefined, error, 'Discover collaboration changes');
     } finally {
       this.pumping = false;
-      if (epoch !== this.epoch && this.dirty && !this.stopped && !this.suspended) void this.recover();
+      if (this.dirty && !this.stopped && !this.suspended) void this.pump();
+    }
+  }
+
+  private async recoverChildren(all: boolean, changes: readonly RuntimeEvent[], reached: readonly ReachedSource[],
+    recheck: ReadonlySet<string>, signal: AbortSignal): Promise<void> {
+    const { runtime, kernel, canExecuteThread } = this.owners;
+    const gates = new Set(changes.filter(event => event.kind === 'bot.execution_gate_published'
+      && (event.data as { permitted?: boolean } | null)?.permitted).map(event => event.subject));
+    const dispatches = new Set(changes.filter(event => event.kind === dependencyCleanupPending || (event.kind === 'operation.settled'
+      && dispatchExecutors.has(String((event.data as { executor?: unknown } | null)?.executor)))).map(event => event.subject));
+    const hasSource = (id: string, owners: (SourceResourceOwner | undefined)[]) => reached.some(source =>
+      !source.active.has(id) && owners.some(owner => isDeepStrictEqual(owner, source.owner)));
+    const onError = (id: string | undefined, error: unknown, stage: string) => {
+      if (!signal.aborted) this.owners.onError(id, error, stage);
+    };
+    if (all || changes.some(event => childWakeEvents.has(event.kind))) {
+      try { await kernel.reconcileChildToolHandoffs(signal); }
+      catch (error) { onError(undefined, error, 'Discover retained child handoffs'); }
+    }
+    signal.throwIfAborted();
+    if (all || dispatches.size || gates.size || reached.length) {
+      let unaccepted: UnacceptedChildDependencies[] = [];
+      try { unaccepted = await runtime.unacceptedChildDependencies(signal, all || gates.size || reached.length ? undefined : [...dispatches]); }
+      catch (error) { onError(undefined, error, 'Discover unaccepted child dependencies'); }
+      signal.throwIfAborted();
+      for (const source of unaccepted) {
+        const id = source.operation_id;
+        if (this.cleaningSources.has(id)) continue;
+        const matches = all || dispatches.has(id) || hasSource(id, [source.source_pin?.source.resource_owner, ...mcpSourceOwners(source.mcp_binding)]);
+        if (!matches && (!canExecuteThread || !gates.size)) continue;
+        try {
+          if (canExecuteThread && !await canExecuteThread(source.parent_thread_id, matches ? undefined : gates)) continue;
+          signal.throwIfAborted();
+          const cleanup = this.releaseUnacceptedSource(source, signal).catch(error => {
+            onError(id, error, 'Release unaccepted child dependencies');
+          }).finally(() => { if (this.cleaningSources.get(id) === cleanup) this.cleaningSources.delete(id); });
+          this.cleaningSources.set(id, cleanup);
+        } catch (error) { onError(id, error, 'Check parent execution gate'); }
+      }
+    }
+    const wholeQueue = all || reached.length > 0 || gates.size > 0 || changes.some(event => arrangementChanges.has(event.kind));
+    const executionIds = new Set(recheck), branchIds = new Set<string>();
+    for (const event of changes) {
+      if (childWakeEvents.has(event.kind)) executionIds.add(event.subject);
+      else if (event.branch_id) branchIds.add(event.branch_id);
+    }
+    if (!wholeQueue && !executionIds.size && !branchIds.size) return;
+    let executions: DelegatedExecution[];
+    try {
+      executions = await runtime.childExecutions(undefined, signal, {
+        pendingOnly: true, ...(wholeQueue ? {} : { executionIds: [...executionIds], branchIds: [...branchIds] }),
+      });
+    }
+    catch (error) { onError(undefined, error, 'Discover pending child executions'); return; }
+    signal.throwIfAborted();
+    for (const child of executions) {
+      const id = child.execution_id;
+      if (this.retiringThreads.has(child.child_thread_id) || child.resources_released && child.report
+        && !(child.receipt && ['pending', 'settling', 'candidate'].includes(child.code_result.kind))) continue;
+      const changed = changes.some(event => affectsChild(child, event));
+      const matches = all || changed || recheck.has(id) || reached.length > 0 && hasSource(id, childSourceOwners(child));
+      if (!matches && (!canExecuteThread || !gates.size)) continue;
+      try {
+        if (canExecuteThread && !await canExecuteThread(child.child_thread_id, matches ? undefined : gates)) continue;
+        signal.throwIfAborted();
+      } catch (error) { onError(id, error, 'Check child execution gate'); continue; }
+      const active = this.tasks.get(id);
+      if (active) {
+        if (child.report && active.preparing) { active.recheck = true; active.controller.abort(); }
+        if (changed || !matches || child.revision > active.revision) active.recheck = true;
+        continue;
+      }
+      const controller = new AbortController();
+      const taskSignal = AbortSignal.any([signal, controller.signal]);
+      const task = { controller, work: Promise.resolve(), revision: child.revision, preparing: !child.report, recheck: false };
+      this.tasks.set(id, task);
+      task.work = this.advance(child, taskSignal, signal, (error, stage) => onError(id, error, stage)).finally(() => {
+        if (this.tasks.get(id) !== task) return;
+        this.tasks.delete(id);
+        if (task.recheck && !signal.aborted) { this.recheckChildren.add(id); void this.pump(); }
+      });
     }
   }
   /** A stale background wake can lose its preparation to this exact terminal Run.
@@ -234,15 +347,14 @@ export class ThreadCollaboration {
       if (run.id !== runId || !['completed', 'cancelled', 'failed'].includes(run.state)) throw error;
     }
   }
-  private async discoverLaunches(signal: AbortSignal): Promise<void> {
+  private async discoverLaunches(signal: AbortSignal, fromCursor: number, changes: RuntimeEvent[]): Promise<void> {
     const { runtime } = this.owners;
     if (this.launchCursor === undefined) {
-      // Capture before discovery so a resume or follow-up admitted during discovery is replayed.
-      const cursor = (await runtime.status(signal)).eventCursor;
+      // The cursor predates the pending scan, so changes committed while it was reading are replayed.
       await this.owners.recoverLaunches(signal);
       await this.owners.recoverCheckpoints?.(signal);
       signal.throwIfAborted();
-      this.launchCursor = cursor;
+      this.launchCursor = fromCursor;
     }
     let events;
     do {
@@ -251,23 +363,21 @@ export class ThreadCollaboration {
       if (events.some(event => event.kind.startsWith('followup.') || ['bot.matter.updated', 'bot.work_queued', 'child.accepted', 'child.report_ready', 'ingress.run_ready', 'ingress.preparation_hold', 'run.changed', 'thread.deleted'].includes(event.kind)
         || event.kind === 'execution.committed' && (event.data as { kind?: string })?.kind === 'state_changed')) this.owners.onWorkChanged?.();
       for (const event of events) {
-        if (event.kind.startsWith('operation.')) {
-          this.domainRecoveryNeeded = true; this.dirty = true;
-          // A process receipt can release a child's writer barrier without changing the
-          // DelegatedExecution revision. Keep that wake even while its earlier check is draining.
-          for (const task of this.tasks.values()) task.recheck = true;
-        }
+        if (event.kind === dependencyCleanupPending || childWakeEvents.has(event.kind) || writerStoppedEvents.has(event.kind)
+          || childScopeChanges.has(event.kind) || arrangementChanges.has(event.kind)) changes.push(event);
+        if (event.kind.startsWith('operation.')) this.domainRecoveryNeeded = true;
         if (event.kind === 'run.cancel_requested') this.owners.kernel.cancelRunPreparation(event.subject);
         if (event.kind === 'run.changed' || event.kind === 'run.failed'
           || event.kind === 'execution.committed' && ['state_changed', 'context_preparation_failed', 'execution_failed'].includes(String((event.data as { kind?: string })?.kind))) {
           void this.owners.settleRunCheckpoints?.(event.subject, signal).catch(error => {
-            if (!signal.aborted) this.owners.onError(event.subject, error);
+            if (!signal.aborted) this.owners.onError(event.subject, error, 'Settle Run checkpoints');
           });
         }
         const data = event.data as { run_id?: unknown } | null;
         if ((event.kind === 'policy.resumed' || event.kind === 'ingress.run_ready' || event.kind === 'goal.run_ready' || event.kind === 'observation.run_ready') && data && typeof data.run_id === 'string') {
-          void this.continueRun(data.run_id, signal).catch(error => {
-            if (!signal.aborted) this.owners.onError(undefined, error);
+          const runId = data.run_id;
+          void this.continueRun(runId, signal).catch(error => {
+            if (!signal.aborted) this.owners.onError(runId, error, 'Continue saved Run');
           });
         }
         this.launchCursor = event.cursor;
@@ -404,7 +514,7 @@ export class ThreadCollaboration {
           workspaceId: prepared.source.workspace_id, executionWorkspaceId: prepared.source.execution_workspace_id,
           branchId: prepared.source.branch_id, revision: prepared.source.revision },
         pin: prepared.pin, provenance: prepared.provenance }, signal);
-    } finally { await kernel.revokeGrant(grant.grantId).catch(error => { if (!signal.aborted) this.owners.onError(child.execution_id, error); }); }
+    } finally { await kernel.revokeGrant(grant.grantId).catch(error => { if (!signal.aborted) this.owners.onError(child.execution_id, error, 'Release child preparation grant'); }); }
   }
   private async prepareContinuationSource(child: DelegatedExecution, signal: AbortSignal): Promise<DelegatedExecution> {
     const basis = child.source_basis;
@@ -526,12 +636,14 @@ export class ThreadCollaboration {
     if (child.resources_released || (!child.receipt && !child.report) || (child.source?.kind !== 'ready' && child.source?.kind !== 'shared' && child.source?.kind !== 'absent' && !child.report)) return;
     const { kernel, runtime } = this.owners;
     const originalHandoff = child.trigger.kind === 'dispatch' && child.source && child.source.kind !== 'absent' ? child.source.handoff : null;
-    const retained = originalHandoff?.retention_pin
-      ?? (originalHandoff?.root.kind === 'fixed' || originalHandoff?.root.kind === 'native' || originalHandoff?.root.kind === 'derived' ? originalHandoff.root.pin : null);
-    if (retained && child.report && originalHandoff?.source.resource_owner.kind === 'managed_host') {
-      await withManagedChildSource(runtime, child, signal, (service,address) => service.service({...address,requestId:randomUUID(),operation:{kind:'child_release',execution:child}},signal));
-    }
-    if (retained && child.report && originalHandoff?.source.resource_owner.kind === 'local') {
+    const rootPin = originalHandoff?.root.kind === 'fixed' || originalHandoff?.root.kind === 'native'
+      || originalHandoff?.root.kind === 'derived' ? originalHandoff.root.pin : null;
+    const retained = originalHandoff?.retention_pin ?? rootPin;
+    const shared = child.source?.kind === 'absent' || child.source?.kind === 'shared';
+    // The normal dispatch cleanup releases the root pin below. A separate
+    // retention pin (or a shared source without that cleanup) still owns a release.
+    if (retained && child.report && originalHandoff?.source.resource_owner.kind === 'local'
+      && (shared || retained.pin_id !== rootPin?.pin_id || retained.source.branch_id !== rootPin?.source.branch_id)) {
       const handoff=originalHandoff;
       const grant=await kernel.claimChildSource({handoffOperationId:handoff.operation_id,grantId:`child-retention-release:${randomUUID()}`,
         childThreadId:child.child_thread_id,childBranchId:child.child_branch_id},signal);
@@ -562,14 +674,18 @@ export class ThreadCollaboration {
       // Successful startRun owns the fast path; terminal discovery owns its retry.
       if (child.report) await kernel.releaseChildToolHandoff(child.parent_run_id, child.child_operation_id);
     }
-    if (child.source?.kind === 'absent' || child.source?.kind === 'shared') {
+    if (shared) {
       if (!child.report) return;
+      if (retained && originalHandoff?.source.resource_owner.kind === 'managed_host') {
+        await withManagedChildSource(runtime, child, signal, (service, address) =>
+          service.service({ ...address, requestId: randomUUID(), operation: { kind: 'child_release', execution: child } }, signal));
+      }
       if (child.receipt) await runtime.retireSourceGrants(child.receipt.run_id);
       signal.throwIfAborted();
       await runtime.releaseChildResources(child.execution_id, signal);
       return;
     }
-    const original = child.trigger.kind === 'dispatch' ? child.source?.handoff?.source : child.source_basis?.source;
+    const original = child.trigger.kind === 'dispatch' ? originalHandoff?.source : child.source_basis?.source;
     if (original?.resource_owner.kind === 'managed_host') {
       await withManagedChildSource(runtime, child, signal, async (service, address) => {
         await service.service({ ...address, requestId: randomUUID(),
@@ -602,7 +718,7 @@ export class ThreadCollaboration {
         });
       }
     } else {
-      const handoff = child.source?.handoff;
+      const handoff = originalHandoff;
       if (!handoff) throw new Error('Original dispatch handoff is unavailable');
       const grant = await kernel.claimChildSource({ handoffOperationId: handoff.operation_id, grantId: `child-release:${randomUUID()}`,
         childThreadId: child.child_thread_id, childBranchId: child.child_branch_id }, signal);
@@ -630,7 +746,8 @@ export class ThreadCollaboration {
     signal.throwIfAborted();
     await runtime.releaseChildResources(child.execution_id, signal);
   }
-  private async advance(admitted: DelegatedExecution, signal: AbortSignal, ownerSignal: AbortSignal): Promise<void> {
+  private async advance(admitted: DelegatedExecution, signal: AbortSignal, ownerSignal: AbortSignal,
+    reportError?: (error: unknown, stage: string) => void): Promise<void> {
     const { runtime, prepareContext } = this.owners;
     let child = admitted;
     let stage = 'Preparing child source';
@@ -643,7 +760,7 @@ export class ThreadCollaboration {
         while (pendingProgress && !signal.aborted) {
           const value = pendingProgress; pendingProgress = undefined;
           try { await runtime.childPreparationProgress(admitted.execution_id, value, signal); }
-          catch (error) { if (!signal.aborted) this.owners.onError(admitted.execution_id, error); }
+          catch (error) { if (!signal.aborted) this.owners.onError(admitted.execution_id, error, 'Record child preparation progress'); }
         }
       })().finally(() => { writingProgress = undefined; if (pendingProgress && !signal.aborted) void drainProgress(); });
       return writingProgress;
@@ -704,27 +821,40 @@ export class ThreadCollaboration {
         // must not repeatedly re-enter the same failed launch.
         if (!launch?.preparation_failure) await this.continueRun(child.receipt.run_id, signal);
       }
-      if (child.report && child.receipt && ['pending', 'settling', 'candidate'].includes(child.code_result.kind)) child = await this.settle(child, signal);
+      if (child.report && child.receipt && ['pending', 'settling', 'candidate'].includes(child.code_result.kind)) {
+        stage = 'Publish child result';
+        child = await this.settle(child, signal);
+      }
     } catch (error) {
       // A current definition/Goal pause can arrive after source preparation but before the
       // original submission transaction. Keep this exact pending execution for its next event.
       if (error instanceof KernelClientError && (error.code === 'activation-held' || error.code === 'bot-suspended')) return;
       if (!signal.aborted) {
-        const current = await runtime.childExecution(child.execution_id);
-        // An admitted Run's unknown effects remain recoverable; preparation failure cannot erase them.
-        if (!current.receipt && !current.report) {
-          const { code, detail, failure } = preparationFailure(error, stage);
-          child = await runtime.failChild(child.execution_id, code, detail, undefined, failure);
+        reportError?.(error, stage);
+        try {
+          const current = await runtime.childExecution(child.execution_id, ownerSignal);
+          // An admitted Run's unknown effects remain recoverable; preparation failure cannot erase them.
+          if (!current.receipt && !current.report) {
+            const { code, detail, failure } = preparationFailure(error, stage);
+            child = await runtime.failChild(child.execution_id, code, detail, ownerSignal, failure);
+          }
+        } catch (recordingError) {
+          if (!reportError) throw recordingError;
+          reportError(recordingError, 'Record child preparation failure');
         }
       }
-      throw error;
+      if (!reportError) throw error;
     } finally {
       pendingProgress = undefined;
       await writingProgress;
       if (!ownerSignal.aborted) {
-        child = await runtime.childExecution(child.execution_id, ownerSignal);
-        if (child.report && child.trigger.kind === 'dispatch') this.owners.kernel.releaseChildToolHandoff(child.parent_run_id, child.child_operation_id);
-        await this.releaseHandoff(child, ownerSignal);
+        try {
+          child = await runtime.childExecution(child.execution_id, ownerSignal);
+          await this.releaseHandoff(child, ownerSignal);
+        } catch (error) {
+          if (!reportError) throw error;
+          reportError(error, 'Release child resources');
+        }
       }
     }
   }

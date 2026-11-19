@@ -3504,6 +3504,17 @@ export interface ChildExecutionParams {
 
 export interface ChildExecutionListParams {
   childOperationId?: string;
+  pendingOnly?: boolean;
+  executionIds?: string[];
+  branchIds?: string[];
+}
+
+export interface ChildHandoffFactsParams {
+  operationIds: string[];
+}
+
+export interface ChildRecoveryOperationsParams {
+  operationIds?: string[];
 }
 
 export interface ChildExecutionReportReadParams {

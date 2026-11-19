@@ -1391,7 +1391,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       managedMcpInteractionsOwner.current?.wake();
       mcpTaskRuntimeOwner.current?.sourceReached();
       mcpResourceRuntimeOwner.current?.sourceReached();
-      collaborationOwner.current?.sourceReached();
+      collaborationOwner.current?.sourceReached(owner);
       void scriptRuntimeOwner.current?.recoverSource(owner).catch(() => console.error("[Script] Original target stop remains pending"));
       void agentRuntime.reconcileSourceCleanup().catch((error: unknown) => {
         console.error("[VarinManagedTarget] Original source cleanup remains pending:", errorMessage(error));
@@ -2724,8 +2724,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       readRetrySettings: () => modelsService.readGlobalInferenceSettings().then(value => value.retry),
       onError: () => console.error('[Delegation] Original selection inference requires attention') } });
   const collaboration = new ThreadCollaboration({ runtime: agentRuntime, prepareProjectSource, prepareModel: delegationModels.prepare,
-    canExecuteThread: async threadId => {
+    canExecuteThread: async (threadId, botSubjects) => {
       const botId = (await agentRuntime.thread(threadId)).bot_id;
+      if (botSubjects && (!botId || !botSubjects.has(`bot:${botId}`))) return false;
       return !botId || (await botService.executionGate(botId)).permitted;
     },
     kernel: kernelClient, storageAdapter: kernelStorageAdapter, resolveLiveSource: liveSources.validate,
@@ -2738,7 +2739,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     prepareContext: threadContext,
     prepareMaterials: threadMaterialLifetime.prepareChild,
     prepareSkillInput: createThreadSkillInputPreparer(threadResources),
-    onError: (operationId, _error) => console.error('[Collaboration] Preparation or delivery requires attention:', operationId ?? 'discovery'),
+    onError: (operationId, error, stage) => {
+      const code = error instanceof KernelClientError ? error.code
+        : error instanceof Error && 'code' in error && typeof error.code === 'string' && /^[a-z0-9_-]+$/i.test(error.code) ? error.code
+        : error instanceof Error ? error.name : 'unknown';
+      // Preparation can contain provider output or user content. Reconciliation
+      // diagnostics use the private kernel's own error message, without its details.
+      const detail = (error instanceof KernelClientError || error instanceof AggregateError) && !/prepar|start|resume|continue/i.test(stage)
+        ? error.message : undefined;
+      console.error('[Collaboration]', stage, operationId ?? 'discovery', code, ...(detail ? [detail] : []));
+    },
   });
   collaborationOwner.current = collaboration;
   externalAgents.startChildren(createExternalSourceOwner({ managed:{coordinatorHostId:agentRuntime.coordinatorHostId,source:(owner,signal)=>agentRuntime.managedSource(owner,signal)}, kernel: kernelClient, storage: kernelStorageAdapter, prepareProjectSource,

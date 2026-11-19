@@ -194,6 +194,21 @@ impl DelegatedExecution {
 pub(super) fn relation(db: &Connection, id: &str) -> Result<ChildRelation> {
     record(db, "child_tasks", id)
 }
+
+const PENDING_RECOVERY: &str = "json_extract(body,'$.resources_released')=0
+    OR (json_extract(body,'$.report') IS NULL AND json_extract(body,'$.code_result.kind') NOT IN ('settling','candidate'))
+    OR (json_extract(body,'$.report') IS NOT NULL AND run_id IS NOT NULL
+        AND json_extract(body,'$.code_result.kind') IN ('pending','settling','candidate'))";
+
+pub(super) fn initialize_pending_index(db: &Connection) -> Result<()> {
+    db.execute_batch(&format!("CREATE INDEX IF NOT EXISTS delegated_pending_recovery ON delegated_executions(id) WHERE {PENDING_RECOVERY};
+        CREATE INDEX IF NOT EXISTS delegated_unreported_runs ON delegated_executions(run_id)
+        WHERE run_id IS NOT NULL AND json_extract(body,'$.report') IS NULL;
+        CREATE INDEX IF NOT EXISTS delegated_unknown_results ON delegated_executions(id) WHERE {UNKNOWN_PUBLISHED_RESULT}"))?;
+    Ok(())
+}
+const UNKNOWN_PUBLISHED_RESULT: &str = "json_extract(body,'$.code_result.kind')='published'
+    AND json_extract(body,'$.code_result.effect')='unknown'";
 pub(super) fn execution(db: &Connection, id: &str) -> Result<DelegatedExecution> {
     record(db, "delegated_executions", id)
 }
@@ -477,6 +492,35 @@ impl Catalog {
         let mut statement=self.db.prepare("SELECT body FROM delegated_executions WHERE ?1 IS NULL OR child_operation_id=?1 ORDER BY rowid")?;
         let rows = statement.query_map([child], |row| row.get::<_, String>(0))?;
         rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+    }
+    pub fn pending_delegated_executions(
+        &self, execution_ids: Option<&[String]>, branch_ids: Option<&[String]>,
+    ) -> Result<Vec<DelegatedExecution>> {
+        let mut statement = self.db.prepare_cached(&format!("SELECT body FROM delegated_executions e
+            INDEXED BY delegated_pending_recovery WHERE ({PENDING_RECOVERY})
+            AND ((?1 IS NULL AND ?2 IS NULL) OR id IN (SELECT value FROM json_each(?1))
+              OR EXISTS(SELECT 1 FROM child_tasks c WHERE c.id=e.child_operation_id AND
+                (json_extract(c.body,'$.child_branch_id') IN (SELECT value FROM json_each(?2))
+                 OR json_extract(c.body,'$.parent_branch_id') IN (SELECT value FROM json_each(?2)))))"))?;
+        let rows = statement.query_map(params![execution_ids.map(serde_json::to_string).transpose()?, branch_ids.map(serde_json::to_string).transpose()?], |row| row.get::<_, String>(0))?;
+        rows.map(|raw| Ok(serde_json::from_str(&raw?)?)).collect()
+    }
+
+    pub(super) fn delegated_unknown_results(&self) -> Result<Vec<DelegatedExecution>> {
+        let mut statement = self.db.prepare_cached(&format!("SELECT body FROM delegated_executions WHERE {UNKNOWN_PUBLISHED_RESULT}"))?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        rows.map(|raw| Ok(serde_json::from_str(&raw?)?)).collect()
+    }
+
+    pub fn child_handoff_facts(&self, operation_ids: &[String]) -> Result<Value> {
+        let mut statement = self.db.prepare_cached("SELECT json_extract(body,'$.report') IS NOT NULL FROM delegated_executions WHERE id=?1")?;
+        let mut facts = Vec::new();
+        for id in operation_ids {
+            if let Some(report) = statement.query_row([id], |row| row.get::<_, bool>(0)).optional()? {
+                facts.push(json!({"operation_id":id,"report":report}));
+            }
+        }
+        Ok(json!(facts))
     }
     pub fn delegated_execution_for_run(&self, run_id: &str) -> Result<Option<DelegatedExecution>> {
         let raw: Option<String> = self

@@ -257,6 +257,7 @@ fn initialize_metadata(
         organization::initialize(&tx)?;
         branch_workspace::initialize(&tx)?;
     }
+    collaboration::initialize_recovery_indexes(&tx)?;
     titles::initialize(&tx)?;
     let epoch = tx.query_row(
         "UPDATE runtime_meta SET epoch=epoch+1 WHERE id=1 RETURNING epoch",

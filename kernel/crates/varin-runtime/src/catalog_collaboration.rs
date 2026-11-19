@@ -1606,17 +1606,43 @@ fn unaccepted_child_dependency_owner(db: &Connection, op: &Operation) -> Result<
     )?;
     Ok(!owned)
 }
+
+const CLEANUP_CANDIDATE: &str = "json_extract(body,'$.phase')='terminal'
+    AND json_extract(body,'$.executor') IN ('dispatch','code_retrieval','user_dispatch')
+    AND json_extract(body,'$.execution_owner') IS NOT NULL";
+
+pub(super) fn initialize_recovery_indexes(db: &Connection) -> Result<()> {
+    db.execute_batch(&format!("CREATE INDEX IF NOT EXISTS child_cleanup_candidates ON operations(id) WHERE {CLEANUP_CANDIDATE}"))?;
+    delegated::initialize_pending_index(db)
+}
+
 impl Catalog {
     /// A target can retain dependencies durably before Catalog accepts the ChildTask. Only a
     /// terminal original dispatch can request cleanup; neither a later launch nor a current epoch
     /// may replace the invocation that created those dependencies.
     pub fn capture_unaccepted_child_dependencies(&self) -> Result<UnacceptedChildDependenciesRead> {
+        self.capture_selected_unaccepted_child_dependencies(None)
+    }
+
+    pub fn capture_selected_unaccepted_child_dependencies(
+        &self, operation_ids: Option<&[String]>,
+    ) -> Result<UnacceptedChildDependenciesRead> {
         let mut dispatches = Vec::new();
         let mut user_dispatches = Vec::new();
-        for op in read_all::<Operation>(&self.db, "operations")? {
-            if !unaccepted_child_dependency_owner(&self.db, &op)? {
-                continue;
-            }
+        let selected = operation_ids.map(serde_json::to_string).transpose()?;
+        let candidates = if selected.is_some() {
+            "json_each(?1) ids CROSS JOIN operations o ON o.id=ids.value"
+        } else {
+            "operations o INDEXED BY child_cleanup_candidates"
+        };
+        let mut query = self.db.prepare_cached(&format!("SELECT o.body FROM {candidates}
+            WHERE {CLEANUP_CANDIDATE}
+            AND NOT EXISTS(SELECT 1 FROM child_tasks WHERE id=o.id)
+            AND NOT EXISTS(SELECT 1 FROM external_children WHERE id=o.id)
+            AND NOT EXISTS(SELECT 1 FROM events WHERE subject=o.id AND kind='child.dependencies_released')"))?;
+        let rows = query.query_map(rusqlite::params_from_iter(selected.iter()), |row| row.get::<_, String>(0))?;
+        for row in rows {
+            let op: Operation = serde_json::from_str(&row?)?;
             if op.executor.as_deref() == Some("user_dispatch") {
                 if op.intent["kind"] != "user_child_dispatch_v1" || op.intent["actor"] != json!({"kind":"user"}) || op.execution_owner != Some(ExecutorOwner::Kernel) {
                     return Err(RuntimeError::Conflict("User handoff cleanup provenance changed".into()));

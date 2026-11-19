@@ -48,8 +48,9 @@ pub(super) fn execute(
         return Ok(json!({"updated":updated}));
     }
     if method == "runtime.child.dependencies.pending" {
+        let p: ChildRecoveryOperationsParams = serde_json::from_value(params)?;
         let read = owner.lock().map_err(|_| KernelError::Storage("Catalog unavailable".into()))?
-            .capture_unaccepted_child_dependencies().map_err(domain)?;
+            .capture_selected_unaccepted_child_dependencies(p.operation_ids.as_deref()).map_err(domain)?;
         return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
     }
     if method == "runtime.host_tool.reconcile" {
@@ -110,8 +111,11 @@ pub(super) fn execute(
             let catalog = owner
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-            catalog
-                .delegated_executions(p.child_operation_id.as_deref())
+            (if p.pending_only.unwrap_or(false) {
+                catalog.pending_delegated_executions(p.execution_ids.as_deref(), p.branch_ids.as_deref())
+            } else {
+                catalog.delegated_executions(p.child_operation_id.as_deref())
+            })
                 .map_err(domain)?
                 .into_iter()
                 .map(|execution| {

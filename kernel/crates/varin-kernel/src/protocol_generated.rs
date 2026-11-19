@@ -90,6 +90,7 @@ pub(crate) const KERNEL_READ_METHODS: &[&str] = &[
     "runtime.tools.inspect",
     "runtime.child.model.read",
     "runtime.child.dependencies.pending",
+    "runtime.child.handoffs",
     "runtime.child.execution.list",
     "runtime.child.execution.for_run",
     "runtime.child.execution.inspect",
@@ -3467,6 +3468,12 @@ pub(crate) struct KernelComputeGrammarParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ChildRecoveryOperationsParams {
+    pub(crate) operation_ids: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct UserChildDispatchCatalogParams {
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
@@ -3523,6 +3530,15 @@ pub(crate) struct ChildExecutionParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ChildExecutionListParams {
     pub(crate) child_operation_id: Option<String>,
+    pub(crate) pending_only: Option<bool>,
+    pub(crate) execution_ids: Option<Vec<String>>,
+    pub(crate) branch_ids: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ChildHandoffFactsParams {
+    pub(crate) operation_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -6481,7 +6497,7 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map_err(|error| error.to_string())
         }
         "runtime.child.dependencies.pending" => {
-            serde_json::from_value::<KernelEmptyParams>(params.clone())
+            serde_json::from_value::<ChildRecoveryOperationsParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
@@ -6520,6 +6536,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map_err(|error| error.to_string()),
         "runtime.child.execution.list" => {
             serde_json::from_value::<ChildExecutionListParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.child.handoffs" => {
+            serde_json::from_value::<ChildHandoffFactsParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

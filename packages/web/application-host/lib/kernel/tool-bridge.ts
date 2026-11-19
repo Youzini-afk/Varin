@@ -534,6 +534,13 @@ export class ToolBridge {
     for (const holder of releasing)
       this.#observeChildRelease(this.#releaseChildHolder(holder));
   }
+  retainedChildOperationIds(): string[] {
+    const ids = new Set<string>();
+    for (const entries of this.#owners.values())
+      for (const entry of entries.values())
+        for (const operationId of entry.childHolders.keys()) ids.add(operationId);
+    return [...ids];
+  }
   async #retainChild(
     requestId: string,
     binding: SourceMcpChildBinding,

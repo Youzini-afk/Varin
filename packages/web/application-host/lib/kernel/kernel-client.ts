@@ -835,7 +835,13 @@ export class KernelClient {
     return {ownerId:live.ownerId,generation:retained.generation,binding:retained.binding};
   }
   releaseChildToolHandoff(parentRunId: string, childOperationId: string): Promise<void> { return this.toolBridge.releaseChild(parentRunId, childOperationId); }
-  reconcileChildToolHandoffs(children: readonly { operation_id: string; report: unknown }[]): void { this.toolBridge.reconcileChildren(children); }
+  async reconcileChildToolHandoffs(signal: AbortSignal): Promise<void> {
+    const operationIds = [...new Set([...this.toolBridge.retainedChildOperationIds(), ...this.credentialBridge.retainedChildOperationIds()])];
+    if (!operationIds.length) return;
+    const facts = await this.agentRuntimeRequest<{ operation_id: string; report: boolean }[], 'runtime.child.handoffs'>('runtime.child.handoffs', { operationIds }, signal);
+    signal.throwIfAborted();
+    this.toolBridge.reconcileChildren(facts);
+  }
   discardExtensionTool(runId:string,live:import('./protocol.generated.js').LiveExtensionToolBinding):void {
     this.toolBridge.discard(runId,{ownerId:live.ownerId,binding:{reference:live.binding.providerKey,generation:live.generation,resources:{},tools:[live.binding.tool]}});
   }

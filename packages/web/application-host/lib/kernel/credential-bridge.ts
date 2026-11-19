@@ -112,6 +112,9 @@ export class CredentialBridge {
       if (child?.report || (!child && entry.epoch !== this.currentEpoch())) this.releaseChildModel(binding.parentRunId, binding.operationId);
     }
   }
+  retainedChildOperationIds(): string[] {
+    return [...this.#owners.values()].flatMap(entry => entry.lifetime.kind === 'child-operation' ? [entry.lifetime.binding.operationId] : []);
+  }
   async retainQueuedModel(runId: string, owner: ExistingHostCredentialOwner): Promise<void> {
     const identity = owner.bindingIdentity;
     if (!identity) throw new CredentialOwnerError('credential-model-identity-unavailable');

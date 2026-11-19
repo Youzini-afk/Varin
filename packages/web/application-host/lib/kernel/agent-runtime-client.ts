@@ -658,10 +658,11 @@ export class AgentRuntimeClient {
   }
   unacceptedChildDependencies(
     signal?: AbortSignal,
+    operationIds?: string[],
   ): Promise<UnacceptedChildDependencies[]> {
     return this.kernel.agentRuntimeRequest(
       'runtime.child.dependencies.pending',
-      {},
+      operationIds ? { operationIds } : {},
       signal,
     );
   }
@@ -756,8 +757,9 @@ export class AgentRuntimeClient {
   childExecutionForRun(runId: string, signal?: AbortSignal): Promise<DelegatedExecution | null> {
     return this.kernel.agentRuntimeRequest('runtime.child.execution.for_run', { runId }, signal);
   }
-  childExecutions(childOperationId?: string, signal?: AbortSignal): Promise<DelegatedExecution[]> {
-    return this.kernel.agentRuntimeRequest('runtime.child.execution.list', { ...(childOperationId ? { childOperationId } : {}) }, signal);
+  childExecutions(childOperationId?: string, signal?: AbortSignal,
+    recovery?: { pendingOnly: true; executionIds?: string[]; branchIds?: string[] }): Promise<DelegatedExecution[]> {
+    return this.kernel.agentRuntimeRequest('runtime.child.execution.list', { ...(childOperationId ? { childOperationId } : {}), ...recovery }, signal);
   }
   readChildExecutionReport(executionId: string, itemId: string, offset = 0, maxBytes = 65536, signal?: AbortSignal): Promise<ChildReportPage> {
     return this.kernel.agentRuntimeRequest('runtime.child.execution.report.read', { executionId, itemId, offset, maxBytes }, signal);

@@ -737,10 +737,10 @@ fn dispatch_read(
             )?)
         }
         "runtime.child.dependencies.pending" => {
-            let _: KernelEmptyParams = serde_json::from_value(params)?;
+            let p: ChildRecoveryOperationsParams = serde_json::from_value(params)?;
             Ok(serde_json::to_value(
                 catalog
-                    .capture_unaccepted_child_dependencies()
+                    .capture_selected_unaccepted_child_dependencies(p.operation_ids.as_deref())
                     .map_err(domain)?
                     .load()
                     .map_err(domain)?,
@@ -749,14 +749,21 @@ fn dispatch_read(
         "runtime.child.execution.list" => {
             let p: ChildExecutionListParams = serde_json::from_value(params)?;
             Ok(serde_json::to_value(
-                catalog
-                    .delegated_executions(p.child_operation_id.as_deref())
+                (if p.pending_only.unwrap_or(false) {
+                    catalog.pending_delegated_executions(p.execution_ids.as_deref(), p.branch_ids.as_deref())
+                } else {
+                    catalog.delegated_executions(p.child_operation_id.as_deref())
+                })
                     .map_err(domain)?
                     .into_iter()
                     .map(|execution| catalog.capture_delegated_execution(execution)?.load())
                     .collect::<Result<Vec<_>, varin_runtime::RuntimeError>>()
                     .map_err(domain)?,
             )?)
+        }
+        "runtime.child.handoffs" => {
+            let p: ChildHandoffFactsParams = serde_json::from_value(params)?;
+            catalog.child_handoff_facts(&p.operation_ids).map_err(domain)
         }
         "runtime.child.execution.for_run" => {
             let p: RunParams = serde_json::from_value(params)?;

@@ -38,6 +38,7 @@ The lead agent coordinates goals, delegates focused work, and judges overall del
   - `child_status` / `wait_child` / `child_cancel` / `child_report`: `target` pins a specific execution on admission (UTF-8 byte offsets for `child_report`).
 - **Active vs History**: A task leaves `current` once terminal (completed/failed/canceled), its report is delivered, and any pending code exchange finishes; re-engaging it via `send` brings it back.
 - **Frozen compatibility**: Restarts/upgrades preserve each admitted child's frozen tool schema and read contract (e.g., short refs vs legacy offsets).
+- **Recovery**: Startup discovers pending child preparations, result publications, and handoff releases from Catalog. Later attempts follow changes to the affected execution, writer, arrangement, Bot gate, or source connection. Failed cleanup retains its original records and reports the failed stage in the Host log.
 
 ## File Sources, Isolation & Code Exchange
 

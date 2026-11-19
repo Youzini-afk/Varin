@@ -533,6 +533,10 @@ fn lost_retain_ack_and_failed_release_preserve_exact_cleanup_without_an_empty_ch
         assert_eq!(pending.len(), 1);
         let dependency = &pending[0];
         assert_eq!(dependency.operation_id, operation);
+        assert!(f.db.capture_selected_unaccepted_child_dependencies(Some(&["different-dispatch".into()]))
+            .unwrap().load().unwrap().is_empty());
+        assert_eq!(f.db.capture_selected_unaccepted_child_dependencies(Some(std::slice::from_ref(&operation)))
+            .unwrap().load().unwrap(), pending);
         assert_eq!(dependency.execution_epoch, original_epoch);
         assert_eq!(dependency.execution_owner, ExecutorOwner::Kernel);
         assert_eq!(
@@ -563,6 +567,21 @@ fn lost_retain_ack_and_failed_release_preserve_exact_cleanup_without_an_empty_ch
         assert!(f.db.stage_user_child_dependencies(&retry).is_err());
         assert_eq!(f.counts(), (original.0, original.1 + 1, original.2));
     }
+}
+
+#[test]
+fn delegated_recovery_discovers_unreleased_work_after_reopen_and_excludes_settled_history() {
+    let mut f = Fixture::new();
+    let child = f.accept();
+    let id = child.operation_id;
+    f.db.fail_delegated_preparation(&id, "preparation_failed", None).unwrap();
+    f.reopen();
+    assert!(f.db.pending_delegated_executions(Some(&["other-execution".into()]), Some(&["other-branch".into()])).unwrap().is_empty());
+    assert_eq!(f.db.pending_delegated_executions(None, Some(&[child.child_branch_id])).unwrap()[0].execution_id, id);
+    assert_eq!(f.db.child_handoff_facts(std::slice::from_ref(&id)).unwrap(), json!([{"operation_id":id,"report":true}]));
+    f.db.release_delegated_resources(&id).unwrap();
+    assert!(f.db.pending_delegated_executions(None, None).unwrap().is_empty());
+    assert_eq!(f.db.delegated_executions(Some(&id)).unwrap().len(), 1);
 }
 #[test]
 fn staged_dependencies_transition_to_the_original_admitted_child_once() {

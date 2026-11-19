@@ -59,7 +59,9 @@ impl ChildReportPreparation {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         let snapshot = database.transaction()?;
-        let mut statement=snapshot.prepare("SELECT c.id FROM delegated_executions c JOIN runs r ON r.id=c.run_id WHERE json_extract(c.body,'$.report') IS NULL AND json_extract(r.body,'$.state') IN ('completed','failed','cancelled')")?;
+        let mut statement=snapshot.prepare("SELECT c.id FROM delegated_executions c JOIN runs r ON r.id=c.run_id
+            WHERE c.run_id IS NOT NULL AND json_extract(c.body,'$.report') IS NULL
+            AND json_extract(r.body,'$.state') IN ('completed','failed','cancelled')")?;
         for row in statement.query_map([], |row| row.get::<_, String>(0))? {
             let child = delegated::execution_task(&snapshot, &row?)?;
             let run: Run = record(
@@ -220,7 +222,7 @@ pub fn reconcile_reports(catalog: &std::sync::Mutex<Catalog>) -> Result<()> {
         let candidates = {
             let owner = lock()?;
             owner
-                .delegated_executions(None)?
+                .delegated_unknown_results()?
                 .into_iter()
                 .filter_map(|child| {
                     if let collaboration::ChildCodeResult::Published {

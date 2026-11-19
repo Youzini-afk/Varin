@@ -140,9 +140,11 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
   };
   const documents = { admitWorkspaceRegistration: vi.fn(async (workspaceId: string) => ({ workspaceId,
     hostId: 'host', kind: 'directory' as const, canonicalPath: '/removed/original' })) };
+  const events: import('./protocol.generated.js').RuntimeEvent[] = [];
   const runtime = {
     onEvent: (listener: typeof emit) => { emit = listener; return () => {}; }, onExit: () => () => {}, onReady: () => () => {}, reconcileObservations: async () => [],
-    children: async () => [], childExecutions: async () => [structuredClone(child)], unacceptedChildDependencies: async () => [], status: async () => ({ eventCursor: 7 }), events: async () => [],
+    children: async () => [], childExecutions: async () => [structuredClone(child)], unacceptedChildDependencies: async () => [],
+    status: async () => ({ eventCursor: 7 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
     context: vi.fn(async () => checkpoint), childExecution: async () => structuredClone(child), launch: async () => null,
     childPreparationProgress: vi.fn(async () => ({ updated: true })),
     readyChildSource: vi.fn(async (input: Parameters<AgentRuntimeClient['readyChildSource']>[0]) => {
@@ -178,6 +180,9 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
       await vi.waitFor(() => { expect(errors).toEqual([]); expect(runtime.prepareChild).toHaveBeenCalledOnce(); });
       expect(runtime.releaseChildResources).not.toHaveBeenCalled(); expect(runtime.failChild).not.toHaveBeenCalled();
       calendarHeld = false;
+      if (child.trigger.kind !== 'calendar') throw new Error('Expected calendar continuation');
+      events.push({ cursor: 8, revision: 2, subject: child.trigger.definition_id, kind: 'calendar.definition_changed',
+        thread_id: null, branch_id: null, data: {} });
       emit({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'same-epoch', stream: 'durable', cursor: 8 });
     }
     await vi.waitFor(() => { expect(errors).toEqual([]); expect(continueRun).toHaveBeenCalledOnce(); });

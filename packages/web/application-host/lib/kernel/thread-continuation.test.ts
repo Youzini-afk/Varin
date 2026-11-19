@@ -559,11 +559,11 @@ it.each(['child_revision', 'process_receipt'] as const)('%s observed during an a
     report: null, resources_released: false, code_result: { kind: 'no_changes' },
     source: { kind: 'pending', handoff: { resource_authority: null, operation_id: 'handoff', source: { mode: 'fixed_branch', resource_owner: { kind: 'local' as const }, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null }, root: { kind: 'fixed', pin: { pin_id: 'pin', root: 'root', source: { mode: 'fixed_branch', resource_owner: { kind: 'local' as const }, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null } } } } },
   } as import('./protocol.generated.js').DelegatedExecution;
-  const children = vi.fn(async () => [structuredClone(child)]);
+  const childExecutions = vi.fn(async () => [structuredClone(child)]);
   const events: RuntimeEvent[] = [];
   const runtime = Object.assign(f.runtime, {
     onEvent: (handler: typeof listener) => { listener = handler; return () => {}; }, onExit: () => () => {}, onReady: () => () => {},
-    reconcileObservations: async () => [], children, childExecutions: async () => [structuredClone(child)], unacceptedChildDependencies: async () => [],
+    reconcileObservations: async () => [], childExecutions, unacceptedChildDependencies: async () => [],
     childExecution: async () => structuredClone(child), retireSourceGrants: vi.fn(async () => {}), releaseMcpResourceSource: vi.fn(async () => {}),
     releaseChildResources: vi.fn(async () => { child.resources_released = true; return structuredClone(child); }),
     status: async () => ({ eventCursor: 0 }), events: async (cursor: number) => events.filter(event => event.cursor > cursor),
@@ -577,16 +577,17 @@ it.each(['child_revision', 'process_receipt'] as const)('%s observed during an a
     if (wake === 'child_revision') {
       child.revision = 2; child.state = 'completed';
       child.report = { outcome: 'succeeded', sender_thread_id: child.child_thread_id, run_id: f.run.id, history_ids: [], detail: null };
+      events.push({ thread_id: child.child_thread_id, branch_id: child.child_branch_id, cursor: 1, subject: child.execution_id, revision: 2, kind: 'child.report_ready', data: {} });
     } else {
       // Original process stop is a distinct fact; it does not revise ChildTask.
       events.push({ thread_id: child.child_thread_id, branch_id: child.child_branch_id, cursor: 1, subject: 'original-child-process', revision: 2, kind: 'operation.executor_stopped', data: { operation_id: 'original-child-process', executor: 'process_spawn', receipt_identity: 'guardian', receipt_epoch: 1 } });
     }
     listener({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'epoch', stream: 'durable', cursor: 2 });
-    await vi.waitFor(() => expect(children).toHaveBeenCalledTimes(wake === 'child_revision' ? 2 : 3));
-    const scans = children.mock.calls.length;
+    await vi.waitFor(() => expect(childExecutions).toHaveBeenCalledTimes(2));
+    await tick();
     release();
-    await vi.waitFor(() => expect(children).toHaveBeenCalledTimes(scans + 1));
-    await tick(); expect(children).toHaveBeenCalledTimes(scans + 1);
+    await vi.waitFor(() => expect(childExecutions).toHaveBeenCalledTimes(3));
+    await tick(); expect(childExecutions).toHaveBeenCalledTimes(3);
     expect(continueRun).toHaveBeenCalledTimes(wake === 'child_revision' ? 1 : 2); expect(f.errors).toEqual([]);
     if (wake === 'child_revision') expect(runtime.retireSourceGrants).toHaveBeenCalledWith(f.run.id);
     else expect(runtime.retireSourceGrants).not.toHaveBeenCalled();
@@ -671,9 +672,9 @@ it.each(['observation', 'unaccepted dependency'] as const)('an unrelated %s erro
     expect(f.runtime.rebindLaunch).toHaveBeenCalledOnce();
     expect(f.runtime.pendingLaunches).toHaveBeenCalledOnce();
     expect(reconcileObservations).toHaveBeenCalledTimes(2);
-    expect(unacceptedChildDependencies).toHaveBeenCalledTimes(2);
+    expect(unacceptedChildDependencies).toHaveBeenCalledOnce();
     expect(releaseUnacceptedChildDependencies).not.toHaveBeenCalled();
-    expect(f.errors).toEqual([failure, failure]);
+    expect(f.errors).toEqual(stage === 'observation' ? [failure, failure] : [failure]);
   } finally { collaboration.stop(); }
 });
 
