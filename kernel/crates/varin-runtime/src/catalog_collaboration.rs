@@ -1466,18 +1466,11 @@ impl Catalog {
     /// between a model call and its tool results, or concurrently with a frozen request.
     pub(super) fn close_finished_parent_waits(&mut self) -> Result<()> {
         let tx = self.db.transaction()?;
-        let operations: Vec<Operation> = {
-            let mut statement=tx.prepare("SELECT o.body FROM operations o JOIN runs r ON r.id=o.run_id WHERE json_extract(o.body,'$.executor') IN (?1,?2) AND json_extract(o.body,'$.phase')!='terminal' AND json_extract(o.body,'$.waiting_on') LIKE 'child-wait:%' AND json_extract(r.body,'$.state') IN ('completed','failed','cancelled')")?;
-            let rows = statement
-                .query_map([WAIT_TOOL,super::retrieval::CONTROL_TOOL], |row| row.get::<_, String>(0))?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            rows.into_iter()
-                .map(|row| serde_json::from_str(&row).map_err(Into::into))
-                .collect::<Result<_>>()?
-        };
         let mut released = Vec::new();
-        for mut op in operations {
-            if !matches!(op.executor.as_deref(),Some(WAIT_TOOL | super::retrieval::CONTROL_TOOL)) || op.phase == OperationPhase::Terminal {
+        for mut op in observations::operations(&tx, None)? {
+            if !matches!(op.executor.as_deref(), Some(WAIT_TOOL | super::retrieval::CONTROL_TOOL))
+                || !op.waiting_on.as_deref().is_some_and(|id| id.starts_with("child-wait:"))
+            {
                 continue;
             }
             let run: Run = record(&tx, "runs", &op.run_id)?;

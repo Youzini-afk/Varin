@@ -8,9 +8,10 @@ import type { MaterialRetention } from './protocol.generated.js';
 
 /** Catalog has proven these Threads have no surviving execution. Recipients must
  * first retain independent material records; source cleanup never follows UI close. */
-export async function releaseDeletedAttachmentSources(kernel: KernelClient, runtime: AgentRuntimeClient, plan: MaterialRetention, signal?: AbortSignal): Promise<{ pending: boolean }> {
+export async function releaseDeletedAttachmentSources(kernel: KernelClient, runtime: AgentRuntimeClient, plan: MaterialRetention, signal?: AbortSignal): Promise<{ pending: boolean; waitingForOperations?: boolean }> {
   const deleted = new Set(plan.threads.filter(thread => thread.release).map(thread => thread.threadId));
   let pending = false;
+  let waitingForOperations = false;
   const retained = new Set(plan.attachments.flatMap(edge => edge.attachments.map(item => item.ref)));
   const discovery = await kernel.issueGrant({ grantId: `attachment-discovery:${randomUUID()}`, owningWorkspace: null, executionWorkspace: null,
     capabilities: ['storage.read', 'storage.maintenance'], pathScopes: [] }, signal);
@@ -44,7 +45,7 @@ export async function releaseDeletedAttachmentSources(kernel: KernelClient, runt
               if (Buffer.from(operationId).toString('base64url') !== match[1]) continue;
               let operation;
               try { operation = await runtime.operation(operationId, signal); } catch { signal?.throwIfAborted(); continue; }
-              if (operation.phase !== 'terminal') { pending = true; continue; }
+              if (operation.phase !== 'terminal') { waitingForOperations = true; continue; }
               if (!['failed', 'cancelled'].includes(operation.outcome ?? '') || operation.effect !== 'none') continue;
               const call = (operation.intent as { call?: { arguments?: { attachments?: unknown } } }).call;
               let selections;
@@ -109,5 +110,5 @@ export async function releaseDeletedAttachmentSources(kernel: KernelClient, runt
   }
   // Offline/revoked targets remain represented by the Catalog projection for a
   // later cleanup pass. Never treat coordinator observation loss as remote stop.
-  return { pending };
+  return waitingForOperations ? { pending: true, waitingForOperations } : { pending };
 }

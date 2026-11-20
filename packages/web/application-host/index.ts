@@ -1154,7 +1154,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // eslint-disable-next-line prefer-const -- Deferred port: early document callbacks must observe undefined until wiring completes.
   let nativeWorkspaces:NativeWorkspaceOwner|undefined;
   let requestSourceMaintenance=()=>{};
-  let releaseSourcePreparations=async(_threads:readonly string[])=>{};
+  let releaseSourcePreparations = async (_threads: readonly string[]): Promise<boolean> => false;
   bindDocumentTextCodec(kernelClient);
   const projectTextEncoding = createProjectTextEncodingService({
     projects: async () => (sanitizeProjects((await readSettingsFromDisk()).projects) ?? []).filter(project => project.source?.resourceOwner.kind !== 'managed_host'),
@@ -1387,6 +1387,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // records already carry the backend job identity, so the experiment
     // reconcile inspects and re-polls rather than resubmitting.
     onSourceReachable: (owner) => {
+      requestSourceMaintenance();
       managedMcpOwner.current?.sourceReached(owner);
       managedMcpInteractionsOwner.current?.wake();
       mcpTaskRuntimeOwner.current?.sourceReached();

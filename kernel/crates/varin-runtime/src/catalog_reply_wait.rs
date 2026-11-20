@@ -157,7 +157,9 @@ pub(in crate::catalog) fn accepted_reply(
         json!({"reply_message_id":identity.message_id,"accepted_at_ms":accepted_at_ms}),
     )?;
     let waits = {
-        let mut q=tx.prepare("SELECT body FROM waits WHERE json_extract(body,'$.subject')=?1 AND json_extract(body,'$.kind')=?2")?;
+        let mut q = tx.prepare_cached(&format!(
+            "SELECT body FROM waits WHERE {PENDING_WAIT} AND json_extract(body,'$.subject')=?1 AND json_extract(body,'$.kind')=?2 ORDER BY rowid"
+        ))?;
         let rows = q
             .query_map(params![original, REPLY_EVENT], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;

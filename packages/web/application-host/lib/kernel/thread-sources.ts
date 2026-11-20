@@ -297,9 +297,11 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
     return observePreparation(flight, signal);
   };
   return Object.assign(prepareSelected,{async releaseDeletedThreads(threadIds:readonly string[]){
-    const selected=[...preparing.values()].filter(flight=>threadIds.includes(flight.threadId));
+    const deleted = new Set(threadIds);
+    const selected = [...preparing.values()].filter(flight => deleted.has(flight.threadId));
     for(const flight of selected)flight.controller.abort(new Error('Source preparation Thread was deleted'));
     await Promise.allSettled(selected.map(flight=>flight.work));
+    return selected.length > 0;
   }});
 }
 

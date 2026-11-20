@@ -203,6 +203,8 @@ fn check_catalog_schema(db: &Connection, version: i64) -> Result<()> {
     Ok(())
 }
 
+const PENDING_WAIT: &str = "json_extract(body,'$.cancelled')=0 AND json_extract(body,'$.trigger_cursor') IS NULL";
+
 /// Installing the catalog is one commit. A failed first open must leave a new, empty
 /// database rather than a collection of independently committed domain fragments.
 fn initialize_metadata(
@@ -240,6 +242,9 @@ fn initialize_metadata(
     // Product discovery and Bot ancestry need only memory-work owners, not every retained tool.
     tx.execute_batch("CREATE INDEX IF NOT EXISTS thread_memory_operations ON operations(run_id) WHERE json_extract(body,'$.intent.kind')='memory_work_v1'")?;
     tx.execute_batch("CREATE INDEX IF NOT EXISTS pending_code_exchange_jobs ON operations(run_id) WHERE json_extract(body,'$.host_job.binding.domain')='collaboration.code' AND (coalesce(json_extract(body,'$.external_receipt.executor_stopped'),0)=0 OR json_extract(body,'$.phase')!='terminal')")?;
+    tx.execute_batch(&format!("CREATE INDEX IF NOT EXISTS pending_waits_by_event ON waits(json_extract(body,'$.subject'),json_extract(body,'$.kind')) WHERE {PENDING_WAIT}"))?;
+    observations::initialize_recovery_index(&tx)?;
+    source_retention::initialize(&tx)?;
     if version == 0 {
         collaboration::initialize_new(&tx)?;
         followups::initialize_new(&tx)?;
@@ -1309,27 +1314,20 @@ impl Catalog {
     pub fn reconcile_waits(&mut self) -> Result<usize> {
         let tx = self.db.transaction()?;
         let waits: Vec<Wait> = {
-            let mut stmt = tx.prepare("SELECT body FROM waits")?;
+            let mut stmt = tx.prepare_cached(&format!("SELECT body FROM waits INDEXED BY pending_waits_by_event WHERE {PENDING_WAIT} ORDER BY rowid"))?;
             let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
-            let mut out = Vec::new();
-            for row in rows {
-                out.push(serde_json::from_str(&row?)?);
-            }
-            out
+            rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect::<Result<_>>()?
         };
         let mut count = 0;
         for mut wait in waits {
-            if wait.cancelled || wait.trigger_cursor.is_some() {
-                continue;
-            }
-            let run: Run = record(&tx, "runs", &wait.run_id)?;
-            if run.state.terminal() || run.cancel_requested {
-                continue;
-            }
             if wait.kind == messages::reply_wait::REPLY_EVENT {
                 if messages::reply_wait::resolve(&tx, &mut wait, observations::wall_time_ms()?)? {
                     count += 1;
                 }
+                continue;
+            }
+            let run: Run = record(&tx, "runs", &wait.run_id)?;
+            if run.state.terminal() || run.cancel_requested {
                 continue;
             }
             let cursor:Option<u64>=tx.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind=?2 AND cursor>?3 ORDER BY cursor LIMIT 1",params![wait.subject,wait.kind,sql_number(wait.after_cursor)?],|r|read_number(r,0)).optional()?;

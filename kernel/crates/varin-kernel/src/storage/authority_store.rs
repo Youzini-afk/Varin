@@ -515,18 +515,28 @@ impl Storage {
                     |row| row.get::<_, String>(0),
                 )
                 .optional()?;
-            if branch_workspace.is_some() {
-                branch_workspace
-            } else if let Some(pin_id) = params.get("pinId").and_then(Value::as_str) {
-                self.conn
+            let workspace = match (branch_workspace, params.get("pinId").and_then(Value::as_str)) {
+                (Some(workspace), _) => Some(workspace),
+                (None, Some(pin_id)) => self.conn
                     .query_row(
                         "SELECT workspace_id FROM pins WHERE pin_id = ?1 AND branch_id = ?2",
                         params![pin_id, branch_id],
                         |row| row.get::<_, String>(0),
                     )
-                    .optional()?
+                    .optional()?,
+                (None, None) => None,
+            };
+            if workspace.is_none() && matches!(method, "branch.delete" | "branch.unpin") {
+                // The successful operation may have removed the record that
+                // supplied its workspace. Replay from the original receipt's
+                // owner so the same request keeps the same admitted identity.
+                self.conn.query_row(
+                    "SELECT ow.workspace_id FROM operation_owners ow JOIN operations o USING(operation_id) WHERE ow.operation_id=?1 AND o.kind=?2",
+                    params![params.get("operationId").and_then(Value::as_str), method],
+                    |row| row.get::<_, String>(0),
+                ).optional()?
             } else {
-                None
+                workspace
             }
         } else if let Some(pin_id) = params.get("pinId").and_then(Value::as_str) {
             self.conn

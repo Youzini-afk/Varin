@@ -3,6 +3,14 @@
 use super::*;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const OBSERVATION_OPERATION: &str = "((json_extract(body,'$.execution_owner.kind')='kernel' AND json_extract(body,'$.executor') IN ('wait_child','retrieval_control','wait_process','send','follow_up'))
+    OR json_extract(body,'$.waiting_on') GLOB 'computer-request-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'host-job-wait:*')";
+
+pub(super) fn initialize_recovery_index(db: &Connection) -> Result<()> {
+    db.execute_batch(&format!("CREATE INDEX IF NOT EXISTS pending_observation_operations ON operations(run_id) WHERE {OBSERVATION_OPERATION} AND json_extract(body,'$.phase')!='terminal'"))?;
+    Ok(())
+}
+
 // All native wall-clock timer backends can represent an absolute signed nanosecond instant.
 // Reject unrepresentable input instead of shortening the persisted user deadline.
 pub const MAX_DEADLINE_MS: u64 = i64::MAX as u64 / 1_000_000;
@@ -33,21 +41,30 @@ pub fn is_observation_id(id: &str) -> bool {
         || id.starts_with(followups::observation::PREFIX)
 }
 fn waiting_runs(db: &Connection) -> Result<Vec<Run>> {
-    let mut q = db.prepare("SELECT body FROM runs WHERE json_extract(body,'$.state')='waiting' AND (json_extract(body,'$.waiting_on') GLOB 'computer-request-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'host-job-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'child-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'process-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'reply-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'followup-observation:*') ORDER BY rowid")?;
+    let mut q = db.prepare_cached("SELECT body FROM runs INDEXED BY runs_waiting WHERE json_extract(body,'$.state')='waiting' AND (json_extract(body,'$.waiting_on') GLOB 'computer-request-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'host-job-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'child-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'process-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'reply-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'followup-observation:*') ORDER BY rowid")?;
     let rows = q.query_map([], |r| r.get::<_, String>(0))?;
     rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
 }
+pub(super) fn parked_waits(db: &Connection, prefix: &str) -> Result<Vec<Wait>> {
+    let mut q = db.prepare_cached("SELECT w.body FROM runs r INDEXED BY runs_waiting
+        JOIN waits w ON w.id=json_extract(r.body,'$.waiting_on')
+        WHERE json_extract(r.body,'$.state')='waiting' AND json_extract(r.body,'$.waiting_on') GLOB ?1
+        ORDER BY w.rowid")?;
+    let rows = q.query_map([format!("{prefix}*")], |row| row.get::<_, String>(0))?;
+    rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+}
+
+pub(super) fn active_operations(db: &Connection, run: Option<&str>) -> Result<Vec<Operation>> {
+    let scope = if run.is_some() { "AND run_id=?1" } else { "" };
+    let mut q = db.prepare_cached(&format!("SELECT body FROM operations INDEXED BY pending_observation_operations WHERE {OBSERVATION_OPERATION} AND json_extract(body,'$.phase')!='terminal' {scope} ORDER BY rowid"))?;
+    let rows = q.query_map(rusqlite::params_from_iter(run), |r| r.get::<_, String>(0))?;
+    rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+}
+
 pub(super) fn operations(db: &Connection, run: Option<&str>) -> Result<Vec<Operation>> {
-    let mut q = db.prepare("SELECT body FROM operations WHERE (?1 IS NULL OR run_id=?1) AND json_extract(body,'$.phase')!='terminal' AND ((json_extract(body,'$.execution_owner.kind')='kernel' AND json_extract(body,'$.executor') IN ('wait_child','retrieval_control','wait_process','send','follow_up')) OR json_extract(body,'$.waiting_on') GLOB 'computer-request-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'host-job-wait:*') AND json_extract(body,'$.waiting_on') IS NOT NULL ORDER BY rowid")?;
-    let rows = q.query_map([run], |r| r.get::<_, String>(0))?;
-    let mut out = Vec::new();
-    for raw in rows {
-        let op: Operation = serde_json::from_str(&raw?)?;
-        if op.waiting_on.as_deref().is_some_and(is_observation_id) {
-            out.push(op);
-        }
-    }
-    Ok(out)
+    let mut ops = active_operations(db, run)?;
+    ops.retain(|op| op.waiting_on.as_deref().is_some_and(is_observation_id));
+    Ok(ops)
 }
 pub(super) fn ready(db: &Connection, op: &Operation, wait: &Wait) -> Result<bool> {
     if wait.cancelled {
@@ -158,7 +175,11 @@ impl Catalog {
     pub fn pending_observation_continuations(&self) -> Result<Vec<String>> {
         // Keep the same native observers as operations(): their first ready event can
         // be consumed before the original worker drains, so later wakes must rediscover them.
-        let mut q=self.db.prepare("SELECT DISTINCT r.id FROM runs r JOIN operations o ON o.run_id=r.id JOIN run_launches l ON l.id=r.id WHERE json_extract(r.body,'$.state')='runnable' AND json_extract(r.body,'$.cancel_requested')=0 AND json_extract(l.body,'$.requires_rebind')=1 AND ((json_extract(o.body,'$.execution_owner.kind')='kernel' AND json_extract(o.body,'$.executor') IN ('wait_child','retrieval_control','wait_process','send','follow_up')) OR json_extract(o.body,'$.waiting_on') GLOB 'computer-request-wait:*' OR json_extract(o.body,'$.waiting_on') GLOB 'host-job-wait:*') AND json_extract(o.body,'$.waiting_on') IS NOT NULL AND json_extract(o.body,'$.phase')='terminal' ORDER BY r.rowid")?;
+        let mut q = self.db.prepare_cached(&format!("SELECT r.id FROM runs r INDEXED BY bot_inactivity_runs JOIN run_launches l ON l.id=r.id
+            WHERE json_extract(r.body,'$.state')='runnable' AND json_extract(r.body,'$.cancel_requested')=0 AND json_extract(l.body,'$.requires_rebind')=1
+            AND EXISTS(SELECT 1 FROM operations WHERE run_id=r.id AND json_extract(body,'$.waiting_on') IS NOT NULL
+                AND {OBSERVATION_OPERATION} AND json_extract(body,'$.phase')='terminal')
+            ORDER BY r.rowid"))?;
         let rows = q
             .query_map([], |r| r.get(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;

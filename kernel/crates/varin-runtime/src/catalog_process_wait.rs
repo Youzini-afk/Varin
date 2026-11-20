@@ -483,14 +483,13 @@ impl Catalog {
     pub(super) fn close_finished_process_waits(&mut self) -> Result<()> {
         let tx = self.db.transaction()?;
         let mut released = Vec::new();
-        for mut operation in read_all::<Operation>(&tx, "operations")? {
-            if (!(operation.executor.as_deref() == Some(WAIT_TOOL)
+        for mut operation in observations::active_operations(&tx, None)? {
+            if !(operation.executor.as_deref() == Some(WAIT_TOOL)
                 && operation.execution_owner == Some(ExecutorOwner::Kernel))
                 && !operation
                     .waiting_on
                     .as_deref()
-                    .is_some_and(|v| v.starts_with(super::host_jobs::WAIT_PREFIX)))
-                || operation.phase == OperationPhase::Terminal
+                    .is_some_and(|v| v.starts_with(super::host_jobs::WAIT_PREFIX))
             {
                 continue;
             }

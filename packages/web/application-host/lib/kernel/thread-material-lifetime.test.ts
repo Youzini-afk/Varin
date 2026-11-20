@@ -27,3 +27,19 @@ it('inherits only readable frozen references, survives parent deletion, and rele
   expect(await f.materials.read(scope, privateRef.snapshotId, authority('unrelated'))).not.toBeNull();
   expect(releaseBrowser).toHaveBeenCalledWith('child');
 });
+
+it('reads the retention plan again only when closing a live preparation can change it', async () => {
+  const fixture = createMaterialStoreFixture({ workspaceId: 'thread-materials:one' });
+  const empty: MaterialRetention = { uiReferences: [], attachmentPreparations: [], attachmentSources: [], sources: [], attachments: [], threads: [], inheritances: [] };
+  const deleted = { ...empty, threads: [{ threadId: 'one', rootThreadId: 'one', release: true }] };
+  const materialRetention = vi.fn().mockResolvedValueOnce(empty).mockResolvedValue(deleted);
+  const releasePreparations = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+  const owner = createThreadMaterialLifetime({ storage: fixture.workingStates, materials: fixture.materials, runtime: { materialRetention }, releasePreparations });
+  await owner.releaseDeleted();
+  expect(releasePreparations).not.toHaveBeenCalled();
+  expect(materialRetention).toHaveBeenCalledTimes(1);
+  await owner.releaseDeleted();
+  expect(materialRetention).toHaveBeenCalledTimes(2);
+  await owner.releaseDeleted();
+  expect(materialRetention).toHaveBeenCalledTimes(4);
+});

@@ -127,23 +127,18 @@ impl Catalog {
     pub fn capture_process_waits(&mut self) -> Result<Vec<ProcessWaitPreparation>> {
         self.close_finished_process_waits()?;
         let mut preparations = Vec::new();
-        for mut wait in read_all::<Wait>(&self.db, "waits")? {
-            let Some(operation_id) = wait
-                .id
-                .strip_prefix(PREFIX)
-                .or_else(|| wait.id.strip_prefix(WAIT_PREFIX))
-            else {
+        for operation in observations::operations(&self.db, None)? {
+            let Some(wait_id) = operation.waiting_on.as_deref().filter(|id| {
+                id.starts_with(PREFIX) || id.starts_with(WAIT_PREFIX)
+            }) else {
                 continue;
             };
-            let operation = self.operation(operation_id)?;
-            if operation.phase == OperationPhase::Terminal {
-                continue;
-            }
+            let mut wait: Wait = record(&self.db, "waits", wait_id)?;
             if operation.cancel_requested && !wait.cancelled {
                 if wait.id.starts_with(WAIT_PREFIX) {
-                    self.cancel_host_job_wait(operation_id)?;
+                    self.cancel_host_job_wait(&operation.id)?;
                 } else {
-                    self.cancel_process_wait(operation_id)?;
+                    self.cancel_process_wait(&operation.id)?;
                 }
                 wait.cancelled = true;
             }
@@ -385,30 +380,15 @@ impl Catalog {
         Ok(true)
     }
     pub fn pending_process_continuations(&self) -> Result<Vec<String>> {
-        let mut resumed = Vec::new();
         // A committed delivery whose Host launch was interrupted remains discoverable.
-        for operation in read_all::<Operation>(&self.db, "operations")? {
-            if (operation.executor.as_deref() != Some(WAIT_TOOL)
-                && !operation
-                    .waiting_on
-                    .as_deref()
-                    .is_some_and(|v| v.starts_with(WAIT_PREFIX)))
-                || operation.phase != OperationPhase::Terminal
-            {
-                continue;
-            }
-            let run = self.run(&operation.run_id)?;
-            if run.state == RunState::Runnable
-                && !run.cancel_requested
-                && self
-                    .launch_metadata(&run.id)?
-                    .is_some_and(|launch| launch.requires_rebind)
-                && !resumed.contains(&run.id)
-            {
-                resumed.push(run.id);
-            }
-        }
-        Ok(resumed)
+        let mut q = self.db.prepare_cached("SELECT r.id FROM runs r INDEXED BY bot_inactivity_runs
+            JOIN run_launches l ON l.id=r.id JOIN operations o ON o.run_id=r.id
+            WHERE json_extract(r.body,'$.state')='runnable' AND json_extract(r.body,'$.cancel_requested')=0
+                AND json_extract(l.body,'$.requires_rebind')=1 AND json_extract(o.body,'$.phase')='terminal'
+                AND (json_extract(o.body,'$.executor')=?1 OR json_extract(o.body,'$.waiting_on') GLOB ?2)
+            GROUP BY r.id ORDER BY min(o.rowid)")?;
+        let rows = q.query_map(params![WAIT_TOOL, format!("{WAIT_PREFIX}*")], |row| row.get(0))?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 }
 pub fn deliver_waits(catalog: &std::sync::Mutex<Catalog>) -> Result<Vec<String>> {

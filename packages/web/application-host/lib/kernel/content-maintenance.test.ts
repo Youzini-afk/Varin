@@ -38,17 +38,21 @@ it('coalesces deletion requests and resumes after original execution produces it
   expect(f.removed).toHaveBeenCalledTimes(3);
 });
 
-it('reports the failed cleanup stage and preserves its actual error', async () => {
+it('retries a failed source cleanup on its own schedule instead of on unrelated runtime events', async () => {
   const error = new Error('source retirement failed: workspace is busy');
-  const f = fixture(async () => { throw error; });
-  await vi.runOnlyPendingTimersAsync();
+  const release = vi.fn().mockRejectedValueOnce(error).mockResolvedValue({ pending: false });
+  const f = fixture(release);
+  await vi.advanceTimersByTimeAsync(1);
   expect(f.onError).toHaveBeenCalledOnce();
   expect(f.onError.mock.calls[0]![0]).toMatchObject({
     message: 'release deleted resources: source retirement failed: workspace is busy', cause: error,
   });
   expect(f.collectContent).not.toHaveBeenCalled();
-  f.activity(); await vi.runOnlyPendingTimersAsync();
-  expect(f.onError).toHaveBeenCalledOnce();
+  f.activity(); await vi.advanceTimersByTimeAsync(100);
+  expect(release).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(release).toHaveBeenCalledTimes(2);
+  expect(f.collectContent).toHaveBeenCalledOnce();
   await f.maintenance.dispose();
 });
 
@@ -56,9 +60,31 @@ it('retries pending source ownership only on the actual resource idle wake after
   const release=vi.fn().mockResolvedValueOnce({pending:true}).mockResolvedValue({pending:false});
   const f=fixture(release);await vi.runOnlyPendingTimersAsync();
   expect(release).toHaveBeenCalledTimes(1);
+  f.activity();
   await vi.advanceTimersByTimeAsync(1000);expect(release).toHaveBeenCalledTimes(1);
   f.maintenance.resourceIdle();await vi.runOnlyPendingTimersAsync();expect(release).toHaveBeenCalledTimes(2);
   f.maintenance.resourceIdle();await vi.runOnlyPendingTimersAsync();expect(release).toHaveBeenCalledTimes(2);
+  await f.maintenance.dispose();
+});
+
+it('keeps a retirement wake that arrives before the first collection reports a pending Run', async () => {
+  const f = fixture();
+  let settle!: (value: ContentCollectionReport) => void;
+  f.collectContent.mockImplementationOnce(() => new Promise(resolve => { settle = resolve; }));
+  await vi.advanceTimersByTimeAsync(1);
+  f.activity();
+  settle(report({ pendingDeletedThreads: 1 }));
+  await vi.runOnlyPendingTimersAsync();
+  expect(f.collectContent).toHaveBeenCalledTimes(2);
+  await f.maintenance.dispose();
+});
+
+it('wakes for an attachment preparation that is still waiting for its original operation', async () => {
+  const release = vi.fn().mockResolvedValueOnce({ pending: true, waitingForOperations: true }).mockResolvedValue({ pending: false });
+  const f = fixture(release);
+  await vi.runOnlyPendingTimersAsync();
+  f.activity(); await vi.runOnlyPendingTimersAsync();
+  expect(release).toHaveBeenCalledTimes(2);
   await f.maintenance.dispose();
 });
 
@@ -87,6 +113,8 @@ it('releases UI assets only after successful native metadata retirement in the s
   f.maintenance.request(); await vi.runOnlyPendingTimersAsync();
   expect(after).toHaveBeenCalledTimes(1);
   expect(f.onError).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1001);
+  expect(after).toHaveBeenCalledTimes(2);
   await f.maintenance.dispose();
 });
 

@@ -15,10 +15,10 @@ export function createThreadMaterialLifetime(options: {
   materials: WebMaterialStore;
   releaseBrowser?(threadId: string): Promise<void>;
   releaseSource?(source:import('./protocol.generated.js').LaunchSource,cleanupId:string,signal?:AbortSignal):Promise<boolean>;
-  releaseAttachmentSources?(plan: MaterialRetention, signal?: AbortSignal): Promise<{ pending: boolean }>;
+  releaseAttachmentSources?(plan: MaterialRetention, signal?: AbortSignal): Promise<{ pending: boolean; waitingForOperations?: boolean }>;
   reconcileAttachments?(plan: MaterialRetention, signal?: AbortSignal): Promise<{ pending: boolean }>;
   retainAttachments?(plan: MaterialRetention, signal?: AbortSignal): Promise<void>;
-  releasePreparations?(threads:readonly string[]):Promise<void>;
+  releasePreparations?(threads: readonly string[]): Promise<boolean>;
 }) {
   const serial = createWorkspaceOpSerializer();
   const actorStorage = (threadId: string): WorkspaceWorkingStateRootAccess => ({
@@ -55,9 +55,9 @@ export function createThreadMaterialLifetime(options: {
     }),
     releaseDeleted: (signal?: AbortSignal) => serial.runSerialized('materials', async () => {
       let plan = await options.runtime.materialRetention(undefined, signal);
-      if(options.releasePreparations){
-        await options.releasePreparations(plan.threads.filter(thread=>thread.release).map(thread=>thread.threadId));
-        plan=await options.runtime.materialRetention(undefined,signal);
+      const deleted = plan.threads.filter(thread => thread.release).map(thread => thread.threadId);
+      if (deleted.length && await options.releasePreparations?.(deleted)) {
+        plan = await options.runtime.materialRetention(undefined, signal);
       }
       await retain(plan, signal);
       const preparations = await options.reconcileAttachments?.(plan, signal);
@@ -71,7 +71,7 @@ export function createThreadMaterialLifetime(options: {
         for (const [root, deleted] of scopes) resumes.push(await stopMaterialActivity(threadMaterialScope(root), deleted));
         let pendingSources = 0;
         for (const item of plan.sources ?? []) { signal?.throwIfAborted(); if (options.releaseSource && !await options.releaseSource(item.source, item.cleanupId, signal)) pendingSources++; }
-        if (pendingSources) return { pending: true };
+        if (pendingSources) return { pending: true, waitingForOperations: Boolean(preparations?.pending) };
         const attachmentCleanup = await options.releaseAttachmentSources?.(plan, signal);
         if (attachmentCleanup?.pending || preparations?.pending) pendingSources++;
         for (const [root, deleted] of scopes) {
@@ -79,7 +79,10 @@ export function createThreadMaterialLifetime(options: {
           await createMaterialLifecycle(actorStorage(deleted[0]!)).releaseThreadMaterials(threadMaterialScope(root), deleted);
           for (const threadId of deleted) await options.releaseBrowser?.(threadId);
         }
-        return { pending: pendingSources > 0 };
+        return {
+          pending: pendingSources > 0,
+          waitingForOperations: Boolean(preparations?.pending || attachmentCleanup?.waitingForOperations),
+        };
       } finally { for (const resume of resumes.reverse()) resume(); }
     }),
   };

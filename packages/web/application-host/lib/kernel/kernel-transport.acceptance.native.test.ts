@@ -65,6 +65,26 @@ async function fixture(recoveryWakeBeforeHandshake = false) {
   return { host, actor, child, root, options, probe, requests, outstanding, runtimeEvents, readyOrder, maximum: () => maximum };
 }
 
+it('replays branch retirement from the original workspace after a restart', async () => {
+  const f = await fixture();
+  const branchId = 'source:retirement-fixture';
+  const deletion = { branchId, operationId: 'source-cleanup:retirement-fixture' };
+  await f.actor.createBranch({ branchId, operationId: 'create-retirement-fixture', workspaceId: 'ws', entries: [], draftBasePaths: [], captureScopes: [] });
+  const receipt = await f.actor.deleteBranch(deletion);
+  expect(receipt.deleted).toBe(true);
+  await f.host.close();
+
+  const reopened = createKernelClient(f.options);
+  cleanups.push(() => reopened.close());
+  await reopened.start();
+  const actor = async (workspace: string) => reopened.scoped(await reopened.issueGrant({
+    grantId: 'retire-' + workspace, owningWorkspace: workspace, executionWorkspace: workspace,
+    capabilities: ['storage.read', 'storage.write'], pathScopes: [''],
+  }));
+  await expect((await actor('ws')).deleteBranch(deletion)).resolves.toEqual(receipt);
+  await expect((await actor('other')).deleteBranch(deletion)).rejects.toThrow('grant workspace does not match resource');
+});
+
 it('reopens a retained tokenizer after real transport loss and reports the original safe native reason', async () => {
   const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
   const f = await fixture();

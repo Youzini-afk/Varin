@@ -6,6 +6,11 @@ use launches::SourceSelection;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub(super) fn initialize(db: &Connection) -> Result<()> {
+    db.execute_batch("CREATE INDEX IF NOT EXISTS source_retirement_candidates ON commands(id) WHERE json_extract(intent,'$.kind')='source.retention'")?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceRetirement {
@@ -138,6 +143,9 @@ impl Catalog {
     }
     fn source_retirement_threads(&self, drained: &[String]) -> Result<BTreeSet<String>> {
         let mut ready: BTreeSet<String> = drained.iter().cloned().collect();
+        if ready.is_empty() {
+            return Ok(ready);
+        }
         // Retained child identities and shared history still use the original
         // source for continuation/navigation, even after hiding its Thread.
         for query in [
@@ -158,6 +166,12 @@ impl Catalog {
         &self,
         drained: &[String],
     ) -> Result<Vec<SourceRetirement>> {
+        if drained.is_empty() && !self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM commands WHERE json_extract(intent,'$.kind')='source.retention')",
+            [], |row| row.get::<_, bool>(0),
+        )? {
+            return Ok(Vec::new());
+        }
         let ready = self.source_retirement_threads(drained)?;
         let references = self.source_references()?;
         for (id, (source, threads)) in &references {

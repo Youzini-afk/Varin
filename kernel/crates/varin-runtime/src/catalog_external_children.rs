@@ -572,7 +572,7 @@ pub fn deliver_waits(owner: &std::sync::Mutex<Catalog>) -> Result<()> {
             .lock()
             .map_err(|_| RuntimeError::Invalid("Catalog unavailable".into()))
     };
-    let waits = read_all::<Wait>(&lock()?.db, "waits")?;
+    let waits = observations::parked_waits(&lock()?.db, "child-wait:")?;
     for wait in waits {
         let Some(operation_id) = wait.id.strip_prefix("child-wait:") else {
             continue;
