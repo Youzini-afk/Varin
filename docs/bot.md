@@ -12,6 +12,7 @@ The Host coordinates room membership and publication through a revisioned kernel
 
 ## Profile, Model Resolution & Sessions
 
+- **Settings**: The Bot directory uses the same groups and order as the conversation sidebar. Each Bot has a Profile and Memory page. One save applies changed profile fields, including appearance. Bot work and its results are accessible from the conversation side panel under **All work**. Settings → Memory owns service-wide memory automation, and **Model roles** owns the memory organizer model.
 - **Model & thinking precedence** for a new Bot conversation:
   1. Bot profile's dedicated model/thinking (if set; omitted thinking falls back to conversation default → model's first supported level).
   2. Current Workbench/IDE selection on the same Host.

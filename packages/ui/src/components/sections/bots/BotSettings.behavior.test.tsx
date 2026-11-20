@@ -6,28 +6,25 @@ import type { BotSummary } from '@/lib/bots';
 import { BotSettings } from './BotSettings';
 import { BotDetailsDialog } from './BotDetailsDialog';
 
-const api = vi.hoisted(() => ({ list: vi.fn(), work: vi.fn(), memory: vi.fn(), update: vi.fn(), remove: vi.fn(), archive: vi.fn(), change: vi.fn(), organizationRead: vi.fn(), organizationUpdate: vi.fn() }));
+const api = vi.hoisted(() => ({ list: vi.fn(), memory: vi.fn(), update: vi.fn(), remove: vi.fn(), archive: vi.fn(), change: vi.fn(), organizationRead: vi.fn(), organizationUpdate: vi.fn() }));
 vi.mock('@/hooks/useRuntimeAPIs', () => { const bots = { organization: { read: api.organizationRead, update: api.organizationUpdate } }; return { useRuntimeAPIs: () => ({ bots }) }; });
-vi.mock('@/lib/bots', async original => ({ ...await original<typeof import('@/lib/bots')>(), listBots: api.list, listBotWork: api.work, updateBot: api.update,
+vi.mock('@/lib/bots', async original => ({ ...await original<typeof import('@/lib/bots')>(), listBots: api.list, updateBot: api.update,
   listBotMemory: api.memory, deleteBot: api.remove, archiveBot: api.archive, changeBotState: api.change, createBot: vi.fn(), openBotEntryFor: vi.fn() }));
-vi.mock('./BotMemoryPreferences', () => ({ BotMemoryPreferences: () => null }));
 vi.mock('@/components/ui/VarinLogo', () => ({ VarinLogo: () => null }));
-vi.mock('@/components/ui/dropdown-menu', async () => {
-  const { createContext, useContext } = await import('react');
-  const Selection = createContext((_id: string) => {});
+vi.mock('@/components/ui/dropdown-menu', () => {
   const Children = ({ children }: React.PropsWithChildren) => <>{children}</>;
-  return { DropdownMenu: Children, DropdownMenuContent: Children, DropdownMenuTrigger: Children, DropdownMenuLabel: Children,
-    DropdownMenuRadioGroup: ({ children, onValueChange }: React.PropsWithChildren<{ onValueChange(id: string): void }>) => <Selection.Provider value={onValueChange}>{children}</Selection.Provider>,
-    DropdownMenuRadioItem: ({ value }: { value: string }) => { const select = useContext(Selection); return <button onClick={() => select(value)}>select-{value}</button>; } };
+  return { DropdownMenu: Children, DropdownMenuContent: Children, DropdownMenuTrigger: Children, DropdownMenuItem: Children };
 });
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('./BotModelSelector', () => ({ BotModelSelector: ({ onChange, onThinkingChange }: { onChange(provider: string, model: string): Promise<void>; onThinkingChange(level: 'high'): void }) => <><button onClick={() => { void onChange('gateway', 'claude'); }}>choose-model</button><button onClick={() => onThinkingChange('high')}>choose-thinking</button></> }));
-vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={onChange as React.FormEventHandler<HTMLInputElement>} /> }));
-vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...props} onInput={onChange as React.FormEventHandler<HTMLTextAreaElement>} /> }));
-vi.mock('@/components/sections/computers/ComputerDesktopView', () => ({ ComputerDesktopView: () => null }));
-vi.mock('@/lib/computers', () => ({ downloadComputerArtifact: vi.fn() }));
+vi.mock('./BotAppearanceSettings', () => ({ BotAppearanceSettings: ({ onApply }: { onApply(value: BotSummary['appearance']): void }) => <button onClick={() => onApply({ kind: 'preset', character: 'gpt', color: 'original' })}>choose-appearance</button> }));
+vi.mock('../shared/kit', async original => ({
+  ...await original<typeof import('../shared/kit')>(),
+  Field: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={onChange as React.FormEventHandler<HTMLInputElement>} />,
+  Area: ({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...props} onInput={onChange as React.FormEventHandler<HTMLTextAreaElement>} />,
+}));
 vi.mock('@/components/ui/dialog', () => {
   const Section = ({ children }: { children?: React.ReactNode }) => <div>{children}</div>;
   return { Dialog: ({ open, children, onOpenChange }: { open: boolean; children: React.ReactNode; onOpenChange?(open: boolean): void }) => open ? <section role="dialog">{children}<button onClick={() => onOpenChange?.(false)}>close-dialog</button></section> : null,
@@ -51,7 +48,7 @@ beforeEach(() => {
   vi.stubGlobal('Event', window.Event); vi.stubGlobal('CustomEvent', window.CustomEvent);
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   api.list.mockReset().mockResolvedValue([bot('a'), bot('b', true)]);
-  api.work.mockReset().mockResolvedValue([]); api.update.mockReset().mockResolvedValue(bot('a'));
+  api.update.mockReset().mockResolvedValue(bot('a'));
   api.memory.mockReset().mockResolvedValue([]);
   api.archive.mockReset().mockResolvedValue(bot('a', true)); api.change.mockReset().mockResolvedValue(bot('b'));
   api.remove.mockReset().mockResolvedValue(null);
@@ -59,14 +56,16 @@ beforeEach(() => {
   api.organizationUpdate.mockReset();
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
-it('uses the Host grouping and member order in the settings Bot picker', async () => {
-  api.organizationRead.mockResolvedValue({ revision: 1, groups: [{ id: 'research', name: 'Research', botIds: ['a'] }], ungrouped: ['b'] });
+it('uses the Host grouping and member order, with archived Bots collapsed', async () => {
+  api.list.mockResolvedValue([bot('a'), bot('b'), bot('c', true)]);
+  api.organizationRead.mockResolvedValue({ revision: 1, groups: [{ id: 'research', name: 'Research', botIds: ['b', 'a'] }], ungrouped: ['c'] });
   await render();
   expect(container.textContent).toContain('Research');
-  expect(container.textContent).toContain('bot.groups.ungrouped');
-  expect([...container.querySelectorAll('button')].filter(button => button.textContent?.startsWith('select-')).map(button => button.textContent)).toEqual(['select-b', 'select-a']);
-  await click('select-b');
+  expect([...container.querySelectorAll('.sk-ci')].map(button => button.textContent)).toEqual(['b', 'a']);
+  await click('b');
   expect(container.querySelector<HTMLInputElement>('[aria-label="settings.bots.name.label"]')?.value).toBe('b');
+  await click('settings.bots.archived');
+  expect([...container.querySelectorAll('.sk-ci')].map(button => button.textContent)).toEqual(['b', 'a', 'c']);
 });
 const render = async () => { await act(async () => { root.render(<BotSettings />); }); };
 const click = async (text: string) => {
@@ -83,15 +82,14 @@ it('marks thinking-only changes as dirty and saves them with the profile', async
   expect(api.update).toHaveBeenCalledWith('a', expect.objectContaining({ model: { ...model, thinkingLevel: 'high' } }));
 });
 
-it('switches Bots in the compact picker and applies lifecycle actions to the selected Bot', async () => {
+it('switches Bots in the directory and applies lifecycle actions to the selected Bot', async () => {
   api.list.mockResolvedValue([bot('a'), bot('b')]);
-  await render(); await click('select-b'); await click('rename-b'); await click('set-name');
-  await act(async () => { container.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
-  expect(api.update).toHaveBeenCalledWith('b', { name: 'New name' });
+  await render(); await click('b');
   expect(container.querySelector<HTMLInputElement>('[aria-label="settings.bots.name.label"]')?.value).toBe('b');
-  await click('select-a');
+  await click('a');
+  api.list.mockResolvedValue([bot('a', true), bot('b', true)]);
   await click('archive-a'); expect(api.archive).toHaveBeenCalledWith('a');
-  await click('select-b');
+  await click('b');
   await click('restore-b'); expect(api.change).toHaveBeenCalledWith('b', 'restore');
 });
 
@@ -121,7 +119,7 @@ it('shows pending cleanup and exposes retry when an archived Bot deletion fails'
 });
 
 
-it('saves name, instructions and model as one profile draft', async () => {
+it('saves name, appearance, instructions and model as one profile draft', async () => {
   let current = bot('a');
   api.list.mockImplementation(async () => [current]);
   let acknowledge!: () => void;
@@ -132,11 +130,13 @@ it('saves name, instructions and model as one profile draft', async () => {
   const instructions = container.querySelector<HTMLTextAreaElement>('[aria-label="settings.bots.instructions.label"]')!;
   await act(async () => { name.value = 'Unsaved name'; name.dispatchEvent(new Event('input', { bubbles: true })); instructions.value = 'Unsaved instructions'; instructions.dispatchEvent(new Event('input', { bubbles: true })); });
   await click('choose-model');
+  await click('choose-appearance');
   expect(api.update).not.toHaveBeenCalled();
   expect(name.value).toBe('Unsaved name');
   expect(instructions.value).toBe('Unsaved instructions');
   await click('settings.bots.save');
-  expect(api.update).toHaveBeenCalledExactlyOnceWith('a', { name: 'Unsaved name', instructions: 'Unsaved instructions', model: { providerId: 'gateway', modelId: 'claude' } });
+  expect(api.update).toHaveBeenCalledExactlyOnceWith('a', { name: 'Unsaved name', instructions: 'Unsaved instructions', model: { providerId: 'gateway', modelId: 'claude' },
+    appearance: { kind: 'preset', character: 'gpt', color: 'original' } });
   const visibleStatus = () => container.querySelector('[aria-hidden="false"] [role="status"]')?.textContent;
   expect(visibleStatus()).toBe('settings.common.actions.saving');
   await act(async () => acknowledge());
@@ -151,28 +151,24 @@ it('saves name, instructions and model as one profile draft', async () => {
   expect(api.update).toHaveBeenCalledOnce();
 });
 
-it('opens work and memory in place, keeps drafts across tabs, and guards changing Bots', async () => {
+it('opens memory in place, keeps drafts across tabs, and guards changing Bots', async () => {
   api.memory.mockResolvedValue([{ id: 1, content: 'Remember this', trigger: '', inactive: false }]);
   await render();
-  expect(api.work).not.toHaveBeenCalled();
   expect(api.memory).not.toHaveBeenCalled();
-  await click('settings.bots.section.work');
-  expect(api.work).toHaveBeenCalledWith('a');
-  await click('bot.profile.title');
   const name = container.querySelector<HTMLInputElement>('[aria-label="settings.bots.name.label"]')!;
   await act(async () => { name.value = 'Draft'; name.dispatchEvent(new Event('input', { bubbles: true })); });
   vi.mocked(window.confirm).mockReturnValueOnce(false);
-  await click('select-b');
+  await click('settings.bots.archived'); await click('b');
   expect(name.value).toBe('Draft');
   expect(window.confirm).toHaveBeenCalledWith('settings.bots.discardConfirm');
-  await click('settings.bots.memory');
+  await click('assistant.memory.title');
   expect(container.querySelector('[role=dialog]')).toBeNull();
   await click('settings.bots.memory.correct');
   const memory = container.querySelector<HTMLTextAreaElement>('[aria-label="settings.bots.memory.correct"]')!;
   await act(async () => { memory.value = 'Memory draft'; memory.dispatchEvent(new Event('input', { bubbles: true })); });
   await click('bot.profile.title');
   expect(name.value).toBe('Draft');
-  await click('settings.bots.memory');
+  await click('assistant.memory.title');
   expect(memory.value).toBe('Memory draft');
   expect(api.memory).toHaveBeenCalledTimes(1);
 });

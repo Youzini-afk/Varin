@@ -1,13 +1,13 @@
 # Bot Appearances & Custom Asset Packs
 
-Each Bot selects its visual appearance under **Settings → Agent → Varin → Profile → Appearance** (and in the Bot side panel). Sidebar, Bot switcher, chat landing, work stage, and mobile headers share this selection. Appearance is purely visual — it never enters prompts or alters model, instructions, memory, or running work.
+Each Bot selects its visual appearance under **Settings → Bot → Profile → Change appearance**. The Bot side panel opens the profile for that Bot. Sidebar, Bot switcher, chat landing, work stage, and mobile headers share this selection. Appearance affects the visuals shown to the user.
 
 ## Selection & Asset Library
 
 - **Built-in Varin**: Follows the client theme, stays original mist-blue, or uses a fixed per-Bot accent color (recoloring outfit/props only; eyes, hair, skin, and running animation remain intact).
 - **Built-in characters**: The appearance picker also includes 15 character presets, each with its own portrait, poses and secondary motion. Presets start in their original palette. Theme and custom colors tint stage effects, particles and props while the character's drawing keeps its palette.
 - **Custom uploads**: PNG, JPEG, WebP, GIF preserve original colors (transparent images use natural silhouette; opaque images get rounded frames). Full figure and small avatar support independent X/Y framing and zoom.
-- **Apply vs Library**: Importing adds the asset to the Host library immediately (deduplicated by content hash); clicking **Apply** binds it to the Bot independently of unsaved profile drafts. Assets still referenced by active or archived Bots cannot be deleted until reassigned.
+- **Apply and Save**: Importing adds the asset to the Host library immediately (deduplicated by content hash). **Apply** previews it in the profile draft. **Save** writes the selected appearance together with the other changed profile fields. Assets referenced by active or archived Bots must be reassigned before removal.
 
 ## External Appearance Packs (ZIP)
 

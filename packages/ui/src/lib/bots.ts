@@ -1,4 +1,4 @@
-import type { BotCreateInput, BotUpdateInput, BotModelSelection, BotReadyEntry, BotSummary, BotWorkItem, BotMemoryItem } from '@varin/application-client';
+import type { BotCreateInput, BotUpdateInput, BotModelSelection, BotReadyEntry, BotMemoryItem } from '@varin/application-client';
 import { createScheduledTasksHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange } from '@varin/application-client';
 import { create } from 'zustand';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
@@ -57,9 +57,6 @@ subscribeRuntimeEndpointWillChange(() => useBotReturn.setState({ point: null, re
 /** View selection only. Identities are always returned by the Host. */
 export const useBotNavigation = create<{ botId: string | null; entry: BotReadyEntry | null; model: BotModelSelection | null; archived?: boolean }>(() => ({ botId: null, entry: null, model: null }));
 subscribeRuntimeEndpointWillChange(() => useBotNavigation.setState({ botId: null, entry: null, model: null }));
-export const botWorkId = (item: BotWorkItem) => JSON.stringify([item.identity.threadId, item.identity.branchId]);
-export const botWorkTitle = (item: BotWorkItem) => item.thread.title || item.identity.threadId;
-export const botWorkEntry = (item: BotWorkItem): BotReadyEntry => item.identity;
 export const sameBotEntry = (a: BotReadyEntry | null | undefined, b: BotReadyEntry | null | undefined) => Boolean(a && b && a.threadId === b.threadId && a.branchId === b.branchId);
 const botNavigationFence = () => {
   const generation = getRuntimeEndpointGeneration();
@@ -83,19 +80,6 @@ export const openBotEntryFor = async (botId: string): Promise<void> => {
   if (!navigation.isCurrent()) return;
   useUIStore.getState().setSettingsDialogOpen(false);
   await openBotConversation(bot.id, entry, model);
-};
-export const openBotWorkFor = async (bot: BotSummary, work: BotWorkItem): Promise<void> => {
-  const entry = botWorkEntry(work); if (!entry) return;
-  if (work.purpose === 'work' || work.purpose === 'followed') {
-    const { openThreadFromNavigation } = await import('@/lib/agent-runtime/threadNavigation');
-    await openThreadFromNavigation(entry);
-    return;
-  }
-  const navigation = botNavigationFence();
-  await selectActiveWorkbenchProfile(VARIN_WORKBENCH_BOT_PROFILE_ID, undefined, { enableShell: true, beforeCommit: navigation.beforeCommit });
-  if (!navigation.isCurrent()) return;
-  useUIStore.getState().setSettingsDialogOpen(false);
-  await openBotConversation(bot.id, entry);
 };
 /** Open delegated work in the ordinary workbench and remember the Bot conversation to return to. */
 export const openBotWorkInWorkbench = async (point: BotReturnPoint, work: BotReadyEntry): Promise<void> => {

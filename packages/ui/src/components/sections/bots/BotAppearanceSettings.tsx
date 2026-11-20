@@ -1,5 +1,5 @@
 import React from 'react';
-import { BOT_APPEARANCE_STATES, BOT_FIGURE_PRESETS, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, defaultBotAppearance, defaultBotImageCrop, type BotAppearance, type BotAppearanceAsset, type BotAppearanceState, type BotFigurePreset, type BotImageCrop, type BotSummary } from '@varin/application-client';
+import { BOT_APPEARANCE_STATES, BOT_FIGURE_PRESETS, getRuntimeEndpointGeneration, defaultBotAppearance, defaultBotImageCrop, type BotAppearance, type BotAppearanceAsset, type BotAppearanceState, type BotFigurePreset, type BotImageCrop, type BotSummary } from '@varin/application-client';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { RiUploadLine } from '@remixicon/react';
@@ -7,7 +7,6 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useMotionLevel } from '@/hooks/usePrefersReducedMotion';
 import { EASE_OUT, springTransition } from '@/lib/motion/tokens';
 import { useI18n } from '@/lib/i18n';
-import { updateBot } from '@/lib/bots';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { BotFigure, BotPresetPortrait } from '@/workbenches/bot/BotFigure';
 import { BotImageArtwork } from '@/workbenches/bot/BotImageArtwork';
@@ -18,31 +17,20 @@ const COLORS = ['#8fb0ea', '#ab97cd', '#c68496', '#cf9e66', '#82ac96', '#7baeb8'
 const PREVIEW_STATES = BOT_APPEARANCE_STATES.filter(state => !state.startsWith('tool-'));
 const TOOL_PREVIEW_STATES = BOT_APPEARANCE_STATES.filter(state => state.startsWith('tool-'));
 
-/** Immediate appearance changes are separate from the surrounding profile's text draft. */
-export function BotAppearanceSettings({ bot, disabled, onChanged }: { bot: BotSummary; disabled?: boolean; onChanged?(bot: BotSummary): void }) {
+export function BotAppearanceSettings({ bot, disabled, onApply }: { bot: BotSummary; disabled?: boolean; onApply(appearance: BotAppearance): void }) {
   const { t } = useI18n();
   const [open, setOpen] = React.useState(false);
-  const [saved, setSaved] = React.useState<{ bot: BotSummary; host: number } | null>(null);
-  const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
-  const current = saved?.host === host && saved.bot.id === bot.id && saved.bot.revision > bot.revision ? saved.bot : bot;
-  const appearance = current.appearance;
   return <>
-    <div className="bot-appearance-setting">
-      <BotFigure bot={current} state="idle" size={64} still portrait={appearance?.kind !== 'custom'} />
-      <div><span className="typography-settings-field-label">{t('bot.appearance.title')}</span>
-        <p className="typography-meta text-muted-foreground">{appearance?.kind === 'preset' ? t(`bot.appearance.character.${appearance.character}`)
-          : appearance?.kind === 'custom' ? t('bot.appearance.custom') : t('bot.appearance.builtin', { name: t('bot.appearance.character.varin') })}</p></div>
-      <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => setOpen(true)}>{t('bot.appearance.change')}</Button>
-    </div>
+    <Button type="button" variant="ghost" size="sm" className="h-7 px-1.5 text-muted-foreground" disabled={disabled} onClick={() => setOpen(true)}>{t('bot.appearance.change')}</Button>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="bot-appearance-dialog max-w-3xl p-0 gap-0 overflow-hidden">
-        <AppearanceEditor key={`${host}:${bot.id}`} bot={current} onClose={() => setOpen(false)} onChanged={value => { setSaved({ bot: value, host }); onChanged?.(value); }} />
+        <AppearanceEditor bot={bot} onClose={() => setOpen(false)} onApply={value => { onApply(value); setOpen(false); }} />
       </DialogContent>
     </Dialog>
   </>;
 }
 
-function AppearanceEditor({ bot, onChanged, onClose }: { bot: BotSummary; onChanged(bot: BotSummary): void; onClose(): void }) {
+function AppearanceEditor({ bot, onApply, onClose }: { bot: BotSummary; onApply(appearance: BotAppearance): void; onClose(): void }) {
   const { t } = useI18n();
   const motionLevel = useMotionLevel();
   const [appearance, setAppearance] = React.useState<BotAppearance>(() => bot.appearance ?? defaultBotAppearance());
@@ -85,12 +73,6 @@ function AppearanceEditor({ bot, onChanged, onClose }: { bot: BotSummary; onChan
       setAssets(current => [...current.filter(item => item.id !== asset.id), asset]); selectAsset(asset);
     } catch (error) { if (active()) setError(String(error)); }
     finally { if (active()) setBusy(false); if (upload.current === controller) upload.current = null; }
-  };
-  const apply = async () => {
-    setBusy(true); setError('');
-    try { const saved = await updateBot(bot.id, { appearance }); if (active()) { onChanged(saved); onClose(); } }
-    catch (error) { if (active()) setError(String(error)); }
-    finally { if (active()) setBusy(false); }
   };
   const remove = async () => {
     if (!selected || !window.confirm(t('bot.appearance.removeConfirm', { name: selected.name }))) return;
@@ -172,7 +154,7 @@ function AppearanceEditor({ bot, onChanged, onClose }: { bot: BotSummary; onChan
     <DialogFooter className="border-t border-border px-6 py-4 items-center flex-row flex-wrap justify-end">
       {error && <span className="basis-full sm:basis-0 flex-1 typography-meta text-destructive" role="alert">{error}<button type="button" className="ml-2 underline" onClick={() => { setError(''); if (appearance.kind === 'preset' && !previewReady) retryPreview(); void refresh(); }}>{t('common.retry')}</button></span>}
       <Button variant="ghost" disabled={busy} onClick={onClose}>{t('settings.common.actions.cancel')}</Button>
-      <Button disabled={busy || !previewReady || appearance.kind === 'custom' && !selected} onClick={() => { void apply(); }}>{t(busy ? 'settings.bots.saving' : 'bot.appearance.apply')}</Button>
+      <Button disabled={busy || !previewReady || appearance.kind === 'custom' && !selected} onClick={() => onApply(appearance)}>{t('bot.appearance.apply')}</Button>
     </DialogFooter>
   </>;
 }

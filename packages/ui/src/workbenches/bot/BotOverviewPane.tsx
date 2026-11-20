@@ -1,6 +1,9 @@
 import React from 'react';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { Icon } from '@/components/icon/Icon';
+import { toast } from '@/components/ui';
+import { downloadComputerArtifact } from '@/lib/computers';
+import type { BotWorkItem } from '@/lib/bots';
 import { useI18n } from '@/lib/i18n';
 import { useBotPanel } from './botPanelModel';
 import { useBotLayout } from './botLayout';
@@ -28,8 +31,21 @@ function FollowingRow({ item, showSession }: { item: BotWorkView; showSession: b
       <span className="bot-following-state">{item.status ? <BotWorkStatusLabel status={item.status} /> : t(item.lastState === 'completed' ? 'bot.workspace.roundEnded' : item.lastState === 'failed' ? 'bot.workspace.failed' : item.lastState === 'cancelled' ? 'bot.workspace.cancelled' : 'bot.workspace.idle')}</span>
       {showSession && item.sessionThreadId && <small>{t('bot.workspace.fromSession', { name: model.sessionTitle(item.sessionThreadId) })}</small>}
     </button>
-    {model.workItems?.find(raw => workKey(raw.identity) === item.key)?.desktops?.map(desktop => <button type="button" key={desktop.id} className="bot-work-link" onClick={() => navigation?.computer(desktop)}><Icon name="computer" className="size-3" />{desktop.label}</button>)}
+    <WorkResources item={model.workItems?.find(raw => workKey(raw.identity) === item.key)} />
   </div>;
+}
+
+function WorkResources({ item }: { item?: BotWorkItem }) {
+  const navigation = useBotWorkspaceNavigation();
+  return <>
+    {navigation && item?.desktops?.map(desktop => <button type="button" key={desktop.id} className="bot-work-link" onClick={() => navigation.computer(desktop)}>
+      <Icon name="computer" className="size-3 shrink-0" /><span className="truncate">{desktop.label}</span>
+    </button>)}
+    {item?.artifacts?.map(artifact => <button type="button" key={artifact.id} className="bot-work-link" title={artifact.relativePath}
+      onClick={() => { void downloadComputerArtifact(artifact).catch(error => toast.error(error instanceof Error ? error.message : String(error))); }}>
+      <Icon name="download" className="size-3 shrink-0" /><span className="truncate">{artifact.relativePath.split('/').at(-1)}</span>
+    </button>)}
+  </>;
 }
 
 /** Stable, source-owned work identities; updates never reorder the user's current reading. */
@@ -57,7 +73,12 @@ export function BotOverviewPane() {
         return item ? <FollowingRow key={item.key} item={item} showSession={scope === 'all' && item.sessionThreadId !== sessionId} /> : null;
       })}</details>)}
       {pending.map(item => <FollowingRow key={item.key} item={item} showSession={scope === 'all' && item.sessionThreadId !== sessionId} />)}
-      {followed.map(item => <button type="button" key={workKey(item.identity)} className="bot-following-main" onClick={() => navigation?.open({ kind: 'work', key: workKey(item.identity), identity: item.identity, title: item.thread.title })}><b>{item.thread.title}</b><small>{t('bot.workspace.followed')} · {runStatus(item.activeRun) ? t('bot.work.running') : t('bot.workspace.idle')}</small></button>)}
+      {followed.map(item => <div className="bot-following-row" key={workKey(item.identity)}>
+        <button type="button" className="bot-following-main" onClick={() => navigation?.open({ kind: 'work', key: workKey(item.identity), identity: item.identity, title: item.thread.title })}>
+          <b>{item.thread.title}</b><small>{t('bot.workspace.followed')} · {runStatus(item.activeRun) ? t('bot.work.running') : t('bot.workspace.idle')}</small>
+        </button>
+        <WorkResources item={item} />
+      </div>)}
       {!pending.length && !matters.length && !followed.length && !model.session?.running && <p className="bot-overview-empty">{t('bot.workspace.emptyWork')}</p>}
       {scope === 'session' && elsewhere > 0 && <button className="bot-section-more" type="button" onClick={() => setScope('all')}>{t('bot.workspace.otherSessions', { count: elsewhere })}<Icon name="arrow-right-s" className="size-3" /></button>}
     </section>

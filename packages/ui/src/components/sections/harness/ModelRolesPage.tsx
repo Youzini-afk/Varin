@@ -67,6 +67,7 @@ export function ModelRolesPage() {
           status={status(props.harness.permissions?.mode === 'smart' && Boolean(resolveHarnessModelSlot('permissionJudge', props.harness.models, null)),
             t('settings.page.harness.page.permissions.title'), () => shell.openPage('harness-permissions', { item: 'harness.permissions.mode' }))} />
         <HarnessModelField {...props} slot="contextCompaction" enableControl={false} openModel={() => openAgent('context')} />
+        <HarnessModelField {...props} slot="memoryOrganizer" item="knowledge.model" />
       </Section>
       <Section title={t('settings.roles.generation')}>
         <HarnessModelField {...props} slot="nextStep" enableControl={false}

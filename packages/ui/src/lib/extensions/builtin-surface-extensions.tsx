@@ -11,6 +11,7 @@ import {
 import type { SurfaceActivation, SurfaceActivationContext } from '@varin/extension-surface';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
+import { BotSettingsPage } from '@/components/sections/bots/BotSettings';
 import {
   HarnessSettingsPage,
   type HarnessSettingsSection,
@@ -29,7 +30,6 @@ const HARNESS_SECTION_BY_SLUG: Record<string, HarnessSettingsSection> = {
   'harness-context': 'context',
   'harness-web': 'web',
   'harness-computers': 'computers',
-  'harness-bots': 'bots',
 };
 
 const pageImplementation = (
@@ -52,6 +52,7 @@ const pageImplementation = (
     case VARIN_BUILTIN_HARNESS_EXTENSION.manifest.id: {
       const contribution = definition.manifest.contributions?.find((item) => item.id === contributionId);
       const slug = typeof contribution?.data.slug === 'string' ? contribution.data.slug : '';
+      if (slug === 'harness-bots') return { renderContent: () => <BotSettingsPage /> };
       const section = HARNESS_SECTION_BY_SLUG[slug];
       if (!section) throw new Error(`Unknown Agent Harness settings page: ${contributionId}`);
       return { renderContent: () => <HarnessSettingsPage section={section} /> };

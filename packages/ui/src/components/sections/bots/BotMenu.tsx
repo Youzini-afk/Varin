@@ -7,8 +7,8 @@ import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, C
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 
 export type BotMenuAction = 'pin' | 'rename' | 'profile' | 'memory' | 'sleep' | 'wake' | 'archive' | 'restore' | 'retry' | 'delete';
-export function BotMenu({ bot, disabled, onAction, children, persistentActions = false, onMove }: {
-  bot: BotSummary; disabled: boolean; onAction(action: BotMenuAction): void; children: React.ReactNode; persistentActions?: boolean; onMove?(): void;
+export function BotMenu({ bot, disabled, onAction, children, onMove }: {
+  bot: BotSummary; disabled: boolean; onAction(action: BotMenuAction): void; children?: React.ReactNode; onMove?(): void;
 }) {
   const { t } = useI18n();
   const pending = React.useRef<BotMenuAction | 'move' | null>(null);
@@ -20,20 +20,21 @@ export function BotMenu({ bot, disabled, onAction, children, persistentActions =
   };
   const state = bot.activity?.state ?? 'awake';
   const transitioning = state === 'sleeping' || state === 'waking';
-  const actions: Array<{ id: BotMenuAction; icon: IconName; label: string; disabled?: boolean } | null> = bot.deletion ? [
+  type ItemAction = { id: BotMenuAction; icon: IconName; label: string; disabled?: boolean };
+  const profileActions: ItemAction[] = children ? [
+    { id: 'profile', icon: 'settings-3', label: t('settings.bots.section.profile') },
+    { id: 'memory', icon: 'brain', label: t('settings.bots.memory') },
+  ] : [];
+  const actions: Array<ItemAction | null> = bot.deletion ? [
     { id: 'retry', icon: 'refresh', label: t(bot.deletion.error ? 'settings.bots.deleteRetry' : 'settings.bots.deleting'), disabled: !bot.deletion.error },
   ] : bot.archived ? [
     { id: 'restore', icon: 'history', label: t('settings.bots.restore') },
-    { id: 'profile', icon: 'settings-3', label: t('settings.bots.section.profile') },
-    { id: 'memory', icon: 'brain', label: t('settings.bots.memory') },
+    ...profileActions,
     null,
     { id: 'delete', icon: 'delete-bin', label: t('settings.bots.delete'), disabled: transitioning },
   ] : [
     { id: 'pin', icon: 'pushpin', label: t(bot.pinnedAt ? 'settings.bots.unpin' : 'settings.bots.pin') },
-    { id: 'rename', icon: 'edit', label: t('settings.bots.rename') },
-    null,
-    { id: 'profile', icon: 'settings-3', label: t('settings.bots.section.profile') },
-    { id: 'memory', icon: 'brain', label: t('settings.bots.memory') },
+    ...(children ? [{ id: 'rename', icon: 'edit', label: t('settings.bots.rename') } as const, null, ...profileActions] : []),
     null,
     { id: state === 'awake' || state === 'sleep-failed' ? 'sleep' : 'wake',
       icon: state === 'awake' || state === 'sleep-failed' ? 'moon' : 'play',
@@ -52,16 +53,19 @@ export function BotMenu({ bot, disabled, onAction, children, persistentActions =
       <Icon name={action.icon} className="size-4" />{action.label}
     </Item> : <Separator key={`separator-${index}`} />)}</>;
   };
+  const menu = <DropdownMenu onOpenChange={opened} onOpenChangeComplete={complete}>
+    <DropdownMenuTrigger asChild><button type="button" disabled={disabled} aria-label={`${bot.name} · ${t('settings.bots.actions')}`}
+      className={`mr-1 rounded p-1 text-muted-foreground hover:text-foreground focus:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100 ${children ? 'opacity-0' : 'opacity-100'}`}>
+      <Icon name="more" className="size-4" />
+    </button></DropdownMenuTrigger>
+    <DropdownMenuContent align={children ? 'start' : 'end'} finalFocus={() => returnFocus.current}>{items(true)}</DropdownMenuContent>
+  </DropdownMenu>;
+  if (!children) return menu;
   return <ContextMenu onOpenChange={opened} onOpenChangeComplete={complete}>
     <ContextMenuTrigger asChild>
       <div className="group flex items-center rounded-md focus-within:bg-interactive-hover data-[state=open]:bg-interactive-hover">
         {children}
-        <DropdownMenu onOpenChange={opened} onOpenChangeComplete={complete}>
-          <DropdownMenuTrigger asChild><button type="button" disabled={disabled} aria-label={`${bot.name} · ${t('settings.bots.actions')}`} className={`mr-1 rounded p-1 text-muted-foreground hover:text-foreground focus:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100 ${persistentActions ? 'opacity-100' : 'opacity-0'}`}>
-            <Icon name="more" className="size-4" />
-          </button></DropdownMenuTrigger>
-          <DropdownMenuContent align="start" finalFocus={() => returnFocus.current}>{items(true)}</DropdownMenuContent>
-        </DropdownMenu>
+        {menu}
       </div>
     </ContextMenuTrigger>
     <ContextMenuContent finalFocus={() => returnFocus.current}>{items(false)}</ContextMenuContent>

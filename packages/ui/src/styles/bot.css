@@ -346,17 +346,6 @@ button.bot-event-input:hover { background: var(--interactive-hover); color: var(
 .bot-schedule-detail dt { opacity: .8; }
 .bot-schedule-detail dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 
-/* Profile page pushed over the tab content (§5.8). */
-.bot-profile-page { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; background: var(--background); animation: bot-profile-in var(--motion-dur-travel) var(--motion-ease-travel) backwards; }
-.bot-profile-page[data-leaving] { pointer-events: none; animation: bot-profile-out var(--motion-dur-exit) var(--motion-ease-exit) forwards; }
-@keyframes bot-profile-in { from { opacity: 0; translate: 24px 0; } }
-@keyframes bot-profile-out { to { opacity: 0; translate: 24px 0; } }
-.bot-savebar {
-  position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 3; display: flex; align-items: center; gap: 8px; border-radius: 12px; padding: 9px 10px 9px 14px;
-  background: var(--surface-elevated, var(--background)); box-shadow: 0 0 0 1px var(--border), 0 22px 50px -18px rgb(0 0 0 / .3); font-size: 12.5px; color: var(--muted-foreground);
-  animation: bot-need-in var(--motion-dur-settle) var(--motion-ease-settle) backwards;
-}
-
 /* Narrow windows: the panel floats over the conversation as a card instead of pushing it (§8). */
 @media (min-width: 760px) and (max-width: 1023px) {
   .bot-panel[data-floating] { position: absolute; top: 8px; right: 8px; bottom: 8px; z-index: 30; margin-left: 0; border-radius: 14px; box-shadow: 0 0 0 1px var(--border), 0 22px 50px -18px rgb(0 0 0 / .35); }

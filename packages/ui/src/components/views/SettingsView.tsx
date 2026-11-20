@@ -101,7 +101,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const activeMeta = React.useMemo(() => registrations.find(registration => registration.meta.slug === slug)?.meta ?? null, [registrations, slug]);
 
   const [stage, setStage] = React.useState<Stage>(() => (initialMobileStage === 'nav' && (requested === 'home') ? 'nav' : 'page'));
-  const [catalogStage, setCatalogStage] = React.useState<CatalogStage>('list');
+  const [catalogStage, setCatalogStage] = React.useState<CatalogStage>(() => useUIStore.getState().settingsCatalogSelection ? 'detail' : 'list');
   const [enterKey, setEnterKey] = React.useState(0);
   const pendingSelection = React.useRef(new Map<string, string>());
   const [pendingItem, setPendingItem] = React.useState<string | null>(null);
@@ -227,7 +227,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   /* Leaving the page stage on wide windows is not a thing; entering compact keeps the current page. */
   React.useEffect(() => { if (!compact) setStage('page'); }, [compact]);
-  React.useEffect(() => { setCatalogStage('list'); }, [runtimeEpoch]);
+  const previousRuntime = React.useRef(runtimeEpoch);
+  React.useEffect(() => {
+    if (previousRuntime.current !== runtimeEpoch) {
+      previousRuntime.current = runtimeEpoch;
+      setCatalogStage('list');
+    }
+  }, [runtimeEpoch]);
 
   const shellValue = React.useMemo<SettingsShellValue>(() => ({
     layout, catalogStage: stackedCatalog ? catalogStage : 'detail', setCatalogStage, openPage, closeSettings: onClose ? close : undefined,

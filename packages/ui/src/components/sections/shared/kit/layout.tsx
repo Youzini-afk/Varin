@@ -303,8 +303,9 @@ export interface CatalogProps {
   /** Selection key: changing it scrolls the detail to the top and replays its entrance. */
   detailKey?: string;
   wideDetail?: boolean;
+  className?: string;
 }
-export function Catalog({ title, description, scope, headActions, filter, items, foot, detail, dock, detailKey, wideDetail }: CatalogProps) {
+export function Catalog({ title, description, scope, headActions, filter, items, foot, detail, dock, detailKey, wideDetail, className }: CatalogProps) {
   const shell = useSettingsShell();
   const scroller = React.useRef<HTMLDivElement>(null);
   const first = React.useRef(true);
@@ -312,7 +313,7 @@ export function Catalog({ title, description, scope, headActions, filter, items,
     if (first.current) { first.current = false; return; }
     scroller.current?.scrollTo?.({ top: 0 });
   }, [detailKey]);
-  return <div className="sk-cat" data-mstage={shell.catalogStage}>
+  return <div className={cn('sk-cat', className)} data-mstage={shell.catalogStage}>
     <aside className="sk-cat-list">
       <div className="sk-cat-head">
         <div className="sk-tt"><h1>{title}</h1>{headActions}</div>

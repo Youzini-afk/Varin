@@ -565,6 +565,7 @@ interface UIStore {
 
   // Settings IA (new shell)
   settingsPage: string;
+  settingsCatalogSelection: string | null;
   settingsModelFocus: { channelId: string; modelId: string } | null;
   settingsHasOpenedOnce: boolean;
   settingsTransitionOrigin: RecentPointer | null;
@@ -736,7 +737,7 @@ interface UIStore {
   setModelSelectorOpen: (open: boolean) => void;
   applyTheme: () => void;
   setSidebarSection: (section: SidebarSection) => void;
-  setSettingsPage: (slug: string) => void;
+  setSettingsPage: (slug: string, selection?: string) => void;
   setSettingsModelFocus: (focus: { channelId: string; modelId: string } | null) => void;
   setSettingsProjectsSelectedId: (projectId: string | null) => void;
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
@@ -897,6 +898,7 @@ export const useUIStore = create<UIStore>()(
         isModelSelectorOpen: false,
         sidebarSection: 'sessions',
         settingsPage: 'home',
+        settingsCatalogSelection: null,
         settingsModelFocus: null,
         settingsHasOpenedOnce: false,
         settingsTransitionOrigin: null,
@@ -1621,6 +1623,7 @@ export const useUIStore = create<UIStore>()(
         setSettingsDialogOpen: (open, origin) => {
           set(state => state.isSettingsDialogOpen === open ? state : {
             isSettingsDialogOpen: open,
+            settingsCatalogSelection: open ? state.settingsCatalogSelection : null,
             settingsHasOpenedOnce: open || state.settingsHasOpenedOnce,
             settingsTransitionOrigin: origin ?? null,
           });
@@ -1638,8 +1641,8 @@ export const useUIStore = create<UIStore>()(
           set({ sidebarSection: section });
         },
 
-        setSettingsPage: (slug) => {
-          set({ settingsPage: slug });
+        setSettingsPage: (slug, selection) => {
+          set({ settingsPage: slug, settingsCatalogSelection: selection ?? null });
         },
         setSettingsModelFocus: (focus) => set({ settingsModelFocus: focus }),
 

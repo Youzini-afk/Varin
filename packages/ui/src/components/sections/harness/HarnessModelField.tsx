@@ -14,8 +14,8 @@ import type { HarnessSettingsPageProps } from './harness-settings-state';
 import { useConfigurationModels } from './ConfigurationModels';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-export function HarnessModelField({ harness, update, slot, enableControl = true, status, openModel }: HarnessSettingsPageProps & {
-  slot: HarnessModelRole; enableControl?: boolean; status?: React.ReactNode; openModel?(): void;
+export function HarnessModelField({ harness, update, slot, enableControl = true, status, openModel, item = `harness.models.${slot}` }: HarnessSettingsPageProps & {
+  slot: HarnessModelRole; enableControl?: boolean; status?: React.ReactNode; openModel?(): void; item?: string;
 }) {
   const { t } = useI18n();
   const cwd = useDirectoryStore((state) => state.currentDirectory);
@@ -32,7 +32,7 @@ export function HarnessModelField({ harness, update, slot, enableControl = true,
     ...(slot === 'permissionJudge' && modelId ? { enabled: true } : {}),
     agent: { modelSettings: { thinkingLevel: undefined } },
   } } });
-  return <Row item={`harness.models.${slot}`} label={label} description={<>
+  return <Row item={item} label={label} description={<>
     {slot !== 'explore' ? t(`settings.harness.role.${slot}.description`) : null}
     {requiresSelection ? <div className="text-[var(--status-warning)]">{t('settings.harness.retrieval.selectOrdinaryModel')}</div> : null}
     {status}

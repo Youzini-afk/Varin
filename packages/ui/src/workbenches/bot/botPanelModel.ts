@@ -1,6 +1,7 @@
 import React from 'react';
 import type { BotSummary, BotWorkItem, ThreadIdentity, ThreadsAPI } from '@varin/application-client';
 import type { BotMatter } from '@varin/protocol';
+import type { RecentPointer } from '@/lib/motion/pointer';
 import type { BotPanelTab } from './botLayout';
 import type { BotFigurePose, BotNeed, BotSessionView, BotStateLine, BotTimelineEvent, BotWorkView } from './botPresentation';
 import type { BotStageFeed } from './botStageRenderer';
@@ -41,12 +42,7 @@ export interface BotPanelModel {
   changeState(action: 'sleep' | 'wake' | 'retry'): void;
   archiveMatter(matter: BotMatter): void;
   newSession(): void;
-  openProfile(): void;
-  closeProfile(): void;
-  profileOpen: boolean;
-  onBotChanged(bot: BotSummary | null): void;
-  requestDelete(): void;
-  archive(): void;
+  openProfile(origin?: RecentPointer): void;
 }
 
 export const BotPanelContext = React.createContext<BotPanelModel | null>(null);

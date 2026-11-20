@@ -298,7 +298,7 @@ const CATALOG_ENTRIES: readonly SettingsCatalogEntry[] = [
       { path: 'harness.models.memoryOrganizer', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; set replaces this binding: include retained model fields, or use agents.catalog enable/disable' },
     ],
     apply: 'next-run',
-    ui: { page: 'harness-bots', titleKey: 'settings.harness.role.memoryOrganizer', keywords: ["memoryOrganizer", "agent", "model", "enable", "disable"] },
+    ui: { page: 'model-roles', titleKey: 'settings.harness.role.memoryOrganizer', keywords: ["memoryOrganizer", "agent", "model", "enable", "disable"] },
   },
   {
     id: 'harness.models.permissionJudge', category: 'harness', owner: 'agent-settings', authority: 'permissions',

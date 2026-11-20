@@ -1,14 +1,14 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { SwapText } from '@/components/motion/SwapText';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useMainColumnGlide } from '@/components/layout/railMotion';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { IconName } from '@/components/icon/icons';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { documentMotionLevel } from '@/lib/motion/preference';
+import { activationPoint } from '@/lib/motion/pointer';
 import { cn } from '@/lib/utils';
-import { useUIStore } from '@/stores/useUIStore';
 import { BOT_PANEL_TABS, BOT_PANEL_WIDTH, clampBotPanelWidth, dampBotPanelWidth, useBotLayout, type BotPanelTab } from './botLayout';
 import { BotPanelContext, useBotPanel, type BotPanelModel } from './botPanelModel';
 import { BotFigure } from './BotFigure';
@@ -18,17 +18,11 @@ import { BotOverviewPane } from './BotOverviewPane';
 import { BotActivityPane } from './BotActivityPane';
 import { BotMemoryPane } from './BotMemoryPane';
 import { BotSchedulePane } from './BotSchedulePane';
-import { BotProfilePage, type BotProfileGuard } from './BotProfilePage';
 
 const TAB_LABEL: Record<BotPanelTab, I18nKey> = { overview: 'bot.tab.overview', activity: 'bot.tab.activity', memory: 'bot.tab.memory', schedule: 'bot.tab.schedule' };
 const TAB_ICON: Record<BotPanelTab, IconName> = { overview: 'list-unordered', activity: 'history', memory: 'bot-memory', schedule: 'calendar-schedule' };
 const PANE: Record<BotPanelTab, React.FC> = { overview: BotOverviewPane, activity: BotActivityPane, memory: BotMemoryPane, schedule: BotSchedulePane };
 const EXIT_MS = 110;
-
-const openBotSettings = () => {
-  useUIStore.getState().setSettingsPage('harness-bots');
-  useUIStore.getState().setSettingsDialogOpen(true);
-};
 
 /** Bot area: figure, name and one state line. It only changes with the Bot (§5.1). */
 function BotStage() {
@@ -50,13 +44,11 @@ function BotStage() {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-[180px]">
-          <DropdownMenuItem onSelect={model.openProfile}><Icon name="user" className="size-4" />{t('bot.profile.title')}</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => model.openProfile()}><Icon name="user" className="size-4" />{t('bot.profile.title')}</DropdownMenuItem>
           <DropdownMenuItem disabled={model.readOnly || model.busy} onSelect={model.newSession}><Icon name="chat-new" className="size-4" />{t('bot.session.new')}</DropdownMenuItem>
           {!bot.archived && !bot.deletion ? <DropdownMenuItem disabled={transitioning || model.busy} onSelect={() => model.changeState(state === 'sleep-failed' || state === 'wake-failed' ? 'retry' : resting ? 'wake' : 'sleep')}>
             <Icon name={resting ? 'play' : 'moon'} className="size-4" />{t(state === 'sleep-failed' ? 'settings.bots.sleepRetry' : resting ? 'settings.bots.wake' : 'settings.bots.sleep')}
           </DropdownMenuItem> : null}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={openBotSettings}><Icon name="settings-3" className="size-4" />{t('bot.sidebar.settings')}</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
@@ -66,8 +58,8 @@ function BotStage() {
     <div className="bot-stage-text">
       {/* The edit badge sits by the name, leaving the ledge to her team (§5.7.2). */}
       <div className="bot-stage-title">
-        <button type="button" className="bot-stage-name truncate" onClick={model.openProfile}><SwapText text={bot.name} hold={0} /></button>
-        <button type="button" className="bot-stage-edit" aria-label={t('bot.stage.editProfile')} title={t('bot.stage.editProfile')} onClick={model.openProfile}>
+        <button type="button" className="bot-stage-name truncate" onClick={event => model.openProfile(activationPoint(event))}><SwapText text={bot.name} hold={0} /></button>
+        <button type="button" className="bot-stage-edit" aria-label={t('bot.stage.editProfile')} title={t('bot.stage.editProfile')} onClick={event => model.openProfile(activationPoint(event))}>
           <Icon name="pencil" className="size-3.5" />
         </button>
       </div>
@@ -99,11 +91,7 @@ function BotPanelContent() {
   const panes = React.useRef<HTMLDivElement>(null);
   const [entered, setEntered] = React.useState<{ tab: BotPanelTab; direction: 1 | -1 } | null>(null);
   const previousTab = React.useRef(tab);
-  const profileGuard = React.useRef<BotProfileGuard>({ dirty: false, saving: false });
-  const [profileLeaving, setProfileLeaving] = React.useState(false);
-  const [profileShown, setProfileShown] = React.useState(model.profileOpen);
-
-  useSegmentKnob(tabRow, knob, '[role="tab"][aria-selected="true"]', model.profileOpen ? '' : tab);
+  useSegmentKnob(tabRow, knob, '[role="tab"][aria-selected="true"]', tab);
 
   // The old pane leaves as a still copy of what was on screen, so it is not mounted (and read) again.
   const paneNode = React.useRef<HTMLDivElement | null>(null);
@@ -136,53 +124,28 @@ function BotPanelContent() {
     return () => { clearTimeout(timer); copy.remove(); };
   }, [tab]);
 
-  React.useEffect(() => {
-    if (model.profileOpen) { setProfileShown(true); setProfileLeaving(false); return undefined; }
-    if (!profileShown) return undefined;
-    setProfileLeaving(true);
-    const timer = setTimeout(() => { setProfileShown(false); setProfileLeaving(false); }, EXIT_MS);
-    return () => clearTimeout(timer);
-  }, [model.profileOpen, profileShown]);
-
   const needsSignature = model.needs.map(need => need.key).join('|');
   const latestActivity = model.timeline[0]?.atMs ?? 0;
   React.useEffect(() => {
-    if (tab === 'overview' && !model.profileOpen) markSeen(model.bot.id, { needs: needsSignature });
-    if (tab === 'activity' && !model.profileOpen) markSeen(model.bot.id, { activityAtMs: latestActivity });
-  }, [tab, model.profileOpen, model.bot.id, needsSignature, latestActivity, markSeen]);
+    if (tab === 'overview') markSeen(model.bot.id, { needs: needsSignature });
+    if (tab === 'activity') markSeen(model.bot.id, { activityAtMs: latestActivity });
+  }, [tab, model.bot.id, needsSignature, latestActivity, markSeen]);
   const dots: Partial<Record<BotPanelTab, 'warn' | 'info'>> = {
     ...(needsSignature && seen?.needs !== needsSignature && tab !== 'overview' ? { overview: 'warn' as const } : {}),
     ...(latestActivity > (seen?.activityAtMs ?? 0) && tab !== 'activity' && seen?.activityAtMs !== undefined ? { activity: 'info' as const } : {}),
   };
 
-  const choose = (next: BotPanelTab) => {
-    if (model.profileOpen) {
-      if (profileGuard.current.saving || (profileGuard.current.dirty && !window.confirm(t('settings.bots.discardConfirm')))) return;
-      model.closeProfile();
-    }
-    setTab(next);
-  };
   const onTabKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft' && event.key !== 'Home' && event.key !== 'End') return;
     event.preventDefault();
     const index = BOT_PANEL_TABS.indexOf(tab);
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? BOT_PANEL_TABS.length - 1
       : (index + (event.key === 'ArrowRight' ? 1 : -1) + BOT_PANEL_TABS.length) % BOT_PANEL_TABS.length;
-    choose(BOT_PANEL_TABS[next]!);
+    setTab(BOT_PANEL_TABS[next]!);
     tabRow.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
   };
-  const closeProfile = model.closeProfile;
-  const guardedModel = React.useMemo<BotPanelModel>(() => ({
-    ...model,
-    closeProfile: () => {
-      if (profileGuard.current.saving || (profileGuard.current.dirty && !window.confirm(t('settings.bots.discardConfirm')))) return;
-      closeProfile();
-    },
-  }), [model, closeProfile, t]);
-
   const Pane = PANE[tab];
-  return <BotPanelContext.Provider value={guardedModel}>
-    <div className="bot-panel-body" aria-label={t('bot.panel.aria')} role="complementary">
+  return <div className="bot-panel-body" aria-label={t('bot.panel.aria')} role="complementary">
       <BotStage />
       <div className="bot-tabs-frame">
         <div ref={tabRow} className="bot-tabs" role="tablist" aria-label={t('bot.panel.aria')} onKeyDown={onTabKey}>
@@ -190,7 +153,7 @@ function BotPanelContent() {
           {BOT_PANEL_TABS.map(id => <Tooltip key={id}>
             <TooltipTrigger asChild>
               <button type="button" role="tab" id={`bot-tab-${id}`} aria-controls={`bot-pane-${id}`} aria-label={t(TAB_LABEL[id])}
-                aria-selected={!model.profileOpen && tab === id} tabIndex={tab === id ? 0 : -1} className="bot-tab" onClick={() => choose(id)}>
+                aria-selected={tab === id} tabIndex={tab === id ? 0 : -1} className="bot-tab" onClick={() => setTab(id)}>
                 <Icon name={TAB_ICON[id]} className="size-[18px]" />
                 {dots[id] ? <span className="bot-dot" data-arrive="" data-tone={dots[id] === 'warn' ? 'warn' : undefined} aria-label={t(dots[id] === 'warn' ? 'bot.panel.needsYou' : 'bot.tab.newActivity')} /> : null}
               </button>
@@ -204,10 +167,8 @@ function BotPanelContent() {
           data-enter={entered?.tab === tab ? '' : undefined} style={{ ['--bot-pane-direction' as string]: entered?.tab === tab ? entered.direction : 1 }}>
           <Pane />
         </div>
-        {profileShown ? <BotProfilePage leaving={profileLeaving} guard={profileGuard} /> : null}
       </div>
-    </div>
-  </BotPanelContext.Provider>;
+    </div>;
 }
 
 /**

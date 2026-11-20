@@ -12,7 +12,7 @@ import { EmbeddingRequests } from '../harness/EmbeddingSettings';
 import { LocalSemanticSettings } from '../harness/LocalSemanticSettings';
 import { useHarnessSettings } from '../harness/useHarnessSettings';
 import { useConfigurationModels } from '../harness/ConfigurationModels';
-import { Btn, Disclosure, Empty, Field, Loading, Note, Page, Row, Section, Select, useSettingsShell, type SelectItem } from '../shared/kit';
+import { Btn, Disclosure, Empty, Field, Loading, Note, Page, Row, Section, Select, Sw, useSettingsShell, type SelectItem } from '../shared/kit';
 import { SettingsScopeLabel } from '../shared/SettingsScope';
 
 function MemoryRetrievalSettings() {
@@ -64,7 +64,18 @@ function MemoryRetrievalSettings() {
       {error || catalogError}
     </Note> : null}
   </>;
-  return <EmbeddingRequests key={targetKey} model={model} />;
+  return <>
+    <EmbeddingRequests key={targetKey} model={model} />
+    {harness && <Section title={t('settings.knowledge.automation.title')}>
+      {(['bot', 'user'] as const).map(scope => {
+        const label = t(`settings.knowledge.automation.autoOrganize.${scope}`);
+        return <Row key={scope} label={label}>
+          <Sw label={label} checked={harness.knowledge.autoOrganize[scope]}
+            onChange={enabled => update({ knowledge: { autoOrganize: { [scope]: enabled } } })} />
+        </Row>;
+      })}
+    </Section>}
+  </>;
 }
 
 export function AgentMemoryPage({ initialScope, scopes, embedded = false, onContentChange }: {
