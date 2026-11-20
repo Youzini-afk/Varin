@@ -3,7 +3,7 @@ import { MessageHandoff } from '@/components/conversation/messageHandoff';
 import React from 'react';
 import { VARIN_WORKBENCH_BOT_PROFILE_ID } from '@varin/extension-contract';
 import type { BotMatter } from '@varin/protocol';
-import { getRuntimeEndpointGeneration, type BotSession, type ThreadIdentity } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, type BotAppearance, type BotSession, type ThreadIdentity } from '@varin/application-client';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { BOT_CONVERSATION_PANEL_SCOPE, openConversationTree } from '@/lib/openConversationTree';
 import { CONVERSATION_TOOL_MODES, ConversationToolsContext, toggleBotConversationTools } from '@/lib/conversationTools';
@@ -483,21 +483,19 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     setNameDialog({ mode: 'create' });
   };
 
-  const saveName = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const saveName = async (name: string, appearance?: BotAppearance) => {
     const host = getRuntimeEndpointGeneration();
     const dialog = nameDialog;
-    const trimmed = nameDraft.trim();
-    if (!dialog || !trimmed) return;
+    if (!dialog) return;
     setActionBusy(dialog.mode === 'create' ? 'create' : `rename:${dialog.mode === 'session' ? dialog.session.identity.threadId : dialog.bot.id}`);
     setError(null);
     try {
       if (dialog.mode === 'session') {
-        await useThreadStore.getState().updateThread(dialog.session.identity.threadId, { title: trimmed });
+        await useThreadStore.getState().updateThread(dialog.session.identity.threadId, { title: name });
         if (!alive.current || host !== getRuntimeEndpointGeneration()) return;
         refreshWork();
       } else {
-        const bot = dialog.mode === 'create' ? await createBot({ name: trimmed }) : await updateBot(dialog.bot.id, { name: trimmed });
+        const bot = dialog.mode === 'create' ? await createBot({ name, appearance }) : await updateBot(dialog.bot.id, { name });
         if (!alive.current || host !== getRuntimeEndpointGeneration()) return;
         setBots((list) => dialog.mode === 'create' ? [...(list ?? []), bot] : list?.map((item) => item.id === bot.id ? bot : item) ?? [bot]);
         if (dialog.mode === 'create') { useBotNavigation.setState({ botId: null, entry: null }); setShowArchived(false); setSelectedId(bot.id); }
@@ -798,6 +796,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
     )}
     <BotNameDialog
       open={nameDialog !== null}
+      mode={nameDialog?.mode === 'create' ? 'create' : 'rename'}
       title={nameDialog?.mode === 'session' ? t('sessions.sidebar.session.menu.rename') : nameDialog?.mode === 'rename' ? t('settings.bots.rename') : t('settings.bots.create')}
       submitLabel={nameDialog?.mode === 'create' ? t('settings.bots.createAction') : t('settings.bots.save')}
       name={nameDraft}
@@ -805,7 +804,7 @@ const BotWorkspace: React.FC<{ committed: boolean }> = ({ committed }) => {
       error={error}
       onNameChange={setNameDraft}
       onOpenChange={(open) => { if (!open && actionBusy === null) setNameDialog(null); }}
-      onSubmit={(event) => { void saveName(event); }}
+      onSubmit={(name, appearance) => { void saveName(name, appearance); }}
     />
     <Dialog open={deletingSession !== null} onOpenChange={open => { if (!open && actionBusy === null) setDeletingSession(null); }}>
       <DialogContent showCloseButton={false} className="max-w-sm gap-5">

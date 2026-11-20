@@ -26,7 +26,7 @@ export type BotEntry = ThreadIdentity;
 export type BotReadyEntry = ThreadIdentity;
 /** `entry` is the Catalog-resolved live session, which may differ from the profile's original entry. */
 export interface BotEntryResult { bot: BotSummary; entry: BotReadyEntry; model: BotModelSelection | null }
-export interface BotCreateInput { name?: string; instructions?: string; model?: BotModelSelection }
+export interface BotCreateInput { name?: string; instructions?: string; model?: BotModelSelection; appearance?: import('./bot-appearance.js').BotAppearance }
 export interface BotUpdateInput { expectedRevision?: number; name?: string; instructions?: string | null; model?: BotModelSelection | null; pinned?: boolean; appearance?: import('./bot-appearance.js').BotAppearance }
 
 export interface BotSleepMachine {

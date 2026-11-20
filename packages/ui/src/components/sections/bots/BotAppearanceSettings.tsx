@@ -1,5 +1,5 @@
 import React from 'react';
-import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, defaultBotAppearance, defaultBotImageCrop, type BotAppearance, type BotAppearanceAsset, type BotAppearanceState, type BotImageCrop, type BotSummary } from '@varin/application-client';
+import { BOT_APPEARANCE_STATES, BOT_FIGURE_PRESETS, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, defaultBotAppearance, defaultBotImageCrop, type BotAppearance, type BotAppearanceAsset, type BotAppearanceState, type BotFigurePreset, type BotImageCrop, type BotSummary } from '@varin/application-client';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { RiUploadLine } from '@remixicon/react';
@@ -9,13 +9,14 @@ import { EASE_OUT, springTransition } from '@/lib/motion/tokens';
 import { useI18n } from '@/lib/i18n';
 import { updateBot } from '@/lib/bots';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
-import { BotFigure } from '@/workbenches/bot/BotFigure';
+import { BotFigure, BotPresetPortrait } from '@/workbenches/bot/BotFigure';
 import { BotImageArtwork } from '@/workbenches/bot/BotImageArtwork';
 import { botAppearanceAPI } from '@/workbenches/bot/botAppearanceResources';
 import './bot-appearance.css';
 
 const COLORS = ['#8fb0ea', '#ab97cd', '#c68496', '#cf9e66', '#82ac96', '#7baeb8', '#8894a2'];
-const PREVIEW_STATES = ['idle', 'thinking', 'working', 'waiting', 'sleeping'] as const;
+const PREVIEW_STATES = BOT_APPEARANCE_STATES.filter(state => !state.startsWith('tool-'));
+const TOOL_PREVIEW_STATES = BOT_APPEARANCE_STATES.filter(state => state.startsWith('tool-'));
 
 /** Immediate appearance changes are separate from the surrounding profile's text draft. */
 export function BotAppearanceSettings({ bot, disabled, onChanged }: { bot: BotSummary; disabled?: boolean; onChanged?(bot: BotSummary): void }) {
@@ -24,11 +25,13 @@ export function BotAppearanceSettings({ bot, disabled, onChanged }: { bot: BotSu
   const [saved, setSaved] = React.useState<{ bot: BotSummary; host: number } | null>(null);
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const current = saved?.host === host && saved.bot.id === bot.id && saved.bot.revision > bot.revision ? saved.bot : bot;
+  const appearance = current.appearance;
   return <>
     <div className="bot-appearance-setting">
-      <BotFigure bot={current} state="idle" size={64} still />
+      <BotFigure bot={current} state="idle" size={64} still portrait={appearance?.kind !== 'custom'} />
       <div><span className="typography-settings-field-label">{t('bot.appearance.title')}</span>
-        <p className="typography-meta text-muted-foreground">{t(current.appearance?.kind === 'custom' ? 'bot.appearance.custom' : 'bot.appearance.builtin')}</p></div>
+        <p className="typography-meta text-muted-foreground">{appearance?.kind === 'preset' ? t(`bot.appearance.character.${appearance.character}`)
+          : appearance?.kind === 'custom' ? t('bot.appearance.custom') : t('bot.appearance.builtin', { name: t('bot.appearance.character.varin') })}</p></div>
       <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => setOpen(true)}>{t('bot.appearance.change')}</Button>
     </div>
     <Dialog open={open} onOpenChange={setOpen}>
@@ -47,6 +50,7 @@ function AppearanceEditor({ bot, onChanged, onClose }: { bot: BotSummary; onChan
   const [error, setError] = React.useState(''), [busy, setBusy] = React.useState(false);
   const [pose, setPose] = React.useState<BotAppearanceState>('idle');
   const [previewReady, setPreviewReady] = React.useState(false);
+  const [previewRetry, retryPreview] = React.useReducer((attempt: number) => attempt + 1, 0);
   const [cropTarget, setCropTarget] = React.useState<'figure' | 'portrait'>('figure');
   const drag = React.useRef<{ x: number; y: number; crop: BotImageCrop; spanX: number; spanY: number } | null>(null);
   const fileInput = React.useRef<HTMLInputElement>(null), alive = React.useRef(true), upload = React.useRef<AbortController | null>(null);
@@ -62,9 +66,15 @@ function AppearanceEditor({ bot, onChanged, onClose }: { bot: BotSummary; onChan
     return () => { alive.current = false; stop(); upload.current?.abort(); };
   }, [refresh]);
   const selected = appearance.kind === 'custom' ? assets.find(asset => asset.id === appearance.assetId) : undefined;
-  const select = (asset?: BotAppearanceAsset) => {
+  const selectAsset = (asset?: BotAppearanceAsset) => {
     if (asset ? appearance.kind === 'custom' && appearance.assetId === asset.id : appearance.kind === 'varin') return;
-    setError(''); setPose('idle'); setAppearance(asset ? { kind: 'custom', assetId: asset.id, figure: defaultBotImageCrop(), portrait: defaultBotImageCrop() } : defaultBotAppearance());
+    setError(''); setPose('idle'); setPreviewReady(false);
+    setAppearance(asset ? { kind: 'custom', assetId: asset.id, figure: defaultBotImageCrop(), portrait: defaultBotImageCrop() } : defaultBotAppearance());
+  };
+  const selectPreset = (character: BotFigurePreset) => {
+    if (appearance.kind === 'preset' && appearance.character === character) return;
+    setError(''); setPose('idle'); setPreviewReady(false);
+    setAppearance({ kind: 'preset', character, color: 'original' });
   };
   const importFile = async (file?: File) => {
     if (!file) return;
@@ -72,7 +82,7 @@ function AppearanceEditor({ bot, onChanged, onClose }: { bot: BotSummary; onChan
     try {
       const asset = await botAppearanceAPI().import(file, controller.signal);
       if (!active()) return;
-      setAssets(current => [...current.filter(item => item.id !== asset.id), asset]); select(asset);
+      setAssets(current => [...current.filter(item => item.id !== asset.id), asset]); selectAsset(asset);
     } catch (error) { if (active()) setError(String(error)); }
     finally { if (active()) setBusy(false); if (upload.current === controller) upload.current = null; }
   };
@@ -85,7 +95,7 @@ function AppearanceEditor({ bot, onChanged, onClose }: { bot: BotSummary; onChan
   const remove = async () => {
     if (!selected || !window.confirm(t('bot.appearance.removeConfirm', { name: selected.name }))) return;
     setBusy(true); setError('');
-    try { await botAppearanceAPI().remove(selected.id); if (active()) { select(); await refresh(); } }
+    try { await botAppearanceAPI().remove(selected.id); if (active()) { selectAsset(); await refresh(); } }
     catch (error) { if (active()) setError(String(error)); }
     finally { if (active()) setBusy(false); }
   };
@@ -111,32 +121,43 @@ function AppearanceEditor({ bot, onChanged, onClose }: { bot: BotSummary; onChan
     <div className="bot-appearance-editor">
       <div className="bot-appearance-preview">
         <div className="bot-appearance-preview-stage" data-cropping={appearance.kind === 'custom' || undefined} onPointerDown={startCrop} onPointerMove={moveCrop} onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }} onLostPointerCapture={() => { drag.current = null; }}>
-          <BotFigure appearance={appearance} {...(selected ? { asset: selected } : {})} portrait={appearance.kind === 'custom' && cropTarget === 'portrait'} state={pose} size={216} onReady={setPreviewReady} onError={setError} />
+          <BotFigure key={previewRetry} appearance={appearance} {...(selected ? { asset: selected } : {})} portrait={appearance.kind === 'custom' && cropTarget === 'portrait'} state={pose} size={216} onReady={setPreviewReady} onError={setError} />
         </div>
-        <div className="bot-appearance-mini"><BotFigure appearance={appearance} {...(selected ? { asset: selected } : {})} state={pose} size={26} still /><span>{bot.name}</span></div>
-        <div className="bot-appearance-poses" aria-label={t('bot.appearance.preview')}>
-          {PREVIEW_STATES.map(state => <button key={state} type="button" aria-pressed={pose === state} onClick={() => setPose(state)}>{t(`bot.appearance.state.${state}`)}</button>)}
+        <div className="bot-appearance-preview-controls">
+          <div className="bot-appearance-mini"><BotFigure appearance={appearance} {...(selected ? { asset: selected } : {})} state={pose} size={26} still /><span className="truncate" title={bot.name}>{bot.name}</span></div>
+          <select aria-label={t('bot.appearance.preview')} value={pose} onChange={event => setPose(event.target.value as BotAppearanceState)}>
+            {PREVIEW_STATES.map(state => <option key={state} value={state}>{t(`bot.appearance.state.${state}`)}</option>)}
+            <optgroup label={t('bot.appearance.toolActions')}>
+              {TOOL_PREVIEW_STATES.map(state => <option key={state} value={state}>{t(`bot.appearance.state.${state}`)}</option>)}
+            </optgroup>
+          </select>
         </div>
       </div>
       <div className="bot-appearance-options">
+        <div className="bot-appearance-library-heading"><span>{t('bot.appearance.characters')}</span></div>
+        <div className="bot-appearance-library" role="group" aria-label={t('bot.appearance.characters')}>
+          <button type="button" aria-pressed={appearance.kind === 'varin'} disabled={busy} onClick={() => selectAsset()}><BotFigure appearance={{ kind: 'varin', color: 'theme' }} state="idle" size={38} still /><span>{t('bot.appearance.character.varin')}</span></button>
+          {BOT_FIGURE_PRESETS.map(character => <button key={character} type="button" disabled={busy} aria-pressed={appearance.kind === 'preset' && appearance.character === character} onClick={() => selectPreset(character)}>
+            <BotPresetPortrait character={character} state="idle" size={38} /><span>{t(`bot.appearance.character.${character}`)}</span>
+          </button>)}
+        </div>
         <div className="bot-appearance-library-heading"><span>{t('bot.appearance.library')}</span><Button variant="ghost" size="sm" disabled={busy} onClick={() => fileInput.current?.click()}><RiUploadLine className="size-4" />{t('bot.appearance.import')}</Button></div>
         <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif,.zip" hidden onChange={event => { void importFile(event.target.files?.[0]); event.target.value = ''; }} />
-        <div className="bot-appearance-library" role="group" aria-label={t('bot.appearance.library')}>
-          <button type="button" aria-pressed={appearance.kind === 'varin'} disabled={busy} onClick={() => select()}><BotFigure appearance={{ kind: 'varin', color: 'theme' }} state="idle" size={56} still /><span>Varin</span></button>
-          {assets.map(asset => <button key={asset.id} type="button" disabled={busy} aria-pressed={appearance.kind === 'custom' && appearance.assetId === asset.id} title={asset.name} onClick={() => select(asset)}><span className="bot-appearance-library-image"><BotImageArtwork asset={asset} compact still /></span><span>{asset.name}</span></button>)}
-        </div>
+        {assets.length > 0 && <div className="bot-appearance-library bot-appearance-uploads" role="group" aria-label={t('bot.appearance.library')}>
+          {assets.map(asset => <button key={asset.id} type="button" disabled={busy} aria-pressed={appearance.kind === 'custom' && appearance.assetId === asset.id} title={asset.name} onClick={() => selectAsset(asset)}><span className="bot-appearance-library-image"><BotImageArtwork asset={asset} compact still /></span><span>{asset.name}</span></button>)}
+        </div>}
         {loading && <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p>}
         <p className="typography-meta text-muted-foreground">{t('bot.appearance.importHint')}</p>
         <motion.div layout={motionLevel === 'full'} transition={springTransition('glide')}>
         <AnimatePresence mode="popLayout" initial={false}>
-        <motion.div key={appearance.kind} initial={{ opacity: 0, y: motionLevel === 'full' ? 5 : 0 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: motionLevel === 'off' ? 0 : .16, ease: EASE_OUT }}>
-        {appearance.kind === 'varin' ? <div className="bot-appearance-controls">
-          <label>{t('bot.appearance.color')}<select value={['theme', 'original'].includes(appearance.color) ? appearance.color : 'custom'} onChange={event => setAppearance({ kind: 'varin', color: event.target.value === 'custom' ? COLORS[0]! : event.target.value })}>
-            <option value="theme">{t('bot.appearance.followTheme')}</option><option value="original">{t('bot.appearance.original')}</option><option value="custom">{t('bot.appearance.customColor')}</option>
+        <motion.div key={appearance.kind === 'custom' ? 'crop' : 'color'} initial={{ opacity: 0, y: motionLevel === 'full' ? 5 : 0 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: motionLevel === 'off' ? 0 : .16, ease: EASE_OUT }}>
+        {appearance.kind !== 'custom' ? <div className="bot-appearance-controls">
+          <label>{t(appearance.kind === 'preset' ? 'bot.appearance.effectColor' : 'bot.appearance.color')}<select value={['theme', 'original'].includes(appearance.color) ? appearance.color : 'custom'} onChange={event => setAppearance({ ...appearance, color: event.target.value === 'custom' ? COLORS[0]! : event.target.value })}>
+            <option value="theme">{t('bot.appearance.followTheme')}</option><option value="original">{t(appearance.kind === 'preset' ? 'bot.appearance.characterColors' : 'bot.appearance.original')}</option><option value="custom">{t('bot.appearance.customColor')}</option>
           </select></label>
           {!['theme', 'original'].includes(appearance.color) && <div className="bot-appearance-colors">
-            {COLORS.map(color => <button type="button" key={color} aria-label={color} aria-pressed={appearance.color === color} style={{ '--swatch': color } as React.CSSProperties} onClick={() => setAppearance({ kind: 'varin', color })} />)}
-            <input type="color" aria-label={t('bot.appearance.customColor')} value={appearance.color} onChange={event => setAppearance({ kind: 'varin', color: event.target.value })} />
+            {COLORS.map(color => <button type="button" key={color} aria-label={color} aria-pressed={appearance.color === color} style={{ '--swatch': color } as React.CSSProperties} onClick={() => setAppearance({ ...appearance, color })} />)}
+            <input type="color" aria-label={t('bot.appearance.customColor')} value={appearance.color} onChange={event => setAppearance({ ...appearance, color: event.target.value })} />
           </div>}
         </div> : <div className="bot-appearance-controls">
           <label>{t('bot.appearance.crop')}<select value={cropTarget} onChange={event => setCropTarget(event.target.value as 'figure' | 'portrait')}><option value="figure">{t('bot.appearance.figure')}</option><option value="portrait">{t('bot.appearance.portrait')}</option></select></label>
@@ -148,8 +169,8 @@ function AppearanceEditor({ bot, onChanged, onClose }: { bot: BotSummary; onChan
         </motion.div></AnimatePresence></motion.div>
       </div>
     </div>
-    <DialogFooter className="border-t border-border px-6 py-4 items-center">
-      <span className="flex-1 typography-meta text-destructive" role={error ? 'alert' : undefined}>{error}{error && <button type="button" className="ml-2 underline" onClick={() => { setError(''); void refresh(); }}>{t('common.retry')}</button>}</span>
+    <DialogFooter className="border-t border-border px-6 py-4 items-center flex-row flex-wrap justify-end">
+      {error && <span className="basis-full sm:basis-0 flex-1 typography-meta text-destructive" role="alert">{error}<button type="button" className="ml-2 underline" onClick={() => { setError(''); if (appearance.kind === 'preset' && !previewReady) retryPreview(); void refresh(); }}>{t('common.retry')}</button></span>}
       <Button variant="ghost" disabled={busy} onClick={onClose}>{t('settings.common.actions.cancel')}</Button>
       <Button disabled={busy || !previewReady || appearance.kind === 'custom' && !selected} onClick={() => { void apply(); }}>{t(busy ? 'settings.bots.saving' : 'bot.appearance.apply')}</Button>
     </DialogFooter>

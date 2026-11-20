@@ -156,10 +156,12 @@ export function registerBotRoutes(app: Express, { bots, computers, memory, organ
         throw new HarnessServiceError("invalid-params", "instructions must be a string");
       }
       const model = parseModel(request.body?.model);
+      const appearance = request.body?.appearance;
       response.status(201).json({ bot: await publicBot(await bots.create({
         ...(typeof name === "string" ? { name } : {}),
         ...(typeof instructions === "string" ? { instructions } : {}),
         ...(model !== undefined && model !== null ? { model } : {}),
+        ...(appearance === undefined ? {} : { appearance }),
       })) });
     } catch (error) {
       sendError(response, error, "Unable to create bot");

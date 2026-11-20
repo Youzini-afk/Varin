@@ -3,11 +3,12 @@ import { documentMotionLevel, type MotionLevel } from '@/lib/motion/preference';
 import type { BotFigurePose, BotFigureState, BotToolProp } from './botPresentation';
 import { VARIN_FIGURE_BLUSH, VARIN_FIGURE_LAYERS, type VarinFigureLayer } from './varinFigureArt';
 import { DEFAULT_FIGURE_ACCENT, type FigureAccent } from './varinFigurePalette';
+import { buildBendingAttachment } from './botFigureBend';
+import type { BotFigureArtwork, FigureAttachment, FigureEye, FigureFace, FigureMicroMove, FigureMouth, FigurePersonality, FigureView } from './botFigureArtwork';
 
 /**
- * The Bot figure's rig (docs/design/varin-figure.md): Varin leaning on a window sill, drawn from the
- * traced layers and driven by springs. One instance owns one SVG inside the host element. There is no
- * frame: she stands on the page itself, leaning on a light ledge that follows the theme.
+ * Shared stage rig for built-in Bot figures. One instance owns one SVG inside the host element.
+ * The character supplies traced artwork and motion parameters in a shared coordinate system.
  *
  * - Every state has a pose and, at full motion, a loop; one-shot moves (wink, nod, tilt, poke, and the
  *   stage's dispatch, point and reactions) play on top. Eyes and mouth change shape by closing and
@@ -19,16 +20,16 @@ import { DEFAULT_FIGURE_ACCENT, type FigureAccent } from './varinFigurePalette';
  */
 
 const NS = 'http://www.w3.org/2000/svg';
-type View = readonly [x: number, y: number, width: number, height: number];
+type View = FigureView;
 const VIEW_FULL: View = [34, -24, 1192, 1192];
-const VIEW_HEAD: View = [330, 236, 750, 750];
+const VIEW_HEAD: View = [82, 64, 1100, 1100];
+const VARIN_HEAD_FADE_END = 991;
 const CENTER_X = 628;
 const PIVOT = [628, 1100] as const;
 const SILL = 1100;
 const EYE = { L: [489, 706], R: [763, 706] } as const;
 const HL = { L: [511, 651], R: [741, 651] } as const;
 const HL2 = { L: [471, 716], R: [781, 716] } as const;
-const BROW = { L: [486, 548], R: [757, 542] } as const;
 const HAND = { L: [473, 1097], R: [767, 1097] } as const;
 const AHOGE = [240, 466] as const;
 const SKIN = '#fae5dd';
@@ -61,6 +62,11 @@ const attr = (node: Element, name: string, value: string | number): void => {
 const display = (node: SVGElement, value: string): void => {
   if (node.style.display !== value) node.style.display = value;
 };
+const paint = (layer: VarinFigureLayer | undefined, parent: Element): void => {
+  for (const [fill, d] of layer ?? []) el('path', { fill, d, 'fill-rule': 'evenodd' }, parent);
+};
+
+type FigureClip = (id: string, path: string, rule?: string) => string;
 const clamp = (v: number, a = 0, b = 1): number => Math.min(b, Math.max(a, v));
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 const bump = (x: number, a: number, b: number): number => (x <= a || x >= b ? 0 : Math.sin(Math.PI * (x - a) / (b - a)));
@@ -87,18 +93,23 @@ const GROUP: Record<Param, SpringGroup> = {
 const SPRING: Record<SpringGroup, readonly [stiffness: number, damping: number]> = { body: [190, 15], face: [280, 29], look: [420, 38], hand: [170, 16.5], slow: [38, 11.5] };
 
 // ---------------------------------------------------------------- face parts
-type EyeShape = 'open' | 'closed' | 'happy' | 'squeezeL' | 'squeezeR';
+type EyeShape = FigureEye;
 type EyeRequest = EyeShape | 'squeeze';
-const ALT: Record<Exclude<EyeShape, 'open'>, (cx: number) => string> = {
-  closed: cx => `M${cx - 44} 682 Q${cx} 716 ${cx + 44} 682`,
-  happy: cx => `M${cx - 44} 706 Q${cx} 650 ${cx + 44} 706`,
-  squeezeL: cx => `M${cx - 30} 662 L${cx + 26} 690 L${cx - 30} 718`,
-  squeezeR: cx => `M${cx + 30} 662 L${cx - 26} 690 L${cx + 30} 718`,
+const ALT: Record<Exclude<EyeShape, 'open'>, (x: number, y: number, width: number) => string> = {
+  closed: (x, y, w) => `M${x - w} ${y - 24} Q${x} ${y + 10} ${x + w} ${y - 24}`,
+  happy: (x, y, w) => `M${x - w} ${y} Q${x} ${y - 56} ${x + w} ${y}`,
+  squeezeL: (x, y, w) => squeezeEye(x, y, w, 1),
+  squeezeR: (x, y, w) => squeezeEye(x, y, w, -1),
 };
+function squeezeEye(x: number, y: number, width: number, direction: number): string {
+  const s = width / 44, edge = x - direction * 30 * s;
+  return `M${edge} ${y - 44 * s} L${x + direction * 26 * s} ${y - 16 * s} L${edge} ${y + 12 * s}`;
+}
 const LIP = '#e7a19c', MOUTH_IN = '#e2827f', TONGUE = '#f3aaa6';
 const stroke = { fill: 'none', stroke: LIP, 'stroke-width': 5.5, 'stroke-linecap': 'round' };
 const MOUTHS = {
   smile: [['path', { ...stroke, d: 'M610 755 Q627 768 644 755' }]],
+  smirk: [['path', { ...stroke, d: 'M609 758 Q628 768 646 751' }], ['path', { d: 'M635 758 L642 754 L640 765 Z', fill: '#ffffff' }]],
   open: [['path', { d: 'M609 753 Q627 757 645 753 Q643 776 627 778 Q611 776 609 753 Z', fill: MOUTH_IN }], ['ellipse', { cx: 627, cy: 771, rx: 8, ry: 4.5, fill: TONGUE }]],
   grin: [['path', { d: 'M600 750 Q627 757 654 750 Q652 788 627 790 Q602 788 600 750 Z', fill: MOUTH_IN }], ['ellipse', { cx: 627, cy: 780, rx: 13, ry: 7, fill: TONGUE }]],
   o: [['ellipse', { cx: 627, cy: 766, rx: 10, ry: 12, fill: MOUTH_IN }]],
@@ -107,8 +118,15 @@ const MOUTHS = {
   flat: [['path', { ...stroke, d: 'M614 762 L640 762' }]],
   cat: [['path', { ...stroke, d: 'M603 755 Q614 769 627 758 Q640 769 651 755', 'stroke-linejoin': 'round' }]],
   pout: [['path', { ...stroke, d: 'M611 765 Q619 756 627 763 Q635 770 643 761' }]],
-} satisfies Record<string, readonly (readonly ['path' | 'ellipse', Attrs])[]>;
-type Mouth = keyof typeof MOUTHS;
+} satisfies Record<FigureMouth, readonly (readonly ['path' | 'ellipse', Attrs])[]>;
+type Mouth = FigureMouth;
+const VARIN_FACE: FigureFace = {
+  eyeL: EYE.L, eyeR: EYE.R, hl2L: HL2.L, hl2R: HL2.R,
+  browL: [481, 536], browR: [759, 534], browMotion: .55,
+  ...VARIN_FIGURE_BLUSH, hasRestBlush: true,
+  mouth: [627, 762], lash: LASH, lip: LIP,
+  blushBase: '#f3c4ba', blushHot: '#f2b3a9', eyeAltWidth: 44,
+};
 
 // ---------------------------------------------------------------- states (docs/design/bot-ui.md §5.7)
 type FxKey = 'alert' | 'zz' | 'dots' | 'ellipsis';
@@ -158,13 +176,13 @@ const typing = (t: number, rate: number): [number, number] => ((t % 2.3) < 1.7
   : [0, 0]);
 // Typing on the ledge, a few bits flying up: delegated work, and her reply to you.
 const WORKING: StateDef = { blink: true, glow: .14, fx: { bits: 1 }, mouth: 'flat',
-  pose: (t, _f, L) => {
-    const [a, b] = L ? typing(t, 15) : [0, 0];
+  pose: (t, f, L) => {
+    const [a, b] = L ? typing(t, f.personality?.typingRate ?? 15) : [0, 0];
     return { fy: 10 + 3 * L * Math.sin(t * 2.2), lookY: .95, lookX: .18 * L * Math.sin(t * .7), eyeY: .82, featY: 6, browL: 5, browR: 5, browLr: 6, browRr: -6, hLy: HAND.L[1] - 20 * a, hRy: HAND.R[1] - 20 * b, hLx: HAND.L[0] + 18, hRx: HAND.R[0] - 18 };
   },
   tick: (t, f, L) => {
     if (!L) return;
-    const taps = typing(t, 15);
+    const taps = typing(t, f.personality?.typingRate ?? 15);
     (['L', 'R'] as const).forEach((side, i) => {
       const was = f.mem[`tap${side}`] ?? 0;
       if (taps[i] > .9 && was <= .9 && Math.random() < .55) f.bit(side);
@@ -173,7 +191,13 @@ const WORKING: StateDef = { blink: true, glow: .14, fx: { bits: 1 }, mouth: 'fla
   } };
 const STATES: Record<BotFigurePose, StateDef> = {
   idle: { blink: true, follow: true, micro: true, glow: 0,
-    pose: (t, f, L) => ({ fy: -3 * L * Math.sin(t * 1.75), fsy: 1 + .006 * L * Math.sin(t * 1.75), lookX: f.glance.x, lookY: f.glance.y, featX: f.glance.x * 5 }) },
+    pose: (t, f, L) => {
+      const personality = f.personality;
+      const breath = Math.sin(t * (personality?.breatheRate ?? 1.75)) * L;
+      return { fy: (personality?.idleFy ?? 0) - (personality?.breatheAmp ?? 3) * breath, fsy: 1 + .006 * breath,
+        eyeY: personality?.idleEyeY, blush: personality?.idleBlush, mouth: personality?.idleMouth,
+        lookX: f.glance.x, lookY: f.glance.y, featX: f.glance.x * 5 };
+    } },
   // Leans in; the eyes read along as you type, with a small nod on each burst of keys.
   listening: { blink: true, follow: true, glow: .22,
     enter: f => f.kick('fy', -260),
@@ -187,9 +211,9 @@ const STATES: Record<BotFigurePose, StateDef> = {
       f.mem.nextKey = t + .11 + Math.random() * .16;
     } },
   thinking: { blink: true, glow: .22, fx: { dots: 1 }, mouth: 'pout',
-    pose: (t, _f, L) => {
+    pose: (t, f, L) => {
       const drift = .32 * L * Math.sin(t * .85), tap = L * bump((t % 1.6) / 1.6, .55, .75);
-      return { frot: -2.8, fy: -6, lookX: -.72 + drift, lookY: -.9, featX: -7 + drift * 6, featY: -4, browL: -13, browR: 2, browLr: -4, browRr: 3, hRx: 688, hRy: 868 - 7 * tap };
+      return { frot: f.personality?.thinkTilt ?? -2.8, fy: -6, lookX: -.72 + drift, lookY: -.9, featX: -7 + drift * 6, featY: -4, browL: -13, browR: 2, browLr: -4, browRr: 3, hRx: 688, hRy: f.chinY - 7 * tap };
     } },
   working: WORKING,
   replying: WORKING,
@@ -254,12 +278,12 @@ const STATES: Record<BotFigurePose, StateDef> = {
     } },
   // Sinks below the sill, chin on her hands, eyes closed, the flyaway lock drooping.
   sleeping: { glow: .12, fx: { zz: 1 }, eyes: 'closed', mouth: 'sleep', stillAt: 3,
-    pose: (t, _f, L) => ({ fy: 150 + 5 * L * Math.sin(t * 1.35), fsy: 1 + .012 * L * Math.sin(t * 1.35), frot: -3, featY: 4, browL: 6, browR: 6, blush: .85, hLx: 560, hRx: 696, hLy: 1092, hRy: 1092, droop: 1 }) },
+    pose: (t, f, L) => ({ fy: (f.personality?.sleepSink ?? 150) + 5 * L * Math.sin(t * 1.35), fsy: 1 + .012 * L * Math.sin(t * 1.35), frot: -3, featY: 4, browL: 6, browR: 6, blush: .85, hLx: 560, hRx: 696, hLy: 1092, hRy: 1092, droop: 1 }) },
   // Rises, rubs an eye and yawns, stretches, then blinks awake.
   waking: { glow: .2, stillAt: 1,
-    pose: t => {
+    pose: (t, f) => {
       const rise = ramp(t, .3, .9), rub = ramp(t, .95, 1.1) * (1 - ramp(t, 1.85, 2.05)), stretch = ramp(t, 2, 2.25) * (1 - ramp(t, 2.6, 2.95));
-      const fy = lerp(150, -4, rise), hLx = lerp(560, 506 + 16 * Math.cos(t * 13), rub), hLy = lerp(1092, 694 + 10 * Math.sin(t * 13), rub), hRx = lerp(696, HAND.R[0], rise);
+      const fy = lerp(f.personality?.sleepSink ?? 150, -4, rise), hLx = lerp(560, 506 + 16 * Math.cos(t * 13), rub), hLy = lerp(1092, 694 + 10 * Math.sin(t * 13), rub), hRx = lerp(696, HAND.R[0], rise);
       const q: Pose = { frot: lerp(-3, 0, rise), droop: 1 - ramp(t, 2.1, 2.4), featY: 4 * (1 - rise), blush: 1,
         fy: fy - 16 * stretch, fsy: 1 + .045 * stretch,
         hLx: lerp(hLx, 250, stretch), hLy: lerp(hLy, 330, stretch), hRx: lerp(hRx, 1005, stretch), hRy: lerp(1094, 330, stretch) };
@@ -283,9 +307,9 @@ interface ActionDef {
   /** Plays on through a change of an awake state: a reaction belongs to the moment, not to the pose. */
   keep?: boolean;
   start?(f: VarinFigureRig): void;
-  pose(x: number, t: number): ActionPose;
+  pose(x: number, t: number, figure: VarinFigureRig): ActionPose;
 }
-type Move = 'wink' | 'nod' | 'tilt' | 'tap' | 'poke';
+type Move = Exclude<FigureMicroMove, 'flick'> | 'poke';
 /** The stage's beats: handing work out, pointing at what needs you, and the graded reactions. */
 export type StageMove = 'throwL' | 'throwR' | 'pointL' | 'pointR' | 'gather' | 'ack' | 'present' | 'presentSerious' | 'concern' | 'cheerLite';
 const toward = (side: Side, value: number): number => (side === 'L' ? -value : value);
@@ -334,8 +358,12 @@ const ACTIONS: Record<Move, ActionDef> = {
   nod: { dur: 1.05, pose: x => ({ add: { fy: 24 * (bump(x, .05, .45) + bump(x, .5, .9)), featY: 8 * (bump(x, .05, .45) + bump(x, .5, .9)) }, eyes: 'happy', mouth: 'smile' }) },
   tilt: { dur: 1.7, start: f => f.pop('question'), pose: () => ({ set: { frot: 6, featX: 9, lookX: .55, lookY: -.35, browL: -13, browR: 4, browLr: -5, browRr: 4 }, mouth: 'pout' }) },
   tap: { dur: .9, pose: (_x, t) => ({ set: { hLy: HAND.L[1] - 22 * bump(t, 0, .2) - 22 * bump(t, .4, .6), hRy: HAND.R[1] - 22 * bump(t, .2, .4) - 22 * bump(t, .6, .8) } }) },
+  earTwitch: { dur: .75, start: f => f.flick(36), pose: x => ({ add: { frot: 1.8 * bump(x, .1, .7), fy: -6 * bump(x, .1, .5) } }) },
   poke: { dur: 1.3, start: f => { f.kick('fsy', -2.4); f.kick('fy', 520); f.flick(-26); f.pop('heart'); },
-    pose: () => ({ set: { blush: 1.7, shy: 1, browL: -6, browR: -6 }, eyes: 'squeeze', mouth: 'cat' }) },
+    pose: (_x, _t, f) => {
+      const blush = f.personality?.pokeBlush ?? 1.7;
+      return { set: { blush, shy: blush >= 1.35 ? 1 : 0, browL: -6, browR: -6 }, eyes: f.personality?.pokeEyes ?? 'squeeze', mouth: f.personality?.pokeMouth ?? 'cat' };
+    } },
 };
 const MICRO: readonly (Move | 'flick')[] = ['wink', 'nod', 'tilt', 'flick', 'tap'];
 const AWAKE = (state: BotFigurePose): boolean => state !== 'offline' && state !== 'sleeping' && state !== 'waking';
@@ -360,7 +388,14 @@ const canAnimate = (): boolean => typeof globalThis.requestAnimationFrame === 'f
 let seq = 0;
 
 interface Shape { cur: string; amt: number; va: number }
-interface Eye extends Shape { cur: EyeShape; open: SVGGElement; hl: SVGCircleElement; hl2: SVGCircleElement; alt: SVGPathElement }
+interface Eye extends Shape { cur: EyeShape; open: SVGGElement; hl: SVGCircleElement | null; hl2: SVGCircleElement; alt: SVGPathElement }
+interface MovingAttachment {
+  def: FigureAttachment;
+  node: SVGGElement;
+  angle: number;
+  velocity: number;
+  bend?: (angle: number, velocity: number) => void;
+}
 interface Particle { node: SVGElement; x: number; y: number; vx: number; vy: number; g: number; r: number; vr: number; s: number; life: number; max: number; drag?: number }
 interface PopFx { node: SVGElement; x: number; y: number; vx: number; vy: number; life: number; max: number; kind: string }
 
@@ -397,6 +432,7 @@ export interface VarinFigureOptions {
   wide?: boolean;
   /** Theme colours for the accent parts (varinFigurePalette). */
   accent?: FigureAccent;
+  artwork?: BotFigureArtwork;
 }
 
 export class VarinFigureRig {
@@ -404,6 +440,10 @@ export class VarinFigureRig {
   private readonly compact: boolean;
   private readonly wide: boolean;
   private readonly posed: boolean;
+  private readonly artwork?: BotFigureArtwork;
+  private readonly face: FigureFace;
+  private readonly attachments: MovingAttachment[] = [];
+  private readonly springs: typeof SPRING;
   private view: View;
   private ledge: SVGRectElement | null = null;
   private accent: FigureAccent = DEFAULT_FIGURE_ACCENT;
@@ -467,9 +507,9 @@ export class VarinFigureRig {
   // Elements written every frame.
   private fig!: SVGGElement;
   private feat!: SVGGElement;
-  private ahoge!: SVGGElement;
-  private bowTail!: SVGGElement;
-  private bowLoop!: SVGGElement;
+  private ahoge?: SVGGElement;
+  private bowTail?: SVGGElement;
+  private bowLoop?: SVGGElement;
   private sheenRect!: SVGRectElement;
   private glowStops!: SVGStopElement[];
   private matrix!: SVGFEColorMatrixElement;
@@ -487,10 +527,22 @@ export class VarinFigureRig {
     this.host = host;
     this.compact = options.compact;
     this.wide = Boolean(options.wide) && !options.compact;
-    this.view = options.compact ? VIEW_HEAD : VIEW_FULL;
+    this.artwork = options.artwork;
+    this.face = options.artwork?.anchors ?? VARIN_FACE;
+    this.view = options.compact ? options.artwork?.viewHead ?? VIEW_HEAD : VIEW_FULL;
+    const personality = this.personality;
+    const spring = (group: 'body' | 'face' | 'hand'): readonly [number, number] => {
+      const [stiffness, damping] = SPRING[group], scale = personality?.springScale[group] ?? 1;
+      return [stiffness * scale, damping * Math.sqrt(scale) * (personality?.dampingMult ?? 1)];
+    };
+    this.springs = personality ? {
+      ...SPRING, body: spring('body'), face: spring('face'), hand: spring('hand'),
+      look: [SPRING.look[0], SPRING.look[1] * personality.dampingMult],
+    } : SPRING;
     this.posed = options.still || options.compact || !canAnimate();
     this.state = options.state;
     this.build();
+    if (this.artwork) for (const part of this.accented) attr(part.node, part.attr, this.tint(part.source));
     if (options.accent) this.setAccent(options.accent);
     if (this.wide) this.fitWidth();
     this.level = documentMotionLevel();
@@ -512,6 +564,8 @@ export class VarinFigureRig {
   get moving(): boolean { return this.animated; }
   get stageLive(): boolean { return this.running && AWAKE(this.state); }
   get current(): BotFigurePose { return this.state; }
+  get personality(): FigurePersonality | undefined { return this.artwork?.personality; }
+  get chinY(): number { return this.face.mouth[1] + 106; }
   /** The one-shot move playing now and how far through it is (0..1). */
   get move(): { name: string; progress: number } | null {
     return this.action ? { name: this.action.name, progress: clamp((this.t - this.action.at) / this.action.def.dur) } : null;
@@ -529,11 +583,15 @@ export class VarinFigureRig {
     if (this.animated) this.lookTarget = { x, y, until: this.t + seconds, turn };
   }
   /** The theme's version of a mist-blue ink. */
-  tint(source: string): string { return this.accent.tint(source); }
+  tint(source: string): string {
+    const artwork = this.artwork;
+    return this.accent.tint(artwork && source === ACCENT ? artwork.brandAccent
+      : artwork && source === ACCENT_SOFT ? artwork.brandSoft : source);
+  }
   /** Keep a stage node's mist-blue ink in step with the theme. */
   paintAccent(node: Element, name: 'fill' | 'stroke', source: string): void {
     this.accented.push({ node, attr: name, source });
-    attr(node, name, this.accent.tint(source));
+    attr(node, name, this.tint(source));
   }
   /** Resume frames after the stage starts something while a settled figure had stopped. */
   wake(): void { if (!this.disposed) this.run(); }
@@ -549,7 +607,7 @@ export class VarinFigureRig {
     // Stage nodes come and go; forget the ones that have left the drawing.
     const inside = (node: Node | null): boolean => { while (node && node !== this.svg) node = node.parentNode; return node === this.svg; };
     for (let i = this.accented.length - 1; i >= 0; i -= 1) if (!inside(this.accented[i]!.node)) this.accented.splice(i, 1);
-    for (const part of this.accented) attr(part.node, part.attr, accent.tint(part.source));
+    for (const part of this.accented) attr(part.node, part.attr, this.tint(part.source));
     // Static figures have no subsequent simulation frame to update their aura.
     if (!this.animated) {
       const [r, g, b] = this.glowColor();
@@ -571,7 +629,12 @@ export class VarinFigureRig {
 
   // ------------------------------------------------------------ used by states and moves
   kick(key: Param, dv: number): void { if (this.animated) this.v[key] = (this.v[key] ?? 0) + dv; }
-  flick(dv: number): void { if (this.animated) this.sec.va += dv * 6; }
+  flick(dv: number): void {
+    if (!this.animated) return;
+    if (this.artwork) {
+      for (const a of this.attachments) if (!a.def.static) a.velocity -= dv * a.def.gainVrot * 3;
+    } else this.sec.va += dv * 6;
+  }
   later(dt: number, fn: () => void): void { this.timers.push({ at: this.t + dt, fn }); }
   blinkNow(double: boolean): void { this.blinkAt = this.t; this.blinkAt2 = double ? this.t + .26 : -9; }
   sheen(): void { if (this.animated) this.sheenAt = this.t; }
@@ -588,14 +651,14 @@ export class VarinFigureRig {
   bit(side: Side): void {
     if (!this.animated) return;
     const x = (side === 'L' ? this.p.hLx : this.p.hRx) + (Math.random() - .5) * 60;
-    const colors = [this.accent.tint('#8fb0ea'), this.accent.tint('#c9d6f5'), '#f3c690', this.accent.tint('#a9c2f2')];
+    const colors = [this.tint(ACCENT), this.tint(ACCENT_SOFT), '#f3c690', this.tint(this.artwork ? ACCENT_SOFT : '#a9c2f2')];
     const node = el('rect', { x: -9, y: -9, width: 18, height: 18, rx: 3, fill: colors[Math.floor(Math.random() * colors.length)] }, this.fxFront);
     this.parts.push({ node, x, y: 1030, vx: (Math.random() - .5) * 90, vy: -260 - Math.random() * 160, g: 120, r: 45, vr: (Math.random() - .5) * 200, s: .7 + Math.random() * .6, life: 0, max: .95 });
   }
 
   burst(count: number): void {
     if (!this.animated) return;
-    const colors = ['#ffd36e', this.accent.tint('#8fb0ea'), '#f4a9c0', this.accent.tint('#c9d6f5'), this.accent.tint('#b8c9f5')];
+    const colors = ['#ffd36e', this.tint(ACCENT), '#f4a9c0', this.tint(ACCENT_SOFT), this.tint(this.artwork ? ACCENT_SOFT : '#b8c9f5')];
     for (let i = 0; i < count; i += 1) {
       const a = -Math.PI / 2 + (Math.random() - .5) * Math.PI * 1.5, speed = 520 + Math.random() * 520, fill = colors[i % colors.length];
       const node = i % 2 === 0
@@ -770,7 +833,8 @@ export class VarinFigureRig {
     const near = (a: number, b = 0): boolean => Math.abs(a - b) < .001;
     return this.poseState === this.state && !this.action && !this.timers.length && !this.parts.length && !this.pops.length
       && PARAMS.every(key => near(this.p[key], this.goal[key]) && near(this.v[key] ?? 0))
-      && near(this.sec.a, -6 * this.p.droop) && near(this.sec.va) && near(this.sec.r) && near(this.sec.vr)
+      && (this.artwork ? this.attachments.every(a => near(a.angle, this.attachmentRestAngle(a.def)) && near(a.velocity))
+        : near(this.sec.a, -6 * this.p.droop) && near(this.sec.va) && near(this.sec.r) && near(this.sec.vr))
       && [this.eyes.L, this.eyes.R, this.mouth].every(shape => near(shape.amt, 1) && near(shape.va))
       && this.eyes.L.cur === this.eyeGoal.L && this.eyes.R.cur === this.eyeGoal.R && this.mouth.cur === this.mouthGoal
       && FX_KEYS.every(key => near(this.fxAmt[key], this.fxGoal[key] ? 1 : 0))
@@ -814,7 +878,7 @@ export class VarinFigureRig {
       const { def, at } = this.action, x = (t - at) / def.dur;
       if (x >= 1) this.action = null;
       else {
-        const w = smooth(ramp(x, 0, .12)) * smooth(1 - ramp(x, .85, 1)), o = def.pose(x, t - at);
+        const w = smooth(ramp(x, 0, .12)) * smooth(1 - ramp(x, .85, 1)), o = def.pose(x, t - at, this);
         for (const key of PARAMS) {
           const set = o.set?.[key], add = o.add?.[key];
           if (set !== undefined) goal[key] = lerp(goal[key], set, w);
@@ -833,10 +897,15 @@ export class VarinFigureRig {
     this.fxGoal = { ...st.fx, ...q.fx };
     st.tick?.(lt, this, L);
     if (st.micro && L && !this.action && t > this.nextMicro) {
-      this.play(MICRO[Math.floor(Math.random() * MICRO.length)]);
+      const pool = this.personality?.microPool ?? MICRO;
+      this.play(pool[Math.floor(Math.random() * pool.length)]);
       this.nextMicro = t + 7 + Math.random() * 7;
     }
-    if (st.blink && L && t > this.nextBlink) { this.blinkNow(Math.random() < .2); this.nextBlink = t + 2.2 + Math.random() * 3.2; }
+    if (st.blink && L && t > this.nextBlink) {
+      const [min, max] = this.personality?.blinkRange ?? [2.2, 5.4];
+      this.blinkNow(Math.random() < .2);
+      this.nextBlink = t + min + Math.random() * (max - min);
+    }
     this.integrate(dt);
   }
 
@@ -845,19 +914,14 @@ export class VarinFigureRig {
     for (let s = 0; s < sub; s += 1) {
       for (const key of PARAMS) {
         if (!springy) { p[key] += (goal[key] - p[key]) * clamp(h * 8); this.v[key] = 0; continue; }
-        const [k, c] = SPRING[GROUP[key]], v = this.v[key] ?? 0;
+        const [k, c] = this.springs[GROUP[key]], v = this.v[key] ?? 0;
         const next = v + (k * (goal[key] - p[key]) - c * v) * h;
         this.v[key] = next; p[key] += next * h;
       }
       this.morph(this.eyes.L, this.eyeGoal.L, h);
       this.morph(this.eyes.R, this.eyeGoal.R, h);
       this.morph(this.mouth, this.mouthGoal, h);
-      // Secondary motion: the flyaway lock and the bow trail the body.
-      const sec = this.sec, vy = this.v.fy ?? 0, vr = this.v.frot ?? 0;
-      const aim = L ? .012 * vy - .9 * vr + 2.2 * Math.sin(this.t * 1.9) : 0;
-      sec.va += (140 * (aim - 6 * p.droop - sec.a) - 7 * sec.va) * h; sec.a += sec.va * h;
-      const rim = L ? -1.1 * vr + 1.8 * Math.sin(this.t * 1.3 + 1) : 0;
-      sec.vr += (90 * (rim - sec.r) - 6 * sec.vr) * h; sec.r += sec.vr * h;
+      this.integrateAttachments(h, L);
       for (const key of FX_KEYS) {
         const want = this.fxGoal[key] ? 1 : 0;
         this.fxAmt[key] += (want - this.fxAmt[key]) * clamp(h * (want ? 6 : 9));
@@ -867,6 +931,32 @@ export class VarinFigureRig {
         this.propAmt[key] += (want - this.propAmt[key]) * clamp(h * (want ? 7 : 10));
       }
     }
+  }
+
+  private attachmentRestAngle(def: FigureAttachment): number {
+    const state = this.action?.name === 'poke' ? 'poke' : this.state;
+    return def.static ? 0 : def.stateAngle?.[state] ?? (this.p.droop > .5 ? def.stateAngle?.sleeping ?? 0 : 0);
+  }
+
+  private integrateAttachments(dt: number, loops: number): void {
+    const vy = this.v.fy ?? 0, vr = this.v.frot ?? 0;
+    if (this.artwork) {
+      for (const a of this.attachments) {
+        const d = a.def;
+        if (d.static) continue;
+        const rest = this.attachmentRestAngle(d);
+        if (!this.animated) { a.angle = rest; a.velocity = 0; continue; }
+        const target = rest + (d.gainVy * vy + d.gainVrot * vr + d.idleAmp * Math.sin(this.t * d.idleFreq)) * loops;
+        a.velocity += (d.stiffness * (target - a.angle) - d.damping * this.artwork.personality.dampingMult * a.velocity) * dt;
+        a.angle = clamp(a.angle + a.velocity * dt, -20, 20);
+      }
+      return;
+    }
+    const sec = this.sec;
+    const aim = loops ? .012 * vy - .9 * vr + 2.2 * Math.sin(this.t * 1.9) : 0;
+    sec.va += (140 * (aim - 6 * this.p.droop - sec.a) - 7 * sec.va) * dt; sec.a += sec.va * dt;
+    const rim = loops ? -1.1 * vr + 1.8 * Math.sin(this.t * 1.3 + 1) : 0;
+    sec.vr += (90 * (rim - sec.r) - 6 * sec.vr) * dt; sec.r += sec.vr * dt;
   }
 
   private morph(m: Shape, want: string, h: number): void {
@@ -879,7 +969,8 @@ export class VarinFigureRig {
 
   private glowColor(): [number, number, number] {
     const key = glowKey(this.state);
-    return hex(TINTED_GLOW.has(key) ? this.accent.tint(GLOW[key]) : GLOW[key]);
+    const characterGlow = this.artwork && (TINTED_GLOW.has(key) || key === 'thinking' || key === 'working');
+    return hex(characterGlow ? this.tint(ACCENT) : TINTED_GLOW.has(key) ? this.tint(GLOW[key]) : GLOW[key]);
   }
 
   // Read geometry once after this frame's layout writers, and reuse it during spring integration.
@@ -929,48 +1020,61 @@ export class VarinFigureRig {
     const p = this.p, t = this.t, c = this.compact, L = this.L;
     const fy = c ? p.fy * .12 : p.fy, frot = c ? p.frot * .5 : p.frot, fsx = p.fsx * (1 + (1 - p.fsy) * .55);
     attr(this.fig, 'transform', `translate(${PIVOT[0]} ${PIVOT[1] + fy}) rotate(${frot}) scale(${fsx} ${p.fsy}) translate(${-PIVOT[0]} ${-PIVOT[1]})`);
-    attr(this.feat, 'transform', `translate(${p.featX + p.lookX * 4} ${p.featY + p.lookY * 3})`);
+    const face = this.face, lookScale = this.personality?.lookScale ?? 1;
+    attr(this.feat, 'transform', `translate(${(p.featX + p.lookX * 4) * lookScale} ${(p.featY + p.lookY * 3) * lookScale})`);
     const blink = Math.max(bump(t - this.blinkAt, 0, .17), bump(t - this.blinkAt2, 0, .17));
     for (const k of ['L', 'R'] as const) {
-      const e = this.eyes[k], [cx, cy] = EYE[k], amt = Math.max(.001, e.amt), lx = p.lookX * 13, ly = p.lookY * 9;
+      const e = this.eyes[k], [cx, cy] = k === 'L' ? face.eyeL : face.eyeR;
+      const pivotY = this.artwork ? cy + 20 : cy, altY = this.artwork ? cy + 32 : cy;
+      const amt = Math.max(.001, e.amt), lx = p.lookX * 13 * lookScale, ly = p.lookY * 9 * lookScale;
       if (e.cur === 'open') {
         const sy = amt * p.eyeY * (1 - .95 * blink);
-        attr(e.open, 'transform', `translate(${cx + lx} ${cy + ly}) scale(${p.eyeS} ${p.eyeS * sy}) translate(${-cx} ${-cy})`);
+        attr(e.open, 'transform', `translate(${cx + lx} ${pivotY + ly}) scale(${p.eyeS} ${p.eyeS * sy}) translate(${-cx} ${-pivotY})`);
         attr(e.open, 'opacity', String(1 - .45 * p.eyeDim));
-        const twinkle = 1 + .14 * Math.sin(t * 2.6 + (k === 'L' ? 0 : 1.3)) * L;
-        attr(e.hl, 'transform', `translate(${HL[k][0] + p.lookX * 5} ${HL[k][1] + p.lookY * 4}) scale(${twinkle}) translate(${-HL[k][0]} ${-HL[k][1]})`);
-        attr(e.hl, 'opacity', String(1 - p.eyeDim));
+        if (e.hl) {
+          const twinkle = 1 + .14 * Math.sin(t * 2.6 + (k === 'L' ? 0 : 1.3)) * L;
+          attr(e.hl, 'transform', `translate(${HL[k][0] + p.lookX * 5} ${HL[k][1] + p.lookY * 4}) scale(${twinkle}) translate(${-HL[k][0]} ${-HL[k][1]})`);
+          attr(e.hl, 'opacity', String(1 - p.eyeDim));
+        }
         attr(e.hl2, 'opacity', String(clamp(p.spark) * (1 - p.eyeDim)));
         display(e.open, ''); display(e.alt, 'none');
       } else {
         display(e.open, 'none'); display(e.alt, '');
-        attr(e.alt, 'd', ALT[e.cur](cx));
-        attr(e.alt, 'transform', `translate(${cx + lx * .4} ${cy}) scale(1 ${amt}) translate(${-cx} ${-cy})`);
+        attr(e.alt, 'd', ALT[e.cur](cx, altY, face.eyeAltWidth));
+        attr(e.alt, 'transform', `translate(${cx + lx * .4} ${altY}) scale(1 ${amt}) translate(${-cx} ${-altY})`);
       }
     }
     const current = this.mouth.cur as Mouth;
     for (const key of Object.keys(this.mouths) as Mouth[]) display(this.mouths[key], key === current ? '' : 'none');
     const ma = Math.max(.001, this.mouth.amt), breathe = current === 'sleep' ? 1 + .18 * Math.sin(t * 1.35) * L : 1;
-    this.mouths[current].setAttribute('transform', `translate(627 762) scale(${Math.min(1, ma * 1.15) * breathe} ${ma * breathe}) translate(-627 -762)`);
+    const [mx, my] = face.mouth;
+    attr(this.mouths[current], 'transform', `translate(${mx} ${my}) scale(${Math.min(1, ma * 1.15) * breathe} ${ma * breathe}) translate(${-mx} ${-my})`);
     this.brows.forEach((g, i) => {
-      const k = i ? 'R' : 'L', [bx, by] = BROW[k];
-      attr(g, 'transform', `translate(0 ${p[k === 'L' ? 'browL' : 'browR'] + p.lookY * 3}) rotate(${p[k === 'L' ? 'browLr' : 'browRr']} ${bx} ${by})`);
+      const [bx, by] = i ? face.browR : face.browL;
+      const offset = (i ? p.browR : p.browL) * face.browMotion;
+      const angle = (i ? p.browRr : p.browLr) * face.browMotion;
+      attr(g, 'transform', `translate(0 ${offset}) rotate(${angle} ${bx} ${by})`);
     });
     for (const b of this.blushes) {
       const s = 1 + .12 * clamp(p.blush - 1);
       attr(b.g, 'transform', `translate(${b.cx} ${b.cy}) scale(${s}) translate(${-b.cx} ${-b.cy})`);
-      attr(b.e, 'opacity', String(clamp(p.blush)));
-      attr(b.e, 'fill', p.blush > 1 ? '#f2b3a9' : '#f3c4ba');
+      attr(b.e, 'opacity', face.hasRestBlush ? clamp(p.blush) : clamp((p.blush - 1.02) * 1.5));
+      attr(b.e, 'fill', p.blush > 1.05 ? face.blushHot : face.blushBase);
       attr(b.lines, 'opacity', String(clamp(p.shy)));
     }
-    attr(this.ahoge, 'transform', `rotate(${this.sec.a} ${AHOGE[0]} ${AHOGE[1]})`);
-    attr(this.bowTail, 'transform', `rotate(${this.sec.r} 1030 540)`);
-    attr(this.bowLoop, 'transform', `rotate(${-.7 * this.sec.r + 1.3 * Math.sin(t * 1.7) * L} 1066 528)`);
+    if (this.ahoge) attr(this.ahoge, 'transform', `rotate(${this.sec.a} ${AHOGE[0]} ${AHOGE[1]})`);
+    if (this.bowTail) attr(this.bowTail, 'transform', `rotate(${this.sec.r} 1030 540)`);
+    if (this.bowLoop) attr(this.bowLoop, 'transform', `rotate(${-.7 * this.sec.r + 1.3 * Math.sin(t * 1.7) * L} 1066 528)`);
+    for (const { def, node, angle, velocity, bend } of this.attachments) {
+      if (def.static) continue;
+      if (bend) bend(angle, velocity);
+      else attr(node, 'transform', `rotate(${angle.toFixed(2)} ${def.pivot[0]} ${def.pivot[1]})`);
+    }
     const sweep = (t - this.sheenAt) / .95;
-    if (sweep >= 0 && sweep < 1) {
+    if (this.sheenRect && sweep >= 0 && sweep < 1) {
       attr(this.sheenRect, 'opacity', '1');
       attr(this.sheenRect, 'transform', `rotate(-18 628 600) translate(${lerp(-200, 1500, smooth(sweep))} 0)`);
-    } else attr(this.sheenRect, 'opacity', '0');
+    } else if (this.sheenRect) attr(this.sheenRect, 'opacity', '0');
     const hand = (h: { g: SVGGElement; sh: SVGEllipseElement }, x: number, y: number, s: number): void => {
       attr(h.g, 'transform', `translate(${x} ${y}) scale(${s})`);
       display(h.g, c ? 'none' : '');
@@ -1123,29 +1227,69 @@ export class VarinFigureRig {
       el('path', { d, 'clip-rule': rule }, node);
       return `url(#${u}${id})`;
     };
-    const above = clip('above', `M0 0H1254V${SILL + 6}H0Z`);
+    const fadeEnd = this.artwork ? this.view[1] + this.view[3] - 6 : VARIN_HEAD_FADE_END;
+    const artBottom = this.compact ? Math.min(fadeEnd, SILL + 6) : SILL + 6;
+    const above = clip('above', `M0 0H1254V${artBottom}H0Z`);
     const lower = clip('lower', 'M0 0H1254V1222H0Z');
-    // The flyaway lock's own outline: grown for the moving copy, cut a little larger in the static hair.
-    const ahogeIn = clip('ai', VARIN_FIGURE_LAYERS.ahogeIn[0][1]);
-    const ahogeOut = clip('ao', `M0 0H1254V1254H0Z ${VARIN_FIGURE_LAYERS.ahogeHole[0][1]}`, 'evenodd');
-    const paint = (layer: VarinFigureLayer, parent: Element): void => {
-      for (const [fill, d] of layer) el('path', { fill, d, 'fill-rule': 'evenodd' }, parent);
-    };
-
     // No backdrop: a state-coloured aura that fades out well inside the box, then everything above the ledge.
     el('circle', { cx: 628, cy: 640, r: 520, fill: `url(#${u}g)` }, svg);
     const aboveLedge = el('g', { 'clip-path': above }, svg);
     if (this.compact) {
-      // The head crop fades out below the chin instead of ending in a hard edge.
-      const fade = el('linearGradient', { id: `${u}m`, gradientUnits: 'userSpaceOnUse', x1: 0, x2: 0, y1: 850, y2: 980 }, defs);
+      // Fade the shoulders below the chin even when the wider crop has room for the ledge.
+      const fade = el('linearGradient', { id: `${u}m`, gradientUnits: 'userSpaceOnUse', x1: 0, x2: 0, y1: fadeEnd - 136, y2: fadeEnd }, defs);
       el('stop', { offset: 0, 'stop-color': '#ffffff' }, fade);
       el('stop', { offset: 1, 'stop-color': '#000000' }, fade);
-      const mask = el('mask', { id: `${u}mk`, maskUnits: 'userSpaceOnUse', x: 0, y: 0, width: 1254, height: 1254 }, defs);
-      el('rect', { x: 0, y: 0, width: 1254, height: 1254, fill: `url(#${u}m)` }, mask);
+      const mask = el('mask', { id: `${u}mk`, maskUnits: 'userSpaceOnUse', x: 0, y: 0, width: 1254, height: artBottom }, defs);
+      el('rect', { x: 0, y: 0, width: 1254, height: artBottom, fill: `url(#${u}m)` }, mask);
       aboveLedge.setAttribute('mask', `url(#${u}mk)`);
     }
     this.fig = el('g', {}, aboveLedge);
 
+    if (this.artwork) this.buildPresetArtwork(this.artwork, defs, clip);
+    else this.buildVarinArtwork(defs, clip);
+
+    // The stage's members sit beside her above the ledge, cut by it as she is; the clip spans any width.
+    const stage = this.wide ? { team: el('g', { class: 'bot-figure-team', 'clip-path': clip('team', `M-4000 -800H5254V${SILL + 6}H-4000Z`) }, svg) } : null;
+    // The ledge she leans on, in the theme's surface colour, and the two ball hands resting on it.
+    if (!this.compact) this.ledge = el('rect', { x: 30, y: SILL, width: 1194, height: 40, rx: 20, style: 'fill: var(--bot-figure-ledge, #e3e5eb)' }, svg);
+    const onLedge = stage ? el('g', { class: 'bot-figure-team' }, svg) : null;
+    const propBack = this.compact ? null : el('g', {}, svg);
+    const hands = el('g', { 'clip-path': lower }, svg);
+    this.hands = [-1, 1].map(side => {
+      const g = el('g', {}, hands);
+      const sh = el('ellipse', { cx: 0, cy: 14, rx: 66, ry: 64, style: 'fill: var(--bot-figure-shadow, #141828)', opacity: .22 }, g);
+      el('circle', { cx: 0, cy: 0, r: 68, fill: this.artwork?.anchors.handShadow ?? '#efc3b7' }, g);
+      el('circle', { cx: -side * 7, cy: -8, r: 61, fill: this.artwork?.anchors.handFill ?? SKIN }, g);
+      return { g, sh };
+    });
+
+    const propFront = this.compact ? null : el('g', {}, svg);
+    // The stage's cards and its flights; her own effects stay the last layer.
+    const stageFront = stage ? el('g', { class: 'bot-figure-team' }, svg) : null;
+    const stageFx = stage ? el('g', { class: 'bot-figure-team' }, svg) : null;
+    // Effects in front: the "needs you" badge, sleep z's, thinking bubbles, particles.
+    this.fxFront = el('g', {}, svg);
+    this.badge = el('g', { opacity: 0 }, this.fxFront);
+    this.badgeRing = el('circle', { r: 44, fill: 'none', stroke: '#f3b562', 'stroke-width': 6 }, this.badge);
+    el('circle', { r: 44, fill: '#f3b562' }, this.badge);
+    el('rect', { x: -7, y: -26, width: 14, height: 32, rx: 7, fill: '#3a2a12' }, this.badge);
+    el('circle', { cx: 0, cy: 19, r: 7.5, fill: '#3a2a12' }, this.badge);
+    this.zz = [0, 1, 2].map(() => el('path', { d: 'M-17 -15 H17 L-17 15 H17', fill: 'none', style: MARK_STROKE, 'stroke-width': 7, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0 }, this.fxFront));
+    const dots = this.compact ? [[460, 440, 15], [420, 385, 21], [385, 312, 28]] : [[236, 238, 15], [172, 176, 21], [102, 106, 28]];
+    this.dots = dots.map(([x, y, r]) => ({ x, y, n: el('circle', { cx: x, cy: y, r, style: MARK_FILL, opacity: 0 }, this.fxFront) }));
+    // Getting ready: a small speech bubble with three dots by her ear.
+    this.ellipsis = el('g', { opacity: 0, style: 'display:none' }, this.fxFront);
+    el('rect', { x: -62, y: -30, width: 124, height: 60, rx: 30, style: 'fill: var(--bot-figure-bubble, #ffffff)' }, this.ellipsis);
+    this.ellipsisDots = [-30, 0, 30].map(x => el('circle', { cx: x, cy: 0, r: 10, style: MARK_FILL }, this.ellipsis));
+    if (propBack && propFront) this.buildProps(defs, propBack, propFront);
+    if (stage && onLedge && stageFront && stageFx) this.stageGroups = { team: stage.team, ledge: onLedge, front: stageFront, fx: stageFx };
+  }
+
+  private buildVarinArtwork(defs: SVGDefsElement, clip: FigureClip): void {
+    const u = this.uid;
+    // The flyaway lock's own outline: grown for the moving copy, cut a little larger in the static hair.
+    const ahogeIn = clip('ai', VARIN_FIGURE_LAYERS.ahogeIn[0][1]);
+    const ahogeOut = clip('ao', `M0 0H1254V1254H0Z ${VARIN_FIGURE_LAYERS.ahogeHole[0][1]}`, 'evenodd');
     // Behind the chin: the shoulder area, the inside of the collar and a little neck.
     const under = el('g', {}, this.fig);
     el('path', { fill: '#9599b8', d: 'M260 1300 L262 1100 C290 1000 390 915 470 892 L530 836 L724 836 L784 892 C864 915 964 1000 992 1100 L994 1300 Z' }, under);
@@ -1180,34 +1324,7 @@ export class VarinFigureRig {
 
     for (const group of [under, body]) this.collectAccent(group);
     paint(VARIN_FIGURE_LAYERS.face, el('g', {}, this.fig));
-    // Face features slide a little under the bangs when the head "turns".
-    this.feat = el('g', {}, this.fig);
-    this.blushes = (['L', 'R'] as const).map(k => {
-      const a = VARIN_FIGURE_BLUSH[k === 'L' ? 'blushL' : 'blushR'], g = el('g', {}, this.feat);
-      const e = el('ellipse', { cx: a.cx, cy: a.cy, rx: a.rx, ry: a.ry, fill: '#f3c4ba' }, g);
-      const lines = el('path', { d: [-18, 0, 18].map(dx => `M${a.cx + dx - 6} ${a.cy + 9} l12 -18`).join(' '), stroke: '#e48b86', 'stroke-width': 4.5, 'stroke-linecap': 'round', opacity: 0 }, g);
-      return { g, e, lines, cx: a.cx, cy: a.cy };
-    });
-    const mouthGroup = el('g', {}, this.feat);
-    const mouths: Partial<Record<Mouth, SVGGElement>> = {};
-    for (const key of Object.keys(MOUTHS) as Mouth[]) {
-      const g = el('g', { style: 'display:none' }, mouthGroup);
-      for (const [tag, attrs] of MOUTHS[key]) el(tag, attrs, g);
-      mouths[key] = g;
-    }
-    this.mouths = mouths as Record<Mouth, SVGGElement>;
-    const eye = (k: Side): Eye => {
-      const wrap = el('g', {}, this.feat), open = el('g', {}, wrap);
-      paint(VARIN_FIGURE_LAYERS[k === 'L' ? 'eyeL' : 'eyeR'], open);
-      return {
-        cur: 'open', amt: 1, va: 0, open,
-        hl: el('circle', { cx: HL[k][0], cy: HL[k][1], r: 8.5, fill: '#fbfbfd' }, open),
-        hl2: el('circle', { cx: HL2[k][0], cy: HL2[k][1], r: 5.5, fill: '#fbfbfd', opacity: 0 }, open),
-        alt: el('path', { fill: 'none', stroke: LASH, 'stroke-width': 13, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', style: 'display:none' }, wrap),
-      };
-    };
-    this.eyes = { L: eye('L'), R: eye('R') };
-    this.brows = (['browL', 'browR'] as const).map(k => { const g = el('g', {}, this.feat); paint(VARIN_FIGURE_LAYERS[k], g); return g; });
+    this.buildFaceFeatures(VARIN_FIGURE_LAYERS);
 
     // The hair tie's loop sits behind the lock; its tail and loop tuck under the band (same colour)
     // so they swing without a visible join.
@@ -1232,41 +1349,88 @@ export class VarinFigureRig {
     el('path', { fill: '#7f9fe4', d: 'M889 325 L946 323 L966 343 L930 423 L845 423 L872 370 L880 364 L899 378 L912 355 L908 347 L887 331 Z' }, clipGroup);
     this.collectAccent(clipGroup);
 
-    // The stage's members sit beside her above the ledge, cut by it as she is; the clip spans any width.
-    const stage = this.wide ? { team: el('g', { class: 'bot-figure-team', 'clip-path': clip('team', `M-4000 -800H5254V${SILL + 6}H-4000Z`) }, svg) } : null;
-    // The ledge she leans on, in the theme's surface colour, and the two ball hands resting on it.
-    if (!this.compact) this.ledge = el('rect', { x: 30, y: SILL, width: 1194, height: 40, rx: 20, style: 'fill: var(--bot-figure-ledge, #e3e5eb)' }, svg);
-    const onLedge = stage ? el('g', { class: 'bot-figure-team' }, svg) : null;
-    const propBack = this.compact ? null : el('g', {}, svg);
-    const hands = el('g', { 'clip-path': lower }, svg);
-    this.hands = [-1, 1].map(side => {
-      const g = el('g', {}, hands);
-      const sh = el('ellipse', { cx: 0, cy: 14, rx: 66, ry: 64, style: 'fill: var(--bot-figure-shadow, #141828)', opacity: .22 }, g);
-      el('circle', { cx: 0, cy: 0, r: 68, fill: '#efc3b7' }, g);
-      el('circle', { cx: -side * 7, cy: -8, r: 61, fill: SKIN }, g);
-      return { g, sh };
-    });
+  }
 
-    const propFront = this.compact ? null : el('g', {}, svg);
-    // The stage's cards and its flights; her own effects stay the last layer.
-    const stageFront = stage ? el('g', { class: 'bot-figure-team' }, svg) : null;
-    const stageFx = stage ? el('g', { class: 'bot-figure-team' }, svg) : null;
-    // Effects in front: the "needs you" badge, sleep z's, thinking bubbles, particles.
-    this.fxFront = el('g', {}, svg);
-    this.badge = el('g', { opacity: 0 }, this.fxFront);
-    this.badgeRing = el('circle', { r: 44, fill: 'none', stroke: '#f3b562', 'stroke-width': 6 }, this.badge);
-    el('circle', { r: 44, fill: '#f3b562' }, this.badge);
-    el('rect', { x: -7, y: -26, width: 14, height: 32, rx: 7, fill: '#3a2a12' }, this.badge);
-    el('circle', { cx: 0, cy: 19, r: 7.5, fill: '#3a2a12' }, this.badge);
-    this.zz = [0, 1, 2].map(() => el('path', { d: 'M-17 -15 H17 L-17 15 H17', fill: 'none', style: MARK_STROKE, 'stroke-width': 7, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0 }, this.fxFront));
-    const dots = this.compact ? [[460, 440, 15], [420, 385, 21], [385, 312, 28]] : [[236, 238, 15], [172, 176, 21], [102, 106, 28]];
-    this.dots = dots.map(([x, y, r]) => ({ x, y, n: el('circle', { cx: x, cy: y, r, style: MARK_FILL, opacity: 0 }, this.fxFront) }));
-    // Getting ready: a small speech bubble with three dots by her ear.
-    this.ellipsis = el('g', { opacity: 0, style: 'display:none' }, this.fxFront);
-    el('rect', { x: -62, y: -30, width: 124, height: 60, rx: 30, style: 'fill: var(--bot-figure-bubble, #ffffff)' }, this.ellipsis);
-    this.ellipsisDots = [-30, 0, 30].map(x => el('circle', { cx: x, cy: 0, r: 10, style: MARK_FILL }, this.ellipsis));
-    if (propBack && propFront) this.buildProps(defs, propBack, propFront);
-    if (stage && onLedge && stageFront && stageFx) this.stageGroups = { team: stage.team, ledge: onLedge, front: stageFront, fx: stageFx };
+  private buildFaceFeatures(layers: Pick<BotFigureArtwork['layers'], 'eyeL' | 'eyeR' | 'browL' | 'browR'>): void {
+    // Face features slide a little under the bangs when the head "turns".
+    const face = this.face;
+    this.feat = el('g', {}, this.fig);
+    this.blushes = (['L', 'R'] as const).map(k => {
+      const a = k === 'L' ? face.blushL : face.blushR, g = el('g', {}, this.feat);
+      const e = el('ellipse', { cx: a.cx, cy: a.cy, rx: a.rx, ry: a.ry, fill: face.blushBase }, g);
+      const lines = el('path', { d: [-18, 0, 18].map(dx => `M${a.cx + dx - 6} ${a.cy + 9} l12 -18`).join(' '), stroke: '#e48b86', 'stroke-width': 4.5, 'stroke-linecap': 'round', opacity: 0 }, g);
+      return { g, e, lines, cx: a.cx, cy: a.cy };
+    });
+    const [mx, my] = face.mouth;
+    const mouthGroup = el('g', {}, this.feat);
+    const mouths: Partial<Record<Mouth, SVGGElement>> = {};
+    for (const key of Object.keys(MOUTHS) as Mouth[]) {
+      const g = el('g', { style: 'display:none' }, mouthGroup);
+      const shapes = this.artwork ? el('g', { transform: 'translate(' + (mx - 627) + ' ' + (my - 762) + ')' }, g) : g;
+      for (const [tag, attrs] of MOUTHS[key]) el(tag, 'stroke' in attrs && attrs.stroke === LIP ? { ...attrs, stroke: face.lip } : attrs, shapes);
+      mouths[key] = g;
+    }
+    this.mouths = mouths as Record<Mouth, SVGGElement>;
+    const eye = (k: Side): Eye => {
+      const wrap = el('g', {}, this.feat), open = el('g', {}, wrap);
+      paint(layers[k === 'L' ? 'eyeL' : 'eyeR'], open);
+      const [hx, hy] = k === 'L' ? face.hl2L : face.hl2R;
+      return {
+        cur: 'open', amt: 1, va: 0, open,
+        hl: this.artwork ? null : el('circle', { cx: HL[k][0], cy: HL[k][1], r: 8.5, fill: '#fbfbfd' }, open),
+        hl2: el('circle', { cx: hx, cy: hy, r: 5.5, fill: '#fbfbfd', opacity: 0 }, open),
+        alt: el('path', { fill: 'none', stroke: face.lash, 'stroke-width': this.artwork ? 13 : 12, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', style: 'display:none' }, wrap),
+      };
+    };
+    this.eyes = { L: eye('L'), R: eye('R') };
+    this.brows = (['browL', 'browR'] as const).map(k => { const g = el('g', {}, this.fig); paint(layers[k], g); return g; });
+
+  }
+
+  private buildPresetArtwork(artwork: BotFigureArtwork, defs: SVGDefsElement, clip: FigureClip): void {
+    const { layers, attachments } = artwork;
+    const u = this.uid;
+    const frontId = `${u}front-art`;
+    paint(layers.front, el('g', { id: frontId }, defs));
+    const holes = [
+      ...attachments.flatMap(a => a.clipHole ? [a.clipHole] : []),
+      ...(layers.forehead ?? []).map(([, path]) => path),
+    ];
+    const addAttachments = (depth: FigureAttachment['z']): void => {
+      for (const def of attachments) {
+        if (def.z !== depth) continue;
+        const node = el('g', {}, this.fig);
+        const paintPiece = (parent: SVGGElement): void => {
+          if (def.clipIn) el('use', { href: `#${frontId}`, 'clip-path': clip(`piece-${def.id}`, def.clipIn) }, parent);
+          else paint(def.layer, parent);
+        };
+        const attachment: MovingAttachment = { def, node, angle: 0, velocity: 0 };
+        if (def.bend && def.tip && !def.static && !this.posed) {
+          const pieceId = `${u}piece-art-${def.id}`;
+          paintPiece(el('g', { id: pieceId }, defs));
+          attachment.bend = buildBendingAttachment({ ...def, tip: def.tip }, node, pieceId, clip);
+        } else paintPiece(node);
+        this.attachments.push(attachment);
+        if (def.foregroundClip) {
+          el('use', { href: `#${frontId}`, 'clip-path': clip(`foreground-${def.id}`, def.foregroundClip) }, this.fig);
+        }
+      }
+    };
+
+    if (layers.back) paint(layers.back, el('g', {}, this.fig));
+    addAttachments('back');
+    const face = el('g', {}, this.fig);
+    paint(layers.face, face);
+    paint(layers.forehead, face);
+    this.buildFaceFeatures(layers);
+    const front: Attrs = { href: `#${frontId}` };
+    if (holes.length) front['clip-path'] = clip('front-cut', `M-200 -200H1454V1500H-200Z ${holes.join(' ')}`, 'evenodd');
+    el('use', front, this.fig);
+    if (layers.front[0]) {
+      const sheen = el('g', { 'clip-path': clip('hair-sheen', layers.front[0][1], 'evenodd') }, this.fig);
+      this.sheenRect = el('rect', { x: -300, y: 60, width: 260, height: 1200, fill: `url(#${u}s)`, opacity: 0 }, sheen);
+    }
+    addAttachments('front');
   }
 
   private buildProps(defs: SVGDefsElement, back: SVGGElement, front: SVGGElement): void {

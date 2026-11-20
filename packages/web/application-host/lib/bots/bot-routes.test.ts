@@ -62,8 +62,10 @@ describe('Bot routes without a network listener', () => {
   });
   it('creates native Bots without a runtime selector and returns the original tagged entry', async () => {
     const f = fixture();
-    expect((await f.call('POST', '/api/harness/bots', { name: 'Bot' })).status).toBe(201);
-    expect(f.create).toHaveBeenCalledWith({ name: 'Bot' });
+    const appearance = { kind: 'preset', character: 'mistral', color: 'original' } as const;
+    f.create.mockResolvedValueOnce({ ...bot, appearance });
+    expect(await f.call('POST', '/api/harness/bots', { name: 'Bot', appearance })).toEqual({ status: 201, body: { bot: { ...bot, appearance } } });
+    expect(f.create).toHaveBeenCalledWith({ name: 'Bot', appearance });
     expect((await f.call('POST', '/api/harness/bots/bot/entry')).body).toEqual({ bot, entry, model: null });
     expect(f.ensureEntry).toHaveBeenCalledWith('bot');
     const work = await f.call('GET', '/api/harness/bots/bot/work');

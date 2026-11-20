@@ -36,7 +36,7 @@ vi.mock('@/components/ui/dialog', () => {
 vi.mock('./BotMenu', () => ({ BotMenu: ({ bot, onAction, children }: { bot: BotSummary; onAction(action: string): void; children: React.ReactNode }) => <div>{children}
   {['rename', 'archive', 'restore', 'delete'].map((action) => <button key={action} onClick={() => onAction(action)}>{action}-{bot.id}</button>)}
 </div> }));
-vi.mock('./BotNameDialog', () => ({ BotNameDialog: ({ open, onNameChange, onSubmit }: { open: boolean; onNameChange(name: string): void; onSubmit(event: React.FormEvent<HTMLFormElement>): void }) => open ? <form onSubmit={onSubmit}>
+vi.mock('./BotNameDialog', () => ({ BotNameDialog: ({ open, name, onNameChange, onSubmit }: { open: boolean; name: string; onNameChange(name: string): void; onSubmit(name: string): void }) => open ? <form onSubmit={event => { event.preventDefault(); onSubmit(name.trim()); }}>
   <button type="button" onClick={() => onNameChange('New name')}>set-name</button><button type="submit">save-name</button>
 </form> : null }));
 

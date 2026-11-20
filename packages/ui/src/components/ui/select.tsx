@@ -202,7 +202,7 @@ function SelectContent({
         sideOffset={sideOffset}
         side={side}
         align={align}
-        className="absolute z-[120] pointer-events-auto"
+        className="absolute z-[120] pointer-events-auto data-[closed]:pointer-events-none"
       >
         <BaseSelect.Popup
           data-slot="select-content"
@@ -211,7 +211,7 @@ function SelectContent({
             color: 'var(--surface-elevated-foreground)',
           }}
           className={cn(
-            "pointer-events-auto motion-popover relative z-[120] max-h-[var(--available-height)] min-w-[8rem] origin-[var(--transform-origin)] overflow-x-hidden corner-continuous rounded-menu border border-border shadow-md shadow-black/10 dark:shadow-black/30",
+            "pointer-events-auto data-[closed]:pointer-events-none motion-popover relative z-[120] max-h-[var(--available-height)] min-w-[8rem] origin-[var(--transform-origin)] overflow-x-hidden corner-continuous rounded-menu border border-border shadow-md shadow-black/10 dark:shadow-black/30",
             !alignItemWithTrigger &&
               "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
             fitContent && "w-max min-w-0",

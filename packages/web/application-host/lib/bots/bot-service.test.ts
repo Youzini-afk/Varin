@@ -60,8 +60,11 @@ const setup = async () => {
 };
 
 it('persists each Bot appearance without propagating model instructions or overwriting profile edits', async () => {
-  const { service, recreate, applyProfile } = await setup();
-  const bot = await service.create({ name: 'Moon', instructions: 'Keep it clear' });
+  const { service, recreate, applyProfile, ensureEntry } = await setup();
+  const appearance = { kind: 'preset', character: 'mistral', color: 'original' } as const;
+  const bot = await service.create({ name: 'Moon', instructions: 'Keep it clear', appearance });
+  expect(ensureEntry).toHaveBeenCalledWith(expect.objectContaining({ appearance }));
+  expect((await recreate().get(bot.id))?.appearance).toEqual(appearance);
   await service.update(bot.id, { appearance: { kind: 'varin', color: '#ab97cd' } });
   await service.update(bot.id, { name: 'Moonlight' });
   expect(await recreate().get(bot.id)).toMatchObject({ name: 'Moonlight', instructions: 'Keep it clear', appearance: { kind: 'varin', color: '#ab97cd' } });

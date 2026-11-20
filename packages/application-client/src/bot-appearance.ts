@@ -1,7 +1,10 @@
 /** Bot-owned presentation; independent of its model, instructions and execution. */
 export interface BotImageCrop { x: number; y: number; scale: number }
+export const BOT_FIGURE_PRESETS = ['deepseek', 'claude', 'gpt', 'gemini', 'grok', 'kimi', 'glm', 'qwen', 'seed', 'minimax', 'llama', 'mistral', 'perplexity', 'wenxin', 'jev'] as const;
+export type BotFigurePreset = typeof BOT_FIGURE_PRESETS[number];
 export type BotAppearance =
   | { kind: 'varin'; color: 'theme' | 'original' | string }
+  | { kind: 'preset'; character: BotFigurePreset; color: 'theme' | 'original' | string }
   | { kind: 'custom'; assetId: string; portrait: BotImageCrop; figure: BotImageCrop };
 export const BOT_APPEARANCE_STATES = ['idle', 'listening', 'thinking', 'working', 'waiting', 'sleeping', 'waking', 'offline', 'preparing', 'replying', 'supervising', 'tool-read', 'tool-search', 'tool-web', 'tool-edit', 'tool-shell', 'tool-memory', 'tool-plan', 'tool-other'] as const;
 export type BotAppearanceState = typeof BOT_APPEARANCE_STATES[number];
@@ -40,8 +43,12 @@ export function parseBotImageCrop(value: unknown): BotImageCrop {
 }
 export function parseBotAppearance(value: unknown): BotAppearance {
   const input = object(value);
-  if (input.kind === 'varin' && typeof input.color === 'string' && (['theme', 'original'].includes(input.color) || /^#[a-f0-9]{6}$/i.test(input.color)))
-    return { kind: 'varin', color: input.color.toLowerCase() };
+  if (typeof input.color === 'string' && (input.color === 'theme' || input.color === 'original' || /^#[a-f0-9]{6}$/i.test(input.color))) {
+    const color = input.color.toLowerCase();
+    if (input.kind === 'varin') return { kind: 'varin', color };
+    if (input.kind === 'preset' && BOT_FIGURE_PRESETS.includes(input.character as BotFigurePreset))
+      return { kind: 'preset', character: input.character as BotFigurePreset, color };
+  }
   if (input.kind === 'custom') return { kind: 'custom', assetId: hash(input.assetId), portrait: parseBotImageCrop(input.portrait), figure: parseBotImageCrop(input.figure) };
   throw new Error('Invalid Bot appearance');
 }

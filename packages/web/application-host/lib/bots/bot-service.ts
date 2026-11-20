@@ -315,22 +315,30 @@ export function createBotService(options: BotServiceOptions): BotService {
 
   const appearances = createBotAppearances({ client: scoped, workspaceId: BOT_CATALOG_WORKSPACE_ID, bots: list,
     ...(options.onAppearanceLibraryChange ? { changed: options.onAppearanceLibraryChange } : {}) });
+  const appearanceFromInput = (value: unknown) => {
+    try { return parseBotAppearance(value); }
+    catch (error) { throw new HarnessServiceError('invalid-params', error instanceof Error ? error.message : 'Invalid Bot appearance'); }
+  };
 
   const create: BotService["create"] = async (input = {}) => {
     if ("runtime" in input) throw new HarnessServiceError("invalid-params", "Bot runtime selection is unsupported");
     if (input.model != null && !parseBotModelSelection(input.model)) throw new HarnessServiceError('invalid-params', 'Invalid Bot model or thinking level');
+    const appearance = input.appearance === undefined ? undefined : appearanceFromInput(input.appearance);
     const botId = randomUUID();
     const homeDir = join(options.dataDir, "bots", botId);
-    await mkdir(homeDir, { recursive: true });
-    const now = new Date().toISOString();
-    const bot = await write(botId, "active", {
-      name: input.name?.trim() || "Varin Bot",
-      instructions: input.instructions?.trim() || null,
-      model: input.model ?? null,
-      homeDir,
-      createdAt: now,
-      entry: { runtime: "agent", threadId: `thread:bot:${botId}`, branchId: `branch:bot:${botId}` },
-    });
+    const save = async () => {
+      await mkdir(homeDir, { recursive: true });
+      return write(botId, "active", {
+        name: input.name?.trim() || "Varin Bot",
+        instructions: input.instructions?.trim() || null,
+        model: input.model ?? null,
+        homeDir,
+        createdAt: new Date().toISOString(),
+        entry: { runtime: "agent", threadId: `thread:bot:${botId}`, branchId: `branch:bot:${botId}` },
+        ...(appearance ? { appearance } : {}),
+      });
+    };
+    const bot = appearance?.kind === 'custom' ? await appearances.use(appearance.assetId, save) : await save();
     await options.agent.ensureEntry(bot);
     return bot;
   };
@@ -360,10 +368,7 @@ export function createBotService(options: BotServiceOptions): BotService {
       updates.model = patch.model;
     }
     if (patch.pinned !== undefined) updates.pinnedAt = patch.pinned ? (toSummary(existing)?.pinnedAt ?? new Date().toISOString()) : null;
-    if (patch.appearance !== undefined) {
-      try { updates.appearance = parseBotAppearance(patch.appearance); }
-      catch (error) { throw new HarnessServiceError('invalid-params', error instanceof Error ? error.message : 'Invalid Bot appearance'); }
-    }
+    if (patch.appearance !== undefined) updates.appearance = appearanceFromInput(patch.appearance);
     const save = () => write(botId, "active", updates, existing.recordRevision);
     const summary = updates.appearance?.kind === 'custom' ? await appearances.use(updates.appearance.assetId, save) : await save();
     if (patch.instructions !== undefined || patch.model !== undefined) {

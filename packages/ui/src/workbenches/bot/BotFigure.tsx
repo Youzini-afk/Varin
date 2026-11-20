@@ -1,11 +1,13 @@
 import React from 'react';
-import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type BotAppearance, type BotAppearanceAsset, type BotSummary } from '@varin/application-client';
+import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type BotAppearance, type BotAppearanceAsset, type BotFigurePreset, type BotSummary } from '@varin/application-client';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { cn } from '@/lib/utils';
 import type { BotFigurePose } from './botPresentation';
 import { BotStageRenderer, type BotStageFeed } from './botStageRenderer';
 import { DEFAULT_FIGURE_ACCENT, resolveFigureAccent, resolveFigureColor } from './varinFigurePalette';
 import { VarinFigureRig } from './varinFigureRig';
+import type { BotFigureArtwork } from './botFigureArtwork';
+import { botFigurePresets } from './botFigurePresets';
 import { CustomBotStage } from './customBotStage';
 import { BotImageArtwork } from './BotImageArtwork';
 import { acquireBotImage, useBotAppearanceAsset, useBotFigureAppearance } from './botAppearanceResources';
@@ -14,13 +16,11 @@ import './bot-image-figure.css';
 
 /** Below this width the figure shows only the head and holds its pose. */
 const COMPACT_BELOW = 40;
+const loadedArtwork = new Map<BotFigurePreset, BotFigureArtwork>();
 
 /**
- * The Bot's figure (docs/design/bot-ui.md §5.7, docs/design/varin-figure.md): Varin leaning on a
- * window sill. It receives one pose and owns the poses and the motion between them (varinFigureRig).
- * Small sizes only take the pose and never loop; loops stop while the figure is out of sight. Her accent
- * parts follow the theme's accent, as the desktop companion does (varinFigurePalette). The wide panel
- * figure can also carry the stage: her team on the ledge and her reactions (botStageRenderer).
+ * Shared entry point for Bot portraits and stages. Built-in stages take their pose from the
+ * current work, pause when out of sight, and can carry the team and its reactions on the ledge.
  */
 export interface BotFigureProps {
   state: BotFigurePose;
@@ -59,6 +59,7 @@ function BotFigureForHost(props: BotFigureProps) {
   const key = appearance?.kind === 'custom' ? assetId : JSON.stringify(appearance);
   const { onReady, onError } = props;
   React.useEffect(() => {
+    if (appearance?.kind === 'preset') return;
     if (!appearance || appearance.kind === 'varin') { setPrepared({ appearance: appearance ?? { kind: 'varin', color: 'theme' } }); onReady?.(true); return; }
     onReady?.(false);
     if (!resource.asset) { if (resource.error) onError?.(resource.error); return; }
@@ -73,32 +74,66 @@ function BotFigureForHost(props: BotFigureProps) {
     ? prepared?.asset?.id === assetId ? { ...prepared, appearance } : prepared
     : { appearance: appearance ?? { kind: 'varin' as const, color: 'theme' } };
   if (shown?.appearance.kind === 'custom' && shown.asset) return <CustomBotFigure {...props} appearance={shown.appearance} asset={shown.asset} />;
+  if (shown?.appearance.kind === 'preset') {
+    const { character, color } = shown.appearance;
+    return <PresetBotFigure key={character} {...props} character={character} color={color} />;
+  }
   if (shown?.appearance.kind === 'varin' || !assetId) return <BuiltinBotFigure {...props} color={shown?.appearance.kind === 'varin' ? shown.appearance.color : 'theme'} />;
   return <span className={cn('bot-figure bot-image-pending', props.className)} style={{ width: props.wide ? '100%' : props.size, height: props.size }} title={resource.error}><RiImageLine className="size-1/2 text-muted-foreground/40" /></span>;
 }
 
-function BuiltinBotFigure({ state, size, still = false, wide = false, stage, className, label, color }: BotFigureProps & { color: string }) {
+function PresetBotFigure(props: BotFigureProps & { character: BotFigurePreset; color: string }) {
+  const { character, size, portrait, onReady, onError } = props;
+  const compact = portrait || size < COMPACT_BELOW;
+  const [artwork, setArtwork] = React.useState(() => loadedArtwork.get(character));
+  React.useEffect(() => {
+    onReady?.(compact || Boolean(artwork));
+    if (compact || artwork) return;
+    let active = true;
+    void botFigurePresets[character].load().then(({ default: loaded }) => {
+      loadedArtwork.set(character, loaded);
+      if (active) setArtwork(loaded);
+    }).catch(error => { if (active) onError?.(String(error)); });
+    return () => { active = false; };
+  }, [artwork, character, compact, onReady, onError]);
+  return compact || !artwork
+    ? <BotPresetPortrait character={character} size={size} state={props.state} className={props.className} label={props.label} wide={props.wide} />
+    : <BuiltinBotFigure {...props} artwork={artwork} />;
+}
+
+export function BotPresetPortrait({ character, size, state, label, wide, className }: Pick<BotFigureProps, 'size' | 'state' | 'label' | 'wide' | 'className'> & { character: BotFigurePreset }) {
+  return <span className={cn('bot-figure bot-preset-portrait', className)} data-state={state} data-still
+    style={{ width: wide ? '100%' : size, height: size }} aria-hidden={label ? undefined : true}>
+    <img src={botFigurePresets[character].portrait} alt={label ?? ''} width={size} height={size} draggable={false} />
+  </span>;
+}
+
+function BuiltinBotFigure({ state, size, still = false, wide = false, stage, className, label, portrait = false, color, artwork }: BotFigureProps & { color: string; artwork?: BotFigureArtwork }) {
   const host = React.useRef<HTMLSpanElement>(null);
   const rig = React.useRef<VarinFigureRig | null>(null);
   const scene = React.useRef<BotStageRenderer | null>(null);
-  const compact = size < COMPACT_BELOW;
+  const compact = portrait || size < COMPACT_BELOW;
   const posed = still || compact;
   const staged = wide && !posed && stage !== undefined;
   const theme = useOptionalThemeSystem()?.currentTheme;
-  const accent = React.useMemo(() => color === 'original' ? DEFAULT_FIGURE_ACCENT : color === 'theme' ? resolveFigureAccent(theme) : resolveFigureColor(color), [theme, color]);
+  const accent = React.useMemo(() => {
+    if (color === 'original') return DEFAULT_FIGURE_ACCENT;
+    if (color === 'theme') return artwork ? resolveFigureColor(theme?.colors?.primary?.base ?? '') : resolveFigureAccent(theme);
+    return resolveFigureColor(color);
+  }, [theme, color, artwork]);
   const latest = React.useRef(state);
   const latestAccent = React.useRef(accent);
   const latestStage = React.useRef(stage);
   React.useLayoutEffect(() => {
     const element = host.current;
     if (!element) return undefined;
-    const figure = new VarinFigureRig(element, { state: latest.current, compact, still: posed, wide, accent: latestAccent.current });
+    const figure = new VarinFigureRig(element, { state: latest.current, compact, still: posed, wide, accent: latestAccent.current, artwork });
     rig.current = figure;
     const team = staged && figure.stageLayers ? new BotStageRenderer(figure) : null;
     scene.current = team;
     if (team && latestStage.current) team.update(latestStage.current);
     return () => { team?.dispose(); scene.current = null; figure.dispose(); rig.current = null; };
-  }, [compact, posed, wide, staged]);
+  }, [artwork, compact, posed, wide, staged]);
   React.useLayoutEffect(() => { latest.current = state; rig.current?.setState(state); }, [state]);
   React.useLayoutEffect(() => { latestAccent.current = accent; rig.current?.setAccent(accent); }, [accent]);
   React.useLayoutEffect(() => { latestStage.current = stage; if (stage) scene.current?.update(stage); }, [stage]);

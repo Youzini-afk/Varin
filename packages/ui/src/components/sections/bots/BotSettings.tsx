@@ -2,7 +2,7 @@ import { SettingsTabs } from '../shared/SettingsTabs';
 import { useSettingsSearchTarget } from '@/lib/settings/search-target';
 import React from 'react';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
-import type { BotModelSelection } from '@varin/application-client';
+import type { BotAppearance, BotModelSelection } from '@varin/application-client';
 import { SettingsActionBar } from '@/components/sections/shared/SettingsActionBar';
 import { Icon } from '@/components/icon/Icon';
 import { BotMemoryPreferences } from './BotMemoryPreferences';
@@ -155,12 +155,9 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
     });
   };
 
-  const submitCreate = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const trimmed = createName.trim();
-    if (!trimmed) return;
+  const submitCreate = (name: string, appearance?: BotAppearance) => {
     void run('create', async () => {
-      const created = renaming ? await updateBot(renaming.id, { name: trimmed }) : await createBot({ name: trimmed });
+      const created = renaming ? await updateBot(renaming.id, { name }) : await createBot({ name, appearance });
       await refresh();
       if (!renaming) { setSelectedId(created.id); setTab('profile'); }
       setCreateDialogOpen(false);
@@ -300,6 +297,7 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
     {viewingDesktop ? <ComputerDesktopView desktop={viewingDesktop} open onOpenChange={(open) => { if (!open) setViewingDesktop(null); }} /> : null}
     <BotNameDialog
       open={createDialogOpen}
+      mode={renaming ? 'rename' : 'create'}
       title={t(renaming ? 'settings.bots.rename' : 'settings.bots.create')}
       submitLabel={t(renaming ? 'settings.bots.save' : 'settings.bots.createAction')}
       name={createName}
