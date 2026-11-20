@@ -754,6 +754,7 @@ export class ThreadCollaboration {
     let pendingProgress: ChildPreparationProgress | undefined;
     let writingProgress: Promise<void> | undefined;
     let progressKey = '';
+    let releaseFailure: { error: unknown } | undefined;
     const drainProgress = (): Promise<void> => {
       if (writingProgress) return writingProgress;
       writingProgress = (async () => {
@@ -828,22 +829,24 @@ export class ThreadCollaboration {
     } catch (error) {
       // A current definition/Goal pause can arrive after source preparation but before the
       // original submission transaction. Keep this exact pending execution for its next event.
-      if (error instanceof KernelClientError && (error.code === 'activation-held' || error.code === 'bot-suspended')) return;
-      if (!signal.aborted) {
-        reportError?.(error, stage);
-        try {
-          const current = await runtime.childExecution(child.execution_id, ownerSignal);
-          // An admitted Run's unknown effects remain recoverable; preparation failure cannot erase them.
-          if (!current.receipt && !current.report) {
-            const { code, detail, failure } = preparationFailure(error, stage);
-            child = await runtime.failChild(child.execution_id, code, detail, ownerSignal, failure);
+      const held = error instanceof KernelClientError && (error.code === 'activation-held' || error.code === 'bot-suspended');
+      if (!held) {
+        if (!signal.aborted) {
+          reportError?.(error, stage);
+          try {
+            const current = await runtime.childExecution(child.execution_id, ownerSignal);
+            // An admitted Run's unknown effects remain recoverable; preparation failure cannot erase them.
+            if (!current.receipt && !current.report) {
+              const { code, detail, failure } = preparationFailure(error, stage);
+              child = await runtime.failChild(child.execution_id, code, detail, ownerSignal, failure);
+            }
+          } catch (recordingError) {
+            if (!reportError) throw recordingError;
+            reportError(recordingError, 'Record child preparation failure');
           }
-        } catch (recordingError) {
-          if (!reportError) throw recordingError;
-          reportError(recordingError, 'Record child preparation failure');
         }
+        if (!reportError) throw error;
       }
-      if (!reportError) throw error;
     } finally {
       pendingProgress = undefined;
       await writingProgress;
@@ -852,10 +855,12 @@ export class ThreadCollaboration {
           child = await runtime.childExecution(child.execution_id, ownerSignal);
           await this.releaseHandoff(child, ownerSignal);
         } catch (error) {
-          if (!reportError) throw error;
-          reportError(error, 'Release child resources');
+          if (reportError) reportError(error, 'Release child resources');
+          else releaseFailure = { error };
         }
       }
     }
+    // Let an earlier execution error propagate even if cleanup also failed.
+    if (releaseFailure) throw releaseFailure.error;
   }
 }

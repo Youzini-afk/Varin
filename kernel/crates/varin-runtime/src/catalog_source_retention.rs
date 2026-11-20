@@ -6,8 +6,16 @@ use launches::SourceSelection;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
+// The fixed key prefixes let SQLite use the commands primary key for these
+// scans. Only selected command bodies participate in source maintenance.
+const COMMAND_KIND: &str = "CASE WHEN json_valid(intent) THEN json_extract(intent,'$.kind') END";
+const RETIREMENT_COMMAND: &str = "source.retention";
+const RETIREMENT_KEYS: &str = "id GLOB 'source-retention:*'";
+const PREPARATION_KEYS: &str = "id GLOB 'source-preparation:*'";
+
 pub(super) fn initialize(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE INDEX IF NOT EXISTS source_retirement_candidates ON commands(id) WHERE json_extract(intent,'$.kind')='source.retention'")?;
+    // Remove the former index so it no longer parses unrelated command bodies on write.
+    db.execute_batch("DROP INDEX IF EXISTS source_retirement_candidates")?;
     Ok(())
 }
 
@@ -134,7 +142,7 @@ impl Catalog {
                 }
             }
         }
-        for row in self.db.prepare("SELECT intent FROM commands WHERE json_extract(intent,'$.kind')='source.preparation'")?.query_map([],|row|row.get::<_,String>(0))? {
+        for row in self.db.prepare_cached(&format!("SELECT intent FROM commands WHERE {PREPARATION_KEYS} AND {COMMAND_KIND}='source.preparation'"))?.query_map([],|row|row.get::<_,String>(0))? {
             let value:Value=serde_json::from_str(&row?)?;
             let source:SourceSelection=serde_json::from_value(value["source"].clone())?;
             if let Some(id)=key(&source){references.entry(id).or_insert_with(||(source,BTreeSet::new())).1.insert(value["threadId"].as_str().ok_or_else(||RuntimeError::Invalid("Source preparation Thread is missing".into()))?.into());}
@@ -166,11 +174,13 @@ impl Catalog {
         &self,
         drained: &[String],
     ) -> Result<Vec<SourceRetirement>> {
-        if drained.is_empty() && !self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM commands WHERE json_extract(intent,'$.kind')='source.retention')",
-            [], |row| row.get::<_, bool>(0),
-        )? {
-            return Ok(Vec::new());
+        if drained.is_empty() {
+            let pending = self.db.prepare_cached(&format!(
+                "SELECT EXISTS(SELECT 1 FROM commands WHERE {RETIREMENT_KEYS} AND {COMMAND_KIND}='{RETIREMENT_COMMAND}')"
+            ))?.query_row([], |row| row.get::<_, bool>(0))?;
+            if !pending {
+                return Ok(Vec::new());
+            }
         }
         let ready = self.source_retirement_threads(drained)?;
         let references = self.source_references()?;
@@ -180,14 +190,14 @@ impl Catalog {
                     "INSERT OR IGNORE INTO commands(id,intent,receipt) VALUES(?1,?2,?3)",
                     params![
                         id,
-                        json!({"kind":"source.retention","source":source}).to_string(),
+                        json!({"kind":RETIREMENT_COMMAND,"source":source}).to_string(),
                         json!({"state":"pending"}).to_string()
                     ],
                 )?;
             }
         }
         let mut retired = Vec::new();
-        for row in self.db.prepare("SELECT id,intent FROM commands WHERE json_extract(intent,'$.kind')='source.retention'")?.query_map([],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)))? {
+        for row in self.db.prepare_cached(&format!("SELECT id,intent FROM commands WHERE {RETIREMENT_KEYS} AND {COMMAND_KIND}='{RETIREMENT_COMMAND}'"))?.query_map([],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)))? {
             let (id,intent)=row?;
             if references.get(&id).is_some_and(|(_,threads)|threads.iter().any(|thread|!ready.contains(thread))) {continue;}
             let source:SourceSelection=serde_json::from_value(serde_json::from_str::<Value>(&intent)?["source"].clone())?;
@@ -204,7 +214,7 @@ impl Catalog {
         complete: bool,
         defer: bool,
     ) -> Result<Value> {
-        let row:Option<(String,String)>=self.db.query_row("SELECT intent,receipt FROM commands WHERE id=?1 AND json_extract(intent,'$.kind')='source.retention'",[cleanup_id],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
+        let row:Option<(String,String)>=self.db.query_row(&format!("SELECT intent,receipt FROM commands WHERE id=?1 AND {RETIREMENT_KEYS} AND {COMMAND_KIND}='{RETIREMENT_COMMAND}'"),[cleanup_id],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
         let Some((intent, receipt)) = row else {
             return Ok(json!({"claimed":false}));
         };
@@ -331,6 +341,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("varin-source-retention-{}", Uuid::new_v4()));
         let mut db = Catalog::open(&root).unwrap();
         db.create_thread("owner", "owner-main").unwrap();
+        db.db.execute("INSERT INTO commands(id,intent,receipt) VALUES('old-command','opaque intent','opaque receipt')", []).unwrap();
         let selected = source();
         db.source_preparation("owner", &selected, false).unwrap();
         assert!(db.capture_source_retirements(&[]).unwrap().is_empty());
@@ -359,7 +370,7 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        assert_eq!(db.db.query_row("SELECT count(*) FROM commands WHERE json_extract(intent,'$.kind') IN ('source.preparation','source.retention')",[],|row|row.get::<_,i64>(0)).unwrap(),0);
+        assert_eq!(db.db.query_row(&format!("SELECT count(*) FROM commands WHERE {PREPARATION_KEYS} OR {RETIREMENT_KEYS}"),[],|row|row.get::<_,i64>(0)).unwrap(),0);
         drop(db);
         let _ = std::fs::remove_dir_all(root);
     }

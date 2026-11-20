@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Run, ThreadSummary } from '@varin/protocol';
-import type { BotEntryResult } from '@varin/application-client';
+import { defaultBotAppearance, type BotEntryResult } from '@varin/application-client';
 import { BotWorkspaceShell } from './BotWorkspaceShell';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -115,15 +115,13 @@ vi.mock('@/components/sections/bots/BotMenu', () => ({ BotMenu: ({ bot, onAction
   <button onClick={() => onAction('sleep')}>sleep-{bot.id}</button>
 </div> }));
 vi.mock('@/components/sections/bots/BotNameDialog', () => ({
-  BotNameDialog: ({ open, name, onNameChange, onSubmit }: {
-    open: boolean;
-    name: string;
-    onNameChange: (value: string) => void;
-    onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
-  }) => open ? <form onSubmit={onSubmit}>
+  BotNameDialog: ({ open, mode, name, onNameChange, onSubmit, submitLabel }: React.ComponentProps<typeof import('@/components/sections/bots/BotNameDialog').BotNameDialog>) => open ? <form onSubmit={event => {
+    event.preventDefault();
+    onSubmit(name.trim(), mode === 'create' ? defaultBotAppearance() : undefined);
+  }}>
     <input value={name} onChange={(event) => onNameChange(event.target.value)} />
     <button type="button" onClick={() => onNameChange('Named bot')}>set-name</button>
-    <button type="submit">settings.bots.save</button>
+    <button type="submit">{submitLabel}</button>
   </form> : null,
 }));
 vi.mock('@/components/ui/dialog', () => ({
@@ -218,7 +216,7 @@ describe('Bot workbench', () => {
     state.openWork.mockReset().mockResolvedValue(undefined);
     state.fork.mockReset(); state.copy.mockReset().mockResolvedValue({ ok: true });
     useThreadStore.setState({ selectedDraftKey: null, hostKey: 'host-a', selectedIdentity: { runtime: 'agent', threadId: 'ordinary', branchId: 'ordinary-main' }, threads: [], catalogError: null });
-    useUIStore.setState({ isSettingsDialogOpen: false, settingsPage: 'general', contextPanelByDirectory: {},
+    useUIStore.setState({ isSettingsDialogOpen: false, settingsPage: 'general', settingsCatalogSelection: null, contextPanelByDirectory: {},
       mainSurfaceSelectionRevision: 0, isScheduledTasksDialogOpen: false, scheduledTasksFocus: null,
       isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false });
   });
@@ -409,7 +407,7 @@ describe('Bot workbench', () => {
     await click('settings.bots.create');
     await click('set-name');
     await act(async () => { document.querySelector('form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
-    expect(state.create).toHaveBeenCalledExactlyOnceWith({ name: 'Named bot' });
+    expect(state.create).toHaveBeenCalledExactlyOnceWith({ name: 'Named bot', appearance: defaultBotAppearance() });
     expect(useBotNavigation.getState().entry).toEqual(bot('new').entry);
   });
 
@@ -721,18 +719,19 @@ describe('Bot workbench', () => {
   it('opens the right-clicked Bot profile without switching the conversation', async () => {
     await render();
     await click('profile-b');
-    expect(container.querySelector('[data-details]')?.getAttribute('data-details')).toBe('b');
+    expect(useUIStore.getState()).toMatchObject({ isSettingsDialogOpen: true, settingsPage: 'harness-bots', settingsCatalogSelection: 'b' });
     expect(useBotNavigation.getState().entry).toEqual(bot('a').entry);
     expect(useThreadStore.getState().selectedIdentity?.threadId).toBe('ordinary');
   });
 
-  it('pushes the selected Bot’s profile over the tabs and returns to them', async () => {
+  it('opens the profile from the Bot panel and keeps the workbench state on return', async () => {
     await render();
-    await click('profile-a');
-    expect(container.querySelector('.bot-profile-page')).not.toBeNull();
-    expect(container.querySelector('[role="tab"][aria-selected="true"]')).toBeNull();
-    await click('bot.profile.back');
-    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.id).toBe('bot-tab-overview');
+    await click('bot.tab.activity');
+    await click('bot.stage.editProfile');
+    expect(useUIStore.getState()).toMatchObject({ isSettingsDialogOpen: true, settingsPage: 'harness-bots', settingsCatalogSelection: 'a' });
+    await act(async () => useUIStore.getState().setSettingsDialogOpen(false));
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.id).toBe('bot-tab-activity');
+    expect(centre()?.getAttribute('data-agent')).toBe('entry-a');
   });
 
   it('views a sleeping Bot read-only without waking it, and wakes it on request', async () => {

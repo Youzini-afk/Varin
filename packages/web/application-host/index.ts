@@ -1575,7 +1575,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // BC0: durable Bot identity. The profile record lives in the kernel catalog;
   // the Bot's work is ordinary Threads under the `bot:<id>` owner scope, and
   // its entry conversation is a native Thread and branch.
-  let reconcileBotGroupDelivery: ((botId: string) => void) | undefined;
+  const botGroupDelivery: { botChanged?: (botId: string) => void } = {};
   const botService = createBotService({
     client: kernelClient,
     hostId,
@@ -1637,7 +1637,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (!botLifecycleRuntime) throw new Error('Bot lifecycle is not ready');
       return botLifecycleRuntime;
     },
-    onChange: (bot) => { broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId: bot.id } }); botPresence.schedule(); reconcileBotGroupDelivery?.(bot.id); },
+    onChange: (bot) => { broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId: bot.id } }); botPresence.schedule(); botGroupDelivery.botChanged?.(bot.id); },
     onDeleted: (botId) => { broadcastGlobalUiEvent?.({ type: 'varin:bot-changed', properties: { botId } }); botPresence.schedule(); },
     onOrganizationChange: () => { broadcastGlobalUiEvent?.({ type: 'varin:bot-organization-changed', properties: {} }); },
     onAppearanceLibraryChange: () => { broadcastGlobalUiEvent?.({ type: 'varin:bot-appearance-library-changed', properties: {} }); },
@@ -2856,7 +2856,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     changed: () => broadcastGlobalUiEvent?.({ type: 'varin:bot-group-chat-changed', properties: {} }),
     onError: error => console.warn('[Bot group chat] Delivery reconciliation requires attention', error instanceof Error ? error.name : 'unknown'),
   });
-  reconcileBotGroupDelivery = botGroupChats.botChanged;
+  botGroupDelivery.botChanged = botGroupChats.botChanged;
   registerBotGroupChatRoutes(app, botGroupChats);
   registerBotRoutes(app, {
     bots: botService,
