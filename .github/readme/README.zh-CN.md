@@ -23,7 +23,11 @@
 </p>
 
 <p align="center">
-  <img src="assets/varin-at-work.gif" alt="Varin 阅读、和队友合作，并随着工作进展作出回应" width="600" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/varin-cast-dark.webp" />
+    <source media="(prefers-color-scheme: light)" srcset="assets/varin-cast-light.webp" />
+    <img src="assets/varin-cast-light.webp" alt="Varin 与 15 位内置 Bot 角色围坐长桌的全家福" width="1100" />
+  </picture>
 </p>
 
 ## 从和 Varin 交流开始
@@ -44,6 +48,10 @@ Varin 是一个开源个人 AI 智能体，能使用文件、浏览器和连接�
 可以创建多位 Bot，各自拥有独立的指令、模型、思考等级、记忆、日程与外观。内置 16 个可动角色（含 Varin），新建时可直接指定或随机选择，也支持导入自定义图片和动图包。
 
 从 Bot 侧栏发起群聊，让多位 Bot 在同一条时间线上协作：通过 `@` 提及或回复点名成员接话，按成员控制未点名消息的监听开关，共享文件、搜索群历史，并沿用同一套日程与定时接续功能。
+
+<p align="center">
+  <img src="assets/varin-at-work.gif" alt="Varin 阅读、和队友合作，并随着工作进展作出回应" width="600" />
+</p>
 
 [了解总助手](../../docs/bot.md) · [外观与角色](../../docs/bot-appearances.md) · [协作与任务复用](../../docs/collaboration.md)
 

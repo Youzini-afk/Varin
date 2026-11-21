@@ -23,7 +23,11 @@
 </p>
 
 <p align="center">
-  <img src="assets/varin-at-work.gif" alt="Varin が読み、チームメイトと協力し、仕事の進行に反応する" width="600" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/varin-cast-dark.webp" />
+    <source media="(prefers-color-scheme: light)" srcset="assets/varin-cast-light.webp" />
+    <img src="assets/varin-cast-light.webp" alt="長いテーブルに集まった Varin と 15 体の内蔵 Bot キャラクターの集合イラスト" width="1100" />
+  </picture>
 </p>
 
 ## Varin と話すところから
@@ -44,6 +48,10 @@ Varin は、ファイルやブラウザー、接続したコンピューター�
 指示、モデル、思考レベル、記憶、予定、外観をそれぞれ持つ複数の Bot を作成できます。Varin を含む 16 体のアニメーション付きキャラクターから選べるほか、作成時にランダムで決めることも、独自の画像やアニメーションパックを読み込むこともできます。
 
 Bot サイドバーからグループチャットを始めると、複数の Bot が同じタイムライン上で協力できます。メンションや返信で特定のメンバーに呼びかけたり、宛先なしの投稿に対する受信設定をメンバーごとに切り替えたりでき、ファイル共有、履歴検索、予定やフォローアップもそのまま利用できます。
+
+<p align="center">
+  <img src="assets/varin-at-work.gif" alt="Varin が読み、チームメイトと協力し、仕事の進行に反応する" width="600" />
+</p>
 
 [アシスタントについて](../../docs/bot.md) · [外観とキャラクター](../../docs/bot-appearances.md) · [協働とタスクの再利用](../../docs/collaboration.md)
 

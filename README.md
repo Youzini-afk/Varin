@@ -23,7 +23,11 @@ English | [简体中文](.github/readme/README.zh-CN.md) | [繁體中文](.githu
 </p>
 
 <p align="center">
-  <img src=".github/readme/assets/varin-at-work.gif" alt="Varin reads, works with her team and responds as the work progresses" width="600" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/readme/assets/varin-cast-dark.webp" />
+    <source media="(prefers-color-scheme: light)" srcset=".github/readme/assets/varin-cast-light.webp" />
+    <img src=".github/readme/assets/varin-cast-light.webp" alt="Varin and her 15 built-in Bot characters gathered along a long banquet table" width="1100" />
+  </picture>
 </p>
 
 ## Meet Varin
@@ -44,6 +48,10 @@ Varin is an open-source personal AI agent that works with your files, browser an
 Create multiple Bots, each with its own instructions, model, thinking level, memory, schedules and appearance. Choose from 16 built-in animated characters (including Varin), leave the choice on random when creating a Bot, or import custom images and animation packs.
 
 Start a group chat from the Bot sidebar to let several Bots work together on one timeline. Mention or reply to specific members to bring them in, use per-member listening for unaddressed posts, share files and search group history, and set up group schedules alongside direct conversations.
+
+<p align="center">
+  <img src=".github/readme/assets/varin-at-work.gif" alt="Varin reads, works with her team and responds as the work progresses" width="600" />
+</p>
 
 [About the assistant](docs/bot.md) · [Appearances](docs/bot-appearances.md) · [Collaboration and task reuse](docs/collaboration.md)
 

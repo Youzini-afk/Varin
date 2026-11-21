@@ -23,7 +23,11 @@
 </p>
 
 <p align="center">
-  <img src="assets/varin-at-work.gif" alt="Varin lit, travaille avec ses coéquipiers et réagit à leur progression" width="600" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/varin-cast-dark.webp" />
+    <source media="(prefers-color-scheme: light)" srcset="assets/varin-cast-light.webp" />
+    <img src="assets/varin-cast-light.webp" alt="Portrait de groupe de Varin et de ses 15 personnages Bot intégrés réunis autour d'une longue table" width="1100" />
+  </picture>
 </p>
 
 ## Faites connaissance avec Varin
@@ -44,6 +48,10 @@ Varin est un agent IA personnel open source qui travaille avec vos fichiers, vot
 Créez plusieurs Bots, chacun avec ses propres instructions, modèle, niveau de réflexion, mémoire, planifications et apparence. Choisissez parmi 16 personnages animés intégrés (dont Varin), laissez Varin en tirer un au sort lors de la création, ou importez vos propres images et packs d'animations.
 
 Ouvrez une discussion de groupe depuis la barre latérale des Bots pour les faire collaborer sur une même chronologie : mentionnez ou répondez à certains membres pour les solliciter, réglez l'écoute par membre pour les messages non adressés, partagez des fichiers, recherchez dans l'historique et planifiez les tâches du groupe avec les mêmes contrôles de calendrier et de suivi.
+
+<p align="center">
+  <img src="assets/varin-at-work.gif" alt="Varin lit, travaille avec ses coéquipiers et réagit à leur progression" width="600" />
+</p>
 
 [L'assistant](../../docs/bot.md) · [Apparences](../../docs/bot-appearances.md) · [Collaboration et reprise des tâches](../../docs/collaboration.md)
 
