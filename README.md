@@ -39,7 +39,13 @@ Varin is an open-source personal AI agent that works with your files, browser an
   <img src=".github/readme/assets/varin-en.png" alt="A conversation with Varin about a product release, with an inline audience choice, a document and the current work alongside it" width="1100" />
 </p>
 
-[About the assistant](docs/bot.md) · [Collaboration and task reuse](docs/collaboration.md)
+### Multiple Bots and group chats
+
+Create multiple Bots, each with its own instructions, model, thinking level, memory, schedules and appearance. Choose from 16 built-in animated characters (including Varin), leave the choice on random when creating a Bot, or import custom images and animation packs.
+
+Start a group chat from the Bot sidebar to let several Bots work together on one timeline. Mention or reply to specific members to bring them in, use per-member listening for unaddressed posts, share files and search group history, and set up group schedules alongside direct conversations.
+
+[About the assistant](docs/bot.md) · [Appearances](docs/bot-appearances.md) · [Collaboration and task reuse](docs/collaboration.md)
 
 ## Choose how closely you want to work
 
@@ -47,7 +53,7 @@ You can stay with the overall conversation, work directly with an Agent, or open
 
 | View | What stays in focus | What you can open when needed |
 | --- | --- | --- |
-| **Varin** | Your conversation, ongoing work and results | Task details, questions, memory, files and computers |
+| **Varin** | Direct or group conversations, ongoing work and results | Task details, questions, memory, files and computers |
 | **Workbench** | A specific task and the Agent doing it | Tool activity, teammates, plans, context and recovery |
 | **IDE** | Files and code you want to work on directly | Editor groups, diffs, terminals, Git and the Agent conversation |
 
@@ -128,7 +134,7 @@ Common tools are available directly; other capabilities are discovered as needed
 
 **Bring other Agents.** Codex, Claude Code, Pi and ACP-compatible programs can run as sessions or take delegated tasks while retaining their own accounts, models and tools. [External Agents](docs/external-agents.md)
 
-**Place the work where it belongs.** Run locally, self-host on a server, or connect from a browser or phone. The interface, Agent service, file workspace and computer-use device can be on different machines. [Deployment](docs/ops/cloud-deployment.md) · [Resources](docs/resources.md)
+**Place the work where it belongs.** Run locally, self-host on a server, or connect from a browser or phone. The interface, Agent service, file workspace and computer-use device can be on different machines, and a single conversation can work across connected devices while keeping file links and recovery tied to where each change happened. [Deployment](docs/ops/cloud-deployment.md) · [Resources](docs/resources.md)
 
 **Keep an optional companion nearby.** The desktop companion follows the selected Bot's activity. Download its artwork and wake or put it to sleep from Settings.
 
@@ -152,8 +158,8 @@ The core runtime is written in Rust. The desktop, web and mobile interfaces shar
 
    | Where | How |
    | --- | --- |
-   | Windows, macOS or Linux | [Download the installer](https://github.com/Astrmira/Varin/releases/latest) for your system and CPU architecture. |
-   | Your own server, used from a browser | [Self-host with Docker](docs/ops/cloud-deployment.md), with persistent storage, passwords and remote access. |
+   | Windows, macOS or Linux | [Download the full desktop installer](https://github.com/Astrmira/Varin/releases/latest) to run locally, or **Varin Light** to connect to an existing Varin service. |
+   | Your own server, used from a browser | [Self-host with Docker](docs/ops/cloud-deployment.md) (`varin` / `varin-toolbelt`), or run a standalone **Resource Node** (`varin-node`) to expose files and commands from another machine. |
    | Your phone | On Android, install the APK from the [latest release](https://github.com/Astrmira/Varin/releases/latest); on iPhone, install the web app (PWA). Then pair it with your Host from Settings. [Mobile guide](packages/docs/content/docs/mobile.mdx) |
    | From source | See [Run from source](#run-from-source). |
 

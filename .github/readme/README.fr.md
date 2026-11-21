@@ -39,7 +39,13 @@ Varin est un agent IA personnel open source qui travaille avec vos fichiers, vot
   <img src="assets/varin-en.png" alt="Une conversation avec Varin associe tâches en cours, document et choix du public de la prochaine publication" width="1100" />
 </p>
 
-[L'assistant](../../docs/bot.md) · [Collaboration et reprise des tâches](../../docs/collaboration.md)
+### Plusieurs Bots et discussions de groupe
+
+Créez plusieurs Bots, chacun avec ses propres instructions, modèle, niveau de réflexion, mémoire, planifications et apparence. Choisissez parmi 16 personnages animés intégrés (dont Varin), laissez Varin en tirer un au sort lors de la création, ou importez vos propres images et packs d'animations.
+
+Ouvrez une discussion de groupe depuis la barre latérale des Bots pour les faire collaborer sur une même chronologie : mentionnez ou répondez à certains membres pour les solliciter, réglez l'écoute par membre pour les messages non adressés, partagez des fichiers, recherchez dans l'historique et planifiez les tâches du groupe avec les mêmes contrôles de calendrier et de suivi.
+
+[L'assistant](../../docs/bot.md) · [Apparences](../../docs/bot-appearances.md) · [Collaboration et reprise des tâches](../../docs/collaboration.md)
 
 ## Choisissez votre niveau de participation
 
@@ -47,7 +53,7 @@ Restez dans la discussion d'ensemble, travaillez directement avec un Agent ou ou
 
 | Vue | Au premier plan | À ouvrir selon vos besoins |
 | --- | --- | --- |
-| **Varin** | La conversation, les travaux en cours et les résultats | Tâches, questions, mémoire, fichiers et ordinateurs |
+| **Varin** | Conversations directes ou de groupe, travaux en cours et résultats | Tâches, questions, mémoire, fichiers et ordinateurs |
 | **Workbench** | Une tâche précise et l'Agent qui l'exécute | Outils, coéquipiers, plans, contexte et restauration |
 | **IDE** | Les fichiers et le code que vous souhaitez manipuler | Éditeurs, différences, terminaux, Git et conversation |
 
@@ -126,7 +132,7 @@ Les outils courants sont disponibles directement ; les autres se découvrent au 
 
 **Intégrez d'autres Agents.** Codex, Claude Code, Pi et les programmes compatibles ACP peuvent fonctionner en sessions ou recevoir des tâches en conservant leurs comptes, modèles et outils. [Agents externes](../../docs/external-agents.md)
 
-**Placez le travail au bon endroit.** Exécutez Varin localement, sur votre serveur, ou connectez-vous depuis un navigateur ou un téléphone. L'interface, le service Agent, les fichiers et l'appareil de contrôle peuvent résider sur des machines différentes. [Déploiement](../../docs/ops/cloud-deployment.md) · [Ressources](../../docs/resources.md)
+**Placez le travail au bon endroit.** Exécutez Varin localement, sur votre serveur, ou connectez-vous depuis un navigateur ou un téléphone. L'interface, le service Agent, les fichiers et l'appareil de contrôle peuvent résider sur des machines différentes, et une même conversation peut travailler sur plusieurs appareils connectés tout en rattachant liens de fichiers et restauration à la machine où chaque modification a eu lieu. [Déploiement](../../docs/ops/cloud-deployment.md) · [Ressources](../../docs/resources.md)
 
 **Un compagnon de bureau facultatif.** Il suit l'activité du Bot sélectionné. Téléchargez son apparence dans les Paramètres et choisissez de le réveiller ou de le mettre en veille.
 
@@ -150,8 +156,8 @@ Le runtime central est écrit en Rust. Les interfaces bureau, web et mobile part
 
    | Où | Comment |
    | --- | --- |
-   | Windows, macOS ou Linux | [Téléchargez le programme d'installation](https://github.com/Astrmira/Varin/releases/latest) adapté à votre système et à votre architecture CPU. |
-   | Votre propre serveur, utilisé depuis un navigateur | [Auto-héberger avec Docker](../../docs/ops/cloud-deployment.md), avec stockage persistant, mots de passe et accès distant. |
+   | Windows, macOS ou Linux | [Téléchargez l'installateur complet](https://github.com/Astrmira/Varin/releases/latest) pour exécuter Varin localement, ou **Varin Light** pour vous connecter à un service Varin existant. |
+   | Votre propre serveur, utilisé depuis un navigateur | [Auto-héberger avec Docker](../../docs/ops/cloud-deployment.md) (`varin` / `varin-toolbelt`), ou déployer un **Resource Node** autonome (`varin-node`) pour partager fichiers et commandes depuis une autre machine. |
    | Votre téléphone | Sur Android, installez l'APK de la [dernière version](https://github.com/Astrmira/Varin/releases/latest) ; sur iPhone, installez l'application web (PWA). Associez-le ensuite à votre Host depuis les Paramètres. [Guide mobile](../../packages/docs/content/docs/fr/mobile.mdx) |
    | Depuis les sources | Voir [Exécuter depuis les sources](#exécuter-depuis-les-sources). |
 

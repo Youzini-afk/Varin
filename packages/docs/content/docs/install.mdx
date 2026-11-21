@@ -8,7 +8,7 @@ Most people install the desktop app. You can also self-host Varin with Docker an
 
 ## Desktop app
 
-Download the installer for your system from the [latest release](https://github.com/Astrmira/Varin/releases/latest): `.exe` for Windows x64 or ARM64, `.dmg` for macOS on Apple silicon, `.AppImage` for Linux x64 or ARM64. The app runs its own Host, so nothing else needs to be installed. It checks for new versions by itself; see [Updates](/updates/).
+Download the installer for your system from the [latest release](https://github.com/Astrmira/Varin/releases/latest): `.exe` for Windows x64 or ARM64, `.dmg` for macOS on Apple silicon, `.AppImage` for Linux x64 or ARM64. The full desktop edition runs its own Host, so nothing else needs to be installed. If you already run a Varin service on another machine, you can install **Varin Light** instead — a separate lightweight client installer from the same releases page that connects directly to an existing service. Desktop builds check for new versions by themselves; see [Updates](/updates/).
 
 Windows installers and macOS packages are not signed yet, so your system may ask you to confirm the first launch.
 
@@ -68,3 +68,5 @@ Compose pulls the slim image `ghcr.io/astrmira/varin:latest` by default (enough 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
+
+To expose files and commands from another Linux machine to an existing Varin service without running a second UI or Host, deploy the standalone Resource Node image `ghcr.io/astrmira/varin-node` using `docker-compose.resource-node.yml`.

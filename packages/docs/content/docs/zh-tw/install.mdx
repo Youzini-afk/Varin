@@ -8,7 +8,7 @@ description: 安裝 Varin 桌面應用程式，用 Docker 自行部署，或從�
 
 ## 桌面應用程式
 
-從[最新版本](https://github.com/Astrmira/Varin/releases/latest)下載對應系統的安裝檔：Windows x64 或 ARM64 用 `.exe`，Apple 晶片的 macOS 用 `.dmg`，Linux x64 或 ARM64 用 `.AppImage`。桌面應用程式自帶 Host，不需要另外安裝任何東西，並會自行檢查新版本，見[更新](/zh-tw/updates/)。
+從[最新版本](https://github.com/Astrmira/Varin/releases/latest)下載對應系統的安裝檔：Windows x64 或 ARM64 用 `.exe`，Apple 晶片的 macOS 用 `.dmg`，Linux x64 或 ARM64 用 `.AppImage`。完整版桌面應用程式自帶 Host，不需要另外安裝任何東西；如果其他機器上已有執行中的 Varin 服務，也可以從同一發布頁下載 **Varin Light** 輕量用戶端，直接連線既有服務。桌面版會自行檢查新版本，見[更新](/zh-tw/updates/)。
 
 Windows 安裝檔和 macOS 安裝檔目前都沒有簽署，第一次開啟時系統可能會要求你確認。
 
@@ -68,3 +68,5 @@ Compose 預設拉取精簡映像 `ghcr.io/astrmira/varin:latest`（用來跑服�
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
+
+如果只想將另一台 Linux 機器上的檔案與命令能力接入既有 Varin 服務，而不需要執行第二套介面或完整 Host，可使用 `docker-compose.resource-node.yml` 部署獨立的資源節點映像 `ghcr.io/astrmira/varin-node`。

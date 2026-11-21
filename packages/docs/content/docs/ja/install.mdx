@@ -8,7 +8,7 @@ description: Varin のデスクトップアプリをインストールするか�
 
 ## デスクトップアプリ
 
-[最新リリース](https://github.com/Astrmira/Varin/releases/latest)から、システムに合ったインストーラーをダウンロードします。Windows x64 / ARM64 は `.exe`、Apple シリコンの macOS は `.dmg`、Linux x64 / ARM64 は `.AppImage` です。アプリは自分の Host を内蔵しているので、ほかに何もインストールする必要はありません。新しいバージョンも自動で確認します。[更新](/ja/updates/)を参照してください。
+[最新リリース](https://github.com/Astrmira/Varin/releases/latest)から、システムに合ったインストーラーをダウンロードします。Windows x64 / ARM64 は `.exe`、Apple シリコンの macOS は `.dmg`、Linux x64 / ARM64 は `.AppImage` です。フル版のデスクトップアプリは自分の Host を内蔵しているので、ほかに何もインストールする必要はありません。別マシンに稼働中の Varin サービスがある場合は、同じリリースページから軽量クライアント **Varin Light** のインストーラーを選び、既存サービスへ直接接続することもできます。新しいバージョンも自動で確認します。[更新](/ja/updates/)を参照してください。
 
 Windows のインストーラーと macOS のパッケージはまだ署名されていないため、初回起動時にシステムが確認を求めることがあります。
 
@@ -68,3 +68,5 @@ Compose は既定で軽量イメージ `ghcr.io/astrmira/varin:latest` を使い
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
+
+別の Linux マシンのファイルやコマンドだけを既存の Varin サービスへ接続したい場合は、UI や完全な Host を動かさずに、`docker-compose.resource-node.yml` を使って独立した **Resource Node** イメージ `ghcr.io/astrmira/varin-node` をデプロイできます。

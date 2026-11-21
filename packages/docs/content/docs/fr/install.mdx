@@ -8,7 +8,7 @@ La plupart des gens installent l’application de bureau. Vous pouvez aussi héb
 
 ## Application de bureau
 
-Téléchargez l’installateur de votre système depuis la [dernière version](https://github.com/Astrmira/Varin/releases/latest) : `.exe` pour Windows x64 ou ARM64, `.dmg` pour macOS sur puce Apple, `.AppImage` pour Linux x64 ou ARM64. L’application embarque son propre Host, rien d’autre n’est nécessaire. Elle vérifie elle-même les nouvelles versions ; voir [Mises à jour](/fr/updates/).
+Téléchargez l’installateur de votre système depuis la [dernière version](https://github.com/Astrmira/Varin/releases/latest) : `.exe` pour Windows x64 ou ARM64, `.dmg` pour macOS sur puce Apple, `.AppImage` pour Linux x64 ou ARM64. L’édition de bureau complète embarque son propre Host, rien d’autre n’est nécessaire. Si vous disposez déjà d’un service Varin sur une autre machine, vous pouvez installer **Varin Light** — un installateur client léger distinct sur la même page de téléchargement qui se connecte directement à un service existant. Les versions de bureau vérifient elles-mêmes les nouvelles versions ; voir [Mises à jour](/fr/updates/).
 
 Les installateurs Windows et les paquets macOS ne sont pas encore signés : votre système peut demander une confirmation au premier lancement.
 
@@ -68,3 +68,5 @@ Compose tire par défaut l’image allégée `ghcr.io/astrmira/varin:latest` (su
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
+
+Pour exposer les fichiers et commandes d’une autre machine Linux à un service Varin existant sans exécuter une seconde interface ni un Host complet, déployez l’image autonome **Resource Node** `ghcr.io/astrmira/varin-node` avec `docker-compose.resource-node.yml`.

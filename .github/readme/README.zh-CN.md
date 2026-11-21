@@ -39,7 +39,13 @@ Varin 是一个开源个人 AI 智能体，能使用文件、浏览器和连接�
   <img src="assets/varin-zh-CN.png" alt="和 Varin 讨论产品发布，正文中选择说明面向的读者，查看文档和旁侧正在推进的工作" width="1100" />
 </p>
 
-[了解总助手](../../docs/bot.md) · [协作与任务复用](../../docs/collaboration.md)
+### 多位 Bot 与群聊协作
+
+可以创建多位 Bot，各自拥有独立的指令、模型、思考等级、记忆、日程与外观。内置 16 个可动角色（含 Varin），新建时可直接指定或随机选择，也支持导入自定义图片和动图包。
+
+从 Bot 侧栏发起群聊，让多位 Bot 在同一条时间线上协作：通过 `@` 提及或回复点名成员接话，按成员控制未点名消息的监听开关，共享文件、搜索群历史，并沿用同一套日程与定时接续功能。
+
+[了解总助手](../../docs/bot.md) · [外观与角色](../../docs/bot-appearances.md) · [协作与任务复用](../../docs/collaboration.md)
 
 ## 按需要选择参与的深度
 
@@ -47,7 +53,7 @@ Varin 是一个开源个人 AI 智能体，能使用文件、浏览器和连接�
 
 | 界面 | 主要关注什么 | 需要时可以进入什么 |
 | --- | --- | --- |
-| **Varin** | 持续交流、正在推进的事和结果 | 任务详情、问题、记忆、文件和电脑 |
+| **Varin** | 持续单聊与群聊、正在推进的事和结果 | 任务详情、问题、记忆、文件和电脑 |
 | **工作台** | 一个具体任务及执行它的 Agent | 工具过程、队友、计划、上下文和恢复记录 |
 | **IDE** | 希望亲自处理的代码和文件 | 编辑组、差异、终端、Git 和 Agent 对话 |
 
@@ -126,7 +132,7 @@ Varin 是一个开源个人 AI 智能体，能使用文件、浏览器和连接�
 
 **已有的 Agent 也能接入。** Codex、Claude Code、Pi 及兼容 ACP 的程序可以作为会话运行或接收派发，同时保留各自的账号、模型和工具。[外部 Agent](../../docs/external-agents.md)
 
-**工作放在合适的设备上。** 本地运行、服务器自托管，或者用浏览器和手机连接。前端、Agent 服务、文件工作区和 Computer Use 设备可以分开部署。[部署](../../docs/ops/cloud-deployment.md) · [资源](../../docs/resources.md)
+**工作放在合适的设备上。** 本地运行、服务器自托管，或者用浏览器和手机连接。前端、Agent 服务、文件工作区和 Computer Use 设备可以分开部署；同一个会话也可以跨多台已连接设备读写文件、执行命令，文件引用与恢复记录始终对应实际操作的设备和目录。[部署](../../docs/ops/cloud-deployment.md) · [资源](../../docs/resources.md)
 
 **也可以有桌面上的陪伴。** 可选桌宠跟随所选 Bot 的活动，在设置中按需下载形象，并控制唤醒和沉睡。
 
@@ -150,8 +156,8 @@ Harness 负责模型周围的上下文和执行机制：
 
    | 使用方式 | 入口 |
    | --- | --- |
-   | Windows、macOS 或 Linux | [下载安装包](https://github.com/Astrmira/Varin/releases/latest)，选择与系统和 CPU 架构对应的版本。 |
-   | 在自己的服务器上运行，用浏览器访问 | [Docker 自托管](../../docs/ops/cloud-deployment.md)，包含持久化目录、密码和远程访问配置。 |
+   | Windows、macOS 或 Linux | 本机运行[下载完整版安装包](https://github.com/Astrmira/Varin/releases/latest)；仅连接已有 Varin 服务可选择 **Varin Light** 轻量客户端。 |
+   | 在自己的服务器上运行，用浏览器访问 | [Docker 自托管](../../docs/ops/cloud-deployment.md)（`varin` / `varin-toolbelt`），也可在另一台机器上部署独立的 **资源节点**（`varin-node`）来接入文件与命令能力。 |
    | 手机 | Android 从[最新版本](https://github.com/Astrmira/Varin/releases/latest)下载 APK 安装，iPhone 安装网页应用（PWA），然后在设置中与 Host 配对。[移动端指南](../../packages/docs/content/docs/zh-cn/mobile.mdx) |
    | 从源码运行 | 见[从源码运行](#从源码运行)。 |
 
