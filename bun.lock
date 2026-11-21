@@ -359,7 +359,7 @@
         "sherpa-onnx-node": "2.0.1",
         "simple-git": "^4.0.2",
         "tar": "^7.5.13",
-        "triviumdb": "0.9.1",
+        "triviumdb": "0.9.2",
         "triviumdb-upgrade-0.8": "npm:triviumdb@0.8.10",
         "turndown": "7.2.5",
         "undici": "8.12.4",
@@ -3045,7 +3045,7 @@
 
     "trim-lines": ["trim-lines@3.0.1", "", {}, "sha512-kRj8B+YHZCc9kQYdWfJB2/oUl9rA99qbowYYBtr4ui4mZyAQ2JpvVBd/6U2YloATfqBhBTSMhTpgBHtU0Mf3Rg=="],
 
-    "triviumdb": ["triviumdb@0.9.1", "", {}, "sha512-3fDhwfFiyCLBAeVoMxtiSTgJqRM76T9StncNeTa9RSu7QbIIi0xF4qDdgBSA2u7BVjUk9n2XUlcMa+J9C33fgA=="],
+    "triviumdb": ["triviumdb@0.9.2", "", {}, "sha512-+VuPK5u8MGzykVtAgEeLPjiitD72mD72hqhKLdiR9320OB+3DelV7Sq45roh4n8lfUvIb508IC0U4SJL8tqCdw=="],
 
     "triviumdb-upgrade-0.8": ["triviumdb@0.8.10", "", {}, "sha512-lD/fhZbyoawOAxVxluUOQ5S4kXhPzFDn5dsdKiyVRMmyPyDQtrs1Jnb1oGfgDhNvO1hszzh+JrtHR6CEIKJMhg=="],
 
