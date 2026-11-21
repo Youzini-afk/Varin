@@ -142,7 +142,7 @@
     "@varin/extension-sdk": "workspace:*",
     "@varin/ui": "workspace:*",
     "@vitejs/plugin-react": "^6.2.1",
-    "eslint": "^10.14.0",
+    "eslint": "^10.15.0",
     "nodemon": "^3.1.7",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
